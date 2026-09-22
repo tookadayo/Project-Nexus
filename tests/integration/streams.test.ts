@@ -29,7 +29,7 @@ it('runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
  discord.members.set(admin,{joinedAt:new Date(now-90*86400000).toISOString(),roles:[],permissions:'32',bot:false});
  discord.members.set(user,{joinedAt:joined.toISOString(),roles:[],permissions:'0',bot:false});
  const analytics=new AnalyticsService(db,settings),lifecycle=new LifecycleService(db,vault,settings,discord);
- const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,s=>analytics.summary(s),async()=>{});
+ const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,async()=>{});
  const actions=new ActionWorker(db,vault,discord,onboarding);
  const keys=generateKeyPairSync('ed25519'),publicKey=keys.publicKey.export({format:'der',type:'spki'}).subarray(-32).toString('hex');
  const http=createInteractionServer({db,vault,components:tokens,publicKey,applicationId:'531111111111111119'});

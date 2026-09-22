@@ -32,7 +32,7 @@ const settings=new SettingsService(db);const onboarding=new OnboardingService(db
 const analytics=new AnalyticsService(db,settings);const lifecycle=new LifecycleService(db,vault,settings,discord);
 const nativeSnapshots=new NativeMemberSnapshotWorker(db,vault,discord);
 const optimization=new OptimizationWorker(db);
-const actions=new ActionWorker(db,vault,discord,onboarding);const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,s=>analytics.summary(s),(s,user,actor,guild)=>privacy.delete(s,user,actor,guild));
+const actions=new ActionWorker(db,vault,discord,onboarding);const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,(s,user,actor,guild)=>privacy.delete(s,user,actor,guild));
 const http=createInteractionServer({db,vault,publicKey:cfg.DISCORD_PUBLIC_KEY,applicationId:cfg.DISCORD_APPLICATION_ID,components:tokens});
 const api=createApi(analytics,cfg.API_KEY,db);const gateway=createGateway(redis,vault,()=>process.stderr.write('Gateway metadata publication failed\n'),db);
 const capabilities=new CapabilityService(db,discord,()=>{const ready=gateway.client.isReady()?true:null;return {members:ready,messages:ready,reactions:ready,voice:ready,scheduledEvents:ready};});

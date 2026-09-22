@@ -1,0 +1,4 @@
+import {actionRow,divider,footer,nexusPanel,section,type Panel} from '../primitives.js';
+import type {Issue} from '../types.js';
+export type ReadinessCheck={label:string;status:'Ready'|'Not configured'|'Needs attention';detail?:string};
+export async function activationReadinessPanel(issue:Issue,checks:ReadinessCheck[]):Promise<Panel>{const attention=checks.some(c=>c.status==='Needs attention'),missing=checks.some(c=>c.status==='Not configured');return nexusPanel({title:'NEXUS · Activation Readiness',subtitle:'Configuration and Discord permission checks',accent:attention?'warning':missing?'collecting':'healthy',children:[divider(),...checks.map(check=>section(check.label,`**${check.status}**${check.detail?`\n-# ${check.detail}`:''}`)),divider(),footer('NEXUS uses metadata only. Automated interventions default to Suggest mode.')],rows:[await actionRow(issue,[{label:'Settings',action:'settings'},{label:'Setup',action:'setup'},{label:'Refresh',action:'status'}])]});}

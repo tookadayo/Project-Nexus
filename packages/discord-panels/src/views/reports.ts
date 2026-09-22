@@ -1,0 +1,3 @@
+import {actionRow,callout,divider,emptyState,nexusPanel,type Panel} from '../primitives.js';
+import type {Issue} from '../types.js';
+export async function reportsPanel(issue:Issue):Promise<Panel>{return nexusPanel({title:'NEXUS · Reports',subtitle:'Shareable community activation reporting',children:[divider(),emptyState('Scheduled reports are coming later','Use Community Overview for the executive snapshot and Lifecycle for stage-by-stage analysis.'),callout('Available now','Live production metrics with explicit maturity and coverage status.')],rows:[await actionRow(issue,[{label:'Overview',action:'overview'},{label:'Lifecycle',action:'lifecycle'}])]});}

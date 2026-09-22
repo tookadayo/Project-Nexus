@@ -69,7 +69,7 @@ it('completes Discord panel configuration, pinned branching flow and ownership-s
  const adminId='666666666666666666',userId='777777777777777777',managedRole='888888888888888888',manualRole='999999999999999999';
  discord.members.set(adminId,{roles:[],permissions:'32',joinedAt:'2026-09-01T00:00:00Z',bot:false});discord.members.set(userId,{roles:[manualRole],permissions:'0',joinedAt:'2026-09-20T00:00:00Z',bot:false});
  const actor={key:vault.hash(s,adminId),permissions:'32',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};
- const tokens=new Components('test');const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,async()=>'Overview',async()=>{});
+ const tokens=new Components('test');const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,async()=>{});
  const actions=new ActionWorker(db,vault,discord,onboarding);
  const base={id:'100000000000000001',applicationId:'111111111111111111',token:'test',userId:adminId,channelId:'111111111111111112'};
  await interactions.dispatch(s,{...base,command:'panel'});while(await actions.tick(s)){/* drain */}
