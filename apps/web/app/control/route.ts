@@ -6,6 +6,9 @@ export async function POST(req:NextRequest){
  const {NEXUS_API_URL,NEXUS_ORGANIZATION_ID,NEXUS_GUILD_ID,NEXUS_API_TOKEN}=process.env;
  if(!NEXUS_API_URL||!NEXUS_ORGANIZATION_ID||!NEXUS_GUILD_ID||!NEXUS_API_TOKEN)return NextResponse.json({error:'API unavailable'},{status:503});
  const body=await req.text();if(body.length>32768)return NextResponse.json({error:'Configuration too large'},{status:413});
- try{const response=await fetch(`${NEXUS_API_URL}/v2/organizations/${NEXUS_ORGANIZATION_ID}/guilds/${NEXUS_GUILD_ID}/configuration`,{method:'POST',headers:{Authorization:`Bearer ${NEXUS_API_TOKEN}`,'Content-Type':'application/json'},body,cache:'no-store',signal:AbortSignal.timeout(10000)});return new NextResponse(await response.text(),{status:response.status,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});}
+ try{const parsed=JSON.parse(body) as Record<string,unknown>,action=String(parsed.action??''),base=`${NEXUS_API_URL}/v3/organizations/${NEXUS_ORGANIZATION_ID}/guilds/${NEXUS_GUILD_ID}`;let url=`${NEXUS_API_URL}/v2/organizations/${NEXUS_ORGANIZATION_ID}/guilds/${NEXUS_GUILD_ID}/configuration`,payload=body;
+  if(action==='activation_preset'){url=base+'/setup/activation';payload=JSON.stringify({preset:parsed.preset});}
+  if(action==='action_template'){url=base+'/actions/draft';const {action:_action,...input}=parsed;void _action;payload=JSON.stringify(input);}
+  const response=await fetch(url,{method:'POST',headers:{Authorization:`Bearer ${NEXUS_API_TOKEN}`,'Content-Type':'application/json'},body:payload,cache:'no-store',signal:AbortSignal.timeout(10000)});return new NextResponse(await response.text(),{status:response.status,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});}
  catch{return NextResponse.json({error:'API unavailable'},{status:503});}
 }

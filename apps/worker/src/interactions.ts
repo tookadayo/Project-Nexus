@@ -52,7 +52,7 @@ export class InteractionWorker {
   const intent=input.customId?await this.tokens.read(this.db,s,input.customId,actorHash):{action:input.command};
   const action=String(intent.action??'');
   const issue:Issue=(data,publicEntry=false)=>this.tokens.issue(this.db,s,data,publicEntry?null:actorHash,publicEntry?31536000:900);
-  const adminActions=['panel','setup','rolloutPreview','rolloutConfirm','modePreview','modeConfirm','lifecycle','activation','activationDraft','activationPublish','cohorts','diagnose','interventions','interventionDraft','interventionApprove','experiments','experimentDraft','configPublish','reports','billing','advanced','settings','status','flows','template','startChannel','uiLanguage','enabled','onboardingEnabled','mapOption','mapRole','editNode','editNodeOpen','editNodeSave','rollback','preview','deleteGuildConfirm','deleteGuild','overview'];
+  const adminActions=['panel','setup','rolloutPreview','rolloutConfirm','modePreview','modeConfirm','lifecycle','activation','activationDraft','activationPublish','cohorts','diagnose','interventions','interventionDraft','interventionApprove','experiments','experimentDraft','configPublish','reports','billing','advanced','settings','status','flows','template','startChannel','uiLanguage','enabled','onboardingEnabled','mapOption','mapRole','editNode','editNodeOpen','editNodeSave','rollback','preview','deleteGuildConfirm','deleteGuild','overview','dashboard'];
   if(adminActions.includes(action))assert(admin,'ADMIN_REQUIRED',403);
   if(action==='setup'){
    const p=await new CapabilityService(this.db,this.discord).refresh(s,current.onboardingMode);
@@ -114,7 +114,9 @@ export class InteractionWorker {
   if(action==='advanced')return settingsPanel(issue,current,locale);
   if(action==='panel'){
    assert(input.channelId,'CHANNEL_REQUIRED');await this.discord.checkChannel(s.guildId,input.channelId);
-   const root=await rootPanel(issue,publicLocale);await enqueue(this.db,s,`panel:${input.id}`,'PANEL_UPSERT',{channelId:input.channelId,body:root});
+   const analytics=new AnalyticsService(this.db,this.settings),now=Date.now(),day=86400000,metrics=await analytics.canonical(s),findings=diagnose(await analytics.canonical(s,new Date(now-15*day)),await analytics.canonical(s,new Date(now-30*day),new Date(now-15*day))),attention=findings.find(f=>f.type!=='DATA_COVERAGE_DROP')??findings[0];
+   const diagnosisKeys:Record<string,Parameters<typeof t>[1]>={ACTIVATION_DROP:'diagnosis.activationDrop',TTFV_SPIKE:'diagnosis.ttfvSpike',CONNECTION_DROP:'diagnosis.connectionDrop',REPLY_LATENCY_SPIKE:'diagnosis.replyLatencySpike',ONBOARDING_DROP:'diagnosis.onboardingDrop',HOME_ACTION_DROP:'diagnosis.homeActionDrop',RETENTION_DROP:'diagnosis.retentionDrop',DATA_COVERAGE_DROP:'diagnosis.coverageDrop',ACTION_FAILURE_SPIKE:'diagnosis.actionFailureSpike'};
+   const root=await rootPanel(issue,publicLocale,{activation:metrics.activation_rate,connection:metrics.direct_reply_connection_rate,retention:metrics.d7_active_retention,attention:attention?t(publicLocale,diagnosisKeys[attention.type]??'diagnosis.coverageDrop'):null,dashboardUrl:process.env.NEXUS_WEB_URL});await enqueue(this.db,s,`panel:${input.id}`,'PANEL_UPSERT',{channelId:input.channelId,body:root});
    return settingsPanel(issue,current,locale);
   }
   if(action==='settings')return settingsPanel(issue,current,locale);
@@ -159,7 +161,7 @@ export class InteractionWorker {
   else if(action==='deleteMemberConfirm'||action==='deleteGuildConfirm')return confirmation(issue,action==='deleteGuildConfirm'?'deleteGuild':'deleteMember',locale);
   else if(action==='deleteMember'||action==='deleteGuild'){
    assert(input.customId,'CONFIRMATION_REQUIRED');await this.deletion(s,input.userId,actor,action==='deleteGuild');return successPanel(issue,t(locale,'success.deletion'),t(locale,'success.deletionDetail'),{label:t(locale,'common.privacy'),action:'privacy'},locale);
-  }else if(action==='overview'){
+  }else if(action==='overview'||action==='dashboard'){
    const analytics=new AnalyticsService(this.db,this.settings),metrics=await analytics.canonical(s),now=Date.now(),day=86400000;
    const findings=diagnose(await analytics.canonical(s,new Date(now-15*day)),await analytics.canonical(s,new Date(now-30*day),new Date(now-15*day)));
    const diagnosis=findings.filter(f=>f.type!=='DATA_COVERAGE_DROP').sort((a,b)=>(a.severity==='critical'?0:1)-(b.severity==='critical'?0:1))[0];
