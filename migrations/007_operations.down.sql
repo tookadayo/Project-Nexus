@@ -1,0 +1,3 @@
+DROP TABLE usage_counters,guild_subscriptions,plan_features,plans,experiment_metric_results,intervention_role_grants,experiment_exposures;
+ALTER TABLE intervention_runs DROP COLUMN assignment_id;
+DROP TABLE experiment_assignments,intervention_runs;

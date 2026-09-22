@@ -1,0 +1,2 @@
+DROP TABLE daily_guild_metrics,deletion_requests,audit_logs,telemetry_health,interaction_jobs,component_tokens,settings_panels,nexus_role_grants,action_outbox,lifecycle_events,event_inbox,flow_sessions,flow_versions,membership_episodes,member_identity_map,guild_settings,guilds,organizations;
+DROP FUNCTION reject_flow_update();

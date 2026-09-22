@@ -1,0 +1,54 @@
+{
+  "name": "nexus",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.ts",
+    "test:e2e": "playwright test",
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "migrate": "tsx scripts/migrate.ts",
+    "dev": "tsx scripts/dev.ts",
+    "infra": "tsx scripts/infra.ts",
+    "register": "tsx scripts/register.ts",
+    "web": "tsx scripts/web.ts"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/sdk-node": "^0.222.0",
+    "bullmq": "^6.3.8",
+    "discord-api-types": "^0.38.55",
+    "discord.js": "^14.27.0",
+    "fastify": "^5.12.5",
+    "ioredis": "^6.0.0",
+    "kysely": "^0.29.6",
+    "pg": "^8.23.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^24.13.6",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "embedded-postgres": "18.4.0-beta.17",
+    "eslint": "^10.11.0",
+    "fast-check": "^4.10.2",
+    "prettier": "^3.9.8",
+    "testcontainers": "^12.1.0",
+    "tsx": "^4.23.15",
+    "turbo": "^2.11.2",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^5.0.1"
+  }
+}

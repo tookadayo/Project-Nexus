@@ -1,0 +1,23 @@
+# Experiments and evidence
+
+memberはexperiment revision + membership episode、time-blockはrevision + UTC block番号をSHA-256で決定的に割り付けます。Control/Treatmentの2群、重み、無介入のnull treatmentを型で表します。assignmentはDBでimmutableです。Controlを配送APIでTreatmentへすり替えることも拒否します。
+
+現行headはdomainごとに1つです。公開済み施策はSuggest / Approval / Autoを保持します。Suggestを実験に紐づけても自動送信しません。新しい実験への移行時は旧実験を停止してから公開してください。新しい版の公開は旧版の配送を自動停止する操作ではありません。
+
+## 分母と観測窓
+
+結果はITTです。割り付け済みで窓が成熟した全episodeを含み、送信失敗や未曝露を除外しません。曝露は実際の副作用成功後にだけ記録します。既に持っているroleへのno-opは曝露を作りません。未成熟episodeはprovisionalです。
+
+primary windowは**割付時点からwindowSeconds後まで**です。Activation / Connectionはその間の完了・返信。Retentionは窓の最後の24時間におけるregistryのactive signalです。これは加入日起点のD7指標とは別の実験endpointです。比較する群のActivation定義は同一で運用してください。
+
+詳細イベントが残っている間に成熟結果を保存します。保持期限後は保存済み成否を使い、結果を推定しません。観測窓より短い保持期間や、長いworker停止で未保存の証拠が失われた場合はinsufficientです。個人削除でassignmentが失われると再集計母数が変わるため、保存済み集計snapshotと現在値を区別してください。
+
+## 推定と停止
+
+memberではBeta(1,1)事前分布、決定的Monte Carloによる差の95%区間とTreatment優越確率を返します。各群最低20の成熟sampleが必要です。time-blockではblock単位のBeta riskとBayesian bootstrapの重み付けを行い、**各群20以上の成熟block**およびmember数を要求します。同じblock内の人を独立sampleとして過大評価しません。
+
+time-blockにもblock間の独立性、曜日・時間トレンド、carryover、staff介入の波及という制約があります。これは因果効果の保証ではありません。INSUFFICIENT_DATA / DIRECTIONAL / INCONCLUSIVE / SUPPORTED / GUARDRAIL_BREACHを表示し、欠測があれば区間・優越確率を抑制します。
+
+退会率、配送失敗率、送信数のGuardrail超過は自動pauseします。pause/stopは新割付と未送信の実行を止めます。stopは取り消せません。停止直前に外部APIへ到達した操作を取り消すことはできません。UNKNOWN配送は再送せず、失敗Guardrailに含めます。
+
+管理者はWebまたはDiscordで結果を確認します。Webのpause/stopから停止可能です。実験公開前に対照群への手動介入混入を避ける運用を定めてください。

@@ -1,0 +1,1 @@
+DROP TABLE activation_members,member_observable_state;
