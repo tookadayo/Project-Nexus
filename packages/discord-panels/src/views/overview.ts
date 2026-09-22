@@ -1,33 +1,26 @@
 import {ButtonStyle} from 'discord-api-types/v10';
 import {formatNumber,formatPercentage} from '../formatting.js';
+import {discordLabel,t,type UiLocale} from '../i18n/index.js';
 import {actionRow,divider,emptyState,footer,metricGrid,nexusPanel,recommendedAction,statusBanner,type Panel} from '../primitives.js';
-import {coverageLabel} from '../status.js';
+import {coverageLabel,diagnosisLabel} from '../status.js';
 import type {Issue,MetricLike,Metrics} from '../types.js';
 
-const metricNote=(metric:MetricLike|undefined)=>metric?`${metric.sampleSize} mature member${metric.sampleSize===1?'':'s'} · ${coverageLabel(metric.dataCoverage.status,metric.dataCoverage.expected?Number(metric.dataCoverage.observed)/metric.dataCoverage.expected:undefined)}`:'Observation window has not matured';
+export type OverviewContext={diagnosis?:{type:string;severity:'warning'|'critical'};unansweredAfter24h?:number|null};
+const metricNote=(metric:MetricLike|undefined,locale:UiLocale)=>metric?`${t(locale,'overview.matureMembers',{count:metric.sampleSize})} · ${coverageLabel(metric.dataCoverage.status,metric.dataCoverage.expected?Number(metric.dataCoverage.observed)/metric.dataCoverage.expected:undefined,locale)}`:t(locale,'overview.observationPending');
 
-export async function overviewPanel(issue:Issue,metrics:Metrics):Promise<Panel>{
+export async function overviewPanel(issue:Issue,metrics:Metrics,locale:UiLocale='en',context:OverviewContext={}):Promise<Panel>{
  const newcomers=metrics.new_members;
- if(!newcomers||newcomers.value===null||newcomers.value===0){
-  return nexusPanel({title:'NEXUS · Community Overview',subtitle:'Community activation and retention snapshot',accent:'collecting',children:[
-   divider(),statusBanner('COLLECTING DATA','NEXUS is connected and ready.\nNo new members have entered the tracked cohort yet.'),
-   emptyState('Next milestone','Track the first newcomer.\n\nActivation, first reply, time to first value, and retention become measurable as observation windows mature.'),
-   footer('Missing data is never treated as zero.')
-  ],rows:[await actionRow(issue,[{label:'Refresh',action:'overview',style:ButtonStyle.Primary},{label:'Lifecycle',action:'lifecycle'},{label:'Setup',action:'setup'}])]});
- }
+ if(!newcomers||newcomers.value===null||newcomers.value===0)return nexusPanel({title:t(locale,'overview.title'),subtitle:t(locale,'overview.subtitle'),accent:'collecting',children:[
+  divider(),statusBanner(t(locale,'overview.collecting'),t(locale,'overview.connected')),emptyState(t(locale,'overview.milestone'),t(locale,'overview.trackFirst')),footer(t(locale,'overview.missingZero'))
+ ],rows:[await actionRow(issue,[{label:discordLabel(locale,'common.refresh'),action:'overview',style:ButtonStyle.Primary},{label:discordLabel(locale,'common.lifecycle'),action:'lifecycle'},{label:discordLabel(locale,'common.setup'),action:'setup'}])]});
  const activation=metrics.activation_rate,reply=metrics.direct_reply_connection_rate,d7=metrics.d7_active_retention;
- const coverage=[activation,reply,d7,newcomers].filter(Boolean) as MetricLike[];
- const healthy=coverage.every(m=>m.dataCoverage.status==='healthy');
- const attention=!activation||activation.value===null?'Activation is still maturing.':!reply||reply.value===null?'First-reply measurement is still maturing.':!d7||d7.value===null?'D7 retention is not mature yet.':'No material data-quality issue detected.';
- return nexusPanel({title:'NEXUS · Community Overview',subtitle:'Community activation and retention snapshot',accent:healthy?'healthy':'collecting',children:[
-  divider(),statusBanner(healthy?'HEALTHY DATA COVERAGE':'MEASUREMENT IN PROGRESS',healthy?'Primary signals are ready for interpretation.':'Some observation windows or inputs are still maturing.'),divider(),
-  metricGrid([
-   {label:'Activation',value:formatPercentage(activation?.value??null),note:metricNote(activation)},
-   {label:'New Members',value:formatNumber(newcomers.value),note:'Rolling 30-day cohort'},
-   {label:'First Reply',value:formatPercentage(reply?.value??null),note:metricNote(reply)},
-   {label:'D7 Retention',value:formatPercentage(d7?.value??null),note:metricNote(d7)}
-  ]),divider(),statusBanner('Attention',attention),
-  recommendedAction(d7?.value===null?'Keep collecting mature cohorts':'Review lifecycle drop-offs',d7?.value===null?'D7 appears after members complete the required observation window.':'Use Lifecycle to locate the stage with the clearest opportunity.'),
-  footer(`${coverageLabel(healthy?'healthy':'degraded')} · Updated from production cohorts only`)
- ],rows:[await actionRow(issue,[{label:'Create Experiment',action:'experiments',style:ButtonStyle.Primary},{label:'Lifecycle',action:'lifecycle'},{label:'Diagnose',action:'diagnose'},{label:'Refresh',action:'overview'}])]});
+ const primary=[activation,reply,d7,newcomers].filter(Boolean) as MetricLike[],healthy=primary.length===4&&primary.every(m=>m.dataCoverage.status==='healthy');
+ const dataWarnings=primary.filter(m=>m.dataCoverage.status!=='healthy').length;
+ const performance=context.diagnosis?diagnosisLabel(context.diagnosis.type,locale):context.unansweredAfter24h&&context.unansweredAfter24h>0?t(locale,'overview.unanswered',{count:context.unansweredAfter24h}):t(locale,'overview.noIssue');
+ const recommendation=context.diagnosis?{title:t(locale,'diagnostics.investigate'),detail:diagnosisLabel(context.diagnosis.type,locale)}:context.unansweredAfter24h&&context.unansweredAfter24h>0?{title:t(locale,'overview.reviewUnanswered'),detail:t(locale,'overview.reviewUnansweredDetail')}:d7?.value===null?{title:t(locale,'overview.keepCollecting'),detail:t(locale,'overview.keepCollectingDetail')}:{title:t(locale,'overview.reviewDropoffs'),detail:t(locale,'overview.reviewDropoffsDetail')};
+ return nexusPanel({title:t(locale,'overview.title'),subtitle:t(locale,'overview.subtitle'),accent:context.diagnosis?.severity==='critical'?'critical':healthy?'healthy':'collecting',children:[
+  divider(),statusBanner(healthy?t(locale,'overview.healthy'):t(locale,'overview.progress'),healthy?t(locale,'overview.healthyDetail'):t(locale,'overview.progressDetail')),divider(),
+  metricGrid([{label:t(locale,'common.activation'),value:formatPercentage(activation?.value??null,0,locale),note:metricNote(activation,locale)},{label:t(locale,'common.newMembers'),value:formatNumber(newcomers.value,locale),note:t(locale,'overview.rolling')},{label:t(locale,'common.firstReply'),value:formatPercentage(reply?.value??null,0,locale),note:metricNote(reply,locale)},{label:t(locale,'common.d7Retention'),value:formatPercentage(d7?.value??null,0,locale),note:metricNote(d7,locale)}]),
+  divider(),statusBanner(t(locale,'overview.attention'),performance),statusBanner(t(locale,'overview.dataHealth'),dataWarnings?t(locale,'overview.dataWarning',{count:dataWarnings}):t(locale,'overview.dataHealthy')),recommendedAction(recommendation.title,recommendation.detail,t(locale,'overview.recommended')),footer(`${coverageLabel(healthy?'healthy':'degraded',undefined,locale)} · ${t(locale,'overview.footer')}`)
+ ],rows:[await actionRow(issue,[{label:discordLabel(locale,'overview.createExperiment'),action:'experiments',style:ButtonStyle.Primary},{label:discordLabel(locale,'common.lifecycle'),action:'lifecycle'},{label:discordLabel(locale,'common.diagnose'),action:'diagnose'},{label:discordLabel(locale,'common.refresh'),action:'overview'}])]});
 }

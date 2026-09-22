@@ -1,8 +1,10 @@
 import {ButtonStyle,ComponentType,type APIChannelSelectComponent,type APIRoleSelectComponent,type APIStringSelectComponent} from 'discord-api-types/v10';
-import {actionRow,callout,divider,nexusPanel,type ActionRow,type Panel} from './primitives.js';
+import {actionRow,callout,divider,nexusPanel,type ActionRow} from './primitives.js';
+import {discordLabel,t,type UiLocale} from './i18n/index.js';
 import type {Issue} from './types.js';
 
 export * from './formatting.js';
+export * from './i18n/index.js';
 export * from './primitives.js';
 export * from './status.js';
 export * from './theme.js';
@@ -25,17 +27,14 @@ export * from './views/root.js';
 export * from './views/settings.js';
 export * from './views/success.js';
 
-/** Transitional builder for compact secondary flows. Major product views use typed builders. */
-export function panel(title:string,description:string,rows:ActionRow[]=[]):Panel{return nexusPanel({title:`NEXUS · ${title}`,children:[divider(),callout('Details',description)],rows});}
-
-export async function confirmation(issue:Issue,action:string){
- const {deletionConfirmationPanel}=await import('./views/privacy.js');return deletionConfirmationPanel(issue,action);
+export async function confirmation(issue:Issue,action:string,locale:UiLocale='en'){
+ const {deletionConfirmationPanel}=await import('./views/privacy.js');return deletionConfirmationPanel(issue,action,locale);
 }
 
-export async function questionPanel(issue:Issue,input:{sessionId:string;revision:number;nodeId:string;question:string;options:{id:string;label:string}[];context:string;type?:string}){
+export async function questionPanel(issue:Issue,input:{sessionId:string;revision:number;nodeId:string;question:string;options:{id:string;label:string}[];context:string;type?:string},locale:UiLocale='en'){
  const customId=await issue({action:'answer',sessionId:input.sessionId,revision:input.revision,nodeId:input.nodeId});let row:ActionRow;
  if(input.type==='role_select')row={type:ComponentType.ActionRow,components:[{type:ComponentType.RoleSelect,custom_id:customId,min_values:1,max_values:Math.min(25,input.options.length)} satisfies APIRoleSelectComponent]};
  else if(input.type==='channel_select')row={type:ComponentType.ActionRow,components:[{type:ComponentType.ChannelSelect,custom_id:customId,min_values:1,max_values:Math.min(25,input.options.length)} satisfies APIChannelSelectComponent]};
  else row={type:ComponentType.ActionRow,components:[{type:ComponentType.StringSelect,custom_id:customId,min_values:1,max_values:input.type==='multi_choice'?input.options.length:1,options:input.options.map(option=>({label:option.label,value:option.id}))} satisfies APIStringSelectComponent]};
- return nexusPanel({title:'NEXUS · Your Community Setup',subtitle:input.context==='PRODUCTION'?'Personalize your experience':`${input.context} · excluded from production metrics`,children:[divider(),callout('Question',input.question)],rows:[row,await actionRow(issue,[{label:'Privacy',action:'privacy',style:ButtonStyle.Secondary}])]});
+ return nexusPanel({title:t(locale,'onboarding.setupTitle'),subtitle:input.context==='PRODUCTION'?t(locale,'onboarding.personalize'):t(locale,'onboarding.excluded',{context:input.context}),children:[divider(),callout(t(locale,'onboarding.question'),input.question)],rows:[row,await actionRow(issue,[{label:discordLabel(locale,'common.privacy'),action:'privacy',style:ButtonStyle.Secondary}])]});
 }

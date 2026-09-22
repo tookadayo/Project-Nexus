@@ -18,7 +18,7 @@ export const footer=(content:string):PanelChild=>text(`-# ${content}`);
 export const metric=(label:string,value:string,note?:string)=>`**${label}**\n${value}${note?`\n-# ${note}`:''}`;
 export const metricGrid=(items:Array<{label:string;value:string;note?:string}>):PanelChild=>text(items.map(item=>metric(item.label,item.value,item.note)).join('\n\n'));
 export const statusBanner=(label:string,detail:string):PanelChild=>text(`### ${label}\n${detail}`);
-export const recommendedAction=(title:string,detail:string):PanelChild=>text(`### Recommended next action\n**${title}**\n${detail}`);
+export const recommendedAction=(title:string,detail:string,heading='Recommended next action'):PanelChild=>text(`### ${heading}\n**${title}**\n${detail}`);
 
 export async function actionRow(issue:Issue,specs:ButtonSpec[]):Promise<ActionRow>{
  const buttons=await Promise.all(specs.slice(0,5).map(async spec=>({type:ComponentType.Button,style:spec.style??ButtonStyle.Secondary,label:spec.label,custom_id:await issue({action:spec.action,...spec.data},spec.publicEntry),disabled:spec.disabled} satisfies APIButtonComponent)));

@@ -113,7 +113,7 @@ it('HTTP ACK is signed, durable, deduplicated and drops all unsolicited fields',
  const keys=generateKeyPairSync('ed25519');const publicKey=keys.publicKey.export({format:'der',type:'spki'}).subarray(-32).toString('hex');
  const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32));
  const app=createInteractionServer({db,vault,publicKey,applicationId:'111111111111111111'});
- const data={id:String(BigInt('200000000000000000')+BigInt(Date.now())),application_id:'111111111111111111',type:2,token:'test-token',guild_id:'222222222222222222',
+ const data={id:String(BigInt('200000000000000000')+BigInt(Date.now())),application_id:'111111111111111111',type:2,token:'test-token',guild_id:'222222222222222222',locale:'ja',guild_locale:'en-US',
   member:{user:{id:'333333333333333333'},permissions:'32',roles:[]},data:{name:'nexus',options:[{name:'panel'}]},content:'PRIVATE BODY',attachments:['PRIVATE FILE']};
  const body=JSON.stringify(data);const ts=String(Math.floor(Date.now()/1000));
  const headers={'content-type':'application/json','x-signature-timestamp':ts,'x-signature-ed25519':sign(null,Buffer.from(ts+body),keys.privateKey).toString('hex')};
@@ -123,6 +123,7 @@ it('HTTP ACK is signed, durable, deduplicated and drops all unsolicited fields',
  const rows=await sql<{encrypted_payload:string}>`SELECT encrypted_payload FROM interaction_jobs WHERE id=${data.id}`.execute(db);
  expect(rows.rows).toHaveLength(1);const plaintext=vault.open(scopeForGuild(data.guild_id),rows.rows[0]!.encrypted_payload);
  expect(plaintext).not.toContain('PRIVATE');
+ expect(JSON.parse(plaintext)).toMatchObject({locale:'ja',guildLocale:'en-US'});
  expect((await app.inject({method:'POST',url:'/interactions',payload:'{}',headers})).statusCode).toBe(401);
  const s=scopeForGuild(data.guild_id);const tokens=new Components('secret');
  const token=await tokens.issue(db,s,{action:'settings'},'owner');
