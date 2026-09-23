@@ -4,11 +4,11 @@ import type {ActionTemplateKey,ActionTemplatePresentation} from './types.js';
 type TemplateInput={channelId?:string;eventId?:string;recommendedChannelIds?:string[];safetyMode?:'suggest'|'approval'|'auto'};
 const snowflake=(value:string|undefined,name:string)=>{if(!value)throw new Error(`${name.toUpperCase()}_REQUIRED`);return value;};
 export const actionTemplates:ActionTemplatePresentation[]=[
- {key:'reply_rescue',when:'A newcomer has not received a reply',wait:'1 hour after their first message',if:'They are still not connected',then:'Alert the community team',safety:'Suggestion only; re-check eligibility before delivery',requires:['channelId']},
- {key:'welcome_helper',when:'A newcomer joins',wait:'24 hours',if:'They have not activated',then:'Alert a welcome helper',safety:'Suggestion only; weekly contact cap applies',requires:['channelId']},
- {key:'inactive_follow_up',when:'A newcomer joins',wait:'3 days',if:'They have not activated',then:'Send one follow-up message',safety:'DM opt-in and daily/weekly caps apply',requires:[]},
- {key:'channel_recommendation',when:'A newcomer joins',wait:'24 hours',if:'They have not activated',then:'Recommend relevant channels',safety:'Suggestion only; at most five channels',requires:['channelId','recommendedChannelIds']},
- {key:'event_recommendation',when:'A newcomer joins',wait:'24 hours',if:'They have not activated',then:'Recommend an upcoming event',safety:'Suggestion only; event must still be available',requires:['channelId','eventId']}
+ {key:'reply_rescue',trigger:'message.sent',delaySeconds:3600,condition:'not_connected',action:'staff_alert',safety:{mode:'suggest',contactsPerWeek:3,dmPerDay:1},requires:['channelId']},
+ {key:'welcome_helper',trigger:'member.joined',delaySeconds:86400,condition:'not_activated',action:'staff_alert',safety:{mode:'suggest',contactsPerWeek:3,dmPerDay:1},requires:['channelId']},
+ {key:'inactive_follow_up',trigger:'member.joined',delaySeconds:259200,condition:'not_activated',action:'send_dm',safety:{mode:'suggest',contactsPerWeek:3,dmPerDay:1},requires:[]},
+ {key:'channel_recommendation',trigger:'member.joined',delaySeconds:86400,condition:'not_activated',action:'recommend_channels',safety:{mode:'suggest',contactsPerWeek:3,dmPerDay:1},requires:['channelId','recommendedChannelIds']},
+ {key:'event_recommendation',trigger:'member.joined',delaySeconds:86400,condition:'not_activated',action:'recommend_event',safety:{mode:'suggest',contactsPerWeek:3,dmPerDay:1},requires:['channelId','eventId']}
 ];
 export function compileActionTemplate(key:ActionTemplateKey,input:TemplateInput):InterventionDefinition{
  const safetyMode=input.safetyMode??'suggest',channelId=input.channelId;

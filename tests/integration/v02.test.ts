@@ -3,7 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {Redis} from 'ioredis';
 import {infrastructure} from '../fixtures/infrastructure.js';
-import {connect,migrate,ensureGuild,sql,tenant,type Database} from '../../packages/db/src/index.js';
+import {connect,migrate,ensureGuild,sql,tenant,json,type Database} from '../../packages/db/src/index.js';
 import {SettingsService,type Actor} from '../../packages/settings/src/index.js';
 import {IdentityVault} from '../../packages/identity/src/index.js';
 import {scopeForGuild} from '../../packages/security/src/index.js';
@@ -25,6 +25,7 @@ import {normalize} from '../../packages/events/src/index.js';
 import type {Scope} from '../../packages/shared/src/index.js';
 import {GatewayPublisher,STREAM} from '../../apps/gateway/src/index.js';
 import {StreamConsumer,scrubStream} from '../../apps/worker/src/streams.js';
+import {PresentationService} from '../../packages/presentation/src/index.js';
 let infra:Awaited<ReturnType<typeof infrastructure>>,db:Database;const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32));
 const user='922222222222222222',channel='933333333333333333';let counter=0;
 const actor:Actor={key:'admin',permissions:'32',roles:[],source:'DISCORD_PANEL',requestId:'v02-test'};
@@ -167,4 +168,52 @@ it('stops experiments without changing existing assignment and rejects restart a
  const ctx=await setup(),episode=await join(ctx),id=await publish(ctx.s,'experiment',{name:'Stop test',eligibility:[],randomization:'time_block',blockSeconds:86400,variants:[{key:'control',weight:50,interventionRevisionId:null},{key:'treatment',weight:50,interventionRevisionId:null}],primaryMetric:'activation',windowSeconds:3600,minimumSample:20,guardrails:{maxLeaveRate:.3,maxFailureRate:.1,maxAlerts:100}});
  const service=new ExperimentService(db),assignment=await service.assign(ctx.s,id,episode);await service.control(ctx.s,actor,id,'stopped');expect(await service.assign(ctx.s,id,episode)).toBeNull();
  expect((await sql<{id:string}>`SELECT id FROM experiment_assignments WHERE ${tenant(ctx.s)}`.execute(db)).rows[0]?.id).toBe(assignment!.id);await expect(service.control(ctx.s,actor,id,'running')).rejects.toThrow('STOPPED_EXPERIMENT_IMMUTABLE');
+});
+it('builds first-reply distribution from one mature first message per newcomer',async()=>{
+ const ctx=await setup(),now=new Date('2026-06-20T12:00:00.000Z'),day=86400000,joined=new Date(now.getTime()-3*day),episode=await join(ctx,joined);
+ await sql`INSERT INTO lifecycle_events VALUES
+  (${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',${new Date(joined.getTime()+3600000)},'PRODUCTION',${json({messageId:'700000000000000001',channelId:channel,firstReplyLatencySeconds:600})}),
+  (${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',${new Date(joined.getTime()+7200000)},'PRODUCTION',${json({messageId:'700000000000000002',channelId:channel})})`.execute(db);
+ const recentIdentity=await vault.resolve(db,ctx.s,'922222222222222223'),recentEpisode=randomUUID(),recentJoin=new Date(now.getTime()-12*3600000);
+ await sql`INSERT INTO membership_episodes VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${recentEpisode}::uuid,${recentIdentity}::uuid,${recentJoin},NULL,'PRODUCTION')`.execute(db);
+ await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${recentEpisode}::uuid,'message.sent',${new Date(recentJoin.getTime()+60000)},'PRODUCTION',${json({messageId:'700000000000000003',channelId:channel})})`.execute(db);
+ const distribution=(await new PresentationService(db).journey(ctx.s,7,now)).firstReplyDistribution;
+ expect(distribution.find(bucket=>bucket.bucket==='5m_1h')).toMatchObject({count:1,rate:1});
+ expect(distribution.find(bucket=>bucket.bucket==='unanswered_24h')).toMatchObject({count:0,rate:0});
+ expect(distribution.reduce((sum,bucket)=>sum+(bucket.count??0),0)).toBe(1);
+});
+it('keeps retention unavailable across telemetry gaps and preserves D30 right censoring',async()=>{
+ const ctx=await setup(),now=new Date('2026-06-20T12:00:00.000Z'),day=86400000,joined=new Date('2026-06-10T12:00:00.000Z'),episode=await join(ctx,joined),cohort=joined.toISOString().slice(0,10);
+ await sql`INSERT INTO telemetry_cursor VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${new Date('2026-06-01T00:00:00.000Z')},${now})`.execute(db);
+ await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'reaction.added',${new Date(joined.getTime()+7*day+3600000)},'PRODUCTION',${json({channelId:channel,messageId:'700000000000000004'})})`.execute(db);
+ await sql`INSERT INTO telemetry_health VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${new Date('2026-06-17T06:00:00.000Z')},${new Date('2026-06-17T18:00:00.000Z')},'test gap')`.execute(db);
+ const row=(await new PresentationService(db).journey(ctx.s,30,now)).retention.find(item=>item.cohort===cohort)!;
+ expect(row).toMatchObject({d7:null,d30:null,maturity:{d7:'unavailable',d30:'provisional'}});
+ expect(row.coverage.status).not.toBe('healthy');
+ expect(row.coverage.notes).toContain('retention_gap');
+});
+it('derives Native, fallback and hybrid onboarding readiness from settings and capabilities',async()=>{
+ const modes=[
+  {mode:'native' as const,native:true,patch:{onboardingMode:'native' as const}},
+  {mode:'fallback' as const,native:false,patch:{onboardingMode:'fallback' as const,startChannelId:channel,flowVersionId:randomUUID()}},
+  {mode:'hybrid' as const,native:true,patch:{onboardingMode:'hybrid' as const,startChannelId:channel,hybrid:{enabled:true,flowVersionId:randomUUID(),trigger:'after_native_onboarding_observed' as const,nativePromptMappings:{}}}}
+ ];
+ for(const item of modes){
+  const ctx=await setup(),cfg=await ctx.settings.get(ctx.s),now=new Date();await ctx.settings.update(ctx.s,actor,cfg.revision,item.patch);
+  await sql`INSERT INTO guild_capabilities VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${json({coverage:'healthy',sendMessages:true,manageRoles:true,nativeOnboardingEnabled:item.native,recommendedMode:item.native?'native':'fallback'})},${now})`.execute(db);
+  await sql`INSERT INTO telemetry_cursor VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${new Date(now.getTime()-86400000)},${now})`.execute(db);
+  const onboarding=(await new PresentationService(db).home(ctx.s,now)).setup.steps.find(step=>step.key==='onboarding');expect(onboarding,item.mode).toMatchObject({complete:true,reason:'ready'});
+ }
+});
+it('serves 7D, 30D and 90D Journey ranges and creates a test from a published Action',async()=>{
+ const ctx=await setup(),actionId=await publish(ctx.s,'intervention',intervention('approval')),key='v03-test-api-key',api=createApi(new AnalyticsService(db,ctx.settings),key,db),base=`/v3/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}`,headers={authorization:`Bearer ${apiToken(key,ctx.s)}`};
+ for(const range of [7,30,90]){const response=await api.inject({url:`${base}/journey?range=${range}`,headers});expect(response.statusCode).toBe(200);expect(response.json().range).toBe(range);}
+ const draft=await api.inject({method:'POST',url:base+'/results/draft',headers,payload:{actionId,primaryMetric:'activation'}});expect(draft.statusCode).toBe(200);const preview=draft.json();expect(preview.after.definition).toMatchObject({randomization:'time_block',variants:[{key:'control',interventionRevisionId:null},{key:'treatment',interventionRevisionId:actionId}]});
+ const publishResponse=await api.inject({method:'POST',url:`/v2/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}/configuration`,headers,payload:{action:'publish',id:preview.after.id,expectedHead:null,confirmationHash:preview.confirmationHash}});expect(publishResponse.statusCode).toBe(200);
+ const results=await api.inject({url:base+'/results',headers});expect(results.statusCode).toBe(200);expect(results.json().items[0]).toMatchObject({randomization:'time_block',analysis:'intention_to_treat',state:'running'});await api.close();
+});
+it('keeps measurement warnings separate from ranked community opportunities',async()=>{
+ const ctx=await setup(),home=await new PresentationService(db).home(ctx.s);
+ expect(home.communityOpportunity).toBeNull();expect(home.measurementWarning).toMatchObject({stage:'data',reason:'measurement_coverage'});
+ const opportunities=await new PresentationService(db).opportunities(ctx.s);expect(opportunities.items).toEqual([]);expect(opportunities.measurementWarnings[0]).toMatchObject({stage:'data'});
 });

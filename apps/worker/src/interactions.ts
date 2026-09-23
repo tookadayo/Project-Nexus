@@ -5,7 +5,7 @@ import type {IdentityVault} from '../../../packages/identity/src/index.js';
 import {Components,canAdmin} from '../../../packages/security/src/index.js';
 import {SettingsService,templates,type Actor} from '../../../packages/settings/src/index.js';
 import {OnboardingService,type Session} from '../../../packages/onboarding/src/index.js';
-import {rootPanel,settingsPanel,privacyPanel,questionPanel,confirmation,errorPanel,readinessPanel,activationPanel,activationPreviewPanel,billingPanel,lifecyclePanel,diagnosticsPanel,interventionsPanel,interventionPreviewPanel,experimentsPanel,experimentPreviewPanel,cohortsPanel,reportsPanel,overviewPanel,publishedPanel,successPanel,rolloutPreviewPanel,onboardingModePreviewPanel,onboardingNotConfiguredPanel,onboardingFlowPanel,editQuestionPanel,roleMappingPanel,sessionCompletePanel,activationReadinessPanel,resolveLocale,t,type Panel,type Issue,type ReadinessCheck} from '../../../packages/discord-panels/src/index.js';
+import {rootPanel,settingsPanel,privacyPanel,questionPanel,confirmation,errorPanel,activationPanel,activationPreviewPanel,billingPanel,lifecyclePanel,diagnosticsPanel,interventionsPanel,interventionPreviewPanel,experimentsPanel,experimentPreviewPanel,cohortsPanel,reportsPanel,overviewPanel,publishedPanel,successPanel,rolloutPreviewPanel,onboardingModePreviewPanel,onboardingNotConfiguredPanel,onboardingFlowPanel,editQuestionPanel,roleMappingPanel,sessionCompletePanel,activationReadinessPanel,guidedSetupPanel,diagnosisLabel,resolveLocale,t,type Panel,type Issue,type ReadinessCheck,type UiLocale,type MetricLike} from '../../../packages/discord-panels/src/index.js';
 import {enqueue} from '../../../packages/discord/src/outbox.js';
 import type {DiscordPort} from '../../../packages/discord/src/rest.js';
 import {assert,DomainError,type Scope} from '../../../packages/shared/src/index.js';
@@ -17,6 +17,7 @@ import {domainRevisions} from '../../../packages/settings/src/domain-config.js';
 import {InterventionService} from '../../../packages/lifecycle/src/interventions.js';
 import {ExperimentService,experimentSchema} from '../../../packages/lifecycle/src/experiments.js';
 import {diagnose} from '../../../packages/analytics/src/diagnoses.js';
+import {PresentationService,type ActionTemplateKey} from '../../../packages/presentation/src/index.js';
 type DeleteData=(s:Scope,userId:string,actor:Actor,guild:boolean)=>Promise<void>;
 export class InteractionWorker {
  constructor(private readonly db:Database,private readonly vault:IdentityVault,private readonly tokens:Components,private readonly discord:DiscordPort,
@@ -52,11 +53,14 @@ export class InteractionWorker {
   const intent=input.customId?await this.tokens.read(this.db,s,input.customId,actorHash):{action:input.command};
   const action=String(intent.action??'');
   const issue:Issue=(data,publicEntry=false)=>this.tokens.issue(this.db,s,data,publicEntry?null:actorHash,publicEntry?31536000:900);
-  const adminActions=['panel','setup','rolloutPreview','rolloutConfirm','modePreview','modeConfirm','lifecycle','activation','activationDraft','activationPublish','cohorts','diagnose','interventions','interventionDraft','interventionApprove','experiments','experimentDraft','configPublish','reports','billing','advanced','settings','status','flows','template','startChannel','uiLanguage','enabled','onboardingEnabled','mapOption','mapRole','editNode','editNodeOpen','editNodeSave','rollback','preview','deleteGuildConfirm','deleteGuild','overview','dashboard'];
+  const adminActions=['panel','panelRefresh','setup','recommendedSetup','rolloutPreview','rolloutConfirm','modePreview','modeConfirm','lifecycle','activation','activationDraft','activationPublish','cohorts','diagnose','interventions','interventionDraft','interventionApprove','experiments','experimentDraft','configPublish','reports','billing','advanced','settings','status','flows','template','startChannel','uiLanguage','enabled','onboardingEnabled','mapOption','mapRole','editNode','editNodeOpen','editNodeSave','rollback','preview','deleteGuildConfirm','deleteGuild','overview','dashboard'];
   if(adminActions.includes(action))assert(admin,'ADMIN_REQUIRED',403);
   if(action==='setup'){
-   const p=await new CapabilityService(this.db,this.discord).refresh(s,current.onboardingMode);
-   return readinessPanel(issue,{communityEnabled:p.communityEnabled,nativeOnboardingAvailable:p.nativeOnboardingAvailable,nativeOnboardingEnabled:p.nativeOnboardingEnabled,membershipScreeningEnabled:p.membershipScreeningEnabled,recommendedMode:p.recommendedMode,configuredMode:current.onboardingMode},locale);
+   try{await new CapabilityService(this.db,this.discord).refresh(s,current.onboardingMode);}catch{/* Guided setup explains the unavailable connection state. */}
+   return guidedSetupPanel(issue,(await new PresentationService(this.db).home(s)).setup,locale);
+  }
+  if(action==='recommendedSetup'){
+   const capability=await new CapabilityService(this.db,this.discord).latest(s);assert(capability,'CAPABILITY_CHECK_REQUIRED');assert(capability.recommendedMode==='native'?capability.nativeOnboardingEnabled:Boolean(current.startChannelId&&current.flowVersionId),'RECOMMENDED_SETUP_REQUIRES_CONFIGURATION');const revisions=domainRevisions(this.db),id=await revisions.draft(s,actor,'onboarding',{onboardingMode:capability.recommendedMode,hybrid:current.hybrid}),preview=await revisions.preview(s,id);return onboardingModePreviewPanel(issue,{from:current.onboardingMode,to:capability.recommendedMode,publishData:{id,hash:preview.confirmationHash,expectedHead:preview.before?.id??null}},locale);
   }
   if(action==='rolloutPreview')return rolloutPreviewPanel(issue,current.revision,locale);
   if(action==='rolloutConfirm'){
@@ -114,10 +118,11 @@ export class InteractionWorker {
   if(action==='advanced')return settingsPanel(issue,current,locale);
   if(action==='panel'){
    assert(input.channelId,'CHANNEL_REQUIRED');await this.discord.checkChannel(s.guildId,input.channelId);
-   const analytics=new AnalyticsService(this.db,this.settings),now=Date.now(),day=86400000,metrics=await analytics.canonical(s),findings=diagnose(await analytics.canonical(s,new Date(now-15*day)),await analytics.canonical(s,new Date(now-30*day),new Date(now-15*day))),attention=findings.find(f=>f.type!=='DATA_COVERAGE_DROP')??findings[0];
-   const diagnosisKeys:Record<string,Parameters<typeof t>[1]>={ACTIVATION_DROP:'diagnosis.activationDrop',TTFV_SPIKE:'diagnosis.ttfvSpike',CONNECTION_DROP:'diagnosis.connectionDrop',REPLY_LATENCY_SPIKE:'diagnosis.replyLatencySpike',ONBOARDING_DROP:'diagnosis.onboardingDrop',HOME_ACTION_DROP:'diagnosis.homeActionDrop',RETENTION_DROP:'diagnosis.retentionDrop',DATA_COVERAGE_DROP:'diagnosis.coverageDrop',ACTION_FAILURE_SPIKE:'diagnosis.actionFailureSpike'};
-   const root=await rootPanel(issue,publicLocale,{activation:metrics.activation_rate,connection:metrics.direct_reply_connection_rate,retention:metrics.d7_active_retention,attention:attention?t(publicLocale,diagnosisKeys[attention.type]??'diagnosis.coverageDrop'):null,dashboardUrl:process.env.NEXUS_WEB_URL});await enqueue(this.db,s,`panel:${input.id}`,'PANEL_UPSERT',{channelId:input.channelId,body:root});
+   const root=await this.communityPanel(issue,s,publicLocale);await enqueue(this.db,s,`panel:${input.id}`,'PANEL_UPSERT',{channelId:input.channelId,body:root});
    return settingsPanel(issue,current,locale);
+  }
+  if(action==='panelRefresh'){
+   const saved=(await sql<{channel_id:string}>`SELECT channel_id FROM settings_panels WHERE ${tenant(s)}`.execute(this.db)).rows[0];assert(saved,'PANEL_NOT_CONFIGURED');const root=await this.communityPanel(issue,s,publicLocale);await enqueue(this.db,s,`panel-refresh:${input.id}`,'PANEL_UPSERT',{channelId:saved.channel_id,body:root});return successPanel(issue,t(locale,'success.panelRefreshed'),t(locale,'success.panelRefreshedDetail'),{label:t(locale,'common.settings'),action:'advanced'},locale);
   }
   if(action==='settings')return settingsPanel(issue,current,locale);
   if(action==='template')await this.onboarding.chooseTemplate(s,actor,z.number().parse(intent.revision),z.enum(templates).parse(input.values?.[0]));
@@ -168,14 +173,25 @@ export class InteractionWorker {
    const summary=await analytics.overview(s);return overviewPanel(issue,metrics,locale,{diagnosis,unansweredAfter24h:summary.unansweredAfter24h?.value??null});
   }
   else if(action==='status'){
-   const checks:ReadinessCheck[]=[{label:t(locale,'health.startChannel'),status:current.startChannelId?'Ready':'Not configured'},{label:t(locale,'health.flow'),status:current.flowVersionId?'Ready':'Not configured'},{label:t(locale,'health.onboarding'),status:current.onboardingEnabled?'Ready':'Not configured'}];
-   if(current.startChannelId){try{await this.discord.checkChannel(s.guildId,current.startChannelId);checks.push({label:t(locale,'health.botPermissions'),status:'Ready'});}catch{checks.push({label:t(locale,'health.botPermissions'),status:'Needs attention'});}}
-   if(current.flowVersionId){const flow=await this.onboarding.flow(s,current.flowVersionId);checks.push({label:t(locale,'health.firstStep'),status:'Ready',detail:t(locale,'health.choices',{count:flow.nodes.find(n=>n.id===flow.start)!.options.length})});
-    for(const role of new Set(flow.nodes.flatMap(n=>n.options.flatMap(o=>o.roleId?[o.roleId]:[])))){try{await this.discord.validateRole(s.guildId,role);checks.push({label:`${t(locale,'settings.roleMappings')} <@&${role}>`,status:'Ready'});}catch{checks.push({label:`${t(locale,'settings.roleMappings')} <@&${role}>`,status:'Needs attention'});}}
-   }
-   checks.push({label:t(locale,'health.activation'),status:current.startChannelId?'Ready':'Not configured',detail:t(locale,'health.activationDetail')});return activationReadinessPanel(issue,checks,locale);
+   const capability=await new CapabilityService(this.db,this.discord).latest(s),home=await new PresentationService(this.db).home(s),activation=await domainRevisions(this.db).current(s,'activation'),cursor=(await sql<{last_seen:Date}>`SELECT last_seen FROM telemetry_cursor WHERE ${tenant(s)}`.execute(this.db)).rows[0],gap=(await sql`SELECT id FROM telemetry_health WHERE ${tenant(s)} AND ended_at IS NULL LIMIT 1`.execute(this.db)).rows.length>0,ingestion=Boolean(cursor&&cursor.last_seen.getTime()>Date.now()-10*60*1000&&!gap),validWeb=(()=>{try{return Boolean(process.env.NEXUS_WEB_URL&&/^https?:\/\//.test(new URL(process.env.NEXUS_WEB_URL).href));}catch{return false;}})(),permissions=Boolean(capability?.sendMessages&&(capability.manageRoles||!current.flowVersionId)),onboarding=home.setup.steps.find(step=>step.key==='onboarding')?.complete??false;
+   const checks:ReadinessCheck[]=[
+    {label:t(locale,'health.discordConnection'),status:capability?'Ready':'Needs attention',detail:capability?undefined:t(locale,'health.fixConnection')},
+    {label:t(locale,'health.permissions'),status:permissions?'Ready':'Needs attention',detail:permissions?undefined:t(locale,'health.fixPermissions')},
+    {label:t(locale,'health.dataIngestion'),status:ingestion?'Ready':'Needs attention',detail:ingestion?undefined:t(locale,'health.fixIngestion')},
+    {label:t(locale,'health.activationDefinition'),status:activation?'Ready':'Not configured',detail:activation?undefined:t(locale,'health.fixActivation')},
+    {label:t(locale,'health.onboarding'),status:onboarding?'Ready':'Not configured',detail:onboarding?undefined:t(locale,'health.fixOnboarding')},
+    {label:t(locale,'health.actionEngine'),status:current.flags.interventions_v2?'Ready':'Not configured',detail:current.flags.interventions_v2?undefined:t(locale,'health.fixActionEngine')},
+    {label:t(locale,'health.experimentEngine'),status:current.flags.experiments_v2?'Ready':'Not configured',detail:current.flags.experiments_v2?undefined:t(locale,'health.fixExperimentEngine')},
+    {label:t(locale,'health.webDashboard'),status:validWeb?'Ready':'Not configured',detail:validWeb?undefined:t(locale,'health.fixWebDashboard')}
+   ];return activationReadinessPanel(issue,checks,locale);
   }else throw new DomainError('UNKNOWN_ACTION');
   const updated=await this.settings.get(s),updatedLocale=resolveLocale(updated.uiLanguage,{interactionLocale:input.locale,guildLocale:input.guildLocale});return settingsPanel(issue,updated,updatedLocale);
+ }
+ private async communityPanel(issue:Issue,s:Scope,locale:UiLocale){
+  const home=await new PresentationService(this.db).home(s),experiment=(await sql<{state:string}>`SELECT COALESCE(c.state,'running') AS state FROM guild_config_heads h LEFT JOIN experiment_controls c ON c.organization_id=h.organization_id AND c.guild_id=h.guild_id AND c.revision_id=h.revision_id WHERE h.organization_id=${s.organizationId}::uuid AND h.guild_id=${s.guildId} AND h.domain='experiment'`.execute(this.db)).rows[0],remaining=home.setup.steps.slice(0,3).filter(step=>!step.complete).length,collecting=home.kpis.slice(1).every(k=>k.current===null||k.sampleSize<20||k.maturity!=='mature'),state=home.setup.required?'SETUP_REQUIRED':experiment&&experiment.state!=='stopped'?'EXPERIMENT_RUNNING':home.communityOpportunity?'NEEDS_ATTENTION':collecting?'COLLECTING_DATA':'HEALTHY';
+  const metric=(key:'activation_rate'|'direct_reply_connection_rate'|'d7_active_retention'):MetricLike|undefined=>{const k=home.kpis.find(item=>item.key===key);if(!k)return;const expected=k.coverage.coverageRatio===null?null:100,observed=k.coverage.coverageRatio===null?null:Math.round(k.coverage.coverageRatio*100);return {metricKey:key,value:k.current,sampleSize:k.sampleSize,provisional:k.maturity==='provisional',dataCoverage:{status:k.coverage.status,expected,observed}};};
+  const actionKeys:Record<ActionTemplateKey,Parameters<typeof t>[1]>={reply_rescue:'root.action.replyRescue',welcome_helper:'root.action.welcomeHelper',inactive_follow_up:'root.action.inactiveFollowup',channel_recommendation:'root.action.channelRecommendation',event_recommendation:'root.action.eventRecommendation'};
+  return rootPanel(issue,locale,{state,activation:metric('activation_rate'),connection:metric('direct_reply_connection_rate'),retention:metric('d7_active_retention'),attention:home.communityOpportunity?diagnosisLabel(home.communityOpportunity.type,locale):null,suggestedAction:home.suggestedAction?t(locale,actionKeys[home.suggestedAction]):null,setupRemaining:remaining,updatedAt:new Date(home.generatedAt),dashboardUrl:process.env.NEXUS_WEB_URL});
  }
  private async sessionPanel(issue:Issue,session:Session,locale:ReturnType<typeof resolveLocale>){
   if(session.state.complete)return sessionCompletePanel(issue,locale);

@@ -25,6 +25,7 @@ export * from './views/readiness.js';
 export * from './views/reports.js';
 export * from './views/root.js';
 export * from './views/settings.js';
+export * from './views/setup.js';
 export * from './views/success.js';
 
 export async function confirmation(issue:Issue,action:string,locale:UiLocale='en'){

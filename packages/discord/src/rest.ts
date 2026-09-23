@@ -5,13 +5,15 @@ export type Member={roles:string[],permissions:string,joinedAt:string,bot:boolea
 export const nativeOnboardingSchema=z.object({guild_id:z.string(),enabled:z.boolean(),mode:z.number().int(),default_channel_ids:z.array(z.string()),prompts:z.array(z.object({id:z.string(),title:z.string(),type:z.number().int(),options:z.array(z.object({id:z.string(),title:z.string(),role_ids:z.array(z.string()),channel_ids:z.array(z.string())})),single_select:z.boolean(),required:z.boolean(),in_onboarding:z.boolean()}))});
 export type NativeOnboarding=z.infer<typeof nativeOnboardingSchema>;
 export type GuildNativeState={features:string[],onboarding:NativeOnboarding|null,bot:Member,roles:Role[],onboardingStatus:'available'|'unavailable'};
-export type Role={id:string,position:number,managed:boolean,permissions:string};
+export type Role={id:string,position:number,managed:boolean,permissions:string,name?:string};
+export type DiscordEntityOptions={channels:{id:string;label:string}[];roles:{id:string;label:string}[];events:{id:string;label:string}[]};
 export class DiscordFailure extends Error {
  constructor(public readonly status:number,public readonly retryAfter=1){super(`Discord HTTP ${status}`);}
 }
 export interface DiscordPort {
  sendDirectMessage?(userId:string,text:string,nonce:string):Promise<string>;
  nativeState?(guildId:string):Promise<GuildNativeState>;
+ options?(guildId:string):Promise<DiscordEntityOptions>;
  memberSnapshot?(guildId:string,userId:string):Promise<Member>;
  registerCommands(guildId:string,commands:unknown[]):Promise<void>;
  member(guildId:string,userId:string):Promise<Member>;
@@ -37,6 +39,10 @@ export class DiscordRest implements DiscordPort {
   return (res.status===204?undefined:await res.json()) as T;
  }
  async roles(guildId:string){return this.request<Role[]>(`/guilds/${guildId}/roles`);}
+ async options(guildId:string):Promise<DiscordEntityOptions>{
+  const [channels,roles,events]=await Promise.all([this.request<{id:string;name:string;type:number}[]>(`/guilds/${guildId}/channels`),this.roles(guildId),this.request<{id:string;name:string;status:number}[]>(`/guilds/${guildId}/scheduled-events`)]);
+  return {channels:channels.filter(c=>c.type===0||c.type===5).map(c=>({id:c.id,label:`#${c.name}`})),roles:roles.filter(r=>r.id!==guildId&&!r.managed).map(r=>({id:r.id,label:`@${r.name??'role'}`})),events:events.filter(e=>e.status===1||e.status===2).map(e=>({id:e.id,label:e.name}))};
+ }
  async memberSnapshot(guildId:string,userId:string):Promise<Member>{
   const raw=z.object({roles:z.array(z.string()),joined_at:z.string(),flags:z.number().int().nonnegative().optional(),pending:z.boolean().optional(),user:z.object({bot:z.boolean().optional()}).optional()}).parse(await this.request(`/guilds/${guildId}/members/${userId}`));
   return {roles:raw.roles,joinedAt:raw.joined_at,permissions:'0',bot:raw.user?.bot??false,flags:raw.flags===undefined?undefined:String(raw.flags),pending:raw.pending??null};
