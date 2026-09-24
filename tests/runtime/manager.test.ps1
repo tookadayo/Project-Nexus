@@ -53,7 +53,8 @@ node "%~dp0fake-service.cjs" ngrok
     $started=Invoke-Launcher 'start-nexus.ps1';Assert ($started.code -eq 0) "Clean START failed: $($started.text)"
     $manifestPath=Join-Path $root '.local\runtime\runtime.json';$first=Get-Content -LiteralPath $manifestPath -Raw|ConvertFrom-Json
     Assert ($first.projectRoot -eq $root) 'Manifest root does not preserve spaces'
-    foreach($role in @('infra','nexus','web','ngrok')){Assert ($first.processes.$role.pid -gt 0) "Missing $role PID"}
+    foreach($role in @('infra','nexus','web')){Assert ($first.processes.$role.pid -gt 0) "Missing $role PID"}
+    Assert ($null -eq $first.processes.ngrok) 'ngrok must not start by default'
     $again=Invoke-Launcher 'start-nexus.ps1';Assert ($again.code -eq 0) "Double START failed: $($again.text)"
     $second=Get-Content -LiteralPath $manifestPath -Raw|ConvertFrom-Json;Assert ($first.infraPid -eq $second.infraPid) 'Double START changed tracked PIDs'
     $stopped=Invoke-Launcher 'stop-nexus.ps1';Assert ($stopped.code -eq 0) "Clean STOP failed: $($stopped.text)"

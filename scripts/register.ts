@@ -9,4 +9,4 @@ const guildId=process.env.DISCORD_GUILD_ID,databaseUrl=process.env.DATABASE_URL;
 if(!guildId||!databaseUrl)throw new Error('DISCORD_GUILD_ID and DATABASE_URL required');
 const command=buildNexusCommand();
 const db=connect(databaseUrl);try{await migrate(db);const s=scopeForGuild(guildId);await db.transaction().execute(async tx=>{await ensureGuild(tx,s);await enqueue(tx,s,`commands:${randomUUID()}`,'COMMANDS_REGISTER',{commands:[command.toJSON()]});});}finally{await db.destroy();}
-process.stdout.write('NEXUS guild commands queued in the action outbox. Run pnpm dev to deliver.\n');
+process.stdout.write('NEXUS guild commands queued in the action outbox. Run corepack pnpm dev to deliver.\n');

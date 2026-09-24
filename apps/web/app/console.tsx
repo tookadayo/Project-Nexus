@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import type {CommunityService} from '../../../packages/presentation/src/community';
 import type {
   ActionsPresentation,
   ActionTemplateKey,
@@ -20,6 +21,8 @@ import {
 } from "./charts";
 
 type Locale = "en" | "ja";
+const stageNamesEn:Record<string,string>={joined:'joining',activated:'first activity',connected:'connecting with someone',repeated:'another day of activity',retained:'activity one week later'};
+const wholePercent=(n:number|null)=>n===null?'—':`${n}%`;
 type Preview = {
   before: { id: string } | null;
   after: { id: string; version: number };
@@ -38,9 +41,11 @@ type Admin = {
 export type ProductData = {
   home: HomePresentation | null;
   journey: JourneyPresentation | null;
+  community: Awaited<ReturnType<CommunityService['overview']>> | null;
   opportunities: OpportunitiesPresentation | null;
   actions: ActionsPresentation | null;
   results: ResultsPresentation | null;
+  weeklyStatus:{state:string;status_note:string|null;attempted_at:string}|null;
   options: DiscordOptions;
   admin: Admin | null;
   guilds?:{id:string;name:string}[];
@@ -48,7 +53,7 @@ export type ProductData = {
 };
 const messages = {
   en: {
-    nav: ["Home", "Newcomers", "Improve", "Results", "Settings"],
+    nav: ["Home", "New Members", "Improve", "Results", "Settings", "Community", "Compare", "Channels"],
     tagline: "See where newcomers drop off. Fix it. Measure what worked.",
     home: "Home",
     journey: "Newcomers",
@@ -87,7 +92,7 @@ const messages = {
     reply: "First reply distribution",
     trendActivation: "First success trend",
     trendConnection: "First Connection trend",
-    trendRetention: "D7 Retention trend",
+    trendRetention: "Activity one week after joining",
     noOpportunity: "Nothing needs attention right now. You can still choose an improvement below.",
     notCausal: "This change was observed; its cause is not yet known.",
     createAction: "Choose an improvement",
@@ -134,7 +139,7 @@ const messages = {
     failed: "Failed",
     unknown: "Unknown",
     suppressed: "Suppressed",
-    seeEvidence: "See Evidence",
+    seeEvidence: "Why this appeared",
     dismiss: "Dismiss for now",
     why: "Why this appeared",
     createFromOpportunity: "Improve this",
@@ -158,7 +163,7 @@ const messages = {
       "Discord choices are unavailable. Refresh setup or use the Discord panel.",
     loading: "Loading verified data…",
     current: "Current",
-    baseline: "Baseline",
+    baseline: "Earlier period",
     difference: "Difference",
     sample: "Sample",
     coverage: "Data collection status",
@@ -170,7 +175,7 @@ const messages = {
     next: "Next",
   },
   ja: {
-    nav: ["ホーム", "新規メンバー", "改善", "結果", "設定"],
+    nav: ["ホーム", "新しいメンバー", "改善", "結果", "設定", "コミュニティ", "比較", "チャンネル"],
     tagline: "新規メンバーが離脱する場所を見つけ、改善し、効果を測定します。",
     home: "ホーム",
     journey: "新規メンバー",
@@ -209,7 +214,7 @@ const messages = {
     reply: "初回返信の分布",
     trendActivation: "最初の成功の推移",
     trendConnection: "最初のつながり推移",
-    trendRetention: "D7 継続率推移",
+    trendRetention: "1週間後も活動した人の推移",
     noOpportunity: "今すぐ対応が必要なことはありません。下から改善策を選ぶこともできます。",
     notCausal: "観測された変化ですが、原因はまだ分かっていません。",
     createAction: "改善策を選ぶ",
@@ -269,9 +274,9 @@ const messages = {
     question: "この改善策は新規メンバーに役立ったか？",
     primaryOutcome: "NEXUS が確認すること",
     assignment: "比較方法",
-    dailyBlocks: "日次タイムブロック",
+    dailyBlocks: "日ごとに試す",
     reviewTest: "効果を確認",
-    startTest: "効果を確認",
+    startTest: "改善テストを始める",
     pauseTest: "テストを一時停止",
     stopTest: "テストを停止",
     viewAction: "改善策を見る",
@@ -315,7 +320,7 @@ const opportunityNames: Record<Locale, Record<string, string>> = {
     REPLY_LATENCY_SPIKE: "最初の返信までの時間が長期化",
     ONBOARDING_DROP: "オンボーディング完了率が低下",
     HOME_ACTION_DROP: "ホームアクション完了率が低下",
-    RETENTION_DROP: "D7 継続率が低下",
+    RETENTION_DROP: "1週間後も活動した割合が低下",
     DATA_COVERAGE_DROP: "一部のデータを取得できていません",
     ACTION_FAILURE_SPIKE: "アクション配信失敗が増加",
   },
@@ -372,6 +377,9 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
     [weeklyEnabled, setWeeklyEnabled] = useState(Boolean(data.admin?.settings.weeklySummaryEnabled)),
     [weeklyChannelId, setWeeklyChannelId] = useState(String(data.admin?.settings.weeklySummaryChannelId??data.options.channels[0]?.id??"")),
     [retentionDays, setRetentionDays] = useState(Number(data.admin?.settings.detailedRetentionDays ?? 30)),
+    [scopeMode,setScopeMode]=useState<'all'|'include'|'exclude'>((data.admin?.settings.analysisScope as {mode?:'all'|'include'|'exclude'}|undefined)?.mode??'all'),
+    [scopeChannels,setScopeChannels]=useState<string[]>((data.admin?.settings.analysisScope as {channelIds?:string[]}|undefined)?.channelIds??[]),
+    [staffRoles,setStaffRoles]=useState<string[]>((data.admin?.settings.staffRoleIds as string[]|undefined)??[]),
     [eventId, setEventId] = useState(data.options.events[0]?.id ?? ""),
     [channels, setChannels] = useState<string[]>([]),
     [preview, setPreview] = useState<Preview | null>(null),
@@ -387,6 +395,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
     [actions, setActions] = useState(data.actions),
     [results, setResults] = useState(data.results);
   const c = messages[locale];
+  const suggestedExcludedChannels=data.options.channels.filter(option=>/^#?(?:bot|logs?|staff|mod(?:erator)?)(?:[-_]|$)/i.test(option.label)).map(option=>option.id);
   const openImprovement=(key:ActionTemplateKey)=>{setTemplate(key);setPreflightState(null);setTestSent(false);setShowImprovementSetup(true);setPage(2);requestAnimationFrame(()=>document.querySelector('.builder-v3')?.scrollIntoView({behavior:'smooth',block:'start'}));};
   const selected = actions?.templates.find((t) => t.key === template),
     selectedAction = actions?.items.find((a) => a.id === testActionId);
@@ -490,7 +499,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
     if (!updated) return;
     setNotificationRevision(Number(updated.revision));
     setRetentionDays(days);
-    setStatus(locale === "ja" ? "保持期間を保存しました。" : "Retention saved.");
+    setStatus(locale === "ja" ? "保持期間を保存しました。" : "Data retention setting saved.");
   }
   async function saveWeekly(enabled:boolean,destination=weeklyChannelId){
     const updated=await request({action:"weekly_summary",enabled,channelId:destination||null,revision:notificationRevision});
@@ -632,6 +641,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
               publish={publish}
             />
           )}
+          {data.community && <section className="surface"><h2>{locale==='ja'?'新しく入った人の流れ':'How new members are participating'}</h2>{data.community.dataReady?<><div className="journey-steps">{data.community.stages.map(step=><p key={step.key}><strong>{step.count.toLocaleString()}</strong> {locale==='ja'?step.label:stageNamesEn[step.key]}</p>)}</div>{data.community.largestDrop&&<p>{locale==='ja'?`最も多くの人が次に進んでいない段階: ${data.community.largestDrop.from} → ${data.community.largestDrop.to}。改善できる可能性があります。`:`The largest observed drop is between ${stageNamesEn[data.community.largestDrop.fromKey]} and ${stageNamesEn[data.community.largestDrop.toKey]}. This may be worth improving.`}</p>}</>:<p>{locale==='ja'?'まだ比較できるだけの観測データがありません。':'There is not enough observed data to compare yet.'}</p>}<button onClick={go(1)}>{locale==='ja'?'詳しく見る':'See details'} →</button></section>}
           <section className="kpi-grid">
             {data.home.kpis.map((k) => (
               <MetricCard
@@ -1240,6 +1250,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
         </div>
       </div>
       <section className="settings-grid">
+        <article className="surface"><h2>{locale==='ja'?'分析する範囲':'Channels to analyze'}</h2><p>{locale==='ja'?'初期設定はサーバー全体です。スタッフ用チャンネルなどは必要に応じて除外してください。':'The default is the whole server. Exclude staff channels where needed.'}</p><button disabled={!suggestedExcludedChannels.length} onClick={()=>{setScopeMode('exclude');setScopeChannels(suggestedExcludedChannels)}}>{locale==='ja'?'スタッフ・ログ用らしいチャンネルを選択':'Select likely staff or log channels'}</button><select aria-label={locale==='ja'?'分析する範囲':'Channels to analyze'} value={scopeMode} onChange={e=>setScopeMode(e.target.value as typeof scopeMode)}><option value="all">{locale==='ja'?'サーバー全体':'Whole server'}</option><option value="include">{locale==='ja'?'選んだチャンネルだけ':'Selected channels only'}</option><option value="exclude">{locale==='ja'?'選んだチャンネルを除外':'Exclude selected channels'}</option></select>{scopeMode!=='all'&&<div className="scope-list">{data.options.channels.map(option=><label key={option.id}><input type="checkbox" checked={scopeChannels.includes(option.id)} onChange={e=>setScopeChannels(e.target.checked?[...scopeChannels,option.id]:scopeChannels.filter(id=>id!==option.id))}/>{option.label}</label>)}</div>}<h3>{locale==='ja'?'比較から除外するスタッフのロール':'Staff roles excluded from comparison'}</h3><div className="scope-list">{data.options.roles.map(option=><label key={option.id}><input type="checkbox" checked={staffRoles.includes(option.id)} onChange={e=>setStaffRoles(e.target.checked?[...staffRoles,option.id]:staffRoles.filter(id=>id!==option.id))}/>{option.label}</label>)}</div><button disabled={busy||scopeMode==='include'&&!scopeChannels.length} onClick={async()=>{const result=await request({action:'analysis_scope',mode:scopeMode,channelIds:scopeChannels,staffRoleIds:staffRoles,revision:notificationRevision});if(result){setNotificationRevision(result.revision);setStatus(locale==='ja'?'分析する範囲を保存しました。':'Analysis scope saved.');}}}>{locale==='ja'?'変更を保存':'Save changes'}</button></article>
         <article className="surface">
           <h2>{locale === "ja" ? "一般" : "General"}</h2>
           <p>{c.language}</p>
@@ -1273,6 +1284,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
           <label><input type="checkbox" checked={weeklyEnabled} disabled={busy||!weeklyChannelId} onChange={e=>void saveWeekly(e.target.checked)}/>{locale==="ja"?"毎週スタッフに送る":"Send to staff each week"}</label>
           <label>{locale==="ja"?"送信先":"Destination"}<select value={weeklyChannelId} disabled={busy||!data.options.available} onChange={e=>{setWeeklyChannelId(e.target.value);if(weeklyEnabled)void saveWeekly(true,e.target.value);}}>{data.options.channels.map(option=><option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
           <p>{locale==="ja"?"新規メンバーの状況、ひとつの問題、ひとつの改善策を簡潔にお知らせします。":"A short update with newcomer progress, one issue, and one improvement."}</p>
+          {data.weeklyStatus?.state==='unknown'&&<p role="status">{locale==='ja'?'送信結果を確認できませんでした。チャンネルを確認してください。':'The delivery result could not be confirmed. Check the channel before sending again.'}</p>}
         </article>
         <article className="surface">
           <h2>{locale === "ja" ? "データ" : "Data"}</h2>
@@ -1299,6 +1311,9 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
     <section key="improve">{opportunityView}{actionView}</section>,
     resultView,
     settingsView,
+    <section key="community" className="surface"><h1>{locale==='ja'?'普段参加している人の状態':'Community activity'}</h1>{data.community?<><p>{locale==='ja'?'継続して参加している人':'Continuing members'}: {data.community.classification.continuing}</p><p>{locale==='ja'?'最近活動が確認できない人':'No recent observed activity'}: {data.community.classification.inactive}</p><p>{locale==='ja'?'比較から除外したスタッフ':'Staff excluded from comparison'}: {data.community.classification.staffExcluded}</p><p>{locale==='ja'?data.community.observation:'Only activity visible to Discord is counted. Reading without interacting cannot be observed.'}</p></>:<p>{c.emptyDetail}</p>}</section>,
+    <section key="compare" className="surface"><h1>{locale==='ja'?'新しい人との違い':'Compare participation'}</h1>{data.community?.compare.available?<><p>{locale==='ja'?`新しいメンバーは返信まで平均 ${data.community.compare.newcomers?.replyMinutes??'—'} 分、継続して参加している人は平均 ${data.community.compare.continuing?.replyMinutes??'—'} 分です。`:`New members waited ${data.community.compare.newcomers?.replyMinutes??'—'} minutes on average for a reply; continuing members waited ${data.community.compare.continuing?.replyMinutes??'—'} minutes.`}</p><p>{locale==='ja'?`返信を受けた人: 新しい人 ${data.community.compare.newcomers?.receivedReplyPercent}%、継続している人 ${data.community.compare.continuing?.receivedReplyPercent}%`:`Received a reply: new ${data.community.compare.newcomers?.receivedReplyPercent}%, continuing ${data.community.compare.continuing?.receivedReplyPercent}%`}</p><p>{locale==='ja'?`活動した日数: 新しい人 ${data.community.compare.newcomers?.activeDays} 日、継続している人 ${data.community.compare.continuing?.activeDays} 日`:`Active days: new ${data.community.compare.newcomers?.activeDays}, continuing ${data.community.compare.continuing?.activeDays}`}</p></>:<p>{locale==='ja'?'まだ比較できるだけのデータがありません。':'There is not enough data to compare yet.'}</p>}<h2>{locale==='ja'?'参加後の結果':'What happened after joining'}</h2>{data.community?<p>{locale==='ja'?`1週間後も活動が確認できた ${data.community.outcomes.retained} 人、確認できなかった ${data.community.outcomes.notRetained} 人、まだ判定前 ${data.community.outcomes.pending} 人、データ不足 ${data.community.outcomes.insufficient} 人。`:`Observed a week later ${data.community.outcomes.retained}; not observed ${data.community.outcomes.notRetained}; pending ${data.community.outcomes.pending}; insufficient data ${data.community.outcomes.insufficient}.`}</p>:null}{data.community?.outcomes.patterns&&<p>{locale==='ja'?`継続した人は ${data.community.outcomes.patterns.retained.receivedReplyPercent}% が返信を受け、継続しなかった人は ${data.community.outcomes.patterns.notRetained.receivedReplyPercent}% でした。関連が見られますが、原因とは断定できません。`:`${data.community.outcomes.patterns.retained.receivedReplyPercent}% of continuing newcomers received a reply, versus ${data.community.outcomes.patterns.notRetained.receivedReplyPercent}% of those without later observed activity. This is an association, not proof of cause.`}</p>}{data.community?.suggestion&&<p>{locale==='ja'?data.community.suggestion.text:'New members appear to wait longer for replies. Consider testing a staff alert for unanswered posts.'}</p>}{data.community?.compare.available&&<p>{locale==='ja'?`活動したチャンネル: 新しい人 平均 ${data.community.compare.newcomers?.channelCount}、継続している人 平均 ${data.community.compare.continuing?.channelCount}。Voice参加: ${wholePercent(data.community.compare.newcomers?.voicePercent??null)} と ${wholePercent(data.community.compare.continuing?.voicePercent??null)}。イベント操作: ${wholePercent(data.community.compare.newcomers?.eventPercent??null)} と ${wholePercent(data.community.compare.continuing?.eventPercent??null)}。`:`Channels used: new ${data.community.compare.newcomers?.channelCount}, continuing ${data.community.compare.continuing?.channelCount}. Voice: ${wholePercent(data.community.compare.newcomers?.voicePercent??null)} vs ${wholePercent(data.community.compare.continuing?.voicePercent??null)}. Event actions: ${wholePercent(data.community.compare.newcomers?.eventPercent??null)} vs ${wholePercent(data.community.compare.continuing?.eventPercent??null)}.`}</p>}{data.community?.outcomes.patterns&&<p>{locale==='ja'?`継続した人の最初の3日間: Voice ${wholePercent(data.community.outcomes.patterns.retained.voicePercent)}、イベント操作 ${wholePercent(data.community.outcomes.patterns.retained.eventPercent)}。継続しなかった人: Voice ${wholePercent(data.community.outcomes.patterns.notRetained.voicePercent)}、イベント操作 ${wholePercent(data.community.outcomes.patterns.notRetained.eventPercent)}。`:`First three days: those observed later had Voice ${wholePercent(data.community.outcomes.patterns.retained.voicePercent)} and event actions ${wholePercent(data.community.outcomes.patterns.retained.eventPercent)}; those without later observed activity had Voice ${wholePercent(data.community.outcomes.patterns.notRetained.voicePercent)} and event actions ${wholePercent(data.community.outcomes.patterns.notRetained.eventPercent)}.`}</p>}</section>,
+    <section key="channels" className="surface"><h1>{locale==='ja'?'チャンネルごとの役割':'Channels in the newcomer journey'}</h1>{data.community?.channels.length?data.community.channels.map(row=><article key={row.channelId}><h2>{data.options.channels.find(option=>option.id===row.channelId)?.label??`#${row.channelId}`}</h2><p>{locale==='ja'?`新しいメンバー ${row.newcomers} 人 · 返信を受けた ${wholePercent(row.receivedReplyPercent)} · 他のチャンネルでも活動 ${wholePercent(row.laterElsewherePercent)} · 1週間後も活動 ${wholePercent(row.weekLaterPercent)}`:`${row.newcomers} new members · ${wholePercent(row.receivedReplyPercent)} received a reply · ${wholePercent(row.laterElsewherePercent)} active elsewhere · ${wholePercent(row.weekLaterPercent)} observed a week later`}</p></article>):<p>{locale==='ja'?'表示できるチャンネルはまだありません。少人数の詳細は表示しません。':'No channels can be shown yet. Small groups are hidden.'}</p>}</section>,
   ];
   return (
     <div className="product">
@@ -1316,7 +1331,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
               onClick={() => setPage(i)}
             >
               <span aria-hidden="true">
-                {["⌂", "↗", "◇", "◎", "⚙"][i]}
+                {["⌂", "↗", "◇", "◎", "⚙", "◉", "⇄", "#"][i]}
               </span>
               {label}
             </button>
@@ -1326,7 +1341,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
           <button onClick={() => { const next=locale === "en" ? "ja" : "en"; setLocale(next); document.cookie=`nexus_locale=${next}; Path=/; Max-Age=31536000; SameSite=Lax`; }}>
             {locale === "en" ? "日本語" : "English"}
           </button>
-          <small>v0.5 · {locale === "ja" ? "本番" : "Production"}</small>
+          <small>v0.5.1 · {locale === "ja" ? "本番" : "Production"}</small>
           {data.guilds?.[0]?.name!=="Development guild"&&<a href="/auth/logout">{locale==="ja"?"サインアウト":"Sign out"}</a>}
         </div>
       </aside>

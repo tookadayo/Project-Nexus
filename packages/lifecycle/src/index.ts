@@ -77,6 +77,9 @@ export class LifecycleService {
     if(previous){for(const roleId of event.roles.filter(r=>!previous.roles.includes(r)))await this.record(tx,s,episode.id,'role.added',at,{roleId});for(const roleId of previous.roles.filter(r=>!event.roles!.includes(r)))await this.record(tx,s,episode.id,'role.removed',at,{roleId});}
     await sql`INSERT INTO member_observable_state(organization_id,guild_id,episode_id,roles,roles_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episode.id}::uuid,${event.roles}::text[],${at}) ON CONFLICT(organization_id,guild_id,episode_id) DO UPDATE SET roles=EXCLUDED.roles,roles_observed_at=EXCLUDED.roles_observed_at WHERE member_observable_state.roles_observed_at IS NULL OR member_observable_state.roles_observed_at<=EXCLUDED.roles_observed_at`.execute(tx);
    }
+   if(!event.roles&&observedMember?.roles?.length){
+    await sql`INSERT INTO member_observable_state(organization_id,guild_id,episode_id,roles,roles_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episode.id}::uuid,${observedMember.roles}::text[],${at}) ON CONFLICT DO NOTHING`.execute(tx);
+   }
    if(settings.flags.activation_dsl_v2)await projectActivation(tx,s,episode.id,at);
    if(settings.flags.native_snapshot_v2&&event.kind!=='member.joined')await requestNativeRefresh(tx,s,episode.id,at);
    if(event.kind==='member.roles_updated'&&event.roles){
@@ -84,9 +87,10 @@ export class LifecycleService {
    }
    if(settings.flags.native_snapshot_v2&&event.kind==='member.joined')await scheduleNativeSnapshots(tx,s,episode.id,episode.joined_at);
    if(event.kind==='member.joined')return;
-   if(event.kind==='reaction.added')await this.record(tx,s,episode.id,event.kind,at,{channelId:event.channelId,messageId:event.messageId});
+   const channelAllowed=(channelId:string|null|undefined)=>!channelId||settings.analysisScope.mode==='all'||(settings.analysisScope.mode==='include')===settings.analysisScope.channelIds.includes(channelId);
+   if(event.kind==='reaction.added'&&channelAllowed(event.channelId))await this.record(tx,s,episode.id,event.kind,at,{channelId:event.channelId,messageId:event.messageId});
    if(event.kind==='scheduled_event.subscribed'||event.kind==='scheduled_event.unsubscribed')await this.record(tx,s,episode.id,event.kind,at,{eventId:event.eventId});
-   if(event.kind==='voice.started'||event.kind==='voice.ended'){
+   if((event.kind==='voice.started'||event.kind==='voice.ended')&&channelAllowed(event.channelId)){
     const previous=(await sql<{voice_channel_id:string|null,voice_started_at:Date|null}>`SELECT voice_channel_id,voice_started_at FROM member_observable_state WHERE ${tenant(s)} AND episode_id=${episode.id}::uuid FOR UPDATE`.execute(tx)).rows[0];
     if(!previous?.voice_started_at||at>=previous.voice_started_at){
      if(previous?.voice_started_at&&previous.voice_channel_id!==event.channelId){
@@ -96,9 +100,14 @@ export class LifecycleService {
      }
      if(previous?.voice_channel_id!==event.channelId)await sql`INSERT INTO member_observable_state(organization_id,guild_id,episode_id,voice_channel_id,voice_started_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episode.id}::uuid,${event.channelId??null},${event.channelId?at:null}) ON CONFLICT(organization_id,guild_id,episode_id) DO UPDATE SET voice_channel_id=EXCLUDED.voice_channel_id,voice_started_at=EXCLUDED.voice_started_at`.execute(tx);
      await this.record(tx,s,episode.id,event.kind,at,{channelId:event.channelId});
+     if(event.kind==='voice.started'&&event.channelId){
+      const peers=(await sql<{episode_id:string}>`SELECT episode_id FROM member_observable_state WHERE ${tenant(s)} AND episode_id<>${episode.id}::uuid AND voice_channel_id=${event.channelId} AND voice_started_at IS NOT NULL AND voice_started_at<=${at} LIMIT 100`.execute(tx)).rows;
+      if(peers.length){await this.record(tx,s,episode.id,'voice.connected',at,{channelId:event.channelId});for(const peer of peers)await this.record(tx,s,peer.episode_id,'voice.connected',at,{channelId:event.channelId});}
+     }
     }
    }
    if(event.kind==='message.sent'){
+    if(!channelAllowed(event.channelId))return;
     if((await sql`SELECT id FROM lifecycle_events WHERE ${tenant(s)} AND kind='message.sent' AND context='PRODUCTION' AND data->>'messageId'=${event.messageId??''}`.execute(tx)).rows.length)return;
     if(event.referenceId){
      const reciprocal=(await sql`SELECT reply_message_id FROM reply_receipts WHERE ${tenant(s)} AND reply_message_id=${event.referenceId} AND episode_id=${episode.id}::uuid AND expires_at>${at}`.execute(tx)).rows.length;
@@ -106,7 +115,7 @@ export class LifecycleService {
      const target=(await sql<{id:string,episode_id:string,occurred_at:Date,data:Record<string,unknown>,identity_id:string,joined_at:Date}>`SELECT e.id,e.episode_id,e.occurred_at,e.data,m.identity_id,m.joined_at FROM lifecycle_events e JOIN membership_episodes m
       ON m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.episode_id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND e.context='PRODUCTION' AND e.kind='message.sent' AND e.data->>'messageId'=${event.referenceId}`.execute(tx)).rows[0];
      if(!target&&Date.now()-at.getTime()<86400000)throw new AwaitingReference('Referenced metadata has not arrived');
-     if(target&&target.identity_id!==identityId&&episode.joined_at<target.joined_at&&at>=target.occurred_at){
+     if(target&&target.identity_id!==identityId&&at>=target.occurred_at){
       const latency=(at.getTime()-target.occurred_at.getTime())/1000;
       await this.record(tx,s,target.episode_id,'reply.received',at,{latencySeconds:latency,channelId:target.data.channelId});
       await sql`INSERT INTO reply_receipts VALUES(${s.organizationId}::uuid,${s.guildId},${event.messageId!},${target.episode_id}::uuid,${new Date(at.getTime()+86400000)}) ON CONFLICT DO NOTHING`.execute(tx);

@@ -3,7 +3,7 @@ import {spawn} from 'node:child_process';
 import {resolve} from 'node:path';
 import {scopeForGuild,apiToken} from '../packages/security/src/index.js';
 try{loadEnvFile();}catch{/* Optional .env; direct environment variables are also supported. */}
-const guildId=process.env.NEXUS_GUILD_ID??process.env.DISCORD_GUILD_ID;
+const guildId=process.env.NEXUS_GUILD_ID||process.env.DISCORD_GUILD_ID;
 if(guildId&&process.env.API_KEY){const s=scopeForGuild(guildId);process.env.NEXUS_GUILD_ID=s.guildId;process.env.NEXUS_ORGANIZATION_ID=s.organizationId;process.env.NEXUS_API_TOKEN=apiToken(process.env.API_KEY,s);}
 process.env.NEXUS_API_URL??='http://127.0.0.1:3001';process.env.NEXT_TELEMETRY_DISABLED??='1';
 if(process.env.NEXUS_WEB_AUTH_MODE==='development'&&(process.env.NEXUS_WEB_PASSWORD?.length??0)<16)throw new Error('Set NEXUS_WEB_PASSWORD to at least 16 characters');

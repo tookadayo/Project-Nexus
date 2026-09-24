@@ -9,7 +9,7 @@ const growth:Feature[]=[...starter,'advanced_cohorts','interventions','automatio
 export const planRegistry:Record<Plan,{price:number|null,included:number|null,guilds:number,features:readonly Feature[]}>={FREE:{price:0,included:250,guilds:1,features:free},STARTER:{price:15,included:1000,guilds:1,features:starter},GROWTH:{price:49,included:5000,guilds:1,features:growth},SCALE:{price:149,included:25000,guilds:5,features},ENTERPRISE:{price:null,included:null,guilds:100,features}};
 export class EntitlementService {
  constructor(private readonly db:Tx){}
- async plan(s:Scope):Promise<Plan>{return (await sql<{plan_key:Plan}>`SELECT plan_key FROM guild_subscriptions WHERE ${tenant(s)} AND status='active' AND (valid_until IS NULL OR valid_until>now())`.execute(this.db)).rows[0]?.plan_key??'FREE';}
+ async plan(s:Scope):Promise<Plan>{const override=process.env.NODE_ENV==='development'?process.env.NEXUS_DEV_PLAN:undefined;if(override&&Object.hasOwn(planRegistry,override))return override as Plan;return (await sql<{plan_key:Plan}>`SELECT plan_key FROM guild_subscriptions WHERE ${tenant(s)} AND status='active' AND (valid_until IS NULL OR valid_until>now())`.execute(this.db)).rows[0]?.plan_key??'FREE';}
  async can(s:Scope,feature:Feature){return planRegistry[await this.plan(s)].features.includes(feature);}
  async canDefineActivation(s:Scope,definition:unknown){
   if(await this.can(s,'custom_activation'))return true;

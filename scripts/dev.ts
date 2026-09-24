@@ -5,7 +5,7 @@ import {Redis} from 'ioredis';
 import {trace} from '@opentelemetry/api';
 import {NodeSDK} from '@opentelemetry/sdk-node';
 import {readConfig} from '../packages/config/src/index.js';
-import {connect,migrate,sql} from '../packages/db/src/index.js';
+import {connect,migrate,sql,ensureGuild} from '../packages/db/src/index.js';
 import {IdentityVault} from '../packages/identity/src/index.js';
 import {Components} from '../packages/security/src/index.js';
 import {PrivacyService} from '../packages/security/src/privacy.js';
@@ -14,7 +14,7 @@ import {OnboardingService} from '../packages/onboarding/src/index.js';
 import {LifecycleService} from '../packages/lifecycle/src/index.js';
 import {AnalyticsService} from '../packages/analytics/src/index.js';
 import {DiscordRest} from '../packages/discord/src/rest.js';
-import {createInteractionServer} from '../apps/interaction/src/server.js';
+import {createInteractionServer,handleGatewayInteraction} from '../apps/interaction/src/server.js';
 import {createApi} from '../apps/api/src/server.js';
 import {createGateway,STREAM} from '../apps/gateway/src/index.js';
 import {StreamConsumer,scrubStream} from '../apps/worker/src/streams.js';
@@ -25,6 +25,9 @@ import {OptimizationWorker} from '../apps/worker/src/optimization.js';
 import {CapabilityService} from '../packages/lifecycle/src/capabilities.js';
 import {WeeklySummaryWorker} from '../apps/worker/src/weekly.js';
 import {scopeSchema,type Scope} from '../packages/shared/src/index.js';
+import {createHash} from 'node:crypto';
+import {buildNexusCommand} from './commands.js';
+import {scopeForGuild} from '../packages/security/src/index.js';
 try{loadEnvFile();}catch{/* Config validation below reports missing fields. */}
 const cfg=readConfig();const db=connect(cfg.DATABASE_URL);await migrate(db);
 const redis=new Redis(cfg.REDIS_URL,{maxRetriesPerRequest:1,enableOfflineQueue:false,lazyConnect:true});redis.on('error',()=>process.stderr.write('Redis unavailable\n'));await redis.connect();
@@ -36,7 +39,7 @@ const optimization=new OptimizationWorker(db);
 const weekly=new WeeklySummaryWorker(db,discord);
 const actions=new ActionWorker(db,vault,discord,onboarding);const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,(s,user,actor,guild)=>privacy.delete(s,user,actor,guild));
 const http=createInteractionServer({db,vault,publicKey:cfg.DISCORD_PUBLIC_KEY,applicationId:cfg.DISCORD_APPLICATION_ID,components:tokens});
-const api=createApi(analytics,cfg.API_KEY,db,discord);const gateway=createGateway(redis,vault,()=>process.stderr.write('Gateway metadata publication failed\n'),db);
+const gateway=createGateway(redis,vault,()=>process.stderr.write('Gateway operation failed\n'),db,cfg.NEXUS_INTERACTION_TRANSPORT==='gateway'?interaction=>handleGatewayInteraction(interaction,{db,vault,components:tokens}):undefined);const api=createApi(analytics,cfg.API_KEY,db,discord,()=>({discordConnected:gateway.client.isReady()}));
 const capabilities=new CapabilityService(db,discord,()=>{const ready=gateway.client.isReady()?true:null;return {members:ready,messages:ready,reactions:ready,voice:ready,scheduledEvents:ready};});
 // Tenant registry discovery is scheduler-only; every domain operation receives the explicit scope.
 async function scopes(){return (await sql<{organization_id:string,guild_id:string}>`SELECT organization_id,guild_id FROM guilds`.execute(db)).rows.map(row=>({organizationId:row.organization_id,guildId:row.guild_id}));}
@@ -67,7 +70,14 @@ const loop=async()=>{while(!stopped){try{
  }catch{process.stderr.write('Worker recovery pending\n');}
  await new Promise(resolve=>setTimeout(resolve,250));
  }};
-await Promise.all([http.listen({host:'127.0.0.1',port:cfg.INTERACTION_PORT}),api.listen({host:'127.0.0.1',port:cfg.API_PORT}),gateway.client.login(cfg.DISCORD_TOKEN)]);
-process.stdout.write(`Interaction HTTP :${cfg.INTERACTION_PORT}; API :${cfg.API_PORT}\n`);const running=loop();
-async function stop(){if(stopped)return;stopped=true;await running;await gateway.stop();await worker.close();await queue.close();await http.close();await api.close();await redis.quit();await db.destroy();await sdk?.shutdown();}
+await Promise.all([...(cfg.NEXUS_INTERACTION_TRANSPORT==='webhook'?[http.listen({host:'127.0.0.1',port:cfg.INTERACTION_PORT})]:[]),api.listen({host:'127.0.0.1',port:cfg.API_PORT}),gateway.client.login(cfg.DISCORD_TOKEN)]);
+const command=buildNexusCommand().toJSON(),hash=createHash('sha256').update(JSON.stringify(command)).digest('hex');
+async function syncCommands(s:Scope){
+ const old=(await sql<{definition_hash:string}>`SELECT definition_hash FROM guild_command_sync WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId}`.execute(db)).rows[0];
+ if(old?.definition_hash!==hash){await discord.registerCommands(s.guildId,[command]);await sql`INSERT INTO guild_command_sync(organization_id,guild_id,definition_hash) VALUES(${s.organizationId}::uuid,${s.guildId},${hash}) ON CONFLICT(organization_id,guild_id) DO UPDATE SET definition_hash=EXCLUDED.definition_hash,registered_at=now()`.execute(db);}
+}
+for(const guild of gateway.client.guilds.cache.values()){const s=scopeForGuild(guild.id);await db.transaction().execute(tx=>ensureGuild(tx,s));await syncCommands(s).catch(()=>process.stderr.write('Command registration pending\n'));}
+gateway.client.on('guildCreate',guild=>{const s=scopeForGuild(guild.id);void db.transaction().execute(tx=>ensureGuild(tx,s)).then(()=>syncCommands(s)).catch(()=>process.stderr.write('Command registration pending\n'));});
+process.stdout.write(`Interaction ${cfg.NEXUS_INTERACTION_TRANSPORT}; API :${cfg.API_PORT}\n`);const running=loop();
+async function stop(){if(stopped)return;stopped=true;await running;await gateway.stop();await worker.close();await queue.close();if(cfg.NEXUS_INTERACTION_TRANSPORT==='webhook')await http.close();await api.close();await redis.quit();await db.destroy();await sdk?.shutdown();}
 process.on('SIGINT',()=>{void stop();});process.on('SIGTERM',()=>{void stop();});

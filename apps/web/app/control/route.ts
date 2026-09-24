@@ -12,6 +12,7 @@ export async function POST(req:NextRequest){
   if(action==='notification_channel'){url=base+'/settings/notification';payload=JSON.stringify({channelId:parsed.channelId,revision:parsed.revision});}
   if(action==='retention_days'){url=base+'/settings/retention';payload=JSON.stringify({days:parsed.days,revision:parsed.revision});}
   if(action==='weekly_summary'){url=base+'/settings/weekly-summary';payload=JSON.stringify({enabled:parsed.enabled,channelId:parsed.channelId,revision:parsed.revision});}
+  if(action==='analysis_scope'){url=base+'/settings/analysis-scope';payload=JSON.stringify({mode:parsed.mode,channelIds:parsed.channelIds,staffRoleIds:parsed.staffRoleIds,revision:parsed.revision});}
   if(action==='feedback_dismiss'){url=base+'/opportunities/dismiss';payload=JSON.stringify({suggestionType:parsed.suggestionType,reason:parsed.reason??null});}
   if(action==='action_template'){url=base+'/actions/draft';const {action:_action,...input}=parsed;void _action;payload=JSON.stringify(input);}
   if(action==='action_preflight'||action==='action_test'){url=base+(action==='action_test'?'/actions/test':'/actions/preflight');const {action:_action,...input}=parsed;void _action;payload=JSON.stringify(input);}

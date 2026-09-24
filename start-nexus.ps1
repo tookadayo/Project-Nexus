@@ -5,22 +5,27 @@ try {
     foreach ($name in @('.env','package.json','node_modules')) {
         if (-not (Test-Path -LiteralPath (Join-Path $script:NexusRoot $name))) { throw "$name is missing from $script:NexusRoot" }
     }
-    foreach ($command in @('node','corepack','ngrok')) {
+    foreach ($command in @('node','corepack')) {
         if (-not (Get-Command $command -ErrorAction SilentlyContinue)) { throw "$command is unavailable on PATH." }
     }
     $version = [version]((& node --version).Trim().TrimStart('v'))
     if ($version.Major -ne 24) { throw "Node.js 24.x is required; found $version." }
+    $transport = if (@(Get-Content -LiteralPath (Join-Path $script:NexusRoot '.env') | Where-Object { $_ -match '^NEXUS_INTERACTION_TRANSPORT=webhook\s*$' }).Count -gt 0) { 'webhook' } else { 'gateway' }
     $existing = Read-NexusManifest
     if ($null -ne $existing) {
-        $alive = @('infra','nexus','web','ngrok') | Where-Object { Test-NexusOwner (Get-NexusRoleEntry $existing $_) $_ }
-        if ($alive.Count -eq 4 -and @(55432,56379,3001,3002,3100 | Where-Object { (Get-NexusPortOwner $_) -eq 0 }).Count -eq 0) {
-            Write-Host 'NEXUS is already running.'
+        $alive = @('infra','nexus','web') | Where-Object { Test-NexusOwner (Get-NexusRoleEntry $existing $_) $_ }
+        $ports = if ($transport -eq 'webhook') { @(55432,56379,3001,3002,3100) } else { @(55432,56379,3001,3100) }
+        if ($alive.Count -eq 3 -and @($ports | Where-Object { (Get-NexusPortOwner $_) -eq 0 }).Count -eq 0) {
+            Write-Host 'NEXUS is already running. Dashboard: http://localhost:3100'
             exit 0
         }
         Stop-NexusManaged $existing
         Remove-Item -LiteralPath $script:RuntimeManifest -Force
     }
-    foreach ($port in @(55432,56379,3001,3002,3100)) {
+    Stop-NexusOrphans
+    Start-Sleep -Milliseconds 800
+    $requiredPorts = if ($transport -eq 'webhook') { @(55432,56379,3001,3002,3100) } else { @(55432,56379,3001,3100) }
+    foreach ($port in $requiredPorts) {
         if ((Get-NexusPortOwner $port) -ne 0) { throw "Port $port is occupied by an unrelated process. Nothing was started." }
     }
     $manifest = @{projectRoot=$script:NexusRoot;startedAt=(Get-Date).ToUniversalTime().ToString('o');processes=@{};infraPid=$null;nexusPid=$null;webPid=$null;ngrokPid=$null}
@@ -49,16 +54,15 @@ try {
     }
     New-Item -ItemType Directory -Path $script:RuntimeDirectory -Force | Out-Null
     Start-NexusRole 'infra' @(55432,56379)
-    Start-NexusRole 'nexus' @(3001,3002)
+    Start-NexusRole 'nexus' $(if ($transport -eq 'webhook') { @(3001,3002) } else { @(3001) })
     Start-NexusRole 'web' @(3100)
-    Start-NexusRole 'ngrok' @()
-    Start-Sleep -Milliseconds 500
-    if (-not (Test-NexusOwner (Get-NexusRoleEntry $manifest 'ngrok') 'ngrok')) { throw 'ngrok exited. Check .local\runtime\ngrok.err.log' }
-    Write-Host 'NEXUS is ready: Web 3100; API 3001; Interaction 3002; PostgreSQL 55432; Redis 56379.'
+    Write-Host 'NEXUS is ready. Dashboard: http://localhost:3100'
+    Write-Host "Database 55432; Redis 56379; API 3001; Discord interactions: $transport."
     exit 0
 } catch {
     [Console]::Error.WriteLine("NEXUS startup failed: $($_.Exception.Message)")
     if ($null -ne $manifest) { Stop-NexusManaged $manifest }
+    Stop-NexusOrphans
     if ($null -ne $manifest -and (Test-Path -LiteralPath $script:RuntimeManifest)) { Remove-Item -LiteralPath $script:RuntimeManifest -Force }
     exit 1
 }

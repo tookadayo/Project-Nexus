@@ -9,9 +9,13 @@ import {SettingsService,type Actor} from '../../../packages/settings/src/index.j
 import {EntitlementService} from '../../../packages/settings/src/entitlements.js';
 import type {DiscordPort} from '../../../packages/discord/src/rest.js';
 import {randomUUID} from 'node:crypto';
+import {CommunityService} from '../../../packages/presentation/src/community.js';
+import {PermissionFlagsBits} from 'discord-api-types/v10';
 
 export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:DiscordPort){
  const base='/v3/organizations/:organizationId/guilds/:guildId',presentation=new PresentationService(db);
+ const roleCache=new Map<string,{at:number;ids:string[]}>();
+ const automaticStaffRoles=async(guildId:string)=>{const cached=roleCache.get(guildId);if(cached&&Date.now()-cached.at<1800000)return cached.ids;if(!discord)return [];try{const roles=await discord.roles(guildId),flags=PermissionFlagsBits.Administrator|PermissionFlagsBits.ManageGuild|PermissionFlagsBits.ManageMessages|PermissionFlagsBits.ModerateMembers,ids=roles.filter(role=>(BigInt(role.permissions)&flags)!==0n).map(role=>role.id);roleCache.set(guildId,{at:Date.now(),ids});return ids;}catch{return cached?.ids??[];}};
  const auth=(params:unknown,header:unknown)=>{const scope=scopeSchema.parse(params);assert(validApiToken(key,scope,String(header??'').replace(/^Bearer /,'')),'FORBIDDEN',403);return scope;};
  const getScope=(req:{params:unknown;headers:{authorization?:unknown}},reply:{header:(name:string,value:string)=>unknown})=>{const scope=auth(req.params,req.headers.authorization);reply.header('Cache-Control','no-store');return scope;};
  const actionInput=z.object({templateKey:z.enum(['reply_rescue','welcome_helper','inactive_follow_up','channel_recommendation','event_recommendation']),channelId:z.string().optional(),eventId:z.string().optional(),recommendedChannelIds:z.array(z.string()).optional(),safetyMode:z.enum(['suggest','approval','auto']).optional()}).strict();
@@ -29,6 +33,8 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
   return {status:'ready' as const,fix:null};
  };
  app.get(base+'/home',async(req,reply)=>presentation.home(getScope(req,reply)));
+ app.get(base+'/community',async(req,reply)=>{const s=getScope(req,reply),range=z.coerce.number().pipe(z.union([z.literal(7),z.literal(30),z.literal(90)])).catch(30).parse((req.query as {range?:unknown}).range);return new CommunityService(db).overview(s,range,new Date(),await automaticStaffRoles(s.guildId));});
+ app.get(base+'/weekly-summary/status',async(req,reply)=>{const s=getScope(req,reply);return (await sql<{state:string;status_note:string|null;attempted_at:Date}>`SELECT state,status_note,attempted_at FROM weekly_summary_deliveries WHERE ${tenant(s)} ORDER BY week_start DESC LIMIT 1`.execute(db)).rows[0]??null;});
  app.get(base+'/journey',async(req,reply)=>{const s=getScope(req,reply),range=z.coerce.number().pipe(z.union([z.literal(7),z.literal(30),z.literal(90)])).catch(30).parse((req.query as {range?:unknown}).range);return presentation.journey(s,range);});
  app.get(base+'/opportunities',async(req,reply)=>presentation.opportunities(getScope(req,reply)));
  app.post(base+'/opportunities/dismiss',async(req,reply)=>{
@@ -61,6 +67,12 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
   if(input.enabled){assert(discord,'DISCORD_UNAVAILABLE',503);await discord.checkChannel(s.guildId,input.channelId!);}
   const actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
   return new SettingsService(db).update(s,actor,input.revision,{weeklySummaryEnabled:input.enabled,weeklySummaryChannelId:input.channelId});
+ });
+ app.post(base+'/settings/analysis-scope',async(req,reply)=>{
+  const s=getScope(req,reply),input=z.object({revision:z.number().int().nonnegative(),mode:z.enum(['all','include','exclude']),channelIds:z.array(z.string().regex(/^\d{17,20}$/)).max(100),staffRoleIds:z.array(z.string().regex(/^\d{17,20}$/)).max(30)}).strict().parse(req.body);
+  assert(input.mode!=='include'||input.channelIds.length>0,'CHANNEL_REQUIRED');
+  const actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
+  return new SettingsService(db).update(s,actor,input.revision,{analysisScope:{mode:input.mode,channelIds:[...new Set(input.channelIds)]},staffRoleIds:[...new Set(input.staffRoleIds)]});
  });
  app.post(base+'/actions/draft',async(req,reply)=>{
   const s=getScope(req,reply),input=actionInput.parse(req.body),actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};

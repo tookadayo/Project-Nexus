@@ -25,6 +25,7 @@ export const signalRegistry={
  'voice.started':def(z.object({channelId:id}).strict(),'gateway','GuildVoiceStates'),
  'voice.ended':def(z.object({channelId:id.nullable()}).strict(),'gateway','GuildVoiceStates'),
  'voice.duration':def(z.object({channelId:id,seconds:z.number().nonnegative()}).strict(),'projector','GuildVoiceStates',true),
+ 'voice.connected':def(z.object({channelId:id}).strict(),'projector','GuildVoiceStates'),
  'scheduled_event.subscribed':def(z.object({eventId:id}).strict(),'gateway','GuildScheduledEvents',true),
  'scheduled_event.unsubscribed':def(z.object({eventId:id}).strict(),'gateway','GuildScheduledEvents'),
  'role.added':def(z.object({roleId:id}).strict(),'gateway','GuildMembers'),

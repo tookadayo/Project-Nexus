@@ -20,6 +20,8 @@ it('starts measurement by default while leaving improvements and weekly messages
  expect(settings.onboardingEnabled).toBe(false);
  expect(settings.weeklySummaryEnabled).toBe(false);
  expect(settings.dmEnabled).toBe(false);
+ expect(settings.analysisScope).toEqual({mode:'all',channelIds:[]});
+ expect(settings.memberStages).toMatchObject({newDays:14,startingDays:30,recentDays:30,activeDays:2,repeatDays:2,retainedFromDay:7,retainedThroughDay:14});
  expect(planRegistry.FREE.features).toContain('interventions');
  expect(planRegistry.FREE.features).not.toContain('automation_auto');
 });

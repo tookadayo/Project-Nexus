@@ -72,23 +72,23 @@ export class PresentationService{
  }
  private async newcomerChannels(s:Scope,range:7|30|90,now:Date):Promise<{channels:NewcomerChannel[];hiddenChannelCount:number}>{
   const from=new Date(now.getTime()-range*DAY);
-  const episodes=(await sql<{id:string;joined_at:Date;revision_id:string|null;activated_at:Date|null;window_seconds:number|null}>`SELECT e.id,e.joined_at,a.revision_id,a.activated_at,(r.definition->>'windowSeconds')::integer AS window_seconds FROM membership_episodes e LEFT JOIN activation_members a ON a.organization_id=e.organization_id AND a.guild_id=e.guild_id AND a.episode_id=e.id LEFT JOIN guild_config_revisions r ON r.organization_id=a.organization_id AND r.guild_id=a.guild_id AND r.id=a.revision_id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND e.context='PRODUCTION' AND e.joined_at>=${from} AND e.joined_at<${now}`.execute(this.db)).rows;
+  const episodes=(await sql<{id:string;identity_id:string;joined_at:Date;revision_id:string|null;activated_at:Date|null;window_seconds:number|null}>`SELECT e.id,e.identity_id,e.joined_at,a.revision_id,a.activated_at,(r.definition->>'windowSeconds')::integer AS window_seconds FROM membership_episodes e LEFT JOIN activation_members a ON a.organization_id=e.organization_id AND a.guild_id=e.guild_id AND a.episode_id=e.id LEFT JOIN guild_config_revisions r ON r.organization_id=a.organization_id AND r.guild_id=a.guild_id AND r.id=a.revision_id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND e.context='PRODUCTION' AND e.joined_at>=${from} AND e.joined_at<${now}`.execute(this.db)).rows;
   if(!episodes.length)return {channels:[],hiddenChannelCount:0};
   const events=(await sql<{episode_id:string;kind:string;occurred_at:Date;data:Record<string,unknown>}>`SELECT episode_id,kind,occurred_at,data FROM lifecycle_events WHERE ${tenant(s)} AND context='PRODUCTION' AND occurred_at>=${from} AND occurred_at<=${now} AND kind IN ('message.sent','reply.received','activation.completed') ORDER BY occurred_at`.execute(this.db)).rows;
   const byEpisode=new Map<string,typeof events>();for(const event of events){const list=byEpisode.get(event.episode_id)??[];list.push(event);byEpisode.set(event.episode_id,list);}
-  const counts=new Map<string,NewcomerChannel>();
-  const add=(channelId:string,key:'firstMessages'|'firstReplies'|'firstSuccesses'|'goalCompleted'|'goalEligible')=>{let row=counts.get(channelId);if(!row){row={channelId,firstMessages:0,firstReplies:0,firstSuccesses:0,goalCompleted:null,goalEligible:null};counts.set(channelId,row);}if(key==='goalCompleted'||key==='goalEligible')row[key]=(row[key]??0)+1;else row[key]++;};
+  const counts=new Map<string,NewcomerChannel>(),people=new Map<string,Set<string>>();
+  const add=(channelId:string,identityId:string,key:'firstMessages'|'firstReplies'|'firstSuccesses'|'goalCompleted'|'goalEligible')=>{let row=counts.get(channelId);if(!row){row={channelId,firstMessages:0,firstReplies:0,firstSuccesses:0,goalCompleted:null,goalEligible:null};counts.set(channelId,row);}const members=people.get(channelId)??new Set<string>();members.add(identityId);people.set(channelId,members);if(key==='goalCompleted'||key==='goalEligible')row[key]=(row[key]??0)+1;else row[key]++;};
   for(const episode of episodes){const facts=byEpisode.get(episode.id)??[],messages=facts.filter(f=>f.kind==='message.sent'),first=messages[0],firstChannel=typeof first?.data.channelId==='string'?first.data.channelId:null;
-   if(firstChannel)add(firstChannel,'firstMessages');
+   if(firstChannel)add(firstChannel,episode.identity_id,'firstMessages');
    const reply=facts.find(f=>f.kind==='reply.received'),replyChannel=typeof reply?.data.channelId==='string'?reply.data.channelId:null;
-   if(replyChannel)add(replyChannel,'firstReplies');
+   if(replyChannel)add(replyChannel,episode.identity_id,'firstReplies');
    const success=facts.find(f=>f.kind==='activation.completed'&&f.data.definitionId===episode.revision_id),source=success&&facts.find(f=>f.occurred_at.getTime()===success.occurred_at.getTime()&&f.kind!=='activation.completed'&&typeof f.data.channelId==='string'),successChannel=typeof source?.data.channelId==='string'?source.data.channelId:null;
-   if(successChannel)add(successChannel,'firstSuccesses');
+   if(successChannel)add(successChannel,episode.identity_id,'firstSuccesses');
    if(firstChannel&&first&&episode.revision_id&&episode.window_seconds&&episode.joined_at.getTime()+episode.window_seconds*1000<=now.getTime()){
-    add(firstChannel,'goalEligible');if(episode.activated_at&&episode.activated_at>=first.occurred_at)add(firstChannel,'goalCompleted');
+    add(firstChannel,episode.identity_id,'goalEligible');if(episode.activated_at&&episode.activated_at>=first.occurred_at)add(firstChannel,episode.identity_id,'goalCompleted');
    }
   }
-  const visible=[...counts.values()].filter(row=>row.firstMessages+row.firstReplies+row.firstSuccesses>=3).sort((a,b)=>b.firstMessages-a.firstMessages);
+  const visible=[...counts.values()].filter(row=>(people.get(row.channelId)?.size??0)>=3).sort((a,b)=>b.firstMessages-a.firstMessages);
   return {channels:visible,hiddenChannelCount:counts.size-visible.length};
  }
  async journey(s:Scope,range:7|30|90=30,now=new Date()):Promise<JourneyPresentation>{

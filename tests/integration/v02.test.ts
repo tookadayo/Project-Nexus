@@ -1,4 +1,4 @@
-import {beforeAll,afterAll,it,expect} from 'vitest';
+import {beforeAll,afterAll,it,expect,vi} from 'vitest';
 import {randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {Redis} from 'ioredis';
@@ -27,6 +27,7 @@ import {DomainError} from '../../packages/shared/src/index.js';
 import {GatewayPublisher,STREAM} from '../../apps/gateway/src/index.js';
 import {StreamConsumer,scrubStream} from '../../apps/worker/src/streams.js';
 import {PresentationService} from '../../packages/presentation/src/index.js';
+import {CommunityService} from '../../packages/presentation/src/community.js';
 import {WeeklySummaryWorker} from '../../apps/worker/src/weekly.js';
 let infra:Awaited<ReturnType<typeof infrastructure>>,db:Database;const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32));
 const user='922222222222222222',channel='933333333333333333';let counter=0;
@@ -281,4 +282,38 @@ it('records optional suggestion feedback without member identifiers',async()=>{
  const rows=(await sql<{suggestion_type:string;reason:string}>`SELECT suggestion_type,reason FROM suggestion_feedback WHERE ${tenant(ctx.s)}`.execute(db)).rows;expect(rows).toEqual([{suggestion_type:'CONNECTION_DROP',reason:'already_handled'}]);
  expect((await sql`SELECT 1 FROM membership_episodes WHERE ${tenant(ctx.s)}`.execute(db)).rows).toHaveLength(0);
  await api.close();
+});
+it('hides a channel when repeated events come from fewer than three newcomers',async()=>{
+ const ctx=await setup(),joined=new Date(Date.now()-3*86400000),identities:string[]=[];
+ for(let i=0;i<3;i++){
+  const identity=await vault.resolve(db,ctx.s,String(980000000000000000n+BigInt(Math.min(i,1)))),episode=randomUUID(),episodeJoined=new Date(joined.getTime()+(i===2?86400000:0));
+  identities.push(identity);
+  await sql`INSERT INTO membership_episodes VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${episode}::uuid,${identity}::uuid,${episodeJoined},NULL,'PRODUCTION')`.execute(db);
+  await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',${episodeJoined},'PRODUCTION',${json({channelId:channel,messageId:String(981000000000000000n+BigInt(i))})})`.execute(db);
+  for(let j=0;j<4;j++)await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'reply.received',${new Date(episodeJoined.getTime()+j*1000)},'PRODUCTION',${json({channelId:channel,latencySeconds:60})})`.execute(db);
+ }
+ expect(new Set(identities).size).toBe(2);
+ const view=await new PresentationService(db).journey(ctx.s,7);expect(view.channels).toEqual([]);expect(view.hiddenChannelCount).toBe(1);
+ await sql`INSERT INTO telemetry_cursor VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${new Date(joined.getTime()-1000)},${new Date()})`.execute(db);
+ const community=await new CommunityService(db).overview(ctx.s,7);expect(community.channels).toEqual([]);expect(community.hiddenChannelCount).toBe(1);
+});
+it('marks an expired weekly send as unknown without resending it',async()=>{
+ const ctx=await setup(),cfg=await ctx.settings.get(ctx.s);await ctx.settings.update(ctx.s,actor,cfg.revision,{weeklySummaryEnabled:true,weeklySummaryChannelId:channel});
+ await sql`INSERT INTO weekly_summary_deliveries(organization_id,guild_id,week_start,channel_id,state,attempted_at,lease_until) VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},'2026-09-14'::date,${channel},'sending','2026-09-22'::timestamptz,'2026-09-22'::timestamptz)`.execute(db);
+ const worker=new WeeklySummaryWorker(db,ctx.discord);expect(await worker.tick(ctx.s,new Date('2026-09-24T12:00:00.000Z'))).toBe(false);
+ expect(ctx.discord.calls.filter(call=>call==='sendPanel')).toHaveLength(0);
+ expect((await sql<{state:string;status_note:string}>`SELECT state,status_note FROM weekly_summary_deliveries WHERE ${tenant(ctx.s)}`.execute(db)).rows).toMatchObject([{state:'unknown',status_note:'送信結果を確認できませんでした'}]);
+});
+it('allows a plan override only in explicit development mode',async()=>{
+ const ctx=await setup();
+ try{vi.stubEnv('NEXUS_DEV_PLAN','FREE');vi.stubEnv('NODE_ENV','production');expect(await new EntitlementService(db).plan(ctx.s)).toBe('GROWTH');vi.stubEnv('NODE_ENV','development');expect(await new EntitlementService(db).plan(ctx.s)).toBe('FREE');}
+ finally{vi.unstubAllEnvs();}
+});
+it('compares age-matched activity and separates mature newcomer outcomes',async()=>{
+ const ctx=await setup(),now=new Date('2026-09-24T12:00:00.000Z'),newJoin=new Date(now.getTime()-20*86400000),oldJoin=new Date(now.getTime()-45*86400000);
+ await sql`INSERT INTO telemetry_cursor VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${new Date(newJoin.getTime()-1000)},${now})`.execute(db);
+ for(let i=0;i<15;i++){const identity=await vault.resolve(db,ctx.s,String(990000000000000000n+BigInt(i))),episode=randomUUID(),joined=i<10?newJoin:oldJoin;await sql`INSERT INTO membership_episodes VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${episode}::uuid,${identity}::uuid,${joined},NULL,'PRODUCTION')`.execute(db);const activity=i<10?new Date(joined.getTime()+60000):new Date(now.getTime()-2*86400000);await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',${activity},'PRODUCTION',${json({messageId:String(991000000000000000n+BigInt(i)),channelId:channel})})`.execute(db);if(i<10){await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'reply.received',${new Date(activity.getTime()+600000)},'PRODUCTION',${json({channelId:channel,latencySeconds:600})})`.execute(db);if(i<5){for(const day of [3,8])await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'reaction.added',${new Date(joined.getTime()+day*86400000)},'PRODUCTION',${json({channelId:channel,messageId:String(992000000000000000n+BigInt(i*10+day))})})`.execute(db);}}else await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'reaction.added',${new Date(now.getTime()-86400000)},'PRODUCTION',${json({channelId:channel,messageId:String(993000000000000000n+BigInt(i))})})`.execute(db);}
+ const view=await new CommunityService(db).overview(ctx.s,30,now);expect(view.classification.continuing).toBe(5);expect(view.compare.available).toBe(true);expect(view.outcomes).toMatchObject({retained:5,notRetained:5,pending:0,insufficient:0});expect(view.stages.map(stage=>stage.count)).toEqual([10,10,10,5,5]);expect(JSON.stringify(view)).not.toContain('episode_id');
+ await sql`INSERT INTO telemetry_health VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${new Date(now.getTime()-2*86400000)},${new Date(now.getTime()-86400000)},'test gap')`.execute(db);
+ const incomplete=await new CommunityService(db).overview(ctx.s,30,now);expect(incomplete.compare.available).toBe(false);expect(incomplete.compare.continuing).toBeNull();
 });

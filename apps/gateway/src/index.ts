@@ -1,4 +1,4 @@
-import {Client,GatewayIntentBits,Events} from 'discord.js';
+import {Client,GatewayIntentBits,Events,type Interaction} from 'discord.js';
 import {Redis} from 'ioredis';
 import {randomUUID} from 'node:crypto';
 import {normalize,eventSchema,dedupeKey,type Envelope,type Dispatch} from '../../../packages/events/src/index.js';
@@ -38,7 +38,7 @@ export class GatewayPublisher {
   for(const row of rows)await this.publish(row.payload);return rows.length;
  }
 }
-export function createGateway(redis:Redis,vault:IdentityVault,onError:()=>void=()=>{},db?:Database){
+export function createGateway(redis:Redis,vault:IdentityVault,onError:()=>void=()=>{},db?:Database,onInteraction?:(interaction:Interaction)=>Promise<void>){
  const client=new Client({intents:gatewayIntents});const publisher=new GatewayPublisher(redis,db,vault);const sessions=new Map<number,string>();let healthSequence=0;
  const healthSession=randomUUID();const disconnected=new Set<number>();
  const registerGuild=async(guildId:string)=>{if(!db)return;const scope=scopeForGuild(guildId);await db.transaction().execute(tx=>ensureGuild(tx,scope));};
@@ -60,6 +60,7 @@ export function createGateway(redis:Redis,vault:IdentityVault,onError:()=>void=(
  client.on(Events.ShardReady,shardId=>{disconnected.delete(shardId);void health('telemetry.connected',shardId);});
  client.on(Events.ShardResume,shardId=>{disconnected.delete(shardId);void health('telemetry.connected',shardId);});
  client.on(Events.ShardDisconnect,(_close,shardId)=>{disconnected.add(shardId);void health('telemetry.disconnected',shardId);});
+ if(onInteraction)client.on(Events.InteractionCreate,interaction=>{void onInteraction(interaction).catch(onError);});
  const heartbeat=setInterval(()=>{void health('telemetry.heartbeat');},30000);heartbeat.unref();
  return {client,publisher,stop:async()=>{clearInterval(heartbeat);await client.destroy();}};
 }

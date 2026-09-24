@@ -57,6 +57,51 @@ function Get-NexusPortOwner([int]$Port) {
     if ($null -eq $connection) { return 0 }
     return [int]$connection.OwningProcess
 }
+function Test-NexusRootText([string]$Value) {
+    if ([string]::IsNullOrEmpty($Value)) { return $false }
+    return $Value.Replace('/','\').IndexOf($script:NexusRoot,[System.StringComparison]::OrdinalIgnoreCase) -ge 0
+}
+function Get-NexusDedicatedPostgresPid {
+    $file = Join-Path $script:NexusRoot '.local\pg\postmaster.pid'
+    if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return 0 }
+    $lines = @(Get-Content -LiteralPath $file -TotalCount 4 -ErrorAction SilentlyContinue)
+    if ($lines.Count -lt 4) { return 0 }
+    $data = [System.IO.Path]::GetFullPath($lines[1].Replace('/','\')).TrimEnd('\')
+    if (-not $data.Equals((Join-Path $script:NexusRoot '.local\pg'),[System.StringComparison]::OrdinalIgnoreCase) -or $lines[3] -ne '55432') { return 0 }
+    $pidNumber = 0
+    if (-not [int]::TryParse($lines[0],[ref]$pidNumber)) { return 0 }
+    if ((Get-NexusPortOwner 55432) -ne $pidNumber) { return 0 }
+    return $pidNumber
+}
+function Get-NexusOrphanProcesses {
+    $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+    $postgresPid = Get-NexusDedicatedPostgresPid
+    $ownedProcesses = New-Object System.Collections.Generic.List[object]
+    foreach ($process in $all) {
+        $command = [string]$process.CommandLine
+        $executable = [string]$process.ExecutablePath
+        $name = [string]$process.Name
+        $owned = $false
+        if ($name -ieq 'postgres.exe' -and $postgresPid -gt 0 -and ($process.ProcessId -eq $postgresPid -or $process.ParentProcessId -eq $postgresPid)) {
+            $owned = (Test-NexusRootText $command) -and $command -match 'embedded-postgres|postgres.exe'
+        }
+        if ($name -ieq 'redis-server.exe' -and ((Test-NexusRootText $executable) -or (Test-NexusRootText $command)) -and ($executable.Replace('/','\') -like "$(Join-Path $script:NexusRoot '.local\redis')\*" -or $command.Replace('/','\') -like "*$(Join-Path $script:NexusRoot '.local\redis')\*redis-server.exe*") -and $command -match '56379') { $owned = $true }
+        if ($name -match '^(node|node.exe)$' -and (Test-NexusRootText $command) -and $command -match 'scripts[\\/]dev\.ts|scripts[\\/]infra\.ts|scripts[\\/]web\.ts|apps[\\/]web[\\/]node_modules[\\/]next') { $owned = $true }
+        if ($name -match '^powershell(\.exe)?$' -and (Test-NexusRootText $command) -and $command -match 'runtime-child\.ps1' -and $command -match '\-Root') { $owned = $true }
+        if ($owned) { $ownedProcesses.Add($process) }
+    }
+    return @($ownedProcesses.ToArray())
+}
+function Stop-NexusOrphans {
+    $owned = @(Get-NexusOrphanProcesses)
+    # Stop children first. Every candidate has independent project evidence; PID alone is never sufficient.
+    foreach ($process in $owned | Sort-Object { if ($_.Name -ieq 'postgres.exe') { 0 } else { 1 } }) {
+        $fresh = Get-NexusProcess ([int]$process.ProcessId)
+        if ($null -ne $fresh -and (Get-NexusStamp $fresh) -eq (Get-NexusStamp $process)) {
+            Stop-Process -Id ([int]$process.ProcessId) -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
 function Stop-NexusManaged($Manifest) {
     if ($null -eq $Manifest) { return }
     if ([string]$Manifest.projectRoot -ne $script:NexusRoot) { throw 'Runtime manifest belongs to a different project root.' }

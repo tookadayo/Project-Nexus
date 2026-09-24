@@ -6,7 +6,7 @@ test('shows independent newcomer data before optional onboarding is configured',
  await expect(page.getByText('Discord onboarding is not currently in use. You can add a welcome flow later.')).toBeVisible();
  await expect(page.locator('article').filter({has:page.getByRole('heading',{name:'New Members',exact:true})}).locator('.value')).toHaveText('24');
  await expect(page.locator('article').filter({has:page.getByRole('heading',{name:'New Members',exact:true})}).locator('.comparison')).toContainText('Previous period: —');
- await expect(page.getByRole('button',{name:'Newcomers',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'New Members',exact:true})).toBeVisible();
  await page.screenshot({path:'test-results/v04-home-desktop.png',fullPage:true});
  await page.setViewportSize({width:390,height:844});
  await page.screenshot({path:'test-results/v04-home-mobile.png',fullPage:true});
@@ -17,7 +17,7 @@ test('rejects unauthenticated dashboard requests',async()=>{const response=await
 
 test('uses independent newcomer milestones and labels for Discord choices',async({page})=>{
  await page.goto('/');
- await page.getByRole('button',{name:'Newcomers',exact:true}).click();
+ await page.getByRole('button',{name:'New Members',exact:true}).click();
  await expect(page.getByText('Home / Newcomers')).toBeVisible();
  const response=page.waitForResponse(value=>value.url().includes('/data/journey?range=7'));
  await page.getByRole('button',{name:'7D'}).click();expect((await response).ok()).toBe(true);
@@ -72,7 +72,23 @@ test('chooses a goal, tests an improvement and sees a useful small-community com
 test('keeps forbidden technical terms out of normal English and Japanese pages',async({page})=>{
  await page.goto('/');
  const forbidden=/\b(?:Activation|Cohorts?|Interventions?|Experiments?|ITT|DSL|Randomization|Guardrails?|Revisions?|Membership Episodes?|Maturity|Eligibility|Posterior|Credible Interval|Deterministic threshold)\b|アクティベーション|コホート|ランダム化|ガードレール|割付|施策|実験|成熟/i;
- for(const name of ['Home','Newcomers','Improve','Results','Settings']){await page.getByRole('button',{name,exact:true}).click();await expect(page.locator('main')).not.toContainText(forbidden);}
+ for(const name of ['Home','New Members','Improve','Results','Settings','Community','Compare','Channels']){await page.getByRole('button',{name,exact:true}).click();await expect(page.locator('main')).not.toContainText(forbidden);}
  await page.locator('.sidebar-bottom').getByRole('button',{name:'日本語',exact:true}).click();
- for(const name of ['ホーム','新規メンバー','改善','結果','設定']){await page.getByRole('button',{name,exact:true}).click();await expect(page.locator('main')).not.toContainText(forbidden);}
+ for(const name of ['ホーム','新しいメンバー','改善','結果','設定','コミュニティ','比較','チャンネル']){await page.getByRole('button',{name,exact:true}).click();await expect(page.locator('main')).not.toContainText(forbidden);}
+});
+test('saves a multi-channel analysis scope and shows the community comparison pages',async({page})=>{
+ await page.goto('/');
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await page.getByRole('combobox',{name:'Channels to analyze'}).selectOption('include');
+ await page.locator('.scope-list').first().getByLabel('#helpers').check();
+ await page.locator('.scope-list').first().getByLabel('#welcome').check();
+ await page.getByRole('button',{name:'Save changes'}).click();
+ await expect(page.locator('main > .status')).toContainText('Analysis scope saved');
+ await page.reload();
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await expect(page.getByRole('combobox',{name:'Channels to analyze'})).toHaveValue('include');
+ await page.getByRole('button',{name:'Community',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Community activity'})).toBeVisible();
+ await page.getByRole('button',{name:'Compare',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Compare participation'})).toBeVisible();
 });
