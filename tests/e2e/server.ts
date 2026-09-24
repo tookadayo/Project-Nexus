@@ -74,6 +74,7 @@ await sql`INSERT INTO guild_subscriptions(organization_id,guild_id,plan_key) VAL
 );
 const discord = {
   checkChannel: async (_guildId:string,channelId:string) => {if(channelId!=='621111111111111111')throw new Error('CHANNEL_PERMISSION_MISSING');},
+  sendPanel: async () => '921111111111111111',
   options: async () => ({
     channels: [
       { id: "621111111111111111", label: "#helpers" },

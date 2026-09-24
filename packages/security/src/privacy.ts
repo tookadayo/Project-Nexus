@@ -14,11 +14,11 @@ export class PrivacyService {
    await this.settings.mutate(s,actor,current.revision,async(_before,tx)=>{
     await sql`SELECT pg_advisory_xact_lock(hashtextextended(${'privacy:'+s.organizationId+':'+s.guildId},0))`.execute(tx);
     // Only an audit tombstone and disabled settings remain. Published flows can be deleted, never mutated.
-    for(const table of ['retention_tracking','retention_cohorts','gateway_ingest','usage_counters','guild_subscriptions','guild_capabilities','guild_config_heads','guild_config_revisions','data_coverage_snapshots','action_outbox','interaction_jobs','component_tokens','settings_panels','event_inbox','telemetry_health','telemetry_cursor','daily_guild_metrics','member_identity_map','flow_versions','audit_logs','deletion_requests'])
+    for(const table of ['suggestion_feedback','weekly_summary_deliveries','retention_tracking','retention_cohorts','gateway_ingest','usage_counters','guild_subscriptions','guild_capabilities','guild_config_heads','guild_config_revisions','data_coverage_snapshots','action_outbox','interaction_jobs','component_tokens','settings_panels','event_inbox','telemetry_health','telemetry_cursor','daily_guild_metrics','member_identity_map','flow_versions','audit_logs','deletion_requests'])
      await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)}`.execute(tx);
     await sql`INSERT INTO deletion_requests(organization_id,guild_id,id,completed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,now())`.execute(tx);
     await audit(tx,s,{...actor,key:'deleted-admin'},'guild.deleted',null,{completed:true});
-    return settingsSchema.parse({});
+    return settingsSchema.parse({enabled:false});
    },true);await this.scrubQueue(s,null);return;
   }
   await this.db.transaction().execute(async tx=>{
@@ -71,6 +71,7 @@ export class PrivacyService {
    await sql`DELETE FROM guild_capabilities WHERE ${tenant(s)} AND checked_at<${cutoff}`.execute(tx);
    await sql`DELETE FROM data_coverage_snapshots WHERE ${tenant(s)} AND observed_at<${cutoff}`.execute(tx);
    await sql`DELETE FROM daily_guild_metrics WHERE ${tenant(s)} AND day<(now()-make_interval(months=>${cfg.aggregateRetentionMonths}))::date`.execute(tx);
+   await sql`DELETE FROM suggestion_feedback WHERE ${tenant(s)} AND dismissed_at<now()-make_interval(months=>${cfg.aggregateRetentionMonths})`.execute(tx);
    await sql`DELETE FROM retention_cohorts WHERE ${tenant(s)} AND cohort_day<(now()-make_interval(months=>${cfg.aggregateRetentionMonths}))::date`.execute(tx);
   });
  }

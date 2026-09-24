@@ -27,6 +27,7 @@ import {DomainError} from '../../packages/shared/src/index.js';
 import {GatewayPublisher,STREAM} from '../../apps/gateway/src/index.js';
 import {StreamConsumer,scrubStream} from '../../apps/worker/src/streams.js';
 import {PresentationService} from '../../packages/presentation/src/index.js';
+import {WeeklySummaryWorker} from '../../apps/worker/src/weekly.js';
 let infra:Awaited<ReturnType<typeof infrastructure>>,db:Database;const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32));
 const user='922222222222222222',channel='933333333333333333';let counter=0;
 const actor:Actor={key:'admin',permissions:'32',roles:[],source:'DISCORD_PANEL',requestId:'v02-test'};
@@ -216,6 +217,10 @@ it('derives Native, fallback and hybrid onboarding readiness from settings and c
 it('serves 7D, 30D and 90D Journey ranges and creates a test from a published Action',async()=>{
  const ctx=await setup(),actionId=await publish(ctx.s,'intervention',intervention('approval')),key='v03-test-api-key',api=createApi(new AnalyticsService(db,ctx.settings),key,db),base=`/v3/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}`,headers={authorization:`Bearer ${apiToken(key,ctx.s)}`};
  for(const range of [7,30,90]){const response=await api.inject({url:`${base}/journey?range=${range}`,headers});expect(response.statusCode).toBe(200);expect(response.json().range).toBe(range);}
+ const tooSmall=await api.inject({method:'POST',url:base+'/results/draft',headers,payload:{actionId,primaryMetric:'activation'}});expect(tooSmall.statusCode).toBe(400);
+ const goalId=await publish(ctx.s,'activation',{name:'First message',windowSeconds:604800,rule:{op:'event',event:'message.sent',withinSeconds:604800}}),joined=new Date(Date.now()-10*86400000),now=new Date();
+ await sql`INSERT INTO telemetry_cursor VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${new Date(now.getTime()-32*86400000)},${now})`.execute(db);
+ for(let i=0;i<40;i++){const id=await vault.resolve(db,ctx.s,String(940000000000000000n+BigInt(i))),episode=randomUUID();await sql`INSERT INTO membership_episodes VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${episode}::uuid,${id}::uuid,${joined},NULL,'PRODUCTION')`.execute(db);await sql`INSERT INTO activation_members VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${episode}::uuid,${goalId}::uuid,${new Date(joined.getTime()+60000)})`.execute(db);await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'activation.completed',${new Date(joined.getTime()+60000)},'PRODUCTION',${json({definitionId:goalId})}),(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',${new Date(joined.getTime()+60000)},'PRODUCTION',${json({messageId:String(950000000000000000n+BigInt(i)),channelId:channel})})`.execute(db);}
  const draft=await api.inject({method:'POST',url:base+'/results/draft',headers,payload:{actionId,primaryMetric:'activation'}});expect(draft.statusCode).toBe(200);const preview=draft.json();expect(preview.after.definition).toMatchObject({randomization:'time_block',variants:[{key:'control',interventionRevisionId:null},{key:'treatment',interventionRevisionId:actionId}]});
  const publishResponse=await api.inject({method:'POST',url:`/v2/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}/configuration`,headers,payload:{action:'publish',id:preview.after.id,expectedHead:null,confirmationHash:preview.confirmationHash}});expect(publishResponse.statusCode).toBe(200);
  const results=await api.inject({url:base+'/results',headers});expect(results.statusCode).toBe(200);expect(results.json().items[0]).toMatchObject({randomization:'time_block',analysis:'intention_to_treat',state:'running'});await api.close();
@@ -248,4 +253,32 @@ it('keeps measurement warnings separate from ranked community opportunities',asy
  const ctx=await setup(),home=await new PresentationService(db).home(ctx.s);
  expect(home.communityOpportunity).toBeNull();expect(home.measurementWarning).toMatchObject({stage:'data',reason:'measurement_coverage'});
  const opportunities=await new PresentationService(db).opportunities(ctx.s);expect(opportunities.items).toEqual([]);expect(opportunities.measurementWarnings[0]).toMatchObject({stage:'data'});
+});
+it('aggregates newcomer channel activity without returning member records or message text',async()=>{
+ const ctx=await setup(),goalId=await publish(ctx.s,'activation',{name:'First message',windowSeconds:86400,rule:{op:'event',event:'message.sent',withinSeconds:86400}}),joined=new Date(Date.now()-3*86400000);
+ for(let i=0;i<3;i++){const identity=await vault.resolve(db,ctx.s,String(960000000000000000n+BigInt(i))),episode=randomUUID(),first=new Date(joined.getTime()+60000);await sql`INSERT INTO membership_episodes VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${episode}::uuid,${identity}::uuid,${joined},NULL,'PRODUCTION')`.execute(db);await sql`INSERT INTO activation_members VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${episode}::uuid,${goalId}::uuid,${first})`.execute(db);for(const [kind,data] of [['message.sent',{messageId:String(970000000000000000n+BigInt(i)),channelId:channel}],['reply.received',{latencySeconds:60,channelId:channel}],['activation.completed',{definitionId:goalId}]] as const)await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,${kind},${first},'PRODUCTION',${json(data)})`.execute(db);}
+ const view=await new PresentationService(db).journey(ctx.s,7);expect(view.channels).toMatchObject([{channelId:channel,firstMessages:3,firstReplies:3,firstSuccesses:3,goalEligible:3,goalCompleted:3}]);expect(JSON.stringify(view.channels)).not.toContain('episodeId');
+});
+it('validates each improvement and sends a fully isolated setup test',async()=>{
+ const ctx=await setup(),key='v05-test-notification',api=createApi(new AnalyticsService(db,ctx.settings),key,db,ctx.discord),base=`/v3/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}`,headers={authorization:`Bearer ${apiToken(key,ctx.s)}`},input={templateKey:'reply_rescue',channelId:channel};
+ ctx.discord.failure=new DomainError('CHANNEL_PERMISSION_MISSING');const denied=await api.inject({method:'POST',url:base+'/actions/preflight',headers,payload:input});expect(denied.json().status).toBe('permission_needed');ctx.discord.failure=null;
+ const ready=await api.inject({method:'POST',url:base+'/actions/preflight',headers,payload:input});expect(ready.json().status).toBe('ready');
+ const sent=await api.inject({method:'POST',url:base+'/actions/test',headers,payload:input});expect(sent.json()).toMatchObject({status:'sent',context:'TEST'});expect(ctx.discord.calls.filter(call=>call==='sendPanel')).toHaveLength(1);
+ expect(JSON.stringify([...ctx.discord.panels.values()][0])).toContain('[TEST]');
+ for(const table of ['intervention_runs','experiment_assignments','lifecycle_events','membership_episodes'])expect((await sql`SELECT 1 FROM ${sql.table(table)} WHERE ${tenant(ctx.s)}`.execute(db)).rows,table).toHaveLength(0);
+ await api.close();
+});
+it('sends one concise optional weekly summary and never duplicates its delivery',async()=>{
+ const ctx=await setup(),cfg=await ctx.settings.get(ctx.s);await ctx.settings.update(ctx.s,actor,cfg.revision,{weeklySummaryEnabled:true,weeklySummaryChannelId:channel});
+ const worker=new WeeklySummaryWorker(db,ctx.discord);expect(await worker.tick(ctx.s,new Date('2026-09-24T12:00:00.000Z'))).toBe(true);expect(await worker.tick(ctx.s,new Date('2026-09-24T12:00:00.000Z'))).toBe(false);
+ expect(ctx.discord.calls.filter(call=>call==='sendPanel')).toHaveLength(1);
+ const content=JSON.stringify([...ctx.discord.panels.values()][0]);expect(content).toContain('Weekly growth summary');expect(content).toContain('View improvement');
+ expect((await sql`SELECT state FROM weekly_summary_deliveries WHERE ${tenant(ctx.s)}`.execute(db)).rows).toMatchObject([{state:'sent'}]);
+});
+it('records optional suggestion feedback without member identifiers',async()=>{
+ const ctx=await setup(),key='v05-feedback',api=createApi(new AnalyticsService(db,ctx.settings),key,db,ctx.discord),base=`/v3/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}`,headers={authorization:`Bearer ${apiToken(key,ctx.s)}`};
+ const result=await api.inject({method:'POST',url:base+'/opportunities/dismiss',headers,payload:{suggestionType:'CONNECTION_DROP',reason:'already_handled'}});expect(result.statusCode).toBe(200);
+ const rows=(await sql<{suggestion_type:string;reason:string}>`SELECT suggestion_type,reason FROM suggestion_feedback WHERE ${tenant(ctx.s)}`.execute(db)).rows;expect(rows).toEqual([{suggestion_type:'CONNECTION_DROP',reason:'already_handled'}]);
+ expect((await sql`SELECT 1 FROM membership_episodes WHERE ${tenant(ctx.s)}`.execute(db)).rows).toHaveLength(0);
+ await api.close();
 });

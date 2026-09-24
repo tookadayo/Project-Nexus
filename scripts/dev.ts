@@ -23,6 +23,7 @@ import {InteractionWorker} from '../apps/worker/src/interactions.js';
 import {NativeMemberSnapshotWorker} from '../packages/lifecycle/src/native.js';
 import {OptimizationWorker} from '../apps/worker/src/optimization.js';
 import {CapabilityService} from '../packages/lifecycle/src/capabilities.js';
+import {WeeklySummaryWorker} from '../apps/worker/src/weekly.js';
 import {scopeSchema,type Scope} from '../packages/shared/src/index.js';
 try{loadEnvFile();}catch{/* Config validation below reports missing fields. */}
 const cfg=readConfig();const db=connect(cfg.DATABASE_URL);await migrate(db);
@@ -32,6 +33,7 @@ const settings=new SettingsService(db);const onboarding=new OnboardingService(db
 const analytics=new AnalyticsService(db,settings);const lifecycle=new LifecycleService(db,vault,settings,discord);
 const nativeSnapshots=new NativeMemberSnapshotWorker(db,vault,discord);
 const optimization=new OptimizationWorker(db);
+const weekly=new WeeklySummaryWorker(db,discord);
 const actions=new ActionWorker(db,vault,discord,onboarding);const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,(s,user,actor,guild)=>privacy.delete(s,user,actor,guild));
 const http=createInteractionServer({db,vault,publicKey:cfg.DISCORD_PUBLIC_KEY,applicationId:cfg.DISCORD_APPLICATION_ID,components:tokens});
 const api=createApi(analytics,cfg.API_KEY,db,discord);const gateway=createGateway(redis,vault,()=>process.stderr.write('Gateway metadata publication failed\n'),db);
@@ -51,13 +53,14 @@ const worker=new Worker<Scope>('nexus-work',async job=>{
   await optimization.tick(s);
  }finally{span.end();}});
 },{connection,concurrency:4});worker.on('error',()=>process.stderr.write('Background worker unavailable\n'));
-let stopped=false;let lastMaintenance=0;let lastAggregate=0;let lastCapabilities=0;
+let stopped=false;let lastMaintenance=0;let lastAggregate=0;let lastCapabilities=0;let lastWeekly=0;
 const loop=async()=>{while(!stopped){try{
  await consumer.tick();
  await gateway.publisher.recover();
  if(Date.now()-lastMaintenance>10000){
-  if(Date.now()-lastCapabilities>1800000){for(const s of await scopes()){const configuration=await settings.get(s);if(configuration.enabled&&configuration.flags.native_capability_v2)await capabilities.refresh(s,configuration.onboardingMode).catch(()=>process.stderr.write('Capability refresh unavailable\n'));}lastCapabilities=Date.now();}
+  if(Date.now()-lastCapabilities>1800000){for(const s of await scopes()){const configuration=await settings.get(s);if(configuration.enabled)await capabilities.refresh(s,configuration.onboardingMode).catch(()=>process.stderr.write('Capability refresh unavailable\n'));}lastCapabilities=Date.now();}
   if(Date.now()-lastAggregate>3600000){for(const s of await scopes())await analytics.materialize(s);lastAggregate=Date.now();}
+  if(Date.now()-lastWeekly>3600000){for(const s of await scopes())await weekly.tick(s);lastWeekly=Date.now();}
   for(const s of await scopes()){await queue.add('guild',s,{jobId:s.guildId,removeOnComplete:true,removeOnFail:true,attempts:3,backoff:{type:'exponential',delay:1000}});await privacy.purge(s);}
   await redis.xtrim(STREAM,'MINID',`${Date.now()-86400000}-0`);lastMaintenance=Date.now();
  }

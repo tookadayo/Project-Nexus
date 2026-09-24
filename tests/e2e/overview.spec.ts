@@ -23,7 +23,7 @@ test('uses independent newcomer milestones and labels for Discord choices',async
  await page.getByRole('button',{name:'7D'}).click();expect((await response).ok()).toBe(true);
  await expect(page.locator('body')).not.toContainText(/step conversion/i);
  await page.getByRole('button',{name:'Improve',exact:true}).click();
- await page.getByRole('button',{name:'Reply Rescue',exact:true}).click();
+ await page.getByRole('button',{name:'Notify staff when someone has no reply',exact:true}).click();
  const channel=page.getByLabel('Destination channel');await channel.selectOption({label:'#helpers'});
  await expect(channel.locator('option:checked')).toHaveText('#helpers');
  await expect(page.locator('body')).not.toContainText('621111111111111111');
@@ -33,36 +33,46 @@ test('persists Japanese web language across reload and shows the improvement flo
  await page.goto('/');await page.getByRole('button',{name:'日本語',exact:true}).click();
  await page.getByRole('button',{name:'改善',exact:true}).click();
  await expect(page.getByRole('heading',{name:'改善メニュー'})).toBeVisible();
- await page.getByRole('button',{name:'返信レスキュー',exact:true}).click();
- await expect(page.getByText(/新規メンバーが1時間返信を待ったら/)).toBeVisible();
+ await page.getByRole('button',{name:'返信がない人をスタッフに知らせる',exact:true}).click();
+ await expect(page.getByLabel('改善策の流れ')).toContainText('1時間');
  await page.screenshot({path:'test-results/v04-improve-japanese.png',fullPage:true});
  await page.reload();await expect(page.getByRole('button',{name:'改善',exact:true})).toBeVisible();
 });
 
 test('explains an unusable notification channel with a direct fix',async({page})=>{
  await page.goto('/');await page.getByRole('button',{name:'Improve',exact:true}).click();
- await page.getByRole('button',{name:'Reply Rescue',exact:true}).click();
+ await page.getByRole('button',{name:'Notify staff when someone has no reply',exact:true}).click();
  await page.getByLabel('Destination channel').selectOption({label:'#welcome'});
- await page.getByRole('button',{name:'Enable',exact:true}).click();
- await expect(page.getByRole('status')).toContainText('NEXUS cannot send messages in #welcome. Choose another channel or check View and Send permissions.');
+ await page.getByRole('button',{name:'Check setup',exact:true}).click();
+ await expect(page.locator('.builder-v3 [role="status"]')).toContainText('Permission needed. Give NEXUS View Channel and Send Messages in the selected channels.');
 });
 
-test('chooses a goal, enables Reply Rescue and checks the result without jargon',async({page})=>{
+test('chooses a goal, tests an improvement and sees a useful small-community comparison',async({page})=>{
  await page.goto('/');
  await page.getByRole('radio',{name:'Receive a reply'}).check();
- await page.getByRole('button',{name:'Start measuring'}).click();
+ await page.getByRole('button',{name:'Save success goal'}).click();
  await page.getByRole('button',{name:'Enable'}).first().click();
  await page.getByRole('button',{name:'Improve',exact:true}).click();
- await page.getByRole('button',{name:'Reply Rescue',exact:true}).click();
- await expect(page.getByText('If a newcomer waits 1 hour without a reply, notify your team. Confirm before running.')).toBeVisible();
+ await page.getByRole('button',{name:'Notify staff when someone has no reply',exact:true}).click();
+ await expect(page.getByLabel('Improvement preview')).toContainText('1 hour');
+ await page.getByRole('button',{name:'Check setup',exact:true}).click();
+ await expect(page.locator('.builder-v3 [role="status"]')).toContainText('Ready');
+ await page.getByRole('button',{name:'Send test notification',exact:true}).click();
+ await expect(page.locator('main > .status')).toContainText('Test notification sent');
  await page.getByRole('button',{name:'Enable',exact:true}).click();
- await expect(page.getByRole('heading',{name:/Reply Rescue · v1/})).toBeVisible();
+ await expect(page.getByRole('heading',{name:/Notify staff when someone has no reply/})).toBeVisible();
  await page.getByRole('button',{name:'Check the result',exact:true}).click();
- await expect(page.getByText('Home / Results / Reply Rescue')).toBeVisible();
- await page.getByRole('button',{name:'Check the result',exact:true}).last().click();
- await expect(page.getByRole('heading',{name:'Reply Rescue Test'})).toBeVisible();
- await expect(page.getByRole('application').getByText('Usual experience')).toBeVisible();
- await expect(page.getByRole('application').getByText('Improvement enabled')).toBeVisible();
- await expect(page.locator('body')).not.toContainText(/\bDSL\b|\bCohort\b|\bITT\b/);
- await page.screenshot({path:'test-results/v04-results-desktop.png',fullPage:true});
+ await expect(page.getByText('Before and after this improvement')).toBeVisible();
+ await expect(page.getByText('Other factors may have affected this difference.')).toBeVisible();
+ await expect(page.getByText('A more rigorous check can become available as activity grows.')).toBeVisible();
+ await expect(page.locator('body')).not.toContainText(/\bActivation\b|\bCohort\b|\bIntervention\b|\bExperiment\b|\bITT\b|\bDSL\b|\bRandomization\b|\bGuardrail\b|\bRevision\b|\bMaturity\b|\bEligibility\b/i);
+ await page.screenshot({path:'test-results/v05-results-desktop.png',fullPage:true});
+});
+
+test('keeps forbidden technical terms out of normal English and Japanese pages',async({page})=>{
+ await page.goto('/');
+ const forbidden=/\b(?:Activation|Cohorts?|Interventions?|Experiments?|ITT|DSL|Randomization|Guardrails?|Revisions?|Membership Episodes?|Maturity|Eligibility|Posterior|Credible Interval|Deterministic threshold)\b|アクティベーション|コホート|ランダム化|ガードレール|割付|施策|実験|成熟/i;
+ for(const name of ['Home','Newcomers','Improve','Results','Settings']){await page.getByRole('button',{name,exact:true}).click();await expect(page.locator('main')).not.toContainText(forbidden);}
+ await page.locator('.sidebar-bottom').getByRole('button',{name:'日本語',exact:true}).click();
+ for(const name of ['ホーム','新規メンバー','改善','結果','設定']){await page.getByRole('button',{name,exact:true}).click();await expect(page.locator('main')).not.toContainText(forbidden);}
 });

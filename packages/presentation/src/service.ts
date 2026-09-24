@@ -10,7 +10,7 @@ import {interventionSchema,type InterventionDefinition} from '../../lifecycle/sr
 import {experimentSchema,ExperimentService,type ExperimentDefinition} from '../../lifecycle/src/experiments.js';
 import {actionTemplates} from './templates.js';
 import {aggregateHealth,rankOpportunities,retentionMaturity,toAction,toExperiment,toJourney,toKpi,toOpportunity,toTrendPoint} from './adapters.js';
-import type {ActionsPresentation,HomePresentation,JourneyPresentation,OpportunitiesPresentation,ResponseDistribution,ResultsPresentation,RetentionCohort,SetupState,TrendPoint} from './types.js';
+import type {ActionsPresentation,HomePresentation,JourneyPresentation,NewcomerChannel,OpportunitiesPresentation,ResponseDistribution,ResultsPresentation,RetentionCohort,SetupState,TrendPoint} from './types.js';
 
 const DAY=86400000;
 const ACTIVE_KINDS=new Set(['message.sent','reaction.added','voice.duration','scheduled_event.subscribed','fallback.answer','nexus_onboarding.answered','interaction.used']);
@@ -24,10 +24,10 @@ export class PresentationService{
  private async setup(s:Scope,now:Date):Promise<SetupState>{
   const [cfg,activation,capabilityResult,cursorResult,gapResult,memberResult]=await Promise.all([this.settings.get(s),domainRevisions(this.db).current(s,'activation'),sql<{profile:{coverage:string;sendMessages:boolean;manageRoles:boolean;nativeOnboardingEnabled:boolean;recommendedMode:'native'|'fallback'}}>`SELECT profile FROM guild_capabilities WHERE ${tenant(s)} ORDER BY checked_at DESC LIMIT 1`.execute(this.db),sql<{last_seen:Date}>`SELECT last_seen FROM telemetry_cursor WHERE ${tenant(s)}`.execute(this.db),sql`SELECT id FROM telemetry_health WHERE ${tenant(s)} AND ended_at IS NULL LIMIT 1`.execute(this.db),sql<{count:number}>`SELECT count(*)::integer AS count FROM membership_episodes WHERE ${tenant(s)} AND context='PRODUCTION'`.execute(this.db)]),capability=capabilityResult.rows[0]?.profile,cursor=cursorResult.rows[0],ingestion=Boolean(cursor&&cursor.last_seen.getTime()>now.getTime()-10*60*1000&&!gapResult.rows.length),connected=Boolean(capability&&ingestion);let preset:SetupState['activationPreset']='not_configured';
   if(activation){const definition=activationSchema.parse(activation.definition),text=JSON.stringify(definition.rule);preset=text.includes('reply.received')?'reply':text.includes('scheduled_event.subscribed')?'event':text.includes('message.sent')?'message':'custom';}
-  const fallbackReady=Boolean(cfg.startChannelId&&cfg.flowVersionId),nativeReady=Boolean(capability?.nativeOnboardingEnabled),onboardingReady=cfg.onboardingMode==='native'?nativeReady:cfg.onboardingMode==='fallback'?fallbackReady:cfg.onboardingMode==='hybrid'?Boolean(nativeReady&&cfg.hybrid.enabled&&cfg.hybrid.flowVersionId&&cfg.startChannelId):capability?.recommendedMode==='native'?nativeReady:fallbackReady,measuring=connected&&Boolean(activation)&&memberResult.rows[0]!.count>0;
+  const fallbackReady=Boolean(cfg.startChannelId&&cfg.flowVersionId),nativeReady=Boolean(capability?.nativeOnboardingEnabled),onboardingReady=cfg.onboardingMode==='native'?nativeReady:cfg.onboardingMode==='fallback'?fallbackReady:cfg.onboardingMode==='hybrid'?Boolean(nativeReady&&cfg.hybrid.enabled&&cfg.hybrid.flowVersionId&&cfg.startChannelId):capability?.recommendedMode==='native'?nativeReady:fallbackReady,measuring=Boolean(cursor&&memberResult.rows[0]!.count>0);
   const connectReason:SetupState['steps'][number]['reason']=connected?'ready':!capability?'capability_unknown':'ingestion_unavailable',onboardingReason:SetupState['steps'][number]['reason']=onboardingReady?'ready':cfg.onboardingMode==='native'?'native_not_ready':cfg.onboardingMode==='hybrid'?'hybrid_not_ready':'fallback_not_ready';
   const recommendedMode=capability?.recommendedMode==='native'&&nativeReady?'native':fallbackReady?'fallback':null;
-  return {required:!connected||!activation,recommendedMode,nativeOnboardingEnabled:capability?.nativeOnboardingEnabled??null,steps:[{key:'connect',complete:connected,reason:connectReason},{key:'activation',complete:Boolean(activation),reason:activation?'ready':'activation_missing'},{key:'onboarding',complete:onboardingReady,reason:onboardingReason},{key:'measuring',complete:measuring,reason:measuring?'ready':'measurement_waiting'}],activationPreset:preset,activationWindowDays:cfg.activationWindowHours/24};
+  return {required:!activation,recommendedMode,nativeOnboardingEnabled:capability?.nativeOnboardingEnabled??null,steps:[{key:'connect',complete:connected,reason:connectReason},{key:'activation',complete:Boolean(activation),reason:activation?'ready':'activation_missing'},{key:'onboarding',complete:onboardingReady,reason:onboardingReason},{key:'measuring',complete:measuring,reason:measuring?'ready':'measurement_waiting'}],activationPreset:preset,activationWindowDays:cfg.activationWindowHours/24};
  }
  async home(s:Scope,now=new Date()):Promise<HomePresentation>{
   const w=await this.windows(s,now),[current,previous,setup,actionFailure]=await Promise.all([this.analytics.canonical(s,...w.current,now),this.analytics.canonical(s,...w.previous,now),this.setup(s,now),this.actionFailure(s,...w.current)]);
@@ -70,9 +70,30 @@ export class PresentationService{
   const counts=[0,0,0,0,0];for(const row of rows){const seconds=typeof row.data.firstReplyLatencySeconds==='number'?row.data.firstReplyLatencySeconds:Infinity;counts[seconds<300?0:seconds<3600?1:seconds<21600?2:seconds<=86400?3:4]!++;}
   const keys=['under_5m','5m_1h','1h_6h','6h_24h','unanswered_24h'] as const;return keys.map((bucket,i)=>({bucket,count:rows.length?counts[i]!:null,rate:rows.length?counts[i]!/rows.length:null}));
  }
+ private async newcomerChannels(s:Scope,range:7|30|90,now:Date):Promise<{channels:NewcomerChannel[];hiddenChannelCount:number}>{
+  const from=new Date(now.getTime()-range*DAY);
+  const episodes=(await sql<{id:string;joined_at:Date;revision_id:string|null;activated_at:Date|null;window_seconds:number|null}>`SELECT e.id,e.joined_at,a.revision_id,a.activated_at,(r.definition->>'windowSeconds')::integer AS window_seconds FROM membership_episodes e LEFT JOIN activation_members a ON a.organization_id=e.organization_id AND a.guild_id=e.guild_id AND a.episode_id=e.id LEFT JOIN guild_config_revisions r ON r.organization_id=a.organization_id AND r.guild_id=a.guild_id AND r.id=a.revision_id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND e.context='PRODUCTION' AND e.joined_at>=${from} AND e.joined_at<${now}`.execute(this.db)).rows;
+  if(!episodes.length)return {channels:[],hiddenChannelCount:0};
+  const events=(await sql<{episode_id:string;kind:string;occurred_at:Date;data:Record<string,unknown>}>`SELECT episode_id,kind,occurred_at,data FROM lifecycle_events WHERE ${tenant(s)} AND context='PRODUCTION' AND occurred_at>=${from} AND occurred_at<=${now} AND kind IN ('message.sent','reply.received','activation.completed') ORDER BY occurred_at`.execute(this.db)).rows;
+  const byEpisode=new Map<string,typeof events>();for(const event of events){const list=byEpisode.get(event.episode_id)??[];list.push(event);byEpisode.set(event.episode_id,list);}
+  const counts=new Map<string,NewcomerChannel>();
+  const add=(channelId:string,key:'firstMessages'|'firstReplies'|'firstSuccesses'|'goalCompleted'|'goalEligible')=>{let row=counts.get(channelId);if(!row){row={channelId,firstMessages:0,firstReplies:0,firstSuccesses:0,goalCompleted:null,goalEligible:null};counts.set(channelId,row);}if(key==='goalCompleted'||key==='goalEligible')row[key]=(row[key]??0)+1;else row[key]++;};
+  for(const episode of episodes){const facts=byEpisode.get(episode.id)??[],messages=facts.filter(f=>f.kind==='message.sent'),first=messages[0],firstChannel=typeof first?.data.channelId==='string'?first.data.channelId:null;
+   if(firstChannel)add(firstChannel,'firstMessages');
+   const reply=facts.find(f=>f.kind==='reply.received'),replyChannel=typeof reply?.data.channelId==='string'?reply.data.channelId:null;
+   if(replyChannel)add(replyChannel,'firstReplies');
+   const success=facts.find(f=>f.kind==='activation.completed'&&f.data.definitionId===episode.revision_id),source=success&&facts.find(f=>f.occurred_at.getTime()===success.occurred_at.getTime()&&f.kind!=='activation.completed'&&typeof f.data.channelId==='string'),successChannel=typeof source?.data.channelId==='string'?source.data.channelId:null;
+   if(successChannel)add(successChannel,'firstSuccesses');
+   if(firstChannel&&first&&episode.revision_id&&episode.window_seconds&&episode.joined_at.getTime()+episode.window_seconds*1000<=now.getTime()){
+    add(firstChannel,'goalEligible');if(episode.activated_at&&episode.activated_at>=first.occurred_at)add(firstChannel,'goalCompleted');
+   }
+  }
+  const visible=[...counts.values()].filter(row=>row.firstMessages+row.firstReplies+row.firstSuccesses>=3).sort((a,b)=>b.firstMessages-a.firstMessages);
+  return {channels:visible,hiddenChannelCount:counts.size-visible.length};
+ }
  async journey(s:Scope,range:7|30|90=30,now=new Date()):Promise<JourneyPresentation>{
-  const from=new Date(now.getTime()-range*DAY),[metrics,trends,retention,firstReplyDistribution]=await Promise.all([this.analytics.canonical(s,from,now,now),this.trends(s,range,now),this.retention(s,range,now),this.replyDistribution(s,range,now)]);
-  return {generatedAt:now.toISOString(),range,funnel:toJourney(metrics),trends,retention,firstReplyDistribution,dataHealth:aggregateHealth(Object.values(metrics))};
+  const from=new Date(now.getTime()-range*DAY),[metrics,trends,retention,firstReplyDistribution,channelData]=await Promise.all([this.analytics.canonical(s,from,now,now),this.trends(s,range,now),this.retention(s,range,now),this.replyDistribution(s,range,now),this.newcomerChannels(s,range,now)]);
+  return {generatedAt:now.toISOString(),range,funnel:toJourney(metrics),trends,retention,firstReplyDistribution,...channelData,dataHealth:aggregateHealth(Object.values(metrics))};
  }
  async actions(s:Scope,now=new Date()):Promise<ActionsPresentation>{
   const rows=(await sql<{id:string;version:number;definition:unknown}>`SELECT r.id,r.version,r.definition FROM guild_config_heads h JOIN guild_config_revisions r ON r.organization_id=h.organization_id AND r.guild_id=h.guild_id AND r.id=h.revision_id WHERE h.organization_id=${s.organizationId}::uuid AND h.guild_id=${s.guildId} AND h.domain='intervention'`.execute(this.db)).rows;
@@ -82,6 +103,17 @@ export class PresentationService{
  async results(s:Scope,now=new Date()):Promise<ResultsPresentation>{
   const rows=(await sql<{id:string;definition:unknown;published_at:Date|null}>`SELECT id,definition,published_at FROM guild_config_revisions WHERE ${tenant(s)} AND domain='experiment' AND state='published' ORDER BY published_at DESC LIMIT 20`.execute(this.db)).rows;
   const items=[];for(const row of rows){const result=await new ExperimentService(this.db).result(s,row.id,now);items.push(toExperiment({id:row.id,definition:experimentSchema.parse(row.definition) as ExperimentDefinition,publishedAt:row.published_at?.toISOString()??null},result));}
-  return {generatedAt:now.toISOString(),items};
+  const actions=(await sql<{id:string;definition:{name:string;trigger:string};published_at:Date}>`SELECT r.id,r.definition,r.published_at FROM guild_config_heads h JOIN guild_config_revisions r ON r.organization_id=h.organization_id AND r.guild_id=h.guild_id AND r.id=h.revision_id WHERE h.organization_id=${s.organizationId}::uuid AND h.guild_id=${s.guildId} AND h.domain='intervention' AND r.published_at IS NOT NULL`.execute(this.db)).rows;
+  const eligibleCount=(await sql<{count:number}>`SELECT count(*)::integer AS count FROM membership_episodes WHERE ${tenant(s)} AND context='PRODUCTION' AND joined_at>=${new Date(now.getTime()-30*DAY)}`.execute(this.db)).rows[0]?.count??0;
+  const entitlement=await new (await import('../../settings/src/entitlements.js')).EntitlementService(this.db).can(s,'experiments');
+  const readiness=entitlement&&eligibleCount>=40?(await this.home(s,now)).dataHealth.status==='healthy':false;
+  const simple=[];for(const action of actions){const length=Math.max(0,Math.min(7*DAY,now.getTime()-action.published_at.getTime())),metric=action.definition.trigger==='message.sent'?'direct_reply_connection_rate' as const:'activation_rate' as const;
+   if(!length)continue;
+   const [before,after]=await Promise.all([this.analytics.canonical(s,new Date(action.published_at.getTime()-length),action.published_at,now),this.analytics.canonical(s,action.published_at,new Date(action.published_at.getTime()+length),now)]);
+   const baseline=toKpi(metric,before[metric]),current=toKpi(metric,after[metric]);
+   const sameGoal=JSON.stringify(before.activation_rate.definitionIds)===JSON.stringify(after.activation_rate.definitionIds);
+   simple.push({actionId:action.id,name:action.definition.name,metric,before:baseline,after:current,startedAt:action.published_at.toISOString(),collecting:current.current===null||baseline.current===null||!sameGoal,controlledAvailable:readiness});
+  }
+  return {generatedAt:now.toISOString(),items,simple};
  }
 }

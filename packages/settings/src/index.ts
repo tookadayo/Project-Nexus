@@ -5,16 +5,17 @@ import {canAdmin} from '../../security/src/index.js';
 import {assert,type Scope} from '../../shared/src/index.js';
 export const templates=['Gaming','Creator','Developer / OSS','Product / SaaS','Education','General Community'] as const;
 const id=z.string().regex(/^\d{17,20}$/);
-export const settingsSchema=z.object({enabled:z.boolean().default(false),onboardingEnabled:z.boolean().default(false),template:z.enum(templates).default('General Community'),
+export const settingsSchema=z.object({enabled:z.boolean().default(true),onboardingEnabled:z.boolean().default(false),template:z.enum(templates).default('General Community'),
  uiLanguage:z.enum(['auto','ja','en','bilingual']).default('auto'),
  startChannelId:id.nullable().default(null),adminNotificationChannelId:id.nullable().default(null),adminRoleId:id.nullable().default(null),flowVersionId:z.uuid().nullable().default(null),
+ weeklySummaryEnabled:z.boolean().default(false),weeklySummaryChannelId:id.nullable().default(null),
  mode:z.literal('SUGGEST').default('SUGGEST'),activationWindowHours:z.number().int().min(1).max(720).default(168),
  firstResponseMinutes:z.number().int().min(1).max(1440).default(60),helperEnabled:z.literal(false).default(false),reportEnabled:z.literal(false).default(false),
  onboardingMode:z.enum(['auto','native','fallback','hybrid']).default('auto'),
  hybrid:z.object({enabled:z.boolean(),flowVersionId:z.uuid().nullable(),trigger:z.enum(['after_join','after_native_onboarding_observed','manual']),nativePromptMappings:z.record(z.string(),z.string())}).strict().default({enabled:false,flowVersionId:null,trigger:'manual',nativePromptMappings:{}}),
  detailedRetentionDays:z.union([z.literal(7),z.literal(14),z.literal(30)]).default(30),aggregateRetentionMonths:z.union([z.literal(3),z.literal(12),z.literal(24)]).default(24),
  dmEnabled:z.boolean().default(false),
- flags:z.object({native_capability_v2:z.boolean().default(false),native_snapshot_v2:z.boolean().default(false),activation_dsl_v2:z.boolean().default(false),interventions_v2:z.boolean().default(false),experiments_v2:z.boolean().default(false),billing_v1:z.boolean().default(false)}).strict().default({native_capability_v2:false,native_snapshot_v2:false,activation_dsl_v2:false,interventions_v2:false,experiments_v2:false,billing_v1:false})}).strict();
+ flags:z.object({native_capability_v2:z.boolean().default(false),native_snapshot_v2:z.boolean().default(false),activation_dsl_v2:z.boolean().default(true),interventions_v2:z.boolean().default(true),experiments_v2:z.boolean().default(true),billing_v1:z.boolean().default(false)}).strict().default({native_capability_v2:false,native_snapshot_v2:false,activation_dsl_v2:true,interventions_v2:true,experiments_v2:true,billing_v1:false})}).strict();
 export type Settings=z.infer<typeof settingsSchema>;
 export type SettingsView=Settings&{revision:number};
 export type Actor={key:string,permissions:string,roles:string[],source:'DISCORD_PANEL'|'WEB_DASHBOARD'|'SYSTEM',requestId:string};

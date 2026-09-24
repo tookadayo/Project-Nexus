@@ -108,7 +108,7 @@ export class LifecycleService {
      if(!target&&Date.now()-at.getTime()<86400000)throw new AwaitingReference('Referenced metadata has not arrived');
      if(target&&target.identity_id!==identityId&&episode.joined_at<target.joined_at&&at>=target.occurred_at){
       const latency=(at.getTime()-target.occurred_at.getTime())/1000;
-      await this.record(tx,s,target.episode_id,'reply.received',at,{latencySeconds:latency});
+      await this.record(tx,s,target.episode_id,'reply.received',at,{latencySeconds:latency,channelId:target.data.channelId});
       await sql`INSERT INTO reply_receipts VALUES(${s.organizationId}::uuid,${s.guildId},${event.messageId!},${target.episode_id}::uuid,${new Date(at.getTime()+86400000)}) ON CONFLICT DO NOTHING`.execute(tx);
       if(settings.flags.activation_dsl_v2)await projectActivation(tx,s,target.episode_id,at);
       await sql`UPDATE lifecycle_events SET data=jsonb_set(jsonb_set(data,'{receivedExplicitReply}','true'::jsonb),'{firstReplyLatencySeconds}',to_jsonb(LEAST(COALESCE((data->>'firstReplyLatencySeconds')::double precision,${latency}),${latency}))) WHERE ${tenant(s)} AND id=${target.id}::uuid`.execute(tx);

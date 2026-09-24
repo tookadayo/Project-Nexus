@@ -3,7 +3,7 @@ import type {Scope} from '../../shared/src/index.js';
 export const features=['fallback_onboarding','hybrid_onboarding','custom_activation','connection_metrics','advanced_cohorts','diagnosis','interventions','automation_auto','experiments','ai_explanation','webhooks','api','multi_guild','rbac','audit_export'] as const;
 export type Feature=typeof features[number];
 export type Plan='FREE'|'STARTER'|'GROWTH'|'SCALE'|'ENTERPRISE';
-const free:Feature[]=['fallback_onboarding','hybrid_onboarding'];
+const free:Feature[]=['fallback_onboarding','hybrid_onboarding','interventions'];
 const starter:Feature[]=[...free,'custom_activation','connection_metrics','diagnosis'];
 const growth:Feature[]=[...starter,'advanced_cohorts','interventions','automation_auto','experiments','ai_explanation','webhooks'];
 export const planRegistry:Record<Plan,{price:number|null,included:number|null,guilds:number,features:readonly Feature[]}>={FREE:{price:0,included:250,guilds:1,features:free},STARTER:{price:15,included:1000,guilds:1,features:starter},GROWTH:{price:49,included:5000,guilds:1,features:growth},SCALE:{price:149,included:25000,guilds:5,features},ENTERPRISE:{price:null,included:null,guilds:100,features}};
@@ -14,8 +14,7 @@ export class EntitlementService {
  async canDefineActivation(s:Scope,definition:unknown){
   if(await this.can(s,'custom_activation'))return true;
   const d=definition as {windowSeconds?:unknown,rule?:{op?:unknown,event?:unknown,withinSeconds?:unknown}};
-  if(d?.windowSeconds!==604800||d.rule?.op!=='event'||d.rule.event!=='message.sent'||d.rule.withinSeconds!==604800)return false;
-  return !(await sql`SELECT id FROM guild_config_revisions WHERE ${tenant(s)} AND domain='activation' AND state='published'`.execute(this.db)).rows.length;
+  return d?.windowSeconds===604800&&d.rule?.op==='event'&&['message.sent','reply.received','scheduled_event.subscribed'].includes(String(d.rule.event))&&d.rule.withinSeconds===604800;
  }
  async usage(s:Scope,now=new Date()){
   const month=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1)),end=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()+1,1));

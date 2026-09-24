@@ -43,6 +43,8 @@ export type ProductData = {
   results: ResultsPresentation | null;
   options: DiscordOptions;
   admin: Admin | null;
+  guilds?:{id:string;name:string}[];
+  selectedGuildId?:string;
 };
 const messages = {
   en: {
@@ -96,11 +98,11 @@ const messages = {
     review: "Enable",
     publish: "Enable",
     published: "Published and active.",
-    when: "WHEN",
-    wait: "WAIT",
-    if: "IF",
-    then: "THEN",
-    safety: "SAFETY",
+    when: "What starts it",
+    wait: "Wait",
+    if: "Check before sending",
+    then: "What happens",
+    safety: "Staff review",
     activeActions: "Enabled improvements",
     delivery: "Delivery health",
     noActions: "No action is active yet. Start from a guarded template.",
@@ -121,7 +123,7 @@ const messages = {
     partial: "Partial",
     provisional: "Collecting",
     mature: "Ready to evaluate",
-    eligible: "Eligible",
+    eligible: "Ready",
     observed: "Observed",
     control: "Usual experience",
     treatment: "Improvement enabled",
@@ -143,7 +145,7 @@ const messages = {
     approvalNeeded: "Approval needed",
     question: "Did this improvement help newcomers?",
     primaryOutcome: "What NEXUS will check",
-    assignment: "Assignment",
+    assignment: "How the check works",
     dailyBlocks: "Daily time blocks",
     reviewTest: "Check the result",
     startTest: "Check the result",
@@ -161,8 +163,8 @@ const messages = {
     sample: "Sample",
     coverage: "Data collection status",
     stage: "Newcomer milestone",
-    guardrails: "Guardrails",
-    randomization: "Randomization",
+    guardrails: "Safety checks",
+    randomization: "Comparison method",
     timeline: "Timeline",
     refresh: "Refresh",
     next: "Next",
@@ -190,7 +192,7 @@ const messages = {
     data: "データ取得状況",
     empty: "検証済みの観測データはまだありません",
     emptyDetail:
-      "対象範囲の本番アクティビティを観測すると表示されます。欠損・未成熟な値をゼロとして扱いません。",
+      "対象期間の活動データが集まると表示されます。欠損した値や集計途中の値をゼロとして扱いません。",
     setup: "コミュニティ成長の測定を始める",
     connect: "Discord を接続",
     activation: "成功した新規メンバー",
@@ -218,11 +220,11 @@ const messages = {
     review: "有効にする",
     publish: "有効にする",
     published: "公開し、有効化しました。",
-    when: "いつ",
-    wait: "待機",
-    if: "条件",
-    then: "実行",
-    safety: "安全性",
+    when: "始まるきっかけ",
+    wait: "待つ時間",
+    if: "送信前の確認",
+    then: "行うこと",
+    safety: "スタッフの確認",
     activeActions: "有効な改善策",
     delivery: "配信の健全性",
     noActions:
@@ -266,7 +268,7 @@ const messages = {
     approvalNeeded: "承認が必要",
     question: "この改善策は新規メンバーに役立ったか？",
     primaryOutcome: "NEXUS が確認すること",
-    assignment: "割付方法",
+    assignment: "比較方法",
     dailyBlocks: "日次タイムブロック",
     reviewTest: "効果を確認",
     startTest: "効果を確認",
@@ -284,8 +286,8 @@ const messages = {
     sample: "サンプル",
     coverage: "データ取得状況",
     stage: "新規メンバーの到達点",
-    guardrails: "ガードレール",
-    randomization: "割付",
+    guardrails: "安全確認",
+    randomization: "比較方法",
     timeline: "期間",
     refresh: "更新",
     next: "次へ",
@@ -320,22 +322,23 @@ const opportunityNames: Record<Locale, Record<string, string>> = {
 };
 const templateNames: Record<Locale, Record<ActionTemplateKey, string>> = {
   en: {
-    reply_rescue: "Reply Rescue",
-    welcome_helper: "Welcome Helper",
+    reply_rescue: "Notify staff when someone has no reply",
+    welcome_helper: "Notify staff when a newcomer may need help",
     inactive_follow_up: "Inactive Newcomer Follow-up",
-    channel_recommendation: "Channel Recommendation",
-    event_recommendation: "Event Recommendation",
+    channel_recommendation: "Show recommended channels",
+    event_recommendation: "Recommend an event",
   },
   ja: {
-    reply_rescue: "返信レスキュー",
-    welcome_helper: "ウェルカム・ヘルパー",
+    reply_rescue: "返信がない人をスタッフに知らせる",
+    welcome_helper: "参加後に困っている人をスタッフに知らせる",
     inactive_follow_up: "非アクティブ新規メンバーのフォロー",
-    channel_recommendation: "チャンネル推薦",
-    event_recommendation: "イベント推薦",
+    channel_recommendation: "おすすめチャンネルを案内する",
+    event_recommendation: "イベントを案内する",
   },
 };
+const internalTemplateNames:Record<ActionTemplateKey,string>={reply_rescue:"Reply Rescue",welcome_helper:"Welcome Helper",inactive_follow_up:"Inactive Newcomer Follow-up",channel_recommendation:"Channel Recommendation",event_recommendation:"Event Recommendation"};
 const actionName = (name: string, locale: Locale) => {
-  const key = Object.entries(templateNames.en).find(
+  const key = Object.entries(internalTemplateNames).find(
     ([, label]) => label === name,
   )?.[0] as ActionTemplateKey | undefined;
   return key ? templateNames[locale][key] : name;
@@ -343,11 +346,7 @@ const actionName = (name: string, locale: Locale) => {
 const resultName = (name: string, locale: Locale) => {
   const base = name.endsWith(" Test") ? name.slice(0, -5) : name;
   const translated = actionName(base, locale);
-  return translated === base
-    ? name
-    : locale === "ja"
-      ? `${translated} テスト`
-      : `${translated} Test`;
+  return translated === base ? name : translated;
 };
 const percent = (n: number | null) =>
   n === null ? "—" : `${(n * 100).toFixed(1)}%`;
@@ -364,9 +363,14 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
     [journeyLoading, setJourneyLoading] = useState(false),
     [template, setTemplate] = useState<ActionTemplateKey>("reply_rescue"),
     [showImprovementSetup, setShowImprovementSetup] = useState(false),
+    [preflightState, setPreflightState] = useState<"ready"|"permission_needed"|"unavailable"|null>(null),
+    [preflightFix, setPreflightFix] = useState<string|null>(null),
+    [testSent, setTestSent] = useState(false),
     [runMode, setRunMode] = useState<"suggest" | "approval" | "auto">("approval"),
     [channelId, setChannelId] = useState(data.options.channels.find(option=>option.id===data.admin?.settings.adminNotificationChannelId)?.id ?? data.options.channels[0]?.id ?? ""),
     [notificationRevision, setNotificationRevision] = useState(Number(data.admin?.settings.revision ?? 0)),
+    [weeklyEnabled, setWeeklyEnabled] = useState(Boolean(data.admin?.settings.weeklySummaryEnabled)),
+    [weeklyChannelId, setWeeklyChannelId] = useState(String(data.admin?.settings.weeklySummaryChannelId??data.options.channels[0]?.id??"")),
     [retentionDays, setRetentionDays] = useState(Number(data.admin?.settings.detailedRetentionDays ?? 30)),
     [eventId, setEventId] = useState(data.options.events[0]?.id ?? ""),
     [channels, setChannels] = useState<string[]>([]),
@@ -377,12 +381,13 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
     [status, setStatus] = useState(""),
     [busy, setBusy] = useState(false),
     [dismissed, setDismissed] = useState<string[]>([]),
+    [dismissReasons, setDismissReasons] = useState<Record<string,"not_relevant"|"already_handled"|"later"|"">>({}),
     [evidence, setEvidence] = useState<string | null>(null),
     [testActionId, setTestActionId] = useState<string | null>(null),
     [actions, setActions] = useState(data.actions),
     [results, setResults] = useState(data.results);
   const c = messages[locale];
-  const openImprovement=(key:ActionTemplateKey)=>{setTemplate(key);setShowImprovementSetup(true);setPage(2);requestAnimationFrame(()=>document.querySelector('.builder-v3')?.scrollIntoView({behavior:'smooth',block:'start'}));};
+  const openImprovement=(key:ActionTemplateKey)=>{setTemplate(key);setPreflightState(null);setTestSent(false);setShowImprovementSetup(true);setPage(2);requestAnimationFrame(()=>document.querySelector('.builder-v3')?.scrollIntoView({behavior:'smooth',block:'start'}));};
   const selected = actions?.templates.find((t) => t.key === template),
     selectedAction = actions?.items.find((a) => a.id === testActionId);
   async function request(body: unknown) {
@@ -448,13 +453,30 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
     }
   }
   async function enableImprovement() {
+    const check=await checkImprovement();if(check!=="ready")return;
     const draft = await request({action:"action_template",templateKey:template,channelId:channelId||undefined,eventId:eventId||undefined,recommendedChannelIds:channels,safetyMode:runMode});
     if (!draft) return;
     const saved = await request({action:"publish",id:draft.after.id,expectedHead:draft.before?.id??null,confirmationHash:draft.confirmationHash});
     if (!saved) return;
     const response = await fetch("/data/actions", {cache:"no-store"});
     if (response.ok) setActions(await response.json() as ActionsPresentation);
+    const resultResponse=await fetch('/data/results',{cache:'no-store'});
+    if(resultResponse.ok)setResults(await resultResponse.json() as ResultsPresentation);
     setStatus(locale === "ja" ? "改善策を有効にしました。" : "Improvement enabled.");
+  }
+  async function checkImprovement(){
+    const result=await request({action:"action_preflight",templateKey:template,channelId:channelId||undefined,eventId:eventId||undefined,recommendedChannelIds:channels,safetyMode:runMode});
+    if(!result)return null;
+    setPreflightState(result.status);setPreflightFix(result.fix);return result.status as typeof preflightState;
+  }
+  async function sendTestNotification(){
+    const check=await checkImprovement();if(check!=="ready")return;
+    const result=await request({action:"action_test",templateKey:template,channelId:channelId||undefined,eventId:eventId||undefined,recommendedChannelIds:channels,safetyMode:runMode});
+    if(result){setTestSent(true);setStatus(locale==="ja"?"テスト通知を送信しました。集計には含まれません。":"Test notification sent. It is excluded from all results.");}
+  }
+  async function dismissOpportunity(id:string,type:string){
+    const result=await request({action:'feedback_dismiss',suggestionType:type,reason:dismissReasons[id]||null});
+    if(result)setDismissed(current=>[...current,id]);
   }
   async function saveNotificationChannel(id:string) {
     const updated=await request({action:"notification_channel",channelId:id,revision:notificationRevision});
@@ -469,6 +491,12 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
     setNotificationRevision(Number(updated.revision));
     setRetentionDays(days);
     setStatus(locale === "ja" ? "保持期間を保存しました。" : "Retention saved.");
+  }
+  async function saveWeekly(enabled:boolean,destination=weeklyChannelId){
+    const updated=await request({action:"weekly_summary",enabled,channelId:destination||null,revision:notificationRevision});
+    if(!updated)return;
+    setNotificationRevision(Number(updated.revision));setWeeklyEnabled(enabled);setWeeklyChannelId(destination);
+    setStatus(locale==="ja"?"週間サマリーを保存しました。":"Weekly summary saved.");
   }
   async function startCheck() {
     if (!testActionId) return;
@@ -631,22 +659,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
               />
             ))}
           </section>
-          <section className="split">
-            <div className="surface">
-              <div className="section-heading">
-                <div>
-                  <p className="eyebrow">
-                    {locale === "ja" ? "マイルストーン" : "MILESTONES"}
-                  </p>
-                  <h2>{c.milestones}</h2>
-                </div>
-                <button className="text-button" onClick={go(1)}>
-                  {c.journey} →
-                </button>
-              </div>
-              <JourneyFunnel stages={data.home.journey} labels={c} />
-            </div>
-            <div className="surface opportunity-spotlight">
+          <section className="surface opportunity-spotlight">
               <p className="eyebrow">{c.communityOpportunity}</p>
               {data.home.communityOpportunity ? (
                 <>
@@ -661,24 +674,11 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
                     {signed(data.home.communityOpportunity.difference)}
                   </div>
                   <p>{c.notCausal}</p>
-                  <button onClick={go(2)}>{c.suggested} →</button>
+                  <button onClick={go(2)}>{c.opportunities} →</button>
                 </>
               ) : (
-                <p>{c.noOpportunity}</p>
+                <><p>{c.noOpportunity}</p><button onClick={go(2)}>{c.opportunities} →</button></>
               )}
-              {data.home.measurementWarning && (
-                <div className="measurement-warning">
-                  <strong>{c.measurementWarning}</strong>
-                  <span>
-                    {
-                      opportunityNames[locale][
-                        data.home.measurementWarning.type
-                      ]
-                    }
-                  </span>
-                </div>
-              )}
-            </div>
           </section>
         </>
       ) : (
@@ -699,7 +699,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
           <p className="orientation">
             {locale === "ja"
               ? "互換性のある母集団ごとに、参加後の主要な到達点を確認します。段階間の換算率ではありません。"
-              : "Review lifecycle milestones using each metric’s valid eligible population. These are not sequential conversion rates."}
+              : "Review each newcomer milestone. Each percentage uses the members with enough time to reach it."}
           </p>
         </div>
         <div className="segmented" aria-label={c.range}>
@@ -753,6 +753,11 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
               labels={replyLabels(locale)}
               emptyLabel={c.emptyDetail}
             />
+          </section>
+          <section className="surface">
+            <h2>{locale==="ja"?"新規メンバーが活動したチャンネル":"Where newcomers started"}</h2>
+            {journey.channels?.length?<div className="channel-table"><table><thead><tr><th>{locale==="ja"?"チャンネル":"Channel"}</th><th>{locale==="ja"?"最初の投稿":"First messages"}</th><th>{locale==="ja"?"最初の返信":"First replies"}</th><th>{locale==="ja"?"最初の成功":"First successes"}</th><th>{locale==="ja"?"その後の成功":"Later success"}</th></tr></thead><tbody>{journey.channels.map(row=><tr key={row.channelId}><th>{data.options.channels.find(option=>option.id===row.channelId)?.label??(locale==="ja"?"現在は利用できないチャンネル":"Channel no longer available")}</th><td>{row.firstMessages}</td><td>{row.firstReplies}</td><td>{row.firstSuccesses}</td><td>{row.goalEligible?`${row.goalCompleted??0}/${row.goalEligible}`:"—"}</td></tr>)}</tbody></table></div>:<p>{locale==="ja"?"チャンネル別に表示できる件数を収集中です。":"Collecting enough activity to show channels safely."}</p>}
+            <p className="inline-note">{locale==="ja"?"少数のチャンネルは非表示です。その後の成功は関係を示すもので、チャンネルが原因とは限りません。":"Channels with very few observations are hidden. Later success is an association, not proof that a channel caused it."}</p>
           </section>
           <NextStep
             prefix={c.next}
@@ -851,12 +856,8 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
                   </button>
                 )}
                 <button className="quiet" onClick={() => setEvidence(evidence === item.id ? null : item.id)}>{c.why}</button>
-                <button
-                  className="quiet"
-                  onClick={() => setDismissed([...dismissed, item.id])}
-                >
-                  {c.dismiss}
-                </button>
+                <details><summary>{locale==="ja"?"非表示にする理由（任意）":"Reason for dismissal (optional)"}</summary><select value={dismissReasons[item.id]??""} onChange={e=>setDismissReasons(current=>({...current,[item.id]:e.target.value as "not_relevant"|"already_handled"|"later"|""}))}><option value="">—</option><option value="not_relevant">{locale==="ja"?"関係ない":"Not relevant"}</option><option value="already_handled">{locale==="ja"?"対応済み":"Already handled"}</option><option value="later">{locale==="ja"?"後で":"Later"}</option></select></details>
+                <button className="quiet" onClick={() => void dismissOpportunity(item.id,item.type)}>{c.dismiss}</button>
               </div>
             </article>
           ))}
@@ -870,7 +871,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
         <h2>{c.actions}</h2>
         <p>{locale === "ja" ? "必要な改善策を選んでください。送信先は有効化する前に確認します。" : "Choose what would help your newcomers. Select a destination before enabling."}</p>
         <div className="improvement-menu-grid">
-          {(["reply_rescue","welcome_helper","channel_recommendation","event_recommendation"] as const).map(key=><button key={key} onClick={()=>openImprovement(key)}>{templateNames[locale][key]}</button>)}
+          {(["reply_rescue","welcome_helper","channel_recommendation","event_recommendation"] as const).filter(key=>key!=="event_recommendation"||data.options.events.length>0).map(key=><button key={key} onClick={()=>openImprovement(key)}>{templateNames[locale][key]}</button>)}
         </div>
       </section>
     </>
@@ -887,17 +888,21 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
               value={template}
               onChange={(e) => {
                 setTemplate(e.target.value as ActionTemplateKey);
+                setPreflightState(null);setTestSent(false);
                 setPreview(null);
               }}
             >
-              {actions?.templates.filter(t => t.key !== "inactive_follow_up").map((t) => (
+              {actions?.templates.filter(t => t.key !== "inactive_follow_up"&&(t.key!=="event_recommendation"||data.options.events.length>0)).map((t) => (
                 <option key={t.key} value={t.key}>
                   {templateNames[locale][t.key]}
                 </option>
               ))}
             </select>
           </label>
-          {selected && <p className="inline-note">{template === "reply_rescue" ? locale === "ja" ? "新規メンバーが1時間返信を待ったら、コミュニティチームに知らせます。" : "If a newcomer waits 1 hour without a reply, notify your team." : locale === "ja" ? "推奨設定で安全に実行します。" : "Uses recommended safety settings."} {runMode === "approval" ? locale === "ja" ? "送信前に確認します。" : "Confirm before running." : runMode === "auto" ? locale === "ja" ? "安全確認後に自動で実行します。" : "Runs automatically after safety checks." : locale === "ja" ? "提案だけ表示します。" : "Suggests only."}</p>}
+          {selected && <div className="flow-preview" aria-label={locale==="ja"?"改善策の流れ":"Improvement preview"}>
+            <strong>{locale==="ja"?"有効にすると":"When enabled"}</strong>
+            <p>{semantic(selected.trigger,locale)} → {duration(selected.delaySeconds,locale)} → {semantic(selected.condition,locale)} → {runMode==="approval"?(locale==="ja"?"スタッフが確認":"staff reviews"):runMode==="suggest"?(locale==="ja"?"提案のみ":"suggestion only"):(locale==="ja"?"自動で実行":"runs automatically")} → {semantic(selected.action,locale)} {channelId ? (data.options.channels.find(option=>option.id===channelId)?.label??"") : ""}</p>
+          </div>}
           {selected && <details><summary>{locale === "ja" ? "設定を変更" : "Change settings"}</summary><label>{locale === "ja" ? "実行方法" : "How to run"}<select value={runMode} onChange={e=>setRunMode(e.target.value as typeof runMode)}><option value="suggest">{locale === "ja" ? "提案だけ" : "Suggest only"}</option><option value="approval">{locale === "ja" ? "確認してから実行" : "Confirm before running"}</option><option value="auto">{locale === "ja" ? "自動で実行" : "Run automatically"}</option></select></label><Policy template={{...selected,safety:{...selected.safety,mode:runMode}}} c={c} locale={locale} /></details>}
           {!data.options.available && selected?.requires.length ? (
             <p className="inline-note">{c.optionsUnavailable}</p>
@@ -907,7 +912,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
               {c.destination}
               <select
                 value={channelId}
-                onChange={(e) => setChannelId(e.target.value)}
+                onChange={(e) => {setChannelId(e.target.value);setPreflightState(null);setTestSent(false);}}
               >
                 <option value="">—</option>
                 {data.options.channels.map((option) => (
@@ -923,7 +928,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
               {c.event}
               <select
                 value={eventId}
-                onChange={(e) => setEventId(e.target.value)}
+                onChange={(e) => {setEventId(e.target.value);setPreflightState(null);setTestSent(false);}}
               >
                 <option value="">—</option>
                 {data.options.events.map((option) => (
@@ -941,7 +946,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
                 multiple
                 value={channels}
                 onChange={(e) =>
-                  setChannels([...e.target.selectedOptions].map((o) => o.value))
+                  {setChannels([...e.target.selectedOptions].map((o) => o.value));setPreflightState(null);setTestSent(false);}
                 }
               >
                 {data.options.channels.map((option) => (
@@ -952,6 +957,11 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
               </select>
             </label>
           )}
+          <div className="card-actions">
+            <button disabled={busy||!channelId} onClick={()=>void checkImprovement()}>{locale==="ja"?"設定を確認":"Check setup"}</button>
+            <button disabled={busy||!channelId} onClick={()=>void sendTestNotification()}>{locale==="ja"?"テスト通知を送る":"Send test notification"}</button>
+          </div>
+          {preflightState&&<p role="status" className="inline-note">{preflightState==="ready"?(locale==="ja"?"準備完了":"Ready"):preflightState==="permission_needed"?(locale==="ja"?"権限が必要です。選択したチャンネルで NEXUS に表示・送信権限を与えてください。":"Permission needed. Give NEXUS View Channel and Send Messages in the selected channels."):(locale==="ja"?"利用できません。選択内容を確認してください。":"Unavailable. Check the selected destination or event.")} {preflightState==="ready"&&testSent?(locale==="ja"?"テスト送信済み":"Test sent"):preflightState!=="ready"?preflightFix:""}</p>}
           <button
             disabled={
               busy ||
@@ -1068,6 +1078,14 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
           </p>
         </div>
       </div>
+      {results?.simple?.length ? <section className="results-list">{results.simple.map(item=><article className="surface result-card" key={item.actionId}>
+        <h2>{actionName(item.name,locale)}</h2>
+        <p>{locale==="ja"?"改善の前後を比較":"Before and after this improvement"}</p>
+        <div className="test-summary"><div><span>{locale==="ja"?"改善前":"Before"}</span><strong>{percent(item.before.current)}</strong><small>{item.before.sampleSize} {locale==="ja"?"人":"newcomers"}</small></div><div><span>{locale==="ja"?"改善後":"After"}</span><strong>{percent(item.after.current)}</strong><small>{item.after.sampleSize} {locale==="ja"?"人":"newcomers"}</small></div></div>
+        <p>{item.collecting?(locale==="ja"?"結果を収集中です。現在の人数と変化を確認できます。":"Still collecting. Counts and trends will appear when enough time has passed."):(locale==="ja"?`観測された差: ${signed(item.after.current!==null&&item.before.current!==null?item.after.current-item.before.current:null)}`:`Observed difference: ${signed(item.after.current!==null&&item.before.current!==null?item.after.current-item.before.current:null)}`)}</p>
+        <p className="inline-note">{locale==="ja"?"この差には他の要因も影響した可能性があります。":"Other factors may have affected this difference."}</p>
+        {item.controlledAvailable?<button onClick={()=>setTestActionId(item.actionId)}>{locale==="ja"?"より正確に確認":"Check more accurately"}</button>:<p className="inline-note">{locale==="ja"?"より正確な確認は、活動が増えると利用できます。":"A more rigorous check can become available as activity grows."}</p>}
+      </article>)}</section>:null}
       {testActionId && selectedAction && (
         <section className="surface test-builder">
           <h2>
@@ -1152,7 +1170,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
                 <p>{c.randomization}: {item.randomization === "time_block" ? c.dailyBlocks : locale === "ja" ? "メンバー単位" : "By member"} · {c.timeline}: {item.timeline.windowDays} {locale === "ja" ? "日" : "days"}</p>
                 <p>
                   {locale === "ja"
-                    ? "成熟済みの全割付を、配信失敗・不明を含めて分析します。"
+                    ? "結果を確認できる全メンバーを、配信失敗・不明を含めて集計します。"
                     : "All mature assignments are analyzed, including failed and uncertain deliveries."}
                 </p>
                 {item.spilloverRisk && (
@@ -1197,11 +1215,11 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
             </article>
           ))}
         </section>
-      ) : (
+      ) : !results?.simple?.length ? (
         <section className="surface">
           <p>{c.noResults}</p>
         </section>
-      )}
+      ) : null}
     </>
   );
 
@@ -1251,6 +1269,12 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
           <p>{data.options.available ? locale === "ja" ? "接続済み。改善策を有効にする前に権限を再確認します。" : "Connected. Permissions are checked again before enabling an improvement." : locale === "ja" ? "接続を確認してください。" : "Check the connection."}</p>
         </article>
         <article className="surface">
+          <h2>{locale==="ja"?"週間サマリー":"Weekly summary"}</h2>
+          <label><input type="checkbox" checked={weeklyEnabled} disabled={busy||!weeklyChannelId} onChange={e=>void saveWeekly(e.target.checked)}/>{locale==="ja"?"毎週スタッフに送る":"Send to staff each week"}</label>
+          <label>{locale==="ja"?"送信先":"Destination"}<select value={weeklyChannelId} disabled={busy||!data.options.available} onChange={e=>{setWeeklyChannelId(e.target.value);if(weeklyEnabled)void saveWeekly(true,e.target.value);}}>{data.options.channels.map(option=><option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
+          <p>{locale==="ja"?"新規メンバーの状況、ひとつの問題、ひとつの改善策を簡潔にお知らせします。":"A short update with newcomer progress, one issue, and one improvement."}</p>
+        </article>
+        <article className="surface">
           <h2>{locale === "ja" ? "データ" : "Data"}</h2>
           <label>{locale === "ja" ? "詳細データの保持期間" : "Detailed data retention"}<select value={retentionDays} onChange={e=>void saveRetentionDays(Number(e.target.value) as 7|14|30)}><option value={7}>{locale === "ja" ? "7日" : "7 days"}</option><option value={14}>{locale === "ja" ? "14日" : "14 days"}</option><option value={30}>{locale === "ja" ? "30日" : "30 days"}</option></select></label>
           <p>{locale === "ja" ? `集計データ: ${String(data.admin?.settings.aggregateRetentionMonths ?? "—")} か月` : `Aggregate data: ${String(data.admin?.settings.aggregateRetentionMonths ?? "—")} months`}</p>
@@ -1283,6 +1307,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
           N<span>✦</span>XUS
         </a>
         <p>{locale === "ja" ? "コミュニティ成長" : "COMMUNITY GROWTH"}</p>
+        {data.guilds&&data.guilds.length>1&&<label>{locale==="ja"?"サーバー":"Server"}<select value={data.selectedGuildId} onChange={e=>{window.location.href=`/auth/select?guild=${encodeURIComponent(e.target.value)}`;}}>{data.guilds.map(guild=><option key={guild.id} value={guild.id}>{guild.name}</option>)}</select></label>}
         <nav>
           {c.nav.map((label, i) => (
             <button
@@ -1301,7 +1326,8 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
           <button onClick={() => { const next=locale === "en" ? "ja" : "en"; setLocale(next); document.cookie=`nexus_locale=${next}; Path=/; Max-Age=31536000; SameSite=Lax`; }}>
             {locale === "en" ? "日本語" : "English"}
           </button>
-          <small>v0.4 · {locale === "ja" ? "本番" : "Production"}</small>
+          <small>v0.5 · {locale === "ja" ? "本番" : "Production"}</small>
+          {data.guilds?.[0]?.name!=="Development guild"&&<a href="/auth/logout">{locale==="ja"?"サインアウト":"Sign out"}</a>}
         </div>
       </aside>
       <main className="content">
@@ -1366,8 +1392,8 @@ function Setup({
         </div>
       </div>
       <p className="inline-note">{connected
-        ? locale === "ja" ? "✓ Discord に接続済み · ✓ データ接続は正常 · ✓ チャンネルを確認済み · ✓ 権限を確認済み" : "✓ Discord connected · ✓ Data connection working · ✓ Channels checked · ✓ Permissions checked"
-        : locale === "ja" ? "サーバーを確認中です。接続または権限を確認してください。" : "Checking your server… Check the connection and permissions."}</p>
+        ? locale === "ja" ? "基本的な測定はすでに始まっています。" : "Basic measurement is already running."
+        : locale === "ja" ? "接続を確認中です。測定できる項目から記録します。" : "Checking the connection. NEXUS records what it can already observe."}</p>
       {!defined && <>
         <h3>{locale === "ja" ? "新規メンバーの最初の成功は何ですか？" : "What should a successful newcomer do first?"}</h3>
         <div className="preset-row" role="radiogroup">
@@ -1376,7 +1402,7 @@ function Setup({
             {option === "reply" ? locale === "ja" ? "誰かから返信を受ける" : "Receive a reply" : option === "message" ? locale === "ja" ? "最初のメッセージを送る" : "Send a first message" : locale === "ja" ? "イベントに参加する" : "Join an event"}
           </label>)}
         </div>
-        <button disabled={busy || !goal || !connected} onClick={() => goal && void prepare({action:"activation_preset",preset:goal},"activation")}>{locale === "ja" ? "測定を開始" : "Start measuring"}</button>
+        <button disabled={busy || !goal} onClick={() => goal && void prepare({action:"activation_preset",preset:goal},"activation")}>{locale === "ja" ? "成功の目標を保存" : "Save success goal"}</button>
       </>}
       <p className="inline-note">{native
         ? locale === "ja" ? "Discord のオンボーディングを使用中です。NEXUS は変更せずに観測します。" : "Discord onboarding is already in use. NEXUS will observe it without changing it."

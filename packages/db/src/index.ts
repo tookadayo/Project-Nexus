@@ -12,7 +12,7 @@ export async function migrate(db:Database){
  await db.transaction().execute(async tx=>{
   await sql`SELECT pg_advisory_xact_lock(763201)`.execute(tx);
   await sql`CREATE TABLE IF NOT EXISTS schema_migrations(version integer PRIMARY KEY)`.execute(tx);
-  for(const [index,name] of ['001_foundation','002_runtime','003_telemetry','004_lifecycle','005_native','006_activation','007_operations','008_measurement','009_optimization','010_durable_ingest','011_activation_backfill','012_retention','013_experiment_outcomes'].entries()){
+  for(const [index,name] of ['001_foundation','002_runtime','003_telemetry','004_lifecycle','005_native','006_activation','007_operations','008_measurement','009_optimization','010_durable_ingest','011_activation_backfill','012_retention','013_experiment_outcomes','014_weekly_summary','015_suggestion_feedback'].entries()){
   const version=index+1;
   const done=await sql`SELECT version FROM schema_migrations WHERE version=${version}`.execute(tx);
   if(!done.rows.length){

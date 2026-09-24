@@ -1,12 +1,8 @@
-import {createHmac,createPublicKey,verify,timingSafeEqual,randomUUID,createHash} from 'node:crypto';
+import {createHmac,createPublicKey,verify,timingSafeEqual,randomUUID} from 'node:crypto';
 import {PermissionFlagsBits} from 'discord-api-types/v10';
 import {sql,tenant,json,type Tx} from '../../db/src/index.js';
 import {assert,type Scope} from '../../shared/src/index.js';
-export function scopeForGuild(guildId:string):Scope {
- assert(/^\d{17,20}$/.test(guildId),'INVALID_GUILD');
- const hex=createHash('sha256').update(`nexus:organization:${guildId}`).digest('hex');
- return {organizationId:`${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(13,16)}-8${hex.slice(17,20)}-${hex.slice(20,32)}`,guildId};
-}
+export {scopeForGuild,apiToken,validApiToken} from './scoping.js';
 export function verifyInteraction(publicKey:string,signature:string,timestamp:string,body:Buffer,now=Date.now()){
  if(!/^[a-f\d]{128}$/i.test(signature)||!/^\d{10}$/.test(timestamp)||Math.abs(now-Number(timestamp)*1000)>300000) return false;
  try{
@@ -37,5 +33,3 @@ export class Components {
   return row.intent;
  }
 }
-export function apiToken(key:string,s:Scope){return createHmac('sha256',key).update(`${s.organizationId}:${s.guildId}`).digest('base64url');}
-export function validApiToken(key:string,s:Scope,token:string){const expected=Buffer.from(apiToken(key,s));const actual=Buffer.from(token);return expected.length===actual.length&&timingSafeEqual(expected,actual);}

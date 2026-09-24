@@ -19,7 +19,7 @@ export const signalRegistry={
  'fallback.answer':def(flow,'interaction',null,true),
  'interaction.used':def(z.object({action:z.string().max(100)}).strict(),'interaction',null,true),
  'message.sent':def(message,'gateway','GuildMessages',true),
- 'reply.received':def(z.object({latencySeconds:z.number().nonnegative()}).strict(),'projector','GuildMessages'),
+ 'reply.received':def(z.object({latencySeconds:z.number().nonnegative(),channelId:z.string().regex(/^\d{17,20}$/).optional()}).strict(),'projector','GuildMessages'),
  'reply.established':def(empty,'projector','GuildMessages'),
  'reaction.added':def(z.object({messageId:id,channelId:id}).strict(),'gateway','GuildMessageReactions',true),
  'voice.started':def(z.object({channelId:id}).strict(),'gateway','GuildVoiceStates'),

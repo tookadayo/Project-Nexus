@@ -1,78 +1,60 @@
-# NEXUS v0.1 — Vertical Slice
+# NEXUS v0.5 — Actionable Newcomer Growth
 
-Discord内の初期設定 → 分岐オンボーディング → 所有権付きロール付与 → Lifecycle / Activation → Coverage付きOverview → Preference変更までの実装です。対象は **Technical ValidationとWP-00〜WP-08のみ**。AI、Experiment、診断、Helper Alertの実行など後続機能は実装していません。
+NEXUS は Discord の新規メンバーについて、最初の成功、返信、7日後の活動を測定し、安全な改善策とその結果を示します。メッセージ本文、添付、DM は保存しません。
 
-## 必要環境
+## ローカル起動（Windows PowerShell 5.1）
 
-- Node.js 24 / pnpm 11.19.0
-- PostgreSQL 18 / Redis 8（本番・CIでは公式コンテナ推奨）
-- 実Discord検証にはテストアプリ、テストguild、HTTP endpointのHTTPS公開が必要です。
+Node.js 24、pnpm、ngrok と、`.env.example` から作成した `.env` が必要です。開発環境では `NEXUS_WEB_AUTH_MODE=development` と16文字以上の `NEXUS_WEB_PASSWORD` を明示します。Redis の Windows バイナリがない場合は `powershell -File scripts/setup-native-redis.ps1` を実行してください。
 
-```powershell
-pnpm install --frozen-lockfile
-docker compose -f infra/docker/compose.yaml up -d
-```
+- `START NEXUS.cmd` — PostgreSQL、Redis、API/Discord、Web、ngrok を順に起動
+- `STOP NEXUS.cmd` — `.local/runtime/runtime.json` に記録されたプロセスだけを停止
+- `RESTART NEXUS.cmd` — STOP の後に START を実行
 
-このWindows環境はDocker未導入のため、開発用ネイティブPostgreSQLとRedisを使用しました。再現する場合：
+同等のスクリプトは `start-nexus.ps1`、`stop-nexus.ps1`、`restart-nexus.ps1` です。START は失敗時にその試行で起動したプロセスを片付けます。既存の関係ないポート使用者は停止しません。
 
-```powershell
-powershell -File scripts/setup-native-redis.ps1
-pnpm infra
-```
+| サービス | ポート |
+| --- | ---: |
+| Web | 3100 |
+| API | 3001 |
+| Discord interaction | 3002 |
+| PostgreSQL | 55432 |
+| Redis | 56379 |
 
-RedisのWindowsバイナリはredis-windowsのテスト用ビルドです。プロダクションのRedisを置き換える技術選定ではありません。
+初回のコマンド登録は `pnpm register` で行います。Discord Developer Portal では Server Members Intent を有効化し、Message Content Intent は不要です。
 
-## Discordで実行する
+## 管理者の流れ
 
-1. `.env.example`を`.env`へコピーし、Discord設定と独立した暗号鍵をローカルで設定します。秘密情報をチャットやGitへ貼り付けないでください。
-2. `IDENTITY_KEY` / `LOOKUP_KEY` / `COMPONENT_KEY`はそれぞれ独立した32バイトのhex値、`API_KEY`は32文字以上を用意します。
-3. Developer Portalで**Server Members Intentのみ**privileged intentとして有効にします。Message Content Intentは有効にしません。
-4. Guild install scopesは`bot applications.commands`。必要権限はViewChannel、SendMessages、ManageRolesのみ（permissions整数`268438528`）。管理対象ロールをBotの最上位ロールより下に置きます。
-5. Interaction endpointを`https://<your-host>/interactions`に設定し、ローカル`:3002`へ転送します。ローカルのサービスは127.0.0.1にbindします。
-6. `pnpm migrate`、`pnpm register`、`pnpm dev`を実行します。コマンド登録もOutboxから送信されます。
-7. Discordで`/nexus panel` → テンプレート → 開始チャンネル → NEXUS / Onboardingを有効化 → Role mappings。
-8. 一般メンバーは`/nexus personalize`またはPanelのPersonalizeから開始し、完了後にUpdate Preferencesで再設定できます。
+1. Bot をサーバーに追加すると、設定前でも基本的な活動測定が始まります。
+2. Home で「最初の成功」を選びます。歓迎フローの設定は任意です。
+3. Newcomers で到達点と、十分な件数があるチャンネル別の集計を見ます。
+4. Improve で改善策を選び、流れと送信先を確認します。機能に必要な権限を検査し、集計に影響しないテスト通知を送れます。
+5. Results で改善前後を比較します。十分な活動、権限、プランがある場合はより正確な比較を選べます。
+6. Settings から週1回の短いスタッフ向けサマリーを任意で有効にできます。
 
-Admin操作はManageGuild権限または設定済みNEXUS Admin Roleが必要です。BotにAdministratorを要求しません。
+通常の改善メニューは、返信待ちのスタッフ通知、参加後のスタッフ通知、チャンネル案内、利用可能なイベントの案内に限定します。DM を使う追跡は初期状態で無効です。
 
-## Overview
+## 本番 Web 認証
 
-`/nexus overview`でDiscord内の集計を表示します。Webは任意の読取専用補助UIです。
-
-```powershell
-pnpm build
-pnpm web
-```
-
-`.env`の`NEXUS_WEB_PASSWORD`（16文字以上）と`DISCORD_GUILD_ID`、`API_KEY`を設定します。`pnpm web`はguild限定APIトークンをメモリー内で生成します。ブラウザーのBasic認証ユーザー名は`nexus`です。外部公開する場合はHTTPSのリバースプロキシが必要です。Webの直接公開、OAuthログイン、マルチguild切替はこのsliceに含みません。
+本番では `NEXUS_WEB_AUTH_MODE=oauth`（既定）を使用します。`.env` に `DISCORD_APPLICATION_ID`、`DISCORD_CLIENT_SECRET`、32文字以上のランダムな `NEXUS_SESSION_SECRET`、`API_KEY`、`NEXUS_WEB_URL` を設定し、Discord OAuth の redirect URI に `${NEXUS_WEB_URL}/auth/callback` を登録します。OAuth は `identify guilds` を要求します。暗号化された HttpOnly セッションを使い、各読み書き時に Discord で管理権限を再確認します。開発用パスワード方式は `NEXUS_WEB_AUTH_MODE=development` のときだけ使います。本番公開には HTTPS を使ってください。
 
 ## 検証
 
 ```powershell
 pnpm check
 pnpm test:integration
-pnpm build
-pnpm exec playwright install chromium
+pnpm --filter @nexus/web build
 pnpm test:e2e
+pnpm test:runtime
 ```
 
-`test:integration`は実PostgreSQL・Redisを起動します。Windowsでは`.local/redis/.../redis-server.exe`または`REDIS_BINARY`を使います。Docker環境では`NEXUS_TEST_INFRA=docker`にするとStreams側の統合テストがTestcontainersを利用します。Discord RESTはFakeDiscordで置き換えています。テストDBは本番接続文字列を使いません。
+`test:runtime` は Windows PowerShell 5.1 と偽のローカルサービスを使用し、既存の NEXUS プロセスに触れずに起動・停止・再起動を確認します。統合テストは埋め込み PostgreSQL とローカル Redis を使い、Discord REST は偽物で検証します。
 
-署名HTTP → durable jobs → BullMQ → Panel / settings → branching flow → role grant → Gateway normalize → Redis Streams → Lifecycle → authenticated API → preference reconciliationを通す統合シナリオ、および実APIに接続するPlaywrightテストを含みます。
+## データの境界
 
-実Discord資格情報は未準備とユーザーから確認済みです。実Gateway接続、Discordクライアント表示、実REST権限は**未検証**です。
+- 個人識別子はサーバーごとに保護され、管理画面には集計だけを表示します。少数のチャンネルは非表示にします。
+- 観測できなかった期間と、まだ7日・30日の窓が終わっていないメンバーは、ゼロや失敗として扱いません。
+- テスト通知は Bot から直接送信し、メンバー活動、改善策の配信、結果比較、割付、利用量に記録しません。
+- 改善策の自動実行は暗黙に有効にしません。送信時も権限と連絡上限を再確認します。
+- 個人またはサーバーの削除後は再取り込みを防ぐ停止状態を残します。
 
-## データと計測の境界
-
-- メッセージ本文、添付、embed、DM、ユーザー名は永続化しません。
-- DiscordユーザーIDはguildごとのHMACとAES-256-GCM vaultで扱い、Analyticsは内部UUIDのmembership episode単位です。
-- 初回返信は既存メンバーの明示的返信だけを使い、Analyticsに返信者IDやユーザー間の辺を保存しません。
-- Activationは「開始チャンネルで加入後7日以内に送信」。Active Retentionは加入からD1/D7/D30の各24時間窓でのメッセージ活動です。未成熟な窓は分母から除外します。
-- TEST / PREVIEWは本番集計・Discordロール操作から除外します。
-- 切断、heartbeat欠落、Redis送信失敗、未処理eventがある期間はCoverageを低下させます。取得不能はnullです。
-- 詳細イベント・membership episode・監査・所有権証跡は45日で期限切れにします。45日を超えて証跡が失われたロールは外しません。長期のPreference同期はこの保持境界内のみ保証します。
-- Interaction token / jobは15分、Streamの正規化メタデータは24時間で削除します。保持期限処理はworker稼働中と再起動後に実行します。
-- 個人削除は再取り込みを防ぐguild限定HMAC tombstoneのみ残します。guild削除は停止状態と削除監査を残します。Discord上の既存ロールは削除しません。
-- UNKNOWNの副作用は自動再実行しません。成功を推測してロール所有権を作りません。
-
-[Work Packet報告](docs/work-packets.md) / [Architecture](docs/architecture/vertical-slice.md) / [計測定義](docs/architecture/metrics.md) / [検証結果](docs/validation.md)
+[Architecture](docs/architecture/vertical-slice.md) / [計測定義](docs/architecture/metrics.md) / [検証結果](docs/validation.md)

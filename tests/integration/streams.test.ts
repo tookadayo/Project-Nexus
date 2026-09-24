@@ -69,6 +69,8 @@ it('runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
   await deliver(admin,{custom_id:control('Choose an answer to map a role'),values:['purpose:community']});
   const roleSelect=controls(discord.panels.get('reply')).find(c=>c.type===6)!;
   await deliver(admin,{custom_id:roleSelect.custom_id,values:[role]});
+  // This slice exercises the legacy start-channel success rule.
+  const configured=await settings.get(s);await settings.update(s,{key:'admin',permissions:'32',roles:[],source:'DISCORD_PANEL',requestId:'legacy-slice'},configured.revision,{flags:{...configured.flags,activation_dsl_v2:false}});
   const publisher=new GatewayPublisher(redis),consumer=new StreamConsumer(redis,lifecycle,'slice-consumer',0);await consumer.init();
   const event=normalize({t:'GUILD_MEMBER_ADD',s:1,d:{guild_id:s.guildId,user:{id:user},joined_at:joined.toISOString()}},0,'slice-gateway',vault)!;
   await publisher.publish(event);await consumer.tick();
@@ -97,7 +99,7 @@ it('uses real Streams, reclaims a crashed delivery and deduplicates lifecycle an
  const user='111111111111111114',helper='111111111111111115',channel='111111111111111116';const now=Date.now();const join=new Date(now-8*86400000);
  discord.members.set(user,{joinedAt:join.toISOString(),roles:[],permissions:'0',bot:false});discord.members.set(helper,{joinedAt:new Date(now-30*86400000).toISOString(),roles:[],permissions:'0',bot:false});
  const actor={key:'admin',permissions:'32',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};
- const cfg=await onboarding.chooseTemplate(s,actor,0,'Gaming');await settings.update(s,actor,cfg.revision,{enabled:true,onboardingEnabled:true,startChannelId:channel});
+ const cfg=await onboarding.chooseTemplate(s,actor,0,'Gaming');await settings.update(s,actor,cfg.revision,{enabled:true,onboardingEnabled:true,startChannelId:channel,flags:{...cfg.flags,activation_dsl_v2:false}});
  const lifecycle=new LifecycleService(db,vault,settings,discord);const publisher=new GatewayPublisher(redis);const worker=new StreamConsumer(redis,lifecycle,'worker-1',0);await worker.init();
  const joined=normalize({t:'GUILD_MEMBER_ADD',s:1,d:{guild_id:s.guildId,user:{id:user},joined_at:join.toISOString()}},0,'session',vault)!;
  const message=normalize({t:'MESSAGE_CREATE',s:2,d:{guild_id:s.guildId,id:'111111111111111117',channel_id:channel,author:{id:user},type:0,timestamp:new Date(join.getTime()+60000).toISOString(),content:'must never persist'}},0,'session',vault)!;
@@ -143,7 +145,7 @@ it('recovers a deleted consumer group and records stream loss as incomplete cove
 });
 it('does not starve fresh messages behind unresolved reply references',async()=>{
  const s=scopeForGuild('741111111111111111');await ensureGuild(db,s);const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32));const settings=new SettingsService(db);const discord=new FakeDiscord();
- await settings.update(s,{key:'admin',permissions:'32',roles:[],source:'DISCORD_PANEL',requestId:'pending'},0,{enabled:true});
+ await settings.update(s,{key:'admin',permissions:'32',roles:[],source:'DISCORD_PANEL',requestId:'pending'},0,{enabled:true,flags:{...(await settings.get(s)).flags,activation_dsl_v2:false}});
  const now=Date.now(),user='741111111111111112',helper='741111111111111113',helper2='741111111111111117';
  discord.members.set(user,{joinedAt:new Date(now-60000).toISOString(),permissions:'0',roles:[],bot:false});discord.members.set(helper,{joinedAt:new Date(now-86400000).toISOString(),permissions:'0',roles:[],bot:false});discord.members.set(helper2,{...discord.members.get(helper)!});
  const service=new LifecycleService(db,vault,settings,discord),consumer=new StreamConsumer(redis,service,'reply-consumer',0),publisher=new GatewayPublisher(redis);await consumer.init();

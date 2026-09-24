@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {normalize,eventSchema,dedupeKey,type Envelope,type Dispatch} from '../../../packages/events/src/index.js';
 import {scopeForGuild} from '../../../packages/security/src/index.js';
 import type {IdentityVault} from '../../../packages/identity/src/index.js';
-import {sql,tenant,json,type Database} from '../../../packages/db/src/index.js';
+import {sql,tenant,json,ensureGuild,type Database} from '../../../packages/db/src/index.js';
 export const gatewayIntents=[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMembers,GatewayIntentBits.GuildMessages,GatewayIntentBits.GuildMessageReactions,GatewayIntentBits.GuildVoiceStates,GatewayIntentBits.GuildScheduledEvents];
 export const STREAM='nexus:events';
 export class GatewayPublisher {
@@ -41,9 +41,11 @@ export class GatewayPublisher {
 export function createGateway(redis:Redis,vault:IdentityVault,onError:()=>void=()=>{},db?:Database){
  const client=new Client({intents:gatewayIntents});const publisher=new GatewayPublisher(redis,db,vault);const sessions=new Map<number,string>();let healthSequence=0;
  const healthSession=randomUUID();const disconnected=new Set<number>();
+ const registerGuild=async(guildId:string)=>{if(!db)return;const scope=scopeForGuild(guildId);await db.transaction().execute(tx=>ensureGuild(tx,scope));};
  const health=async(kind:Envelope['kind'],shardId?:number)=>{
   for(const guild of client.guilds.cache.values())if(shardId===undefined||guild.shardId===shardId){
    if(kind==='telemetry.heartbeat'&&disconnected.has(guild.shardId))continue;
+   await registerGuild(guild.id);
    const event:Envelope={...scopeForGuild(guild.id),shardId:guild.shardId,gatewaySessionId:healthSession,sequence:healthSequence++,kind,at:new Date().toISOString(),context:'PRODUCTION'};
    await publisher.publish(event).catch(onError);
   }
@@ -51,8 +53,9 @@ export function createGateway(redis:Redis,vault:IdentityVault,onError:()=>void=(
  client.on('raw',(packet:Dispatch,shardId:number)=>{
   if(packet.t==='READY'){const data=packet.d as {session_id:string};sessions.set(shardId,data.session_id);}
   const session=sessions.get(shardId);if(!session)return;
-  try{const event=normalize(packet,shardId,session,vault);if(event)void publisher.publish(event).catch(onError);}catch{onError();}
+  try{const event=normalize(packet,shardId,session,vault);if(event)void registerGuild(event.guildId).then(()=>publisher.publish(event)).catch(onError);}catch{onError();}
  });
+ client.on(Events.GuildCreate,guild=>{void registerGuild(guild.id).then(()=>health('telemetry.connected',guild.shardId)).catch(onError);});
  client.on(Events.ClientReady,()=>{void health('telemetry.connected');});
  client.on(Events.ShardReady,shardId=>{disconnected.delete(shardId);void health('telemetry.connected',shardId);});
  client.on(Events.ShardResume,shardId=>{disconnected.delete(shardId);void health('telemetry.connected',shardId);});
