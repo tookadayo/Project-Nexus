@@ -11,24 +11,24 @@ export const metricRegistry={
 export type MetricKey=keyof typeof metricRegistry;
 export type MetricResult={metricKey:MetricKey,metricVersion:number,value:number|null,numerator?:number,denominator?:number,sampleSize:number,window:{from:string,to:string,asOf:string},dataCoverage:CoverageMetric,provisional:boolean,definitionIds?:string[]};
 export function percentile(values:number[],p:number){if(!values.length)return null;const s=[...values].sort((a,b)=>a-b),i=(s.length-1)*p;return s[Math.floor(i)]!+(s[Math.ceil(i)]!-s[Math.floor(i)]!)*(i%1);}
-export function canonicalMetrics(episodes:MetricEpisode[],events:MetricEvent[],from:number,to:number,asOf:number,coverage:Record<string,CoverageMetric>,activationSeconds=604800,definitions:Record<string,{id:string,windowSeconds:number}>={}):Record<MetricKey,MetricResult>{
+export function canonicalMetrics(episodes:MetricEpisode[],events:MetricEvent[],from:number,to:number,asOf:number,coverage:Record<string,CoverageMetric>,activationSeconds=604800,definitions:Record<string,{id:string,windowSeconds:number}>={},strictActivation=false):Record<MetricKey,MetricResult>{
  const cohort=episodes.filter(e=>e.context==='PRODUCTION'&&e.joinedAt>=from&&e.joinedAt<to&&e.joinedAt<=asOf);
  const facts=(e:MetricEpisode)=>events.filter(f=>f.context==='PRODUCTION'&&f.episodeId===e.id&&f.at>=e.joinedAt&&f.at<=asOf);
  const mature=(seconds:number)=>cohort.filter(e=>e.joinedAt+seconds*1000<=asOf);
  const activationWindow=(e:MetricEpisode)=>definitions[e.id]?.windowSeconds??activationSeconds;
- const activationMature=cohort.filter(e=>e.joinedAt+activationWindow(e)*1000<=asOf);
+ const activationMature=cohort.filter(e=>(!strictActivation||Boolean(definitions[e.id]))&&e.joinedAt+activationWindow(e)*1000<=asOf);
  const has=(e:MetricEpisode,kind:string,seconds:number)=>facts(e).some(f=>canonicalSignal(f.kind)===kind&&f.at<=e.joinedAt+seconds*1000);
  const results={} as Record<MetricKey,MetricResult>;
  const put=(key:MetricKey,value:number|null,n:number,provisional=false,numerator?:number,denominator?:number)=>{
   const d=metricRegistry[key],c=coverage[d.input]??inputCoverage(d.input,null,null);
-  results[key]={metricKey:key,metricVersion:d.version,value:c.status==='unavailable'||c.status==='incomplete'?null:value,sampleSize:n,window:{from:new Date(from).toISOString(),to:new Date(to).toISOString(),asOf:new Date(asOf).toISOString()},dataCoverage:c,provisional,...(numerator===undefined?{}:{numerator,denominator}),...(d.input==='activation'?{definitionIds:[...new Set(cohort.map(e=>definitions[e.id]?.id??'legacy'))].sort()}: {})};
+  results[key]={metricKey:key,metricVersion:d.version,value:c.status==='unavailable'||c.status==='incomplete'?null:value,sampleSize:n,window:{from:new Date(from).toISOString(),to:new Date(to).toISOString(),asOf:new Date(asOf).toISOString()},dataCoverage:c,provisional,...(numerator===undefined?{}:{numerator,denominator}),...(d.input==='activation'?{definitionIds:[...new Set(cohort.flatMap(e=>definitions[e.id]?.id?[definitions[e.id]!.id]:strictActivation?[]:['legacy']))].sort()}: {})};
  };
  const rate=(key:MetricKey,eligible:MetricEpisode[],yes:(e:MetricEpisode)=>boolean)=>{const n=eligible.filter(yes).length;put(key,eligible.length?n/eligible.length:null,eligible.length,eligible.length<cohort.length,n,eligible.length);};
  put('new_members',cohort.length,cohort.length);
  rate('onboarding_completion',mature(activationSeconds),e=>has(e,'native_onboarding.observed_completed',activationSeconds)||has(e,'fallback.completed',activationSeconds));
  rate('home_actions_completion',mature(activationSeconds),e=>has(e,'home_actions.observed_completed',activationSeconds));
- rate('activation_rate',activationMature,e=>has(e,'activation.completed',activationWindow(e)));
- const ttfv=cohort.flatMap(e=>{const activation=facts(e).filter(f=>f.kind==='activation.completed'&&f.at<=e.joinedAt+activationWindow(e)*1000);return activation.length?[(Math.min(...activation.map(f=>f.at))-e.joinedAt)/1000]:[];});
+ rate('activation_rate',activationMature,e=>strictActivation?facts(e).some(f=>f.kind==='activation.completed'&&f.data.definitionId===definitions[e.id]?.id&&f.at<=e.joinedAt+activationWindow(e)*1000):has(e,'activation.completed',activationWindow(e)));
+ const ttfv=cohort.flatMap(e=>{const activation=facts(e).filter(f=>f.kind==='activation.completed'&&(!strictActivation||f.data.definitionId===definitions[e.id]?.id)&&f.at<=e.joinedAt+activationWindow(e)*1000);return activation.length?[(Math.min(...activation.map(f=>f.at))-e.joinedAt)/1000]:[];});
  for(const [key,p] of [['ttfv_median',.5],['ttfv_p75',.75],['ttfv_p90',.9]] as const)put(key,percentile(ttfv,p),ttfv.length,activationMature.length<cohort.length);
  const messages=cohort.flatMap(e=>{const first=facts(e).filter(f=>f.kind==='message.sent'&&f.at<=e.joinedAt+activationSeconds*1000).sort((a,b)=>a.at-b.at)[0];return first&&first.at+86400000<=asOf?[first]:[];});
  const latencies=messages.flatMap(f=>typeof f.data.firstReplyLatencySeconds==='number'&&f.data.firstReplyLatencySeconds<=86400?[f.data.firstReplyLatencySeconds]:[]);

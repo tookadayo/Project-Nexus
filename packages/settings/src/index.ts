@@ -7,7 +7,7 @@ export const templates=['Gaming','Creator','Developer / OSS','Product / SaaS','E
 const id=z.string().regex(/^\d{17,20}$/);
 export const settingsSchema=z.object({enabled:z.boolean().default(false),onboardingEnabled:z.boolean().default(false),template:z.enum(templates).default('General Community'),
  uiLanguage:z.enum(['auto','ja','en','bilingual']).default('auto'),
- startChannelId:id.nullable().default(null),adminRoleId:id.nullable().default(null),flowVersionId:z.uuid().nullable().default(null),
+ startChannelId:id.nullable().default(null),adminNotificationChannelId:id.nullable().default(null),adminRoleId:id.nullable().default(null),flowVersionId:z.uuid().nullable().default(null),
  mode:z.literal('SUGGEST').default('SUGGEST'),activationWindowHours:z.number().int().min(1).max(720).default(168),
  firstResponseMinutes:z.number().int().min(1).max(1440).default(60),helperEnabled:z.literal(false).default(false),reportEnabled:z.literal(false).default(false),
  onboardingMode:z.enum(['auto','native','fallback','hybrid']).default('auto'),

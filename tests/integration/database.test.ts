@@ -78,7 +78,7 @@ it('completes Discord panel configuration, pinned branching flow and ownership-s
  await interactions.dispatch(s,{...base,id:'100000000000000003',command:'panelRefresh'});while(await actions.tick(s)){/* drain */}
  expect(discord.calls.filter(c=>c==='sendPanel')).toHaveLength(1);expect(discord.panels.has(permanent.message_id)).toBe(true);
  const flow=templateFlow('Gaming');flow.nodes[2]!.options[0]!.roleId=managedRole;flow.nodes[2]!.options[1]!.roleId=manualRole;
- let cfg=await onboarding.publish(s,actor,0,flow,'Gaming');cfg=await settings.update(s,actor,cfg.revision,{startChannelId:base.channelId,enabled:true,onboardingEnabled:true});
+ let cfg=await onboarding.publish(s,actor,(await settings.get(s)).revision,flow,'Gaming');cfg=await settings.update(s,actor,cfg.revision,{startChannelId:base.channelId,onboardingEnabled:true});
  let session=await onboarding.start(s,userId,new Date(discord.members.get(userId)!.joinedAt));
  const pinned=session.flow_version_id;const newer=await onboarding.publish(s,actor,cfg.revision,templateFlow('General Community'));
  expect((await onboarding.session(s,session.id)).flow_version_id).toBe(pinned);

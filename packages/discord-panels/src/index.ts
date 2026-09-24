@@ -16,6 +16,7 @@ export * from './views/diagnostics.js';
 export * from './views/errors.js';
 export * from './views/experiments.js';
 export * from './views/health.js';
+export * from './views/improve.js';
 export * from './views/interventions.js';
 export * from './views/lifecycle.js';
 export * from './views/onboarding.js';

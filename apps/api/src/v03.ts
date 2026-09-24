@@ -21,11 +21,35 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
  app.get(base+'/options',async(req,reply)=>{const s=getScope(req,reply);if(!discord?.options)return {channels:[],roles:[],events:[],available:false};try{return {...await discord.options(s.guildId),available:true};}catch{return {channels:[],roles:[],events:[],available:false};}});
  app.post(base+'/setup/activation',async(req,reply)=>{
   const s=getScope(req,reply),input=z.object({preset:z.enum(['reply','event','message'])}).strict().parse(req.body),event={reply:'reply.received',event:'scheduled_event.subscribed',message:'message.sent'}[input.preset],definition={name:`${event} within 7d`,windowSeconds:604800,rule:{op:'event',event,withinSeconds:604800}},actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
-  assert(await new EntitlementService(db).canDefineActivation(s,definition),'ENTITLEMENT_REQUIRED',403);const revisions=domainRevisions(db),id=await revisions.draft(s,actor,'activation',definition);return revisions.preview(s,id);
+  assert(await new EntitlementService(db).canDefineActivation(s,definition),'ENTITLEMENT_REQUIRED',403);
+  const settings=new SettingsService(db),cfg=await settings.get(s);if(!cfg.enabled)await settings.update(s,actor,cfg.revision,{enabled:true});
+  const revisions=domainRevisions(db),id=await revisions.draft(s,actor,'activation',definition);return revisions.preview(s,id);
+ });
+ app.post(base+'/settings/notification',async(req,reply)=>{
+  const s=getScope(req,reply),input=z.object({channelId:z.string().regex(/^\d{17,20}$/),revision:z.number().int().nonnegative()}).strict().parse(req.body);
+  assert(discord,'DISCORD_UNAVAILABLE',503);await discord.checkChannel(s.guildId,input.channelId);
+  const actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
+  return new SettingsService(db).update(s,actor,input.revision,{adminNotificationChannelId:input.channelId});
+ });
+ app.post(base+'/settings/retention',async(req,reply)=>{
+  const s=getScope(req,reply),input=z.object({days:z.union([z.literal(7),z.literal(14),z.literal(30)]),revision:z.number().int().nonnegative()}).strict().parse(req.body);
+  const actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
+  return new SettingsService(db).update(s,actor,input.revision,{detailedRetentionDays:input.days});
  });
  app.post(base+'/actions/draft',async(req,reply)=>{
   const s=getScope(req,reply),input=z.object({templateKey:z.enum(['reply_rescue','welcome_helper','inactive_follow_up','channel_recommendation','event_recommendation']),channelId:z.string().optional(),eventId:z.string().optional(),recommendedChannelIds:z.array(z.string()).optional(),safetyMode:z.enum(['suggest','approval','auto']).optional()}).strict().parse(req.body),actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
-  assert(await new EntitlementService(db).can(s,'interventions'),'ENTITLEMENT_REQUIRED',403);const definition=compileActionTemplate(input.templateKey as ActionTemplateKey,input),revisions=domainRevisions(db),id=await revisions.draft(s,actor,'intervention',definition);return revisions.preview(s,id);
+  assert(await new EntitlementService(db).can(s,'interventions'),'ENTITLEMENT_REQUIRED',403);
+  if(input.safetyMode==='auto')assert(await new EntitlementService(db).can(s,'automation_auto'),'ENTITLEMENT_REQUIRED',403);
+  const definition=compileActionTemplate(input.templateKey as ActionTemplateKey,input);
+  for(const action of definition.actions){
+   if('channelId' in action){assert(discord,'DISCORD_UNAVAILABLE',503);await discord.checkChannel(s.guildId,action.channelId);}
+   if(action.type==='recommend_channels')for(const id of action.channels){assert(discord,'DISCORD_UNAVAILABLE',503);await discord.checkChannel(s.guildId,id);}
+   if(action.type==='recommend_event'){
+    assert(discord?.options,'DISCORD_UNAVAILABLE',503);
+    const options=await discord.options(s.guildId);assert(options.events.some(event=>event.id===action.eventId),'EVENT_NOT_AVAILABLE');
+   }
+  }
+  const revisions=domainRevisions(db),id=await revisions.draft(s,actor,'intervention',definition);return revisions.preview(s,id);
  });
  app.post(base+'/setup/onboarding/recommended',async(req,reply)=>{
   const s=getScope(req,reply),actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id},cfg=await new SettingsService(db).get(s),capability=(await sql<{profile:{recommendedMode:'native'|'fallback';nativeOnboardingEnabled:boolean}}>`SELECT profile FROM guild_capabilities WHERE ${tenant(s)} ORDER BY checked_at DESC LIMIT 1`.execute(db)).rows[0];assert(capability,'CAPABILITY_CHECK_REQUIRED');assert(capability.profile.recommendedMode==='native'?capability.profile.nativeOnboardingEnabled:Boolean(cfg.startChannelId&&cfg.flowVersionId),'RECOMMENDED_SETUP_REQUIRES_CONFIGURATION');

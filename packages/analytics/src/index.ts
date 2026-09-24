@@ -52,19 +52,21 @@ export class AnalyticsService {
   for(const state of activationState)if(!events.some(e=>e.episode_id===state.episode_id&&e.kind==='activation.completed'))events.push({episode_id:state.episode_id,kind:'activation.completed',occurred_at:state.activated_at,context:'PRODUCTION',data:{}});
   const cursor=(await sql<{first_seen:Date,last_seen:Date}>`SELECT first_seen,last_seen FROM telemetry_cursor WHERE ${tenant(s)}`.execute(this.db)).rows[0];
   const gaps=(await sql<{started_at:Date,ended_at:Date|null}>`SELECT started_at,ended_at FROM telemetry_health WHERE ${tenant(s)} AND started_at<${asOf} AND (ended_at IS NULL OR ended_at>${from})`.execute(this.db)).rows;
-  const ratio=coverage(from.getTime(),asOf.getTime(),cursor?Math.max(cursor.first_seen.getTime(),Date.now()-cfg.detailedRetentionDays*day):null,cursor?.last_seen.getTime()??null,gaps.map(g=>({start:g.started_at.getTime(),end:g.ended_at?.getTime()??null})),asOf.getTime());
-  const expected=asOf.getTime()-from.getTime(),observed=Math.floor(expected*ratio);
+  const coverageEnd=Math.min(to.getTime(),asOf.getTime());
+  const ratio=coverage(from.getTime(),coverageEnd,cursor?Math.max(cursor.first_seen.getTime(),Date.now()-cfg.detailedRetentionDays*day):null,cursor?.last_seen.getTime()??null,gaps.map(g=>({start:g.started_at.getTime(),end:g.ended_at?.getTime()??null})),asOf.getTime());
+  const expected=coverageEnd-from.getTime(),observed=Math.floor(expected*ratio);
   const coverageMap:Record<string,CoverageMetric>={members:inputCoverage('members',cursor?expected:null,cursor?observed:null),messages:inputCoverage('messages',cursor?expected:null,cursor?observed:null),activity:inputCoverage('activity',cursor?expected:null,cursor?observed:null),activation:inputCoverage('activation',cursor?expected:null,cursor?observed:null)};
-  const snapshots=(await sql<{expected:number,observed:number}>`SELECT count(*)::integer AS expected,count(*) FILTER(WHERE state='succeeded')::integer AS observed FROM native_snapshot_jobs WHERE ${tenant(s)} AND due_at>=${from} AND due_at<=${asOf}`.execute(this.db)).rows[0]!;
+  const snapshots=(await sql<{expected:number,observed:number}>`SELECT count(*)::integer AS expected,count(*) FILTER(WHERE state='succeeded')::integer AS observed FROM native_snapshot_jobs WHERE ${tenant(s)} AND due_at>=${from} AND due_at<=${new Date(coverageEnd)}`.execute(this.db)).rows[0]!;
   coverageMap.native=inputCoverage('native',cfg.flags.native_snapshot_v2&&snapshots.expected?snapshots.expected:null,cfg.flags.native_snapshot_v2&&snapshots.expected?snapshots.observed:null);
-  const capability=(await sql<{profile:{recommendedMode:string}}>`SELECT profile FROM guild_capabilities WHERE ${tenant(s)} ORDER BY checked_at DESC LIMIT 1`.execute(this.db)).rows[0];
+  const capability=(await sql<{profile:{recommendedMode:string;nativeOnboardingEnabled?:boolean}}>`SELECT profile FROM guild_capabilities WHERE ${tenant(s)} ORDER BY checked_at DESC LIMIT 1`.execute(this.db)).rows[0];
   const effectiveMode=cfg.onboardingMode==='auto'?capability?.profile.recommendedMode:cfg.onboardingMode;
-  coverageMap.onboarding=effectiveMode==='fallback'?coverageMap.members!:coverageMap.native;
+  const onboardingUnavailable=inputCoverage('onboarding',null,null);
+  coverageMap.onboarding=effectiveMode==='fallback'?(cfg.onboardingEnabled&&cfg.flowVersionId?coverageMap.members!:onboardingUnavailable):capability?.profile.nativeOnboardingEnabled?coverageMap.native:onboardingUnavailable;
   const pins=(await sql<{episode_id:string,revision_id:string,definition:{windowSeconds:number}}>`SELECT a.episode_id,a.revision_id,r.definition FROM activation_members a JOIN guild_config_revisions r ON r.organization_id=a.organization_id AND r.guild_id=a.guild_id AND r.id=a.revision_id WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId}`.execute(this.db)).rows;
   if(pins.some(p=>/native_onboarding\.|home_actions\.|screening\.passed/.test(JSON.stringify(p.definition)))){
    const native=coverageMap.native;coverageMap.activation=native.status==='unavailable'?inputCoverage('activation',null,null):inputCoverage('activation',expected,Math.min(observed,expected*(native.observed??0)/Math.max(1,native.expected??1)));
   }
-  const metrics=canonicalMetrics(episodes.map(e=>({id:e.id,joinedAt:e.joined_at.getTime(),context:e.context})),events.map(e=>({episodeId:e.episode_id,kind:e.kind,at:e.occurred_at.getTime(),context:e.context,data:e.data})),from.getTime(),to.getTime(),asOf.getTime(),coverageMap,cfg.activationWindowHours*3600,Object.fromEntries(pins.map(p=>[p.episode_id,{id:p.revision_id,windowSeconds:p.definition.windowSeconds}])));
+  const metrics=canonicalMetrics(episodes.map(e=>({id:e.id,joinedAt:e.joined_at.getTime(),context:e.context})),events.map(e=>({episodeId:e.episode_id,kind:e.kind,at:e.occurred_at.getTime(),context:e.context,data:e.data})),from.getTime(),to.getTime(),asOf.getTime(),coverageMap,cfg.activationWindowHours*3600,Object.fromEntries(pins.map(p=>[p.episode_id,{id:p.revision_id,windowSeconds:p.definition.windowSeconds}])),true);
   if(defaultWindow)metrics.d30_active_retention=await this.matureD30(s,asOf);
   return metrics;
  }

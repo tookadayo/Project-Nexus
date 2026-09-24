@@ -8,6 +8,8 @@ export async function POST(req:NextRequest){
  const body=await req.text();if(body.length>32768)return NextResponse.json({error:'Configuration too large'},{status:413});
  try{const parsed=JSON.parse(body) as Record<string,unknown>,action=String(parsed.action??''),base=`${NEXUS_API_URL}/v3/organizations/${NEXUS_ORGANIZATION_ID}/guilds/${NEXUS_GUILD_ID}`;let url=`${NEXUS_API_URL}/v2/organizations/${NEXUS_ORGANIZATION_ID}/guilds/${NEXUS_GUILD_ID}/configuration`,payload=body;
   if(action==='activation_preset'){url=base+'/setup/activation';payload=JSON.stringify({preset:parsed.preset});}
+  if(action==='notification_channel'){url=base+'/settings/notification';payload=JSON.stringify({channelId:parsed.channelId,revision:parsed.revision});}
+  if(action==='retention_days'){url=base+'/settings/retention';payload=JSON.stringify({days:parsed.days,revision:parsed.revision});}
   if(action==='action_template'){url=base+'/actions/draft';const {action:_action,...input}=parsed;void _action;payload=JSON.stringify(input);}
   if(action==='onboarding_recommended'){url=base+'/setup/onboarding/recommended';payload='{}';}
   if(action==='experiment_draft'){url=base+'/results/draft';payload=JSON.stringify({actionId:parsed.actionId,primaryMetric:parsed.primaryMetric});}

@@ -59,9 +59,11 @@ it('runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
  };
  try{
   await deliver(admin,{name:'nexus',options:[{name:'panel'}]},2);
+  expect(JSON.stringify(discord.panels.get('reply'))).toContain('NEXUS panel is ready');
+  await deliver(admin,{custom_id:control('Settings')});
+  await deliver(admin,{custom_id:control('Advanced')});
   await deliver(admin,{custom_id:control('Choose community template'),values:['Gaming']});
   await deliver(admin,{custom_id:control('Choose a start channel'),values:[channel]});
-  await deliver(admin,{custom_id:control('Enable NEXUS')});
   await deliver(admin,{custom_id:control('Enable onboarding')});
   await deliver(admin,{custom_id:control('Role mappings')});
   await deliver(admin,{custom_id:control('Choose an answer to map a role'),values:['purpose:community']});

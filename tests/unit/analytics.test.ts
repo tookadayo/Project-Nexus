@@ -1,6 +1,7 @@
 import {expect,it} from 'vitest';
 import fc from 'fast-check';
 import {computeOverview,coverage,type MetricEvent} from '../../packages/analytics/src/index.js';
+import {canonicalMetrics,inputCoverage} from '../../packages/analytics/src/registry.js';
 const day=86400000;
 it('excludes TEST/PREVIEW and immature retention denominators',()=>{
  const episodes=[{id:'a',joinedAt:0,context:'PRODUCTION'},{id:'b',joinedAt:day*31,context:'PRODUCTION'},{id:'test',joinedAt:0,context:'TEST'}];
@@ -20,4 +21,11 @@ it('duplicate and reordered events yield identical metrics',()=>{
   const expected=computeOverview(episodes,events,0,day*32,day*32,1);
   expect(computeOverview(episodes,[...events,...events].reverse(),0,day*32,day*32,1)).toEqual(expected);
  }));
+});
+it('keeps goal completion unavailable until a versioned goal is pinned',()=>{
+ const episodes=[{id:'a',joinedAt:0,context:'PRODUCTION'}],events:MetricEvent[]=[{episodeId:'a',kind:'activation.completed',at:1000,context:'PRODUCTION',data:{}}],inputs={activation:inputCoverage('activation',1,1),members:inputCoverage('members',1,1)};
+ const before=canonicalMetrics(episodes,events,0,day*9,day*9,inputs,day*7/1000,{},true);
+ expect(before.activation_rate).toMatchObject({value:null,sampleSize:0,definitionIds:[]});expect(before.new_members.value).toBe(1);
+ const after=canonicalMetrics(episodes,[...events,{...events[0]!,data:{definitionId:'version-one'}}],0,day*9,day*9,inputs,day*7/1000,{a:{id:'version-one',windowSeconds:day*7/1000}},true);
+ expect(after.activation_rate).toMatchObject({value:1,sampleSize:1,definitionIds:['version-one']});
 });

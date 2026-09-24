@@ -12,5 +12,5 @@ export function createApi(analytics:AnalyticsService,key:string,db?:Database,dis
   const scope=scopeSchema.safeParse(req.params);if(!scope.success)return reply.code(400).send({error:'invalid scope'});
   const token=String(req.headers.authorization??'').replace(/^Bearer /,'');if(!validApiToken(key,scope.data,token))return reply.code(403).send({error:'forbidden'});
   reply.header('Cache-Control','no-store');return {metrics:await analytics.overview(scope.data),generatedAt:new Date().toISOString()};
- });if(db){registerV02(app,db,key);registerV03(app,db,key,discord);}return app;
+ });if(db){registerV02(app,db,key,discord);registerV03(app,db,key,discord);}return app;
 }

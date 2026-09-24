@@ -23,6 +23,7 @@ import {createApi} from '../../apps/api/src/server.js';
 import {apiToken} from '../../packages/security/src/index.js';
 import {normalize} from '../../packages/events/src/index.js';
 import type {Scope} from '../../packages/shared/src/index.js';
+import {DomainError} from '../../packages/shared/src/index.js';
 import {GatewayPublisher,STREAM} from '../../apps/gateway/src/index.js';
 import {StreamConsumer,scrubStream} from '../../apps/worker/src/streams.js';
 import {PresentationService} from '../../packages/presentation/src/index.js';
@@ -44,6 +45,13 @@ async function join(ctx:Awaited<ReturnType<typeof setup>>,joined=ctx.now){
  return (await sql<{id:string}>`SELECT id FROM membership_episodes WHERE ${tenant(ctx.s)}`.execute(db)).rows[0]!.id;
 }
 const intervention=(mode='suggest')=>({name:'Helper',trigger:'member.joined',delaySeconds:0,conditions:[],actions:[{type:'staff_alert',channelId:channel,text:'A newcomer may need help.'}],cooldownSeconds:86400,safetyMode:mode,frequencyCaps:{dmPerDay:1,contactsPerWeek:3}});
+it('collects basic newcomer activity without configuring onboarding or a goal',async()=>{
+ const ctx=await setup(),joined=new Date(Date.now()-60000);await join(ctx,joined);
+ const asOf=new Date(Date.now()+1000),from=new Date(joined.getTime()-1000);
+ await sql`INSERT INTO telemetry_cursor VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${from},${asOf})`.execute(db);
+ const metrics=await new AnalyticsService(db,ctx.settings).canonical(ctx.s,from,asOf,asOf);
+ expect(metrics.new_members.value).toBe(1);expect(metrics.activation_rate.value).toBeNull();expect(metrics.onboarding_completion.value).toBeNull();
+});
 it('preserves anonymous mature D30 denominators after personal deletion and counts activity once',async()=>{
  const ctx=await setup(),day=86400000,joined=new Date(Date.now()-35*day),episode=await join(ctx,joined);
  await sql`UPDATE retention_tracking SET started_at=${new Date(Date.now()-65*day)} WHERE ${tenant(ctx.s)}`.execute(db);
@@ -211,6 +219,30 @@ it('serves 7D, 30D and 90D Journey ranges and creates a test from a published Ac
  const draft=await api.inject({method:'POST',url:base+'/results/draft',headers,payload:{actionId,primaryMetric:'activation'}});expect(draft.statusCode).toBe(200);const preview=draft.json();expect(preview.after.definition).toMatchObject({randomization:'time_block',variants:[{key:'control',interventionRevisionId:null},{key:'treatment',interventionRevisionId:actionId}]});
  const publishResponse=await api.inject({method:'POST',url:`/v2/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}/configuration`,headers,payload:{action:'publish',id:preview.after.id,expectedHead:null,confirmationHash:preview.confirmationHash}});expect(publishResponse.statusCode).toBe(200);
  const results=await api.inject({url:base+'/results',headers});expect(results.statusCode).toBe(200);expect(results.json().items[0]).toMatchObject({randomization:'time_block',analysis:'intention_to_treat',state:'running'});await api.close();
+});
+it('rechecks selected channels and events before enabling an improvement',async()=>{
+ const ctx=await setup(),key='v04-permissions',events=[{id:'833333333333333333',label:'Community call'}];
+ const port=Object.assign(ctx.discord,{options:async()=>({channels:[{id:channel,label:'#helpers'}],roles:[],events})});
+ const api=createApi(new AnalyticsService(db,ctx.settings),key,db,port),base=`/v3/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}`,headers={authorization:`Bearer ${apiToken(key,ctx.s)}`};
+ ctx.discord.failure=new DomainError('CHANNEL_PERMISSION_MISSING');
+ const blocked=await api.inject({method:'POST',url:base+'/actions/draft',headers,payload:{templateKey:'reply_rescue',channelId:channel}});
+ expect(blocked.statusCode).not.toBe(200);
+ ctx.discord.failure=null;
+ const draft=await api.inject({method:'POST',url:base+'/actions/draft',headers,payload:{templateKey:'reply_rescue',channelId:channel}});expect(draft.statusCode).toBe(200);
+ ctx.discord.failure=new DomainError('CHANNEL_PERMISSION_MISSING');
+ const preview=draft.json(),deleted=await api.inject({method:'POST',url:`/v2/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}/configuration`,headers,payload:{action:'publish',id:preview.after.id,expectedHead:null,confirmationHash:preview.confirmationHash}});
+ expect(deleted.json().error).toBe('CHANNEL_PERMISSION_MISSING');
+ ctx.discord.failure=null;
+ const eventDraft=await api.inject({method:'POST',url:base+'/actions/draft',headers,payload:{templateKey:'event_recommendation',channelId:channel,eventId:events[0]!.id}});expect(eventDraft.statusCode).toBe(200);
+ events.length=0;const eventPreview=eventDraft.json(),removed=await api.inject({method:'POST',url:`/v2/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}/configuration`,headers,payload:{action:'publish',id:eventPreview.after.id,expectedHead:null,confirmationHash:eventPreview.confirmationHash}});
+ expect(removed.json().error).toBe('EVENT_NOT_AVAILABLE');
+ const original=await ctx.settings.get(ctx.s);
+ ctx.discord.failure=new DomainError('CHANNEL_PERMISSION_MISSING');
+ const invalidDestination=await api.inject({method:'POST',url:base+'/settings/notification',headers,payload:{channelId:channel,revision:original.revision}});expect(invalidDestination.statusCode).not.toBe(200);
+ ctx.discord.failure=null;
+ const destination=await api.inject({method:'POST',url:base+'/settings/notification',headers,payload:{channelId:channel,revision:original.revision}});expect(destination.statusCode).toBe(200);expect(destination.json().adminNotificationChannelId).toBe(channel);
+ const retention=await api.inject({method:'POST',url:base+'/settings/retention',headers,payload:{days:14,revision:destination.json().revision}});expect(retention.statusCode).toBe(200);expect(retention.json().detailedRetentionDays).toBe(14);
+ await api.close();
 });
 it('keeps measurement warnings separate from ranked community opportunities',async()=>{
  const ctx=await setup(),home=await new PresentationService(db).home(ctx.s);

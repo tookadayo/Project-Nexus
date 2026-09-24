@@ -10,8 +10,9 @@ import {EntitlementService,type Feature} from '../../../packages/settings/src/en
 import {domainRevisions} from '../../../packages/settings/src/domain-config.js';
 import type {ConfigDomain} from '../../../packages/settings/src/revisions.js';
 import {ExperimentService} from '../../../packages/lifecycle/src/experiments.js';
-import {InterventionService} from '../../../packages/lifecycle/src/interventions.js';
-export function registerV02(app:FastifyInstance,db:Database,key:string){
+import {InterventionService,interventionSchema} from '../../../packages/lifecycle/src/interventions.js';
+import type {DiscordPort} from '../../../packages/discord/src/rest.js';
+export function registerV02(app:FastifyInstance,db:Database,key:string,discord?:DiscordPort){
  const base='/v2/organizations/:organizationId/guilds/:guildId';
  const auth=(params:unknown,header:unknown)=>{const scope=scopeSchema.parse(params);assert(validApiToken(key,scope,String(header??'').replace(/^Bearer /,'')),'FORBIDDEN',403);return scope;};
  const schemas=domainRevisions(db);
@@ -45,6 +46,20 @@ export function registerV02(app:FastifyInstance,db:Database,key:string){
    if(input.action==='approve'){await new InterventionService(db).approve(s,actor,input.id);return {approved:true};}
    assert(input.confirmationHash&&input.expectedHead!==undefined,'PREVIEW_REQUIRED');
    const next=await schemas.get(s,input.id),needed=feature[next.domain];if(needed)assert(needed==='custom_activation'?await new EntitlementService(db).canDefineActivation(s,next.definition):await new EntitlementService(db).can(s,needed),'ENTITLEMENT_REQUIRED',403);
+   if(next.domain==='intervention'){
+    assert(discord,'DISCORD_UNAVAILABLE',503);
+    const definition=interventionSchema.parse(next.definition);
+    if(definition.safetyMode==='auto')assert(await new EntitlementService(db).can(s,'automation_auto'),'ENTITLEMENT_REQUIRED',403);
+    for(const action of definition.actions){
+     if('channelId' in action)await discord.checkChannel(s.guildId,action.channelId);
+     if(action.type==='recommend_channels')for(const id of action.channels)await discord.checkChannel(s.guildId,id);
+     if(action.type==='recommend_event'){
+      assert(discord.options,'DISCORD_UNAVAILABLE',503);
+      const options=await discord.options(s.guildId);assert(options.events.some(event=>event.id===action.eventId),'EVENT_NOT_AVAILABLE');
+     }
+     if('roleId' in action)await discord.validateRole(s.guildId,action.roleId);
+    }
+   }
    const published=await schemas.publish(s,actor,input.id,input.expectedHead,input.confirmationHash);
    return published;
   }catch(error){return reply.code(error instanceof DomainError?error.status:400).send({error:error instanceof DomainError?error.code:'INVALID_CONFIGURATION'});}

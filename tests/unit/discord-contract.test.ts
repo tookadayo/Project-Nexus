@@ -21,3 +21,7 @@ it('rejects an above-bot role before making a role mutation',async()=>{
  vi.stubGlobal('fetch',vi.fn(async(url:string)=>new Response(JSON.stringify(url.endsWith('/roles')?[...roles,{id:'777777777777777777',name:'Owner',position:9,permissions:'0',managed:false}]:url.includes('/members/')?member:guild),{status:200})));
  await expect(new DiscordRest('test-only-token',botId).validateRole(guildId,'777777777777777777')).rejects.toThrow('ROLE_NOT_MANAGEABLE');
 });
+it('explains a channel deleted after selection without exposing Discord HTTP errors',async()=>{
+ vi.stubGlobal('fetch',vi.fn(async()=>new Response('{}',{status:404})));
+ await expect(new DiscordRest('test-only-token',botId).checkChannel(guildId,'888888888888888888')).rejects.toThrow('INVALID_START_CHANNEL');
+});

@@ -62,7 +62,10 @@ export class DiscordRest implements DiscordPort {
   return {roles:raw.roles,permissions:permissions.toString(),joinedAt:raw.joined_at,bot:raw.user.bot??false};
  }
  async checkChannel(guildId:string,channelId:string){
-  const [channel,bot]=await Promise.all([this.request<{guild_id:string,type:number,permission_overwrites:{id:string,type:number,allow:string,deny:string}[]}>(`/channels/${channelId}`),this.member(guildId,this.botId)]);
+  let channel:{guild_id:string,type:number,permission_overwrites:{id:string,type:number,allow:string,deny:string}[]};
+  try{channel=await this.request(`/channels/${channelId}`);}
+  catch(error){if(error instanceof DiscordFailure&&[403,404].includes(error.status))assert(false,'INVALID_START_CHANNEL');throw error;}
+  const bot=await this.member(guildId,this.botId);
   assert(channel.guild_id===guildId&&channel.type===0,'INVALID_START_CHANNEL');
   let bits=BigInt(bot.permissions);
   if((bits&PermissionFlagsBits.Administrator)===0n){

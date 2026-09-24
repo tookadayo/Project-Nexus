@@ -8,7 +8,6 @@ import type {
   JourneyPresentation,
   OpportunitiesPresentation,
   ResultsPresentation,
-  SetupReason,
 } from "../../../packages/presentation/src/types";
 import {
   CohortHeatmap,
@@ -47,86 +46,85 @@ export type ProductData = {
 };
 const messages = {
   en: {
-    nav: ["Home", "Journey", "Opportunities", "Actions", "Results", "Settings"],
+    nav: ["Home", "Newcomers", "Improve", "Results", "Settings"],
     tagline: "See where newcomers drop off. Fix it. Measure what worked.",
     home: "Home",
-    journey: "Journey",
-    milestones: "New Member Journey Milestones",
-    opportunities: "Opportunities",
-    actions: "Actions",
+    journey: "Newcomers",
+    milestones: "Newcomer milestones",
+    opportunities: "Improve",
+    actions: "Improvement menu",
     results: "Results",
     settings: "Settings",
     new_members: "New Members",
-    activation_rate: "Activation",
-    direct_reply_connection_rate: "First Connection",
-    d7_active_retention: "D7 Retention",
+    activation_rate: "Successful newcomers",
+    direct_reply_connection_rate: "Received a reply",
+    d7_active_retention: "Active after 7 days",
     joined: "Joined",
-    onboarded: "Onboarded",
-    first_value: "First Value",
-    connected: "Connected",
-    d7_active: "D7 Active",
+    onboarded: "Completed joining steps",
+    first_value: "Reached first success",
+    connected: "Received a reply",
+    d7_active: "Active after 7 days",
     previous: "Previous period",
-    data: "Data health",
+    data: "Data collection status",
     empty: "No verified observations yet",
     emptyDetail:
       "NEXUS will show this view after scoped production activity is observed. Missing and immature observations are never treated as zero.",
     setup: "Start measuring community growth",
     connect: "Connect Discord",
-    activation: "Define success",
-    onboarding: "Configure onboarding",
+    activation: "Successful newcomers",
+    onboarding: "Welcome flow (optional)",
     measuring: "Start measuring",
     complete: "Complete",
     todo: "Next step",
-    communityOpportunity: "Community opportunity",
-    measurementWarning: "Measurement warning",
+    communityOpportunity: "Needs attention",
+    measurementWarning: "Data collection status",
     suggested: "Suggested next action",
     range: "Range",
-    retention: "Retention cohorts",
+    retention: "By join period",
     members: "Members",
     reply: "First reply distribution",
-    trendActivation: "Activation trend",
+    trendActivation: "First success trend",
     trendConnection: "First Connection trend",
     trendRetention: "D7 Retention trend",
-    noOpportunity:
-      "No evidence-backed community opportunity meets the threshold yet.",
-    notCausal: "Observational signal — causality is not established.",
-    createAction: "Create Action",
-    template: "Template",
+    noOpportunity: "Nothing needs attention right now. You can still choose an improvement below.",
+    notCausal: "This change was observed; its cause is not yet known.",
+    createAction: "Choose an improvement",
+    template: "Improvement menu",
     destination: "Destination channel",
     event: "Scheduled event",
     recommendedChannels: "Recommended channels",
-    review: "Review Action",
-    publish: "Publish",
+    review: "Enable",
+    publish: "Enable",
     published: "Published and active.",
     when: "WHEN",
     wait: "WAIT",
     if: "IF",
     then: "THEN",
     safety: "SAFETY",
-    activeActions: "Active Actions",
+    activeActions: "Enabled improvements",
     delivery: "Delivery health",
     noActions: "No action is active yet. Start from a guarded template.",
     learning: "What we learned",
     hypothesis: "Question",
-    maturity: "Maturity",
+    maturity: "Evaluated",
     noResults:
-      "No test result yet. Publish an Action, then compare it with a no-action control.",
+      "No results yet. Enable an improvement, then check whether it helped.",
     privacy: "Privacy & retention",
     team: "Team & access",
     plan: "Plan & usage",
-    advanced: "Advanced methodology",
+    advanced: "How this was measured",
     configureActivation: "Use this preset",
-    draftReady: "Draft is ready. Review and publish it.",
+    draftReady: "Confirm your choice to start measuring.",
     language: "Language",
     unavailable: "Unavailable",
     healthy: "Healthy",
     partial: "Partial",
-    provisional: "Maturing",
-    mature: "Mature",
+    provisional: "Collecting",
+    mature: "Ready to evaluate",
     eligible: "Eligible",
     observed: "Observed",
-    control: "Control",
-    treatment: "Treatment",
+    control: "Usual experience",
+    treatment: "Improvement enabled",
     rate: "Rate",
     triggered: "Triggered",
     approved: "Approved",
@@ -137,21 +135,21 @@ const messages = {
     seeEvidence: "See Evidence",
     dismiss: "Dismiss for now",
     why: "Why this appeared",
-    createFromOpportunity: "Create Action",
-    viewOpportunities: "View Opportunities",
-    testAction: "Test this Action",
+    createFromOpportunity: "Improve this",
+    viewOpportunities: "View improvements",
+    testAction: "Check the result",
     viewActivity: "View Activity",
     approve: "Approve",
     approvalNeeded: "Approval needed",
-    question: "Does this Action improve Activation?",
-    primaryOutcome: "Primary outcome",
+    question: "Did this improvement help newcomers?",
+    primaryOutcome: "What NEXUS will check",
     assignment: "Assignment",
     dailyBlocks: "Daily time blocks",
-    reviewTest: "Review Test",
-    startTest: "Start Test",
+    reviewTest: "Check the result",
+    startTest: "Check the result",
     pauseTest: "Pause Test",
     stopTest: "Stop Test",
-    viewAction: "View Action",
+    viewAction: "View improvement",
     continueCollecting: "Continue collecting",
     recommendedSetup: "Use Recommended Setup",
     optionsUnavailable:
@@ -161,8 +159,8 @@ const messages = {
     baseline: "Baseline",
     difference: "Difference",
     sample: "Sample",
-    coverage: "Coverage",
-    stage: "Journey stage",
+    coverage: "Data collection status",
+    stage: "Newcomer milestone",
     guardrails: "Guardrails",
     randomization: "Randomization",
     timeline: "Timeline",
@@ -170,86 +168,86 @@ const messages = {
     next: "Next",
   },
   ja: {
-    nav: ["ホーム", "ジャーニー", "機会", "アクション", "結果", "設定"],
+    nav: ["ホーム", "新規メンバー", "改善", "結果", "設定"],
     tagline: "新規メンバーが離脱する場所を見つけ、改善し、効果を測定します。",
     home: "ホーム",
-    journey: "ジャーニー",
-    milestones: "新規メンバーのジャーニー・マイルストーン",
-    opportunities: "改善機会",
-    actions: "アクション",
+    journey: "新規メンバー",
+    milestones: "新規メンバーの到達点",
+    opportunities: "改善",
+    actions: "改善メニュー",
     results: "結果",
     settings: "設定",
     new_members: "新規メンバー",
-    activation_rate: "アクティベーション",
-    direct_reply_connection_rate: "最初のつながり",
-    d7_active_retention: "D7 継続率",
+    activation_rate: "成功した新規メンバー",
+    direct_reply_connection_rate: "返信を受けた",
+    d7_active_retention: "7日後も活動",
     joined: "参加",
-    onboarded: "オンボード完了",
-    first_value: "初回価値",
-    connected: "つながり",
-    d7_active: "D7 アクティブ",
+    onboarded: "参加手続きを完了",
+    first_value: "最初の成功に到達",
+    connected: "返信を受けた",
+    d7_active: "7日後も活動",
     previous: "前期間",
-    data: "データ健全性",
+    data: "データ取得状況",
     empty: "検証済みの観測データはまだありません",
     emptyDetail:
       "対象範囲の本番アクティビティを観測すると表示されます。欠損・未成熟な値をゼロとして扱いません。",
     setup: "コミュニティ成長の測定を始める",
     connect: "Discord を接続",
-    activation: "成功を定義",
-    onboarding: "オンボーディングを設定",
+    activation: "成功した新規メンバー",
+    onboarding: "歓迎フロー（任意）",
     measuring: "測定を開始",
     complete: "完了",
     todo: "次のステップ",
-    communityOpportunity: "コミュニティの改善機会",
-    measurementWarning: "測定上の警告",
+    communityOpportunity: "今見るべきこと",
+    measurementWarning: "データ取得状況",
     suggested: "推奨アクション",
     range: "期間",
-    retention: "継続率コホート",
+    retention: "参加した時期別",
     members: "メンバー",
     reply: "初回返信の分布",
-    trendActivation: "アクティベーション推移",
+    trendActivation: "最初の成功の推移",
     trendConnection: "最初のつながり推移",
     trendRetention: "D7 継続率推移",
-    noOpportunity: "基準を満たす、根拠のある改善機会はまだありません。",
-    notCausal: "観察シグナルです。因果関係は確立されていません。",
-    createAction: "アクションを作成",
-    template: "テンプレート",
+    noOpportunity: "今すぐ対応が必要なことはありません。下から改善策を選ぶこともできます。",
+    notCausal: "観測された変化ですが、原因はまだ分かっていません。",
+    createAction: "改善策を選ぶ",
+    template: "改善メニュー",
     destination: "送信先チャンネル",
     event: "予定イベント",
     recommendedChannels: "推奨チャンネル",
-    review: "アクションを確認",
-    publish: "公開",
+    review: "有効にする",
+    publish: "有効にする",
     published: "公開し、有効化しました。",
     when: "いつ",
     wait: "待機",
     if: "条件",
     then: "実行",
     safety: "安全性",
-    activeActions: "有効なアクション",
+    activeActions: "有効な改善策",
     delivery: "配信の健全性",
     noActions:
       "有効なアクションはありません。安全設定済みテンプレートから開始できます。",
     learning: "わかったこと",
     hypothesis: "検証する問い",
-    maturity: "成熟度",
+    maturity: "評価済み",
     noResults:
-      "テスト結果はまだありません。アクションを公開し、何もしない対照群と比較してください。",
+      "結果はまだありません。改善策を有効にして効果を確認できます。",
     privacy: "プライバシーと保持期間",
     team: "チームとアクセス",
     plan: "プランと利用状況",
-    advanced: "高度な測定方法",
+    advanced: "測定方法を見る",
     configureActivation: "このプリセットを使う",
-    draftReady: "下書きを作成しました。確認して公開してください。",
+    draftReady: "選択を確認して測定を開始してください。",
     language: "言語",
     unavailable: "利用不可",
     healthy: "良好",
     partial: "一部",
-    provisional: "成熟待ち",
-    mature: "成熟済み",
+    provisional: "集計中",
+    mature: "集計完了",
     eligible: "対象",
     observed: "観測",
-    control: "対照群",
-    treatment: "施策群",
+    control: "通常運用",
+    treatment: "改善あり",
     rate: "割合",
     triggered: "起動",
     approved: "承認済み",
@@ -260,21 +258,21 @@ const messages = {
     seeEvidence: "根拠を見る",
     dismiss: "今は非表示",
     why: "表示された理由",
-    createFromOpportunity: "アクションを作成",
-    viewOpportunities: "改善機会を見る",
-    testAction: "このアクションをテスト",
+    createFromOpportunity: "改善する",
+    viewOpportunities: "改善を見る",
+    testAction: "効果を確認",
     viewActivity: "アクティビティを見る",
     approve: "承認",
     approvalNeeded: "承認が必要",
-    question: "このアクションはアクティベーションを改善するか？",
-    primaryOutcome: "主要成果",
+    question: "この改善策は新規メンバーに役立ったか？",
+    primaryOutcome: "NEXUS が確認すること",
     assignment: "割付方法",
     dailyBlocks: "日次タイムブロック",
-    reviewTest: "テストを確認",
-    startTest: "テストを開始",
+    reviewTest: "効果を確認",
+    startTest: "効果を確認",
     pauseTest: "テストを一時停止",
     stopTest: "テストを停止",
-    viewAction: "アクションを見る",
+    viewAction: "改善策を見る",
     continueCollecting: "データ収集を続ける",
     recommendedSetup: "推奨設定を使う",
     optionsUnavailable:
@@ -284,8 +282,8 @@ const messages = {
     baseline: "基準値",
     difference: "差分",
     sample: "サンプル",
-    coverage: "カバレッジ",
-    stage: "ジャーニー段階",
+    coverage: "データ取得状況",
+    stage: "新規メンバーの到達点",
     guardrails: "ガードレール",
     randomization: "割付",
     timeline: "期間",
@@ -305,7 +303,7 @@ const opportunityNames: Record<Locale, Record<string, string>> = {
     ONBOARDING_DROP: "Onboarding completion has dropped",
     HOME_ACTION_DROP: "Home Actions completion has dropped",
     RETENTION_DROP: "D7 retention has dropped",
-    DATA_COVERAGE_DROP: "Measurement coverage needs attention",
+    DATA_COVERAGE_DROP: "Some data could not be collected",
     ACTION_FAILURE_SPIKE: "Action delivery failures increased",
   },
   ja: {
@@ -316,7 +314,7 @@ const opportunityNames: Record<Locale, Record<string, string>> = {
     ONBOARDING_DROP: "オンボーディング完了率が低下",
     HOME_ACTION_DROP: "ホームアクション完了率が低下",
     RETENTION_DROP: "D7 継続率が低下",
-    DATA_COVERAGE_DROP: "測定カバレッジの確認が必要",
+    DATA_COVERAGE_DROP: "一部のデータを取得できていません",
     ACTION_FAILURE_SPIKE: "アクション配信失敗が増加",
   },
 };
@@ -358,14 +356,18 @@ const signed = (n: number | null, rate = true) =>
     ? "—"
     : `${n > 0 ? "+" : n < 0 ? "−" : ""}${rate ? `${(Math.abs(n) * 100).toFixed(1)} pt` : Math.abs(n).toLocaleString()}`;
 
-export default function Console({ data }: { data: ProductData }) {
-  const [locale, setLocale] = useState<Locale>("en"),
+export default function Console({ data, initialLocale = "en" }: { data: ProductData; initialLocale?: Locale }) {
+  const [locale, setLocale] = useState<Locale>(initialLocale),
     [page, setPage] = useState(0),
     [journey, setJourney] = useState(data.journey),
     [range, setRange] = useState<7 | 30 | 90>(data.journey?.range ?? 30),
     [journeyLoading, setJourneyLoading] = useState(false),
     [template, setTemplate] = useState<ActionTemplateKey>("reply_rescue"),
-    [channelId, setChannelId] = useState(data.options.channels[0]?.id ?? ""),
+    [showImprovementSetup, setShowImprovementSetup] = useState(false),
+    [runMode, setRunMode] = useState<"suggest" | "approval" | "auto">("approval"),
+    [channelId, setChannelId] = useState(data.options.channels.find(option=>option.id===data.admin?.settings.adminNotificationChannelId)?.id ?? data.options.channels[0]?.id ?? ""),
+    [notificationRevision, setNotificationRevision] = useState(Number(data.admin?.settings.revision ?? 0)),
+    [retentionDays, setRetentionDays] = useState(Number(data.admin?.settings.detailedRetentionDays ?? 30)),
     [eventId, setEventId] = useState(data.options.events[0]?.id ?? ""),
     [channels, setChannels] = useState<string[]>([]),
     [preview, setPreview] = useState<Preview | null>(null),
@@ -380,6 +382,7 @@ export default function Console({ data }: { data: ProductData }) {
     [actions, setActions] = useState(data.actions),
     [results, setResults] = useState(data.results);
   const c = messages[locale];
+  const openImprovement=(key:ActionTemplateKey)=>{setTemplate(key);setShowImprovementSetup(true);setPage(2);requestAnimationFrame(()=>document.querySelector('.builder-v3')?.scrollIntoView({behavior:'smooth',block:'start'}));};
   const selected = actions?.templates.find((t) => t.key === template),
     selectedAction = actions?.items.find((a) => a.id === testActionId);
   async function request(body: unknown) {
@@ -391,7 +394,17 @@ export default function Console({ data }: { data: ProductData }) {
           body: JSON.stringify(body),
         }),
         result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? "Request failed");
+      if (!response.ok) {
+        const code = String(result.message ?? result.error ?? "");
+        const channel = data.options.channels.find(item => item.id === channelId)?.label ?? (locale === "ja" ? "選択したチャンネル" : "the selected channel");
+        const explanation = code.includes("CHANNEL_PERMISSION_MISSING") || code.includes("INVALID_START_CHANNEL") || code.includes("Discord HTTP 403") || code.includes("Discord HTTP 404")
+          ? locale === "ja" ? `NEXUS は ${channel} に送信できません。別のチャンネルを選ぶか、表示・送信権限を確認してください。` : `NEXUS cannot send messages in ${channel}. Choose another channel or check View and Send permissions.`
+          : code.includes("EVENT_NOT_AVAILABLE") ? locale === "ja" ? "イベントが見つかりません。現在利用できるイベントを選び直してください。" : "That event is no longer available. Choose another event."
+          : code.includes("ENTITLEMENT_REQUIRED") ? locale === "ja" ? "この改善策は現在のプランでは使えません。プランを確認してください。" : "This improvement is not available on the current plan. Check your plan."
+          : code.includes("REVISION_CONFLICT") ? locale === "ja" ? "設定が更新されました。ページを再読み込みしてやり直してください。" : "Settings changed. Refresh the page and try again."
+          : locale === "ja" ? "変更を保存できませんでした。接続を確認して再試行してください。" : "The change could not be saved. Check the connection and try again.";
+        throw new Error(explanation);
+      }
       return result;
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Request failed");
@@ -433,6 +446,40 @@ export default function Console({ data }: { data: ProductData }) {
         window.location.reload();
       }
     }
+  }
+  async function enableImprovement() {
+    const draft = await request({action:"action_template",templateKey:template,channelId:channelId||undefined,eventId:eventId||undefined,recommendedChannelIds:channels,safetyMode:runMode});
+    if (!draft) return;
+    const saved = await request({action:"publish",id:draft.after.id,expectedHead:draft.before?.id??null,confirmationHash:draft.confirmationHash});
+    if (!saved) return;
+    const response = await fetch("/data/actions", {cache:"no-store"});
+    if (response.ok) setActions(await response.json() as ActionsPresentation);
+    setStatus(locale === "ja" ? "改善策を有効にしました。" : "Improvement enabled.");
+  }
+  async function saveNotificationChannel(id:string) {
+    const updated=await request({action:"notification_channel",channelId:id,revision:notificationRevision});
+    if (!updated) return;
+    setNotificationRevision(Number(updated.revision));
+    setChannelId(id);
+    setStatus(locale === "ja" ? "通知先を保存しました。" : "Notification destination saved.");
+  }
+  async function saveRetentionDays(days:7|14|30) {
+    const updated=await request({action:"retention_days",days,revision:notificationRevision});
+    if (!updated) return;
+    setNotificationRevision(Number(updated.revision));
+    setRetentionDays(days);
+    setStatus(locale === "ja" ? "保持期間を保存しました。" : "Retention saved.");
+  }
+  async function startCheck() {
+    if (!testActionId) return;
+    const draft = await request({action:"experiment_draft",actionId:testActionId,primaryMetric:selectedAction?.name==='Reply Rescue'?"connection":"activation"});
+    if (!draft) return;
+    const saved = await request({action:"publish",id:draft.after.id,expectedHead:draft.before?.id??null,confirmationHash:draft.confirmationHash});
+    if (!saved) return;
+    const response = await fetch("/data/results", {cache:"no-store"});
+    if (response.ok) setResults(await response.json() as ResultsPresentation);
+    setTestActionId(null);
+    setStatus(locale === "ja" ? "効果の確認を開始しました。" : "Result check started.");
   }
   async function approveAction(actionId: string, runId: string) {
     if (!(await request({ action: "approve", id: runId }))) return;
@@ -498,10 +545,16 @@ export default function Console({ data }: { data: ProductData }) {
   }
   const healthText = (label: string) =>
     label === "healthy"
-      ? c.healthy
+      ? locale === "ja" ? "正常" : "Collecting normally"
       : label === "partial"
-        ? c.partial
-        : c.unavailable;
+        ? locale === "ja" ? "一部取得できていません" : "Some data could not be collected"
+        : locale === "ja" ? "まだ利用できるデータがありません" : "Not enough verified data is available";
+  const healthBadgeText = (label: string) =>
+    label === "healthy"
+      ? locale === "ja" ? "正常" : "Collecting"
+      : label === "partial"
+        ? locale === "ja" ? "一部欠損" : "Data limited"
+        : locale === "ja" ? "データ待ち" : "No data yet";
   const go = (index: number) => () => setPage(index);
   const breadcrumb = (...parts: string[]) => (
     <p className="breadcrumb">{[c.home, ...parts].join(" / ")}</p>
@@ -574,7 +627,7 @@ export default function Console({ data }: { data: ProductData }) {
                       : c.unavailable
                 }
                 coverageStatus={k.coverage.label}
-                coverageLabel={healthText(k.coverage.label)}
+                coverageLabel={healthBadgeText(k.coverage.label)}
               />
             ))}
           </section>
@@ -727,8 +780,8 @@ export default function Console({ data }: { data: ProductData }) {
           <h1>{c.opportunities}</h1>
           <p className="orientation">
             {locale === "ja"
-              ? "比較可能な期間の変化を確認し、安全なアクションへ進みます。"
-              : "Understand evidence-backed changes and move into a safe Action."}
+              ? "今見るべきことと、NEXUS が提案する改善策を確認できます。"
+              : "See what needs attention and which improvement NEXUS suggests."}
           </p>
         </div>
       </div>
@@ -754,12 +807,10 @@ export default function Console({ data }: { data: ProductData }) {
               </div>
               <div>
                 <h2>{opportunityNames[locale][item.type]}</h2>
-                <p>
-                  {c.stage}: {c[item.stage as keyof Copy]} · n=
-                  {item.sampleSize.toLocaleString()} ·{" "}
-                  {healthText(item.dataHealth.label)}
-                </p>
+                <p>{locale === "ja" ? `${item.sampleSize.toLocaleString()} 人の新規メンバーを評価` : `${item.sampleSize.toLocaleString()} newcomers evaluated`}</p>
+                <p>{c.current}: {percent(item.current)} · {c.previous}: {percent(item.previous)}</p>
                 <small>{c.notCausal}</small>
+                {item.suggestedAction && <p>{locale === "ja" ? "提案する改善策" : "Suggested improvement"}: <strong>{templateNames[locale][item.suggestedAction]}</strong></p>}
                 {evidence === item.id && (
                   <dl className="evidence-detail">
                     <div>
@@ -792,23 +843,14 @@ export default function Console({ data }: { data: ProductData }) {
                 </span>
               </div>
               <div className="button-stack">
-                <button
-                  onClick={() =>
-                    setEvidence(evidence === item.id ? null : item.id)
-                  }
-                >
-                  {c.seeEvidence}
-                </button>
                 {item.suggestedAction && (
                   <button
-                    onClick={() => {
-                      setTemplate(item.suggestedAction!);
-                      setPage(3);
-                    }}
+                    onClick={() => openImprovement(item.suggestedAction!)}
                   >
                     {c.createFromOpportunity}
                   </button>
                 )}
+                <button className="quiet" onClick={() => setEvidence(evidence === item.id ? null : item.id)}>{c.why}</button>
                 <button
                   className="quiet"
                   onClick={() => setDismissed([...dismissed, item.id])}
@@ -824,27 +866,20 @@ export default function Console({ data }: { data: ProductData }) {
           <p>{c.noOpportunity}</p>
         </section>
       )}
+      <section className="surface improvement-menu">
+        <h2>{c.actions}</h2>
+        <p>{locale === "ja" ? "必要な改善策を選んでください。送信先は有効化する前に確認します。" : "Choose what would help your newcomers. Select a destination before enabling."}</p>
+        <div className="improvement-menu-grid">
+          {(["reply_rescue","welcome_helper","channel_recommendation","event_recommendation"] as const).map(key=><button key={key} onClick={()=>openImprovement(key)}>{templateNames[locale][key]}</button>)}
+        </div>
+      </section>
     </>
   );
 
   const actionView = (
     <>
-      {breadcrumb(c.actions, templateNames[locale][template])}
-      <div className="page-head">
-        <div>
-          <p className="eyebrow">
-            {locale === "ja" ? "安全な自動化" : "SAFE AUTOMATION"}
-          </p>
-          <h1>{c.actions}</h1>
-          <p className="orientation">
-            {locale === "ja"
-              ? "条件・待機時間・実行内容・安全上限を確認して公開します。"
-              : "Draft, review, publish, approve and monitor guarded community Actions."}
-          </p>
-        </div>
-      </div>
       <section className="action-layout">
-        <div className="builder-v3">
+        {showImprovementSetup && <div className="builder-v3">
           <h2>{c.createAction}</h2>
           <label>
             {c.template}
@@ -855,14 +890,15 @@ export default function Console({ data }: { data: ProductData }) {
                 setPreview(null);
               }}
             >
-              {actions?.templates.map((t) => (
+              {actions?.templates.filter(t => t.key !== "inactive_follow_up").map((t) => (
                 <option key={t.key} value={t.key}>
                   {templateNames[locale][t.key]}
                 </option>
               ))}
             </select>
           </label>
-          {selected && <Policy template={selected} c={c} locale={locale} />}{" "}
+          {selected && <p className="inline-note">{template === "reply_rescue" ? locale === "ja" ? "新規メンバーが1時間返信を待ったら、コミュニティチームに知らせます。" : "If a newcomer waits 1 hour without a reply, notify your team." : locale === "ja" ? "推奨設定で安全に実行します。" : "Uses recommended safety settings."} {runMode === "approval" ? locale === "ja" ? "送信前に確認します。" : "Confirm before running." : runMode === "auto" ? locale === "ja" ? "安全確認後に自動で実行します。" : "Runs automatically after safety checks." : locale === "ja" ? "提案だけ表示します。" : "Suggests only."}</p>}
+          {selected && <details><summary>{locale === "ja" ? "設定を変更" : "Change settings"}</summary><label>{locale === "ja" ? "実行方法" : "How to run"}<select value={runMode} onChange={e=>setRunMode(e.target.value as typeof runMode)}><option value="suggest">{locale === "ja" ? "提案だけ" : "Suggest only"}</option><option value="approval">{locale === "ja" ? "確認してから実行" : "Confirm before running"}</option><option value="auto">{locale === "ja" ? "自動で実行" : "Run automatically"}</option></select></label><Policy template={{...selected,safety:{...selected.safety,mode:runMode}}} c={c} locale={locale} /></details>}
           {!data.options.available && selected?.requires.length ? (
             <p className="inline-note">{c.optionsUnavailable}</p>
           ) : null}
@@ -926,30 +962,11 @@ export default function Console({ data }: { data: ProductData }) {
                 !channels.length,
               )
             }
-            onClick={() =>
-              void prepare(
-                {
-                  action: "action_template",
-                  templateKey: template,
-                  channelId: channelId || undefined,
-                  eventId: eventId || undefined,
-                  recommendedChannelIds: channels,
-                },
-                "action",
-              )
-            }
+            onClick={() => void enableImprovement()}
           >
             {c.review}
           </button>
-          {preview && previewKind === "action" && (
-            <PreviewCard
-              title={`${templateNames[locale][template]} · v${preview.after.version}`}
-              c={c}
-              busy={busy}
-              publish={publish}
-            />
-          )}
-        </div>
+        </div>}
         <div>
           <h2>{c.activeActions}</h2>
           {actions?.items.length ? (
@@ -963,7 +980,7 @@ export default function Console({ data }: { data: ProductData }) {
                     {locale === "ja" ? "稼働中" : "LIVE"}
                   </span>
                 </div>
-                <Policy template={item} c={c} locale={locale} />
+                <details><summary>{locale === "ja" ? "設定を見る" : "View settings"}</summary><Policy template={item} c={c} locale={locale} /></details>
                 <h4>{c.delivery}</h4>
                 <DeliveryFunnelChart
                   action={item}
@@ -1012,7 +1029,7 @@ export default function Console({ data }: { data: ProductData }) {
                   <button
                     onClick={() => {
                       setTestActionId(item.id);
-                      setPage(4);
+                      setPage(3);
                     }}
                   >
                     {c.testAction}
@@ -1046,8 +1063,8 @@ export default function Console({ data }: { data: ProductData }) {
           <h1>{c.results}</h1>
           <p className="orientation">
             {locale === "ja"
-              ? "何もしない対照群とアクション群を比較し、次の判断につなげます。"
-              : "Compare no action with the treatment and decide what to do next."}
+              ? "通常運用と改善ありを比較し、次の判断につなげます。"
+              : "Compare usual operation with the improvement enabled."}
           </p>
         </div>
       </div>
@@ -1061,14 +1078,14 @@ export default function Console({ data }: { data: ProductData }) {
               <span>{c.hypothesis}</span>
               <strong>
                 {locale === "ja"
-                  ? `${actionName(selectedAction.name, locale)} はアクティベーションを改善するか？`
-                  : `Does ${actionName(selectedAction.name, locale)} improve Activation?`}
+                  ? `${actionName(selectedAction.name, locale)} は新規メンバーに役立つか？`
+                  : `Does ${actionName(selectedAction.name, locale)} help newcomers?`}
               </strong>
             </div>
             <div>
               <span>{c.control}</span>
               <strong>
-                {locale === "ja" ? "アクションなし" : "No action"}
+                {c.control}
               </strong>
             </div>
             <div>
@@ -1077,39 +1094,10 @@ export default function Console({ data }: { data: ProductData }) {
             </div>
             <div>
               <span>{c.primaryOutcome}</span>
-              <strong>{c.activation}</strong>
-            </div>
-            <div>
-              <span>{c.assignment}</span>
-              <strong>{c.dailyBlocks}</strong>
+              <strong>{metricLabel(selectedAction.name==='Reply Rescue'?'connection':'activation',locale)}</strong>
             </div>
           </div>
-          {previewKind !== "test" ? (
-            <button
-              disabled={busy}
-              onClick={() =>
-                void prepare(
-                  {
-                    action: "experiment_draft",
-                    actionId: testActionId,
-                    primaryMetric: "activation",
-                  },
-                  "test",
-                )
-              }
-            >
-              {c.reviewTest}
-            </button>
-          ) : (
-            preview && (
-              <PreviewCard
-                title={`${actionName(selectedAction.name, locale)} · ${c.startTest}`}
-                c={{ ...c, publish: c.startTest }}
-                busy={busy}
-                publish={publish}
-              />
-            )
-          )}
+          <button disabled={busy} onClick={() => void startCheck()}>{c.reviewTest}</button>
         </section>
       )}
       {results?.items.length ? (
@@ -1125,8 +1113,8 @@ export default function Console({ data }: { data: ProductData }) {
                   <p>
                     <strong>{c.hypothesis}:</strong>{" "}
                     {locale === "ja"
-                      ? `施策群は対照群より ${metricLabel(item.primaryMetric, locale)} を改善するか？`
-                      : `Does treatment improve ${metricLabel(item.primaryMetric, locale)} versus control?`}
+                      ? `改善ありは通常運用より ${metricLabel(item.primaryMetric, locale)} を改善するか？`
+                      : `Does the improvement help ${metricLabel(item.primaryMetric, locale)} compared with usual operation?`}
                   </p>
                 </div>
                 <div className="lift">
@@ -1149,44 +1137,19 @@ export default function Console({ data }: { data: ProductData }) {
                   <dl>
                     <div>
                       <dt>{c.maturity}</dt>
-                      <dd>
-                        {item.maturity.mature} / {item.maturity.assigned}
-                      </dd>
+                      <dd>{item.maturity.mature}</dd>
                     </div>
                     <div>
-                      <dt>{c.coverage}</dt>
-                      <dd>{healthText(item.dataHealth.label)}</dd>
-                    </div>
-                    <div>
-                      <dt>{c.guardrails}</dt>
-                      <dd>
-                        {item.guardrailStatus === "healthy"
-                          ? c.healthy
-                          : c.partial}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>{c.randomization}</dt>
-                      <dd>
-                        {item.randomization === "time_block"
-                          ? c.dailyBlocks
-                          : locale === "ja"
-                            ? "メンバー単位"
-                            : "Member"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>{c.timeline}</dt>
-                      <dd>
-                        {item.timeline.windowDays}
-                        {locale === "ja" ? "日" : " days"}
-                      </dd>
+                      <dt>{locale === "ja" ? "集計中" : "Still collecting"}</dt>
+                      <dd>{item.maturity.assigned - item.maturity.mature}</dd>
                     </div>
                   </dl>
                 </div>
               </div>
               <details>
                 <summary>{c.advanced}</summary>
+                <p>{c.coverage}: {healthText(item.dataHealth.label)} · {c.guardrails}: {item.guardrailStatus === "healthy" ? c.healthy : c.partial}</p>
+                <p>{c.randomization}: {item.randomization === "time_block" ? c.dailyBlocks : locale === "ja" ? "メンバー単位" : "By member"} · {c.timeline}: {item.timeline.windowDays} {locale === "ja" ? "日" : "days"}</p>
                 <p>
                   {locale === "ja"
                     ? "成熟済みの全割付を、配信失敗・不明を含めて分析します。"
@@ -1212,7 +1175,7 @@ export default function Console({ data }: { data: ProductData }) {
                 </p>
               </details>
               <div className="card-actions">
-                <button onClick={() => setPage(3)}>{c.viewAction}</button>
+                <button onClick={() => setPage(2)}>{c.viewAction}</button>
                 {item.state === "running" && (
                   <button
                     disabled={busy}
@@ -1253,24 +1216,25 @@ export default function Console({ data }: { data: ProductData }) {
           <h1>{c.settings}</h1>
           <p className="orientation">
             {locale === "ja"
-              ? "言語、プライバシー、アクセス、プランを管理します。"
-              : "Manage language, privacy, access and plan information."}
+              ? "言語、通知先、Discord、データを管理します。"
+              : "Manage language, notifications, Discord and data."}
           </p>
         </div>
       </div>
       <section className="settings-grid">
         <article className="surface">
-          <h2>{c.language}</h2>
+          <h2>{locale === "ja" ? "一般" : "General"}</h2>
+          <p>{c.language}</p>
           <div className="segmented">
             <button
               aria-pressed={locale === "en"}
-              onClick={() => setLocale("en")}
+              onClick={() => { setLocale("en"); document.cookie="nexus_locale=en; Path=/; Max-Age=31536000; SameSite=Lax"; }}
             >
               English
             </button>
             <button
               aria-pressed={locale === "ja"}
-              onClick={() => setLocale("ja")}
+              onClick={() => { setLocale("ja"); document.cookie="nexus_locale=ja; Path=/; Max-Age=31536000; SameSite=Lax"; }}
             >
               日本語
             </button>
@@ -1280,40 +1244,26 @@ export default function Console({ data }: { data: ProductData }) {
               ? "Discord パネルの言語は Discord 内の設定で管理します。"
               : "Discord panel language is managed from Settings in Discord."}
           </p>
+          <label>{locale === "ja" ? "スタッフの通知先" : "Staff notification destination"}<select value={channelId} onChange={e=>void saveNotificationChannel(e.target.value)} disabled={!data.options.available}>{data.options.channels.map(option=><option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
         </article>
         <article className="surface">
-          <h2>{c.plan}</h2>
-          <strong className="big-setting">
-            {data.admin?.usage.plan ?? "—"}
-          </strong>
-          <p>
-            {data.admin
-              ? locale === "ja"
-                ? `${data.admin.usage.used} / ${data.admin.usage.included ?? "個別設定"} MTM · 予測 ${data.admin.usage.projected}`
-                : `${data.admin.usage.used} / ${data.admin.usage.included ?? "Custom"} MTM · projected ${data.admin.usage.projected}`
-              : c.unavailable}
-          </p>
+          <h2>Discord</h2>
+          <p>{data.options.available ? locale === "ja" ? "接続済み。改善策を有効にする前に権限を再確認します。" : "Connected. Permissions are checked again before enabling an improvement." : locale === "ja" ? "接続を確認してください。" : "Check the connection."}</p>
         </article>
         <article className="surface">
-          <h2>{c.privacy}</h2>
-          <p>
-            {locale === "ja"
-              ? `詳細データ: ${String(data.admin?.settings.detailedRetentionDays ?? "—")} 日 · 集計データ: ${String(data.admin?.settings.aggregateRetentionMonths ?? "—")} か月`
-              : `Detailed data: ${String(data.admin?.settings.detailedRetentionDays ?? "—")} days · Aggregate data: ${String(data.admin?.settings.aggregateRetentionMonths ?? "—")} months`}
-          </p>
+          <h2>{locale === "ja" ? "データ" : "Data"}</h2>
+          <label>{locale === "ja" ? "詳細データの保持期間" : "Detailed data retention"}<select value={retentionDays} onChange={e=>void saveRetentionDays(Number(e.target.value) as 7|14|30)}><option value={7}>{locale === "ja" ? "7日" : "7 days"}</option><option value={14}>{locale === "ja" ? "14日" : "14 days"}</option><option value={30}>{locale === "ja" ? "30日" : "30 days"}</option></select></label>
+          <p>{locale === "ja" ? `集計データ: ${String(data.admin?.settings.aggregateRetentionMonths ?? "—")} か月` : `Aggregate data: ${String(data.admin?.settings.aggregateRetentionMonths ?? "—")} months`}</p>
           <p>
             {locale === "ja"
               ? "メッセージ本文、添付、DM、プレゼンスは保存しません。"
               : "Message contents, attachments, DMs and presence are not stored."}
           </p>
+          <p>{locale === "ja" ? "データを削除するには Discord で /nexus privacy を開いてください。" : "To delete data, open /nexus privacy in Discord."}</p>
         </article>
         <article className="surface">
-          <h2>{c.team}</h2>
-          <p>
-            {locale === "ja"
-              ? "管理には「サーバー管理」権限または設定済み管理ロールが必要です。"
-              : "Administration requires Manage Guild or the configured NEXUS admin role."}
-          </p>
+          <h2>{locale === "ja" ? "詳細設定" : "Advanced"}</h2>
+          <details><summary>{locale === "ja" ? "プランと管理情報を見る" : "View plan and administration"}</summary><p>{c.plan}: {data.admin?.usage.plan ?? "—"}</p><p>{locale === "ja" ? "管理にはサーバー管理権限が必要です。" : "Administration requires Manage Guild permission."}</p></details>
         </article>
       </section>
     </>
@@ -1322,8 +1272,7 @@ export default function Console({ data }: { data: ProductData }) {
   const views = [
     home,
     journeyView,
-    opportunityView,
-    actionView,
+    <section key="improve">{opportunityView}{actionView}</section>,
     resultView,
     settingsView,
   ];
@@ -1342,17 +1291,17 @@ export default function Console({ data }: { data: ProductData }) {
               onClick={() => setPage(i)}
             >
               <span aria-hidden="true">
-                {["⌂", "↗", "◇", "⚡", "◎", "⚙"][i]}
+                {["⌂", "↗", "◇", "◎", "⚙"][i]}
               </span>
               {label}
             </button>
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <button onClick={() => setLocale(locale === "en" ? "ja" : "en")}>
+          <button onClick={() => { const next=locale === "en" ? "ja" : "en"; setLocale(next); document.cookie=`nexus_locale=${next}; Path=/; Max-Age=31536000; SameSite=Lax`; }}>
             {locale === "en" ? "日本語" : "English"}
           </button>
-          <small>v0.3.1 · {locale === "ja" ? "本番" : "Production"}</small>
+          <small>v0.4 · {locale === "ja" ? "本番" : "Production"}</small>
         </div>
       </aside>
       <main className="content">
@@ -1377,8 +1326,8 @@ export default function Console({ data }: { data: ProductData }) {
         </p>
         <footer className="product-footer">
           {locale === "ja"
-            ? "メタデータのみ · サーバー単位の識別 · 欠損データをゼロにしません"
-            : "Metadata only · Guild-scoped identity · Missing data is not zero"}
+            ? "必要な活動データだけを使用します · 欠損データをゼロにしません"
+            : "Uses only the activity data needed here · Missing data is not zero"}
         </footer>
       </main>
     </div>
@@ -1402,6 +1351,10 @@ function Setup({
   prepare: (body: unknown, kind: "activation" | "onboarding") => Promise<void>;
   publish: () => Promise<void>;
 }) {
+  const [goal, setGoal] = useState<"reply" | "message" | "event" | null>(null);
+  const connected = data.setup.steps.find(step => step.key === "connect")?.complete ?? false;
+  const defined = data.setup.steps.find(step => step.key === "activation")?.complete ?? false;
+  const native = data.setup.nativeOnboardingEnabled ?? false;
   return (
     <section className="setup-card">
       <div className="section-heading">
@@ -1412,84 +1365,25 @@ function Setup({
           <h2>{c.setup}</h2>
         </div>
       </div>
-      <div className="setup-steps">
-        {data.setup.steps.map((step, i) => (
-          <article key={step.key} className={step.complete ? "done" : ""}>
-            <span>{i + 1}</span>
-            <div>
-              <strong>{c[step.key]}</strong>
-              <small>
-                {step.complete ? c.complete : setupReason(step.reason, locale)}
-              </small>
-            </div>
-          </article>
-        ))}
-      </div>
-      {!data.setup.steps[1]?.complete && (
-        <div className="preset-row">
-          <button
-            onClick={() =>
-              void prepare(
-                { action: "activation_preset", preset: "reply" },
-                "activation",
-              )
-            }
-            disabled={busy}
-          >
-            {c.configureActivation}:{" "}
-            {locale === "ja" ? "直接返信" : "Direct reply"}
-          </button>
-          <button
-            onClick={() =>
-              void prepare(
-                { action: "activation_preset", preset: "event" },
-                "activation",
-              )
-            }
-            disabled={busy}
-          >
-            {locale === "ja" ? "イベント参加" : "Event RSVP"}
-          </button>
-          <button
-            onClick={() =>
-              void prepare(
-                { action: "activation_preset", preset: "message" },
-                "activation",
-              )
-            }
-            disabled={busy}
-          >
-            {locale === "ja" ? "最初の投稿" : "First message"}
-          </button>
+      <p className="inline-note">{connected
+        ? locale === "ja" ? "✓ Discord に接続済み · ✓ データ接続は正常 · ✓ チャンネルを確認済み · ✓ 権限を確認済み" : "✓ Discord connected · ✓ Data connection working · ✓ Channels checked · ✓ Permissions checked"
+        : locale === "ja" ? "サーバーを確認中です。接続または権限を確認してください。" : "Checking your server… Check the connection and permissions."}</p>
+      {!defined && <>
+        <h3>{locale === "ja" ? "新規メンバーの最初の成功は何ですか？" : "What should a successful newcomer do first?"}</h3>
+        <div className="preset-row" role="radiogroup">
+          {(["reply", "message", "event"] as const).map(option => <label key={option}>
+            <input type="radio" name="goal" checked={goal === option} onChange={() => setGoal(option)} />
+            {option === "reply" ? locale === "ja" ? "誰かから返信を受ける" : "Receive a reply" : option === "message" ? locale === "ja" ? "最初のメッセージを送る" : "Send a first message" : locale === "ja" ? "イベントに参加する" : "Join an event"}
+          </label>)}
         </div>
-      )}
-      {!data.setup.steps[2]?.complete && data.setup.recommendedMode && (
-        <button
-          disabled={busy}
-          onClick={() =>
-            void prepare({ action: "onboarding_recommended" }, "onboarding")
-          }
-        >
-          {c.recommendedSetup} ·{" "}
-          {data.setup.recommendedMode === "native"
-            ? locale === "ja"
-              ? "Discord ネイティブ"
-              : "Discord Native"
-            : locale === "ja"
-              ? "NEXUS フォールバック"
-              : "NEXUS Fallback"}
-        </button>
-      )}
-      {!data.setup.steps[2]?.complete && !data.setup.recommendedMode && (
-        <p className="inline-note">
-          {locale === "ja"
-            ? "Discord で /nexus setup を開き、開始チャンネルとオンボーディング内容を選択してください。"
-            : "Open /nexus setup in Discord to choose a start channel and onboarding content."}
-        </p>
-      )}
+        <button disabled={busy || !goal || !connected} onClick={() => goal && void prepare({action:"activation_preset",preset:goal},"activation")}>{locale === "ja" ? "測定を開始" : "Start measuring"}</button>
+      </>}
+      <p className="inline-note">{native
+        ? locale === "ja" ? "Discord のオンボーディングを使用中です。NEXUS は変更せずに観測します。" : "Discord onboarding is already in use. NEXUS will observe it without changing it."
+        : locale === "ja" ? "Discord のオンボーディングは現在使われていません。歓迎フローは後で追加できます。" : "Discord onboarding is not currently in use. You can add a welcome flow later."}</p>
       {preview && (
         <PreviewCard
-          title={`v${preview.after.version}`}
+          title={locale === "ja" ? "選択した最初の成功を確認" : "Confirm your first success"}
           c={c}
           busy={busy}
           publish={publish}
@@ -1557,9 +1451,6 @@ function PreviewCard({
   return (
     <div className="publish-preview">
       <strong>{title}</strong>
-      <p>
-        {c.safety}: {c.approvalNeeded}
-      </p>
       <button disabled={busy} onClick={() => void publish()}>
         {c.publish}
       </button>
@@ -1600,31 +1491,6 @@ function Empty({ c }: { c: Copy }) {
       <p>{c.emptyDetail}</p>
     </div>
   );
-}
-function setupReason(reason: SetupReason, locale: Locale) {
-  const en: Record<SetupReason, string> = {
-    ready: "Ready",
-    capability_unknown: "Run Discord capability check",
-    permissions_missing: "Required permissions are missing",
-    ingestion_unavailable: "Data ingestion is not healthy",
-    activation_missing: "Choose a success signal",
-    native_not_ready: "Discord Native Onboarding is not ready",
-    fallback_not_ready: "Configure a start channel and flow",
-    hybrid_not_ready: "Complete Native and fallback setup",
-    measurement_waiting: "Waiting for the first newcomer",
-  };
-  const ja: Record<SetupReason, string> = {
-    ready: "準備完了",
-    capability_unknown: "Discord 機能チェックを実行",
-    permissions_missing: "必要な権限がありません",
-    ingestion_unavailable: "データ取り込みを確認してください",
-    activation_missing: "成功シグナルを選択",
-    native_not_ready: "Discord Native Onboarding の準備が未完了",
-    fallback_not_ready: "開始チャンネルとフローを設定",
-    hybrid_not_ready: "Native とフォールバックの設定を完了",
-    measurement_waiting: "最初の新規メンバーを待っています",
-  };
-  return (locale === "ja" ? ja : en)[reason];
 }
 function semantic(value: string, locale: Locale) {
   const en: Record<string, string> = {
@@ -1694,14 +1560,14 @@ function replyLabels(locale: Locale) {
 function metricLabel(metric: string, locale: Locale) {
   const labels = {
     en: {
-      activation: "Activation",
-      connection: "First Connection",
-      retention: "Retention",
+      activation: "successful newcomers",
+      connection: "first replies",
+      retention: "7 day activity",
     },
     ja: {
-      activation: "アクティベーション",
-      connection: "最初のつながり",
-      retention: "継続率",
+      activation: "新規メンバーの成功",
+      connection: "最初の返信",
+      retention: "7日後の活動",
     },
   };
   return labels[locale][metric as keyof typeof labels.en] ?? metric;
@@ -1714,18 +1580,18 @@ function evidenceLabel(
   if (item.state === "paused") return locale === "ja" ? "一時停止" : "Paused";
   const labels = {
     en: {
-      supported: "Evidence available",
-      directional: "Early signal",
-      inconclusive: "No clear difference",
-      insufficient: item.maturity.mature ? "Collecting data" : "Preparing",
-      guardrail: "Paused by guardrail",
+      supported: "Current results support the improvement",
+      directional: "A positive trend is appearing",
+      inconclusive: "No clear difference yet",
+      insufficient: "Not enough data yet",
+      guardrail: "Stopped for safety",
     },
     ja: {
-      supported: "エビデンスあり",
-      directional: "初期シグナル",
-      inconclusive: "明確な差なし",
-      insufficient: item.maturity.mature ? "データ収集中" : "準備中",
-      guardrail: "安全基準により一時停止",
+      supported: "現在の結果は改善を支持しています",
+      directional: "良い傾向が見えています",
+      inconclusive: "はっきりした差はありません",
+      insufficient: "まだ判断できません",
+      guardrail: "安全のため停止しました",
     },
   };
   return labels[locale][item.evidence];
@@ -1735,21 +1601,18 @@ function learning(
   locale: Locale,
 ) {
   const en = {
-    supported:
-      "The treatment is outperforming control in the current mature sample.",
-    directional:
-      "Treatment is trending higher, but the evidence is not conclusive yet.",
-    inconclusive: "The mature sample does not show a reliable difference.",
-    insufficient:
-      "More mature observations are needed before drawing a conclusion.",
-    guardrail: "The test paused because a safety guardrail was crossed.",
+    supported: "Current results support this improvement. Keep checking as more data arrives.",
+    directional: "A positive trend is appearing. Continue collecting before deciding.",
+    inconclusive: "No clear difference yet. Continue collecting.",
+    insufficient: "Not enough data yet. Continue collecting.",
+    guardrail: "NEXUS stopped this check for safety. Review the improvement before continuing.",
   };
   const ja = {
-    supported: "現在の成熟済みサンプルでは施策群が対照群を上回っています。",
-    directional: "施策群が上回る傾向ですが、まだ結論には至りません。",
-    inconclusive: "成熟済みサンプルでは信頼できる差を確認できません。",
-    insufficient: "結論を出すには、より多くの観測値の成熟が必要です。",
-    guardrail: "安全基準を超えたためテストを一時停止しました。",
+    supported: "現在の結果は改善を支持しています。データが増えても確認を続けてください。",
+    directional: "良い傾向があります。判断まで集計を続けてください。",
+    inconclusive: "はっきりした差はありません。集計を続けてください。",
+    insufficient: "まだ判断できません。集計を続けてください。",
+    guardrail: "安全のため停止しました。再開前に改善策を確認してください。",
   };
   return (locale === "ja" ? ja : en)[evidence];
 }

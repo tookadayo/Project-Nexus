@@ -43,8 +43,11 @@ const db = connect(`postgresql://nexus:nexus@127.0.0.1:${pgPort}/postgres`);
 await migrate(db);
 const s = scopeForGuild("321111111111111111");
 await ensureGuild(db, s);
+const settings=new SettingsService(db);
+await settings.update(s,{key:'e2e-admin',permissions:'32',roles:[],source:'SYSTEM',requestId:randomUUID()},0,{enabled:true,flags:{native_capability_v2:true,native_snapshot_v2:true,activation_dsl_v2:true,interventions_v2:true,experiments_v2:true,billing_v1:true}});
 const vault = new IdentityVault("aa".repeat(32), "bb".repeat(32));
 const now = new Date();
+await sql`INSERT INTO guild_capabilities(organization_id,guild_id,id,profile,checked_at) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${json({coverage:'healthy',sendMessages:true,manageRoles:true,nativeOnboardingEnabled:false,recommendedMode:'fallback'})},${now})`.execute(db);
 const joined = new Date(now.getTime() - 9 * 86400000);
 for (let i = 0; i < 24; i++) {
   const identityId = await vault.resolve(
@@ -70,6 +73,7 @@ await sql`INSERT INTO guild_subscriptions(organization_id,guild_id,plan_key) VAL
   db,
 );
 const discord = {
+  checkChannel: async (_guildId:string,channelId:string) => {if(channelId!=='621111111111111111')throw new Error('CHANNEL_PERMISSION_MISSING');},
   options: async () => ({
     channels: [
       { id: "621111111111111111", label: "#helpers" },
