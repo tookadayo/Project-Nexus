@@ -64,15 +64,15 @@
 
 ## CI result
 
-Linux の `@embedded-postgres/linux-x64` を pnpm の build 許可に追加し、性能テストを GitHub Actions に追加しました。このレポート作成時点で、この変更の GitHub Actions 実行結果は未確認です。ローカル通過を CI 通過とは記載しません。
+Linux の `@embedded-postgres/linux-x64` を pnpm の build 許可に追加し、性能テストを GitHub Actions に追加しました。[commit `21b5beb` の Actions 実行](https://github.com/tookadayo/Project-Nexus/actions/runs/36122705737) では、Linux の lint、typecheck、Unit、Build、Web E2E、Integration、Performance と Windows Runtime がすべて通過しました。
 
 ## Discord acceptance result
 
-実 Discord Test Server での `/nexus panel`、ページ移動、再起動後の Panel、3秒以内の ACK は未確認です。現在の実行環境では Bot Token と Application ID の一致を確認しましたが、Discord Guild API が `40333 internal network error` を返しました。これは Guild 権限不足か接続経路の問題かを確定できていません。Discord の画面からコマンドを操作した結果は得ていません。
+実 Discord Test Server での `/nexus panel`、ページ移動、再起動後の Panel、3秒以内の ACK は未確認です。ローカルの `start-nexus.ps1` は起動し、STATUS は Gateway 接続、ハンドラー登録、Slash Command 登録を正常と表示しました。一方、最後の Interaction 受信・ACK・応答完了は未観測です。Bot Token と Application ID の一致は確認しましたが、Discord Guild API は `40333 internal network error` を返しました。Guild 権限不足か接続経路の問題かは確定できていません。操作用ブラウザーは Discord に未ログインのため、コマンドを実行できませんでした。
 
 ## Known limitations
 
 - Discord Developer Portal の Interactions Endpoint URL は API から確認できません。Gateway 方式では空欄にする必要があり、DOCTOR は確認手順を表示します。
 - Web の共有管理者認証で変更した履歴は「Web 管理者」と表示します。個々の Web 操作者までは区別しません。
 - 旧詳細設定と旧分析画面には、専門用語や長い説明が一部残っています。主要な固定 Panel と通常の Web 画面を優先して改善しました。
-- 実 Discord での受入確認と、この変更に対する GitHub Actions の成功が確認されるまで、v0.5.2 の完成条件を満たしたとは扱いません。
+- 実 Discord での受入確認が完了するまで、v0.5.2 の完成条件を満たしたとは扱いません。
