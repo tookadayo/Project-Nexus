@@ -87,17 +87,19 @@ export function createInteractionServer(opts:{db:Database,vault:IdentityVault,pu
   const job:InteractionJob={id:input.id,applicationId:input.application_id,token:input.token,userId:input.member.user.id,
    channelId:input.channel_id,messageId:input.message?.id,command:input.data.name==='nexus'?input.data.options?.[0]?.name:undefined,customId:input.data.custom_id,values:input.data.values,
    fields:input.type===5?Object.fromEntries(input.data.components?.flatMap(row=>row.components.map(c=>[c.custom_id,c.value]))??[]):undefined,locale:input.locale,guildLocale:input.guild_locale};
-  const acknowledgedAt=new Date();opts.health?.acknowledged(acknowledgedAt);
-  // Send the initial response before acquiring a database connection.
-  void opts.db.transaction().execute(async tx=>{
-   await sql`SET LOCAL transaction_timeout='1700ms'`.execute(tx);
-   await sql`SET LOCAL statement_timeout='1200ms'`.execute(tx);await sql`SET LOCAL lock_timeout='500ms'`.execute(tx);
-   await ensureGuild(tx,s);
-   await saveDiagnostic(tx,s,opts.vault,{id:input.id,kind:input.type===2?'command':input.type===5?'modal':'component',action:job.command??'component',receivedAt,acknowledgedAt});
-   await sql`INSERT INTO interaction_jobs(organization_id,guild_id,id,encrypted_payload) VALUES
-    (${s.organizationId}::uuid,${s.guildId},${job.id},${opts.vault.seal(s,JSON.stringify(job))}) ON CONFLICT DO NOTHING`.execute(tx);
-  }).catch(async()=>{opts.health?.failed('queue_failed');await opts.discord?.editReply(input.application_id,input.token,{content:t(immediateLocale,'interaction.saveFailed')}).catch(()=>{});});
-  return {type:5,data:{flags:64}};
+  // The response must finish before queueing can acquire a database connection.
+  reply.raw.once('finish',()=>{
+   const acknowledgedAt=new Date();opts.health?.acknowledged(acknowledgedAt);
+   void opts.db.transaction().execute(async tx=>{
+    await sql`SET LOCAL transaction_timeout='1700ms'`.execute(tx);
+    await sql`SET LOCAL statement_timeout='1200ms'`.execute(tx);await sql`SET LOCAL lock_timeout='500ms'`.execute(tx);
+    await ensureGuild(tx,s);
+    await saveDiagnostic(tx,s,opts.vault,{id:input.id,kind:input.type===2?'command':input.type===5?'modal':'component',action:job.command??'component',receivedAt,acknowledgedAt});
+    await sql`INSERT INTO interaction_jobs(organization_id,guild_id,id,encrypted_payload) VALUES
+     (${s.organizationId}::uuid,${s.guildId},${job.id},${opts.vault.seal(s,JSON.stringify(job))}) ON CONFLICT DO NOTHING`.execute(tx);
+   }).catch(async()=>{opts.health?.failed('queue_failed');await opts.discord?.editReply(input.application_id,input.token,{content:t(immediateLocale,'interaction.saveFailed')}).catch(()=>{});});
+  });
+  return reply.send({type:5,data:{flags:64}});
  });
  return app;
 }
