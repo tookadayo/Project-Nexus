@@ -70,7 +70,10 @@ function Get-NexusDedicatedPostgresPid {
     if (-not $data.Equals((Join-Path $script:NexusRoot '.local\pg'),[System.StringComparison]::OrdinalIgnoreCase) -or $lines[3] -ne '55432') { return 0 }
     $pidNumber = 0
     if (-not [int]::TryParse($lines[0],[ref]$pidNumber)) { return 0 }
-    if ((Get-NexusPortOwner 55432) -ne $pidNumber) { return 0 }
+    $owner = Get-NexusPortOwner 55432
+    # Windows can report 0 for an orphaned PostgreSQL worker. A positive owner
+    # belonging to another process is never evidence for a NEXUS cleanup.
+    if ($owner -gt 0 -and $owner -ne $pidNumber) { return 0 }
     return $pidNumber
 }
 function Get-NexusOrphanProcesses {
@@ -83,7 +86,9 @@ function Get-NexusOrphanProcesses {
         $name = [string]$process.Name
         $owned = $false
         if ($name -ieq 'postgres.exe' -and $postgresPid -gt 0 -and ($process.ProcessId -eq $postgresPid -or $process.ParentProcessId -eq $postgresPid)) {
-            $owned = (Test-NexusRootText $command) -and $command -match 'embedded-postgres|postgres.exe'
+            $binaryPath = $executable.Replace('/','\')
+            $fromBundledBinary = (Test-NexusRootText $binaryPath) -and ($binaryPath -match '\\node_modules\\\.pnpm\\@embedded-postgres\+windows-x64@|\\node_modules\\@embedded-postgres\\windows-x64\\')
+            $owned = ((Test-NexusRootText $command) -and $command -match 'embedded-postgres|postgres.exe') -or ($fromBundledBinary -and $command -match 'postgres.exe|--fork')
         }
         if ($name -ieq 'redis-server.exe' -and ((Test-NexusRootText $executable) -or (Test-NexusRootText $command)) -and ($executable.Replace('/','\') -like "$(Join-Path $script:NexusRoot '.local\redis')\*" -or $command.Replace('/','\') -like "*$(Join-Path $script:NexusRoot '.local\redis')\*redis-server.exe*") -and $command -match '56379') { $owned = $true }
         if ($name -match '^(node|node.exe)$' -and (Test-NexusRootText $command) -and $command -match 'scripts[\\/]dev\.ts|scripts[\\/]infra\.ts|scripts[\\/]web\.ts|apps[\\/]web[\\/]node_modules[\\/]next') { $owned = $true }

@@ -44,13 +44,22 @@ try {
     }
     $text=($lines -join "`n")+"`n"
     [System.IO.File]::WriteAllText($envPath,$text,(New-Object System.Text.UTF8Encoding($false)))
+    if((Get-Setting 'NODE_ENV') -eq 'development') { Write-Host "Local dashboard password: $(Get-Setting 'NEXUS_WEB_PASSWORD')" }
     Write-Host 'Building NEXUS and the local dashboard...'
     & corepack pnpm build
     if($LASTEXITCODE -ne 0) { throw 'Build failed. Review the output above before starting NEXUS.' }
     Write-Host 'Starting database, Redis, Discord, and dashboard. The database is migrated automatically; commands register when their definition changes.'
     & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $script:NexusRoot 'start-nexus.ps1')
     if($LASTEXITCODE -ne 0) { throw 'NEXUS did not start. Check .local\runtime\*.err.log and run NEXUS DOCTOR.cmd.' }
-    if($newPassword) { Write-Host "Local dashboard password: $newPassword" }
+    $ready=$false
+    for($attempt=0;$attempt -lt 20;$attempt++) {
+        try { $health=Invoke-RestMethod 'http://127.0.0.1:3001/health' -TimeoutSec 2
+            if($health.discordConnected -and $health.interaction.handlerRegistered -and $health.commands.registered) { $ready=$true;break }
+        } catch { }
+        Start-Sleep -Seconds 2
+    }
+    if(-not $ready) { throw 'Processes started, but Discord command readiness is not confirmed. Run NEXUS DOCTOR.cmd and check the Bot Token, Guild ID, privileged intent, and Interaction mode.' }
+    Write-Host 'Discord commands are registered and the interaction handler is ready.'
     Write-Host 'Dashboard: http://localhost:3100'
     exit 0
 } catch { [Console]::Error.WriteLine("NEXUS setup failed: $($_.Exception.Message)");exit 1 }

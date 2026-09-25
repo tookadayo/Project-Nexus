@@ -48,12 +48,13 @@ it('runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
   const found=controls(discord.panels.get('reply')).find(c=>c.label===label||c.placeholder===label);
   expect(found,`Missing control: ${label}`).toBeDefined();return String(found!.custom_id);
  };
- const deliver=async(userId:string,data:Record<string,unknown>,type=3)=>{
+ const deliver=async(userId:string,data:Record<string,unknown>,type=3,messageId?:string)=>{
   const id=String(BigInt('631111111111111111')+BigInt(++sequence));
-  const body=JSON.stringify({id,application_id:'531111111111111119',type,token:`token-${id}`,guild_id:s.guildId,channel_id:channel,
+  const body=JSON.stringify({id,application_id:'531111111111111119',type,token:`token-${id}`,guild_id:s.guildId,channel_id:channel,message:messageId?{id:messageId}:undefined,
    member:{user:{id:userId},permissions:userId===admin?'32':'0',roles:[]},data});
   const ts=String(Math.floor(Date.now()/1000));const res=await http.inject({method:'POST',url:'/interactions',payload:body,headers:{'content-type':'application/json','x-signature-timestamp':ts,'x-signature-ed25519':sign(null,Buffer.from(ts+body),keys.privateKey).toString('hex')}});
   expect(res.statusCode).toBe(200);expect(res.json()).toEqual({type:5,data:{flags:64}});
+  await expect.poll(async()=>(await sql`SELECT id FROM interaction_jobs WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId} AND id=${id}`.execute(db)).rows.length,{timeout:10000}).toBe(1);
   const job=await queue.add('interaction',{});
   await expect.poll(async()=> (await queue.getJob(job.id!))?.getState(),{timeout:10000}).toBe('completed');
  };
@@ -91,6 +92,16 @@ it('runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
   await deliver(user,{custom_id:controls(discord.panels.get('reply'))[0]!.custom_id,values:['valorant']});
   expect(discord.members.get(user)!.roles).toEqual([]);
   expect((await sql`SELECT role_id FROM nexus_role_grants WHERE guild_id=${s.guildId} AND revoked_at IS NOT NULL`.execute(db)).rows).toHaveLength(1);
+  const fixed=(await sql<{message_id:string}>`SELECT message_id FROM settings_panels WHERE guild_id=${s.guildId}`.execute(db)).rows[0]!;
+  const pageControl=controls(discord.panels.get(fixed.message_id)).find(item=>item.placeholder==='Choose a page')!;
+  expect(pageControl).toBeDefined();
+  await deliver(admin,{custom_id:pageControl.custom_id,values:['channels']},3,fixed.message_id);
+  expect(JSON.stringify(discord.panels.get(fixed.message_id))).toContain('Channels');
+  expect(discord.calls.filter(call=>call==='sendPanel')).toHaveLength(1);
+  const settingControl=controls(discord.panels.get(fixed.message_id)).find(item=>item.label==='Change settings')!;
+  await deliver(user,{custom_id:settingControl.custom_id},3,fixed.message_id);
+  expect(JSON.stringify(discord.panels.get('reply'))).toContain('permission');
+  expect(JSON.stringify(discord.panels.get(fixed.message_id))).toContain('Channels');
  }finally{await worker.close();await queue.close();await http.close();await api.close();}
 });
 it('uses real Streams, reclaims a crashed delivery and deduplicates lifecycle and activation',async()=>{

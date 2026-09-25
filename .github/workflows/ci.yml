@@ -20,6 +20,9 @@ jobs:
       - run: corepack pnpm test:integration
         env:
           NEXUS_TEST_INFRA: docker
+      - run: corepack pnpm test:performance
+        env:
+          NEXUS_TEST_INFRA: docker
   windows-runtime:
     runs-on: windows-latest
     steps:

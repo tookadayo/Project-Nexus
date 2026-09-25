@@ -15,6 +15,7 @@ import {LifecycleService} from '../packages/lifecycle/src/index.js';
 import {AnalyticsService} from '../packages/analytics/src/index.js';
 import {DiscordRest} from '../packages/discord/src/rest.js';
 import {createInteractionServer,handleGatewayInteraction} from '../apps/interaction/src/server.js';
+import {InteractionHealth} from '../apps/interaction/src/health.js';
 import {createApi} from '../apps/api/src/server.js';
 import {createGateway,STREAM} from '../apps/gateway/src/index.js';
 import {StreamConsumer,scrubStream} from '../apps/worker/src/streams.js';
@@ -24,12 +25,15 @@ import {NativeMemberSnapshotWorker} from '../packages/lifecycle/src/native.js';
 import {OptimizationWorker} from '../apps/worker/src/optimization.js';
 import {CapabilityService} from '../packages/lifecycle/src/capabilities.js';
 import {WeeklySummaryWorker} from '../apps/worker/src/weekly.js';
+import {HelperWorker} from '../apps/worker/src/helpers.js';
 import {scopeSchema,type Scope} from '../packages/shared/src/index.js';
 import {createHash} from 'node:crypto';
 import {buildNexusCommand} from './commands.js';
 import {scopeForGuild} from '../packages/security/src/index.js';
 try{loadEnvFile();}catch{/* Config validation below reports missing fields. */}
 const cfg=readConfig();const db=connect(cfg.DATABASE_URL);await migrate(db);
+const interactionHealth=new InteractionHealth(cfg.NEXUS_INTERACTION_TRANSPORT);
+const command=buildNexusCommand().toJSON(),hash=createHash('sha256').update(JSON.stringify(command)).digest('hex');
 const redis=new Redis(cfg.REDIS_URL,{maxRetriesPerRequest:1,enableOfflineQueue:false,lazyConnect:true});redis.on('error',()=>process.stderr.write('Redis unavailable\n'));await redis.connect();
 const vault=new IdentityVault(cfg.IDENTITY_KEY,cfg.LOOKUP_KEY);const tokens=new Components(cfg.COMPONENT_KEY);const discord=new DiscordRest(cfg.DISCORD_TOKEN,cfg.DISCORD_APPLICATION_ID);
 const settings=new SettingsService(db);const onboarding=new OnboardingService(db,settings,vault);const privacy=new PrivacyService(db,vault,settings,(s,hash)=>scrubStream(redis,vault,s,hash));
@@ -37,9 +41,10 @@ const analytics=new AnalyticsService(db,settings);const lifecycle=new LifecycleS
 const nativeSnapshots=new NativeMemberSnapshotWorker(db,vault,discord);
 const optimization=new OptimizationWorker(db);
 const weekly=new WeeklySummaryWorker(db,discord);
-const actions=new ActionWorker(db,vault,discord,onboarding);const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,(s,user,actor,guild)=>privacy.delete(s,user,actor,guild));
-const http=createInteractionServer({db,vault,publicKey:cfg.DISCORD_PUBLIC_KEY,applicationId:cfg.DISCORD_APPLICATION_ID,components:tokens});
-const gateway=createGateway(redis,vault,()=>process.stderr.write('Gateway operation failed\n'),db,cfg.NEXUS_INTERACTION_TRANSPORT==='gateway'?interaction=>handleGatewayInteraction(interaction,{db,vault,components:tokens}):undefined);const api=createApi(analytics,cfg.API_KEY,db,discord,()=>({discordConnected:gateway.client.isReady()}));
+const helpers=new HelperWorker(db,discord,settings);
+const actions=new ActionWorker(db,vault,discord,onboarding,interactionHealth);const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,(s,user,actor,guild)=>privacy.delete(s,user,actor,guild),()=>({gatewayConnected:gateway.client.isReady(),interaction:interactionHealth.snapshot(),commandHash:hash}));
+const http=createInteractionServer({db,vault,publicKey:cfg.DISCORD_PUBLIC_KEY,applicationId:cfg.DISCORD_APPLICATION_ID,components:tokens,discord,health:interactionHealth});
+const gateway=createGateway(redis,vault,()=>process.stderr.write('Gateway operation failed\n'),db,cfg.NEXUS_INTERACTION_TRANSPORT==='gateway'?interaction=>handleGatewayInteraction(interaction,{db,vault,components:tokens,health:interactionHealth}):undefined);const api=createApi(analytics,cfg.API_KEY,db,discord,()=>({discordConnected:gateway.client.isReady(),interaction:interactionHealth.snapshot(),commandHash:hash}),vault);
 const capabilities=new CapabilityService(db,discord,()=>{const ready=gateway.client.isReady()?true:null;return {members:ready,messages:ready,reactions:ready,voice:ready,scheduledEvents:ready};});
 // Tenant registry discovery is scheduler-only; every domain operation receives the explicit scope.
 async function scopes(){return (await sql<{organization_id:string,guild_id:string}>`SELECT organization_id,guild_id FROM guilds`.execute(db)).rows.map(row=>({organizationId:row.organization_id,guildId:row.guild_id}));}
@@ -64,14 +69,13 @@ const loop=async()=>{while(!stopped){try{
   if(Date.now()-lastCapabilities>1800000){for(const s of await scopes()){const configuration=await settings.get(s);if(configuration.enabled)await capabilities.refresh(s,configuration.onboardingMode).catch(()=>process.stderr.write('Capability refresh unavailable\n'));}lastCapabilities=Date.now();}
   if(Date.now()-lastAggregate>3600000){for(const s of await scopes())await analytics.materialize(s);lastAggregate=Date.now();}
   if(Date.now()-lastWeekly>3600000){for(const s of await scopes())await weekly.tick(s);lastWeekly=Date.now();}
-  for(const s of await scopes()){await queue.add('guild',s,{jobId:s.guildId,removeOnComplete:true,removeOnFail:true,attempts:3,backoff:{type:'exponential',delay:1000}});await privacy.purge(s);}
+  for(const s of await scopes()){await queue.add('guild',s,{jobId:s.guildId,removeOnComplete:true,removeOnFail:true,attempts:3,backoff:{type:'exponential',delay:1000}});await helpers.tick(s);await privacy.purge(s);}
   await redis.xtrim(STREAM,'MINID',`${Date.now()-86400000}-0`);lastMaintenance=Date.now();
  }
  }catch{process.stderr.write('Worker recovery pending\n');}
  await new Promise(resolve=>setTimeout(resolve,250));
  }};
 await Promise.all([...(cfg.NEXUS_INTERACTION_TRANSPORT==='webhook'?[http.listen({host:'127.0.0.1',port:cfg.INTERACTION_PORT})]:[]),api.listen({host:'127.0.0.1',port:cfg.API_PORT}),gateway.client.login(cfg.DISCORD_TOKEN)]);
-const command=buildNexusCommand().toJSON(),hash=createHash('sha256').update(JSON.stringify(command)).digest('hex');
 async function syncCommands(s:Scope){
  const old=(await sql<{definition_hash:string}>`SELECT definition_hash FROM guild_command_sync WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId}`.execute(db)).rows[0];
  if(old?.definition_hash!==hash){await discord.registerCommands(s.guildId,[command]);await sql`INSERT INTO guild_command_sync(organization_id,guild_id,definition_hash) VALUES(${s.organizationId}::uuid,${s.guildId},${hash}) ON CONFLICT(organization_id,guild_id) DO UPDATE SET definition_hash=EXCLUDED.definition_hash,registered_at=now()`.execute(db);}

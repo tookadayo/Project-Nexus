@@ -14,8 +14,10 @@ export class WeeklySummaryWorker {
   const cfg=await this.settings.get(s);if(!cfg.weeklySummaryEnabled||!cfg.weeklySummaryChannelId)return false;
   const {from,to}=previousCompleteWeek(now),week=from.toISOString().slice(0,10);
   await sql`UPDATE weekly_summary_deliveries SET state='unknown',status_note='送信結果を確認できませんでした',lease_until=NULL WHERE ${tenant(s)} AND state='sending' AND COALESCE(lease_until,attempted_at+interval '15 minutes')<${now}`.execute(this.db);
-  const reserved=(await sql`INSERT INTO weekly_summary_deliveries(organization_id,guild_id,week_start,channel_id,state,lease_until) VALUES(${s.organizationId}::uuid,${s.guildId},${week}::date,${cfg.weeklySummaryChannelId},'sending',${new Date(now.getTime()+15*60000)}) ON CONFLICT DO NOTHING RETURNING week_start`.execute(this.db)).rows.length>0;
+  await sql`UPDATE weekly_summary_deliveries SET state='ready',lease_until=NULL WHERE ${tenant(s)} AND state='preparing' AND lease_until<${now}`.execute(this.db);
+  const reserved=(await sql`INSERT INTO weekly_summary_deliveries(organization_id,guild_id,week_start,channel_id,state,lease_until,attempted_at) VALUES(${s.organizationId}::uuid,${s.guildId},${week}::date,${cfg.weeklySummaryChannelId},'preparing',${new Date(now.getTime()+15*60000)},NULL) ON CONFLICT(organization_id,guild_id,week_start) DO UPDATE SET state='preparing',channel_id=EXCLUDED.channel_id,lease_until=EXCLUDED.lease_until,status_note=NULL WHERE weekly_summary_deliveries.state='ready' RETURNING week_start`.execute(this.db)).rows.length>0;
   if(!reserved)return false;
+  let sendStarted=false;
   try{
    await this.discord.checkChannel(s.guildId,cfg.weeklySummaryChannelId);
    const [current,previous]=await Promise.all([this.analytics.canonical(s,from,to,now),this.analytics.canonical(s,new Date(from.getTime()-7*DAY),from,now)]);
@@ -43,12 +45,15 @@ export class WeeklySummaryWorker {
     `Recommended improvement: ${replyIssue?'Notify staff when someone has no reply':'Notify staff when a newcomer may need help'}`,
     `View improvement: ${improvementLink}`
    ].join('\n');
+   await sql`UPDATE weekly_summary_deliveries SET state='ready' WHERE ${tenant(s)} AND week_start=${week}::date AND state='preparing'`.execute(this.db);
+   await sql`UPDATE weekly_summary_deliveries SET state='sending',attempted_at=${now} WHERE ${tenant(s)} AND week_start=${week}::date AND state='ready'`.execute(this.db);
+   sendStarted=true;
    const messageId=await this.discord.sendPanel(cfg.weeklySummaryChannelId,{content,allowed_mentions:{parse:[]}},randomUUID());
    await sql`UPDATE weekly_summary_deliveries SET state='sent',message_id=${messageId},lease_until=NULL,status_note=NULL WHERE ${tenant(s)} AND week_start=${week}::date`.execute(this.db);
    return true;
   }catch{
-   // Unknown delivery is never retried automatically: no duplicate staff posts.
-   await sql`UPDATE weekly_summary_deliveries SET state='unknown',lease_until=NULL,status_note='送信結果を確認できませんでした' WHERE ${tenant(s)} AND week_start=${week}::date`.execute(this.db);
+   // Once Discord send starts, an unknown result must not be retried automatically.
+   await sql`UPDATE weekly_summary_deliveries SET state=${sendStarted?'unknown':'ready'},lease_until=NULL,status_note=${sendStarted?'送信結果を確認できませんでした':'送信前の準備に失敗しました。再試行できます'} WHERE ${tenant(s)} AND week_start=${week}::date`.execute(this.db);
    return false;
   }
  }

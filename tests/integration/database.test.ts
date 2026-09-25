@@ -123,6 +123,7 @@ it('HTTP ACK is signed, durable, deduplicated and drops all unsolicited fields',
  const start=performance.now();const response=await app.inject({method:'POST',url:'/interactions',payload:body,headers});
  expect(performance.now()-start).toBeLessThan(2500);expect(response.json()).toEqual({type:5,data:{flags:64}});
  await app.inject({method:'POST',url:'/interactions',payload:body,headers});
+ await expect.poll(async()=>(await sql`SELECT id FROM interaction_jobs WHERE id=${data.id}`.execute(db)).rows.length).toBe(1);
  const rows=await sql<{encrypted_payload:string}>`SELECT encrypted_payload FROM interaction_jobs WHERE id=${data.id}`.execute(db);
  expect(rows.rows).toHaveLength(1);const plaintext=vault.open(scopeForGuild(data.guild_id),rows.rows[0]!.encrypted_payload);
  expect(plaintext).not.toContain('PRIVATE');

@@ -8,7 +8,7 @@ export class FakeDiscord implements DiscordPort {
  async validateRole(_guildId:string,_roleId:string){if(this.failure)throw this.failure;}
  async addRole(_guildId:string,userId:string,roleId:string){this.calls.push(`add:${roleId}`);if(this.mutationFailure)throw this.mutationFailure;if(this.failure)throw this.failure;this.members.get(userId)!.roles.push(roleId);}
  async removeRole(_guildId:string,userId:string,roleId:string){this.calls.push(`remove:${roleId}`);if(this.failure)throw this.failure;const m=this.members.get(userId)!;m.roles=m.roles.filter(id=>id!==roleId);}
- async sendPanel(_channelId:string,body:unknown,nonce:string){this.calls.push('sendPanel');if(this.failure)throw this.failure;this.panels.set(nonce,body);return nonce;}
+ async sendPanel(_channelId:string,body:unknown,_nonce:string){this.calls.push('sendPanel');if(this.failure)throw this.failure;const id=String(930000000000000000n+BigInt(this.calls.filter(call=>call==='sendPanel').length));this.panels.set(id,body);return id;}
  async editPanel(_channelId:string,messageId:string,body:unknown){if(!this.panels.has(messageId))throw new DiscordFailure(404);this.panels.set(messageId,body);}
  async editReply(_appId:string,_token:string,body:unknown){this.calls.push('editReply');if(this.failure)throw this.failure;this.panels.set('reply',body);}
 }

@@ -101,8 +101,8 @@ export class LifecycleService {
      if(previous?.voice_channel_id!==event.channelId)await sql`INSERT INTO member_observable_state(organization_id,guild_id,episode_id,voice_channel_id,voice_started_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episode.id}::uuid,${event.channelId??null},${event.channelId?at:null}) ON CONFLICT(organization_id,guild_id,episode_id) DO UPDATE SET voice_channel_id=EXCLUDED.voice_channel_id,voice_started_at=EXCLUDED.voice_started_at`.execute(tx);
      await this.record(tx,s,episode.id,event.kind,at,{channelId:event.channelId});
      if(event.kind==='voice.started'&&event.channelId){
-      const peers=(await sql<{episode_id:string}>`SELECT episode_id FROM member_observable_state WHERE ${tenant(s)} AND episode_id<>${episode.id}::uuid AND voice_channel_id=${event.channelId} AND voice_started_at IS NOT NULL AND voice_started_at<=${at} LIMIT 100`.execute(tx)).rows;
-      if(peers.length){await this.record(tx,s,episode.id,'voice.connected',at,{channelId:event.channelId});for(const peer of peers)await this.record(tx,s,peer.episode_id,'voice.connected',at,{channelId:event.channelId});}
+      const peers=(await sql<{episode_id:string;identity_id:string}>`SELECT state.episode_id,member.identity_id FROM member_observable_state state JOIN membership_episodes member ON member.organization_id=state.organization_id AND member.guild_id=state.guild_id AND member.id=state.episode_id WHERE state.organization_id=${s.organizationId}::uuid AND state.guild_id=${s.guildId} AND state.episode_id<>${episode.id}::uuid AND state.voice_channel_id=${event.channelId} AND state.voice_started_at IS NOT NULL AND state.voice_started_at<=${at} AND member.left_at IS NULL LIMIT 100`.execute(tx)).rows;
+      if(peers.length){await this.record(tx,s,episode.id,'voice.connected',at,{channelId:event.channelId});for(const peer of peers){await this.record(tx,s,peer.episode_id,'voice.connected',at,{channelId:event.channelId});await this.pair(tx,s,episode.id,peer.identity_id,at);await this.pair(tx,s,peer.episode_id,identityId,at);}}
      }
     }
    }
@@ -118,6 +118,8 @@ export class LifecycleService {
      if(target&&target.identity_id!==identityId&&at>=target.occurred_at){
       const latency=(at.getTime()-target.occurred_at.getTime())/1000;
       await this.record(tx,s,target.episode_id,'reply.received',at,{latencySeconds:latency,channelId:target.data.channelId});
+      await this.pair(tx,s,target.episode_id,identityId,at);
+      await this.pair(tx,s,episode.id,target.identity_id,at);
       await sql`INSERT INTO reply_receipts VALUES(${s.organizationId}::uuid,${s.guildId},${event.messageId!},${target.episode_id}::uuid,${new Date(at.getTime()+86400000)}) ON CONFLICT DO NOTHING`.execute(tx);
       if(settings.flags.activation_dsl_v2)await projectActivation(tx,s,target.episode_id,at);
       await sql`UPDATE lifecycle_events SET data=jsonb_set(jsonb_set(data,'{receivedExplicitReply}','true'::jsonb),'{firstReplyLatencySeconds}',to_jsonb(LEAST(COALESCE((data->>'firstReplyLatencySeconds')::double precision,${latency}),${latency}))) WHERE ${tenant(s)} AND id=${target.id}::uuid`.execute(tx);
@@ -140,6 +142,9 @@ export class LifecycleService {
   validateSignal(kind,data);
   await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data) VALUES
    (${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episodeId}::uuid,${kind},${at},'PRODUCTION',${json(data)}) ON CONFLICT DO NOTHING`.execute(tx);
+ }
+ private async pair(tx:Tx,s:Scope,episodeId:string,peerIdentityId:string,at:Date){
+  await sql`INSERT INTO member_interaction_pairs(organization_id,guild_id,episode_id,peer_identity_id,first_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episodeId}::uuid,${peerIdentityId}::uuid,${at}) ON CONFLICT(organization_id,guild_id,episode_id,peer_identity_id) DO UPDATE SET first_at=LEAST(member_interaction_pairs.first_at,EXCLUDED.first_at)`.execute(tx);
  }
  private async gap(tx:Tx,s:Scope,start:Date,end:Date|null,reason:string){await sql`INSERT INTO telemetry_health VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${start},${end},${reason})`.execute(tx);}
  private async health(tx:Tx,s:Scope,e:Envelope){

@@ -1,6 +1,6 @@
 {
   "name": "nexus",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.19.0",
@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:integration": "vitest run --config vitest.integration.ts",
+    "test:performance": "vitest run --config vitest.performance.ts",
     "test:e2e": "corepack pnpm --filter @nexus/web build && playwright test",
     "test:runtime": "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File tests/runtime/manager.test.ps1",
     "check": "corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test",
