@@ -22,17 +22,27 @@
 - Windows で PostgreSQL 親プロセスが消えた場合、ポート所有 PID が取得できなくても、NEXUS のデータ領域と同梱実行ファイルで確認できる worker だけを回収します。
 - 開発環境の再 Setup で既存 Web パスワードを表示します。Setup は Bot 接続、操作ハンドラー、コマンド登録の準備も確認します。
 
-## UI changes / Copy changes
+## UI changes
 
 - 主要な Discord 操作を固定 Panel に集め、通常の `/nexus` サブコマンドを4件に整理しました。
-- Panel の日英メッセージを i18n に追加し、返信待ち・期間・不足データ・権限エラーを短い行動指示で表示します。通常の設定ミスには内部エラー参照 ID を表示しません。
 - Web ホームは参加期間と確認日数を明示します。旧「成功した新規メンバー」をホームの KPI 列から外しました。
 - Web の設定画面に Helper 通知、重要なチャンネル、監査履歴を追加しました。
 - [Dyno の設定とログ](https://docs.dyno.gg/en/dashboard/settings)、[Dyno の診断](https://docs.dyno.gg/faq)、[MEE6 のサポート構成](https://help.mee6.xyz/) を、導線・状態表示・診断の参考として確認しました。画面や文言は複製していません。
 
+## Copy changes
+
+- Panel の日英メッセージを i18n に追加し、返信待ち・期間・不足データ・権限エラーを短い行動指示で表示します。通常の設定ミスには内部エラー参照 ID を表示しません。
+- Web の主要ページ名を Panel と揃え、通常画面で旧専門用語が再表示されないよう E2E で確認します。
+
 ## Discord Control Panel
 
 固定メッセージの ID を `settings_panels` に保持し、選択・更新では `PANEL_UPSERT` が編集します。同じサーバーの別チャンネルから `/nexus panel` を実行しても、既存 Panel のチャンネルを更新対象にします。削除されていた場合だけ再作成します。古い Panel のコンポーネントは保存済みメッセージ ID と照合します。設定変更・改善の有効化・データ削除は管理権限を再確認します。
+
+## New features
+
+- Newcomer Attention Queue、任意の Helper 通知、6時間帯ごとの Helper Coverage、前日の参加と交流をまとめる Daily Staff Summary を追加しました。
+- LFG・意見・不具合報告・試遊・交流の重要なチャンネルと、ゲームコミュニティ向け重点プリセットを設定できます。
+- 設定変更の監査履歴を Web に表示します。
 
 ## Database migrations
 
