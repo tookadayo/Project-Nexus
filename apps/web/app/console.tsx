@@ -54,10 +54,10 @@ export type ProductData = {
 };
 const messages = {
   en: {
-    nav: ["Home", "New Members", "Improve", "Results", "Settings", "Community", "Compare", "Channels"],
+    nav: ["Overview", "New Members", "Improve", "Results", "Settings", "Community", "Compare", "Channels"],
     tagline: "See where newcomers drop off. Fix it. Measure what worked.",
-    home: "Home",
-    journey: "Newcomers",
+    home: "Overview",
+    journey: "New Members",
     milestones: "Newcomer milestones",
     opportunities: "Improve",
     actions: "Improvement menu",
@@ -117,7 +117,7 @@ const messages = {
     maturity: "Evaluated",
     noResults:
       "No results yet. Enable an improvement, then check whether it helped.",
-    privacy: "Privacy & retention",
+    privacy: "Privacy & data storage",
     team: "Team & access",
     plan: "Plan & usage",
     advanced: "How this was measured",
@@ -176,9 +176,9 @@ const messages = {
     next: "Next",
   },
   ja: {
-    nav: ["ホーム", "新しいメンバー", "改善", "結果", "設定", "コミュニティ", "比較", "チャンネル"],
+    nav: ["概要", "新しいメンバー", "改善", "結果", "設定", "コミュニティ", "比較", "チャンネル"],
     tagline: "新規メンバーが離脱する場所を見つけ、改善し、効果を測定します。",
-    home: "ホーム",
+    home: "概要",
     journey: "新規メンバー",
     milestones: "新規メンバーの到達点",
     opportunities: "改善",
@@ -310,7 +310,7 @@ const opportunityNames: Record<Locale, Record<string, string>> = {
     REPLY_LATENCY_SPIKE: "First replies are taking longer",
     ONBOARDING_DROP: "Onboarding completion has dropped",
     HOME_ACTION_DROP: "Home Actions completion has dropped",
-    RETENTION_DROP: "D7 retention has dropped",
+    RETENTION_DROP: "Fewer members are active after a week",
     DATA_COVERAGE_DROP: "Some data could not be collected",
     ACTION_FAILURE_SPIKE: "Action delivery failures increased",
   },
@@ -624,9 +624,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
           <section className="hero">
             <div>
               <p className="eyebrow">
-                {locale === "ja"
-                  ? "コミュニティ成長 OS"
-                  : "COMMUNITY GROWTH OS"}
+                NEXUS
               </p>
               <h1>{c.tagline}</h1>
               <p className="orientation">
@@ -724,7 +722,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
       <div className="page-head">
         <div>
           <p className="eyebrow">
-            {locale === "ja" ? "参加後の歩み" : "LIFECYCLE"}
+            {c.nav[1]}
           </p>
           <h1>{c.milestones}</h1>
           <p className="orientation">
@@ -811,7 +809,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
       <div className="page-head">
         <div>
           <p className="eyebrow">
-            {locale === "ja" ? "観察シグナル" : "OBSERVATIONAL SIGNALS"}
+            {locale === "ja" ? "活動の傾向" : "ACTIVITY PATTERNS"}
           </p>
           <h1>{c.opportunities}</h1>
           <p className="orientation">
@@ -1328,7 +1326,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
         </article>
         <article className="surface">
           <h2>{locale === "ja" ? "データ" : "Data"}</h2>
-          <label>{locale === "ja" ? "詳細データの保持期間" : "Detailed data retention"}<select value={retentionDays} onChange={e=>void saveRetentionDays(Number(e.target.value) as 7|14|30)}><option value={7}>{locale === "ja" ? "7日" : "7 days"}</option><option value={14}>{locale === "ja" ? "14日" : "14 days"}</option><option value={30}>{locale === "ja" ? "30日" : "30 days"}</option></select></label>
+          <label>{locale === "ja" ? "詳細データを保存する期間" : "Keep detailed data for"}<select value={retentionDays} onChange={e=>void saveRetentionDays(Number(e.target.value) as 7|14|30)}><option value={7}>{locale === "ja" ? "7日" : "7 days"}</option><option value={14}>{locale === "ja" ? "14日" : "14 days"}</option><option value={30}>{locale === "ja" ? "30日" : "30 days"}</option></select></label>
           <p>{locale === "ja" ? `集計データ: ${String(data.admin?.settings.aggregateRetentionMonths ?? "—")} か月` : `Aggregate data: ${String(data.admin?.settings.aggregateRetentionMonths ?? "—")} months`}</p>
           <p>
             {locale === "ja"
@@ -1365,7 +1363,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
         <a className="brand" href="/">
           N<span>✦</span>XUS
         </a>
-        <p>{locale === "ja" ? "コミュニティ成長" : "COMMUNITY GROWTH"}</p>
+        <p>NEXUS</p>
         {data.guilds&&data.guilds.length>1&&<label>{locale==="ja"?"サーバー":"Server"}<select value={data.selectedGuildId} onChange={e=>{window.location.href=`/auth/select?guild=${encodeURIComponent(e.target.value)}`;}}>{data.guilds.map(guild=><option key={guild.id} value={guild.id}>{guild.name}</option>)}</select></label>}
         <nav>
           {c.nav.map((label, i) => (
