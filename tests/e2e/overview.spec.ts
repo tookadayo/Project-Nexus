@@ -18,7 +18,7 @@ test('rejects unauthenticated dashboard requests',async()=>{const response=await
 test('uses independent newcomer milestones and labels for Discord choices',async({page})=>{
  await page.goto('/');
  await page.getByRole('button',{name:'New Members',exact:true}).click();
- await expect(page.getByText('Home / Newcomers')).toBeVisible();
+ await expect(page.getByText('Overview / New Members')).toBeVisible();
  const response=page.waitForResponse(value=>value.url().includes('/data/journey?range=7'));
  await page.getByRole('button',{name:'7D'}).click();expect((await response).ok()).toBe(true);
  await expect(page.locator('body')).not.toContainText(/step conversion/i);
@@ -71,10 +71,10 @@ test('chooses a goal, tests an improvement and sees a useful small-community com
 
 test('keeps forbidden technical terms out of normal English and Japanese pages',async({page})=>{
  await page.goto('/');
- const forbidden=/\b(?:Activation|Cohorts?|Interventions?|Experiments?|ITT|DSL|Randomization|Guardrails?|Revisions?|Membership Episodes?|Maturity|Eligibility|Posterior|Credible Interval|Deterministic threshold)\b|アクティベーション|コホート|ランダム化|ガードレール|割付|施策|実験|成熟/i;
- for(const name of ['Home','New Members','Improve','Results','Settings','Community','Compare','Channels']){await page.getByRole('button',{name,exact:true}).click();await expect(page.locator('main')).not.toContainText(forbidden);}
+ const forbidden=/\b(?:Activation|Retention|Cohorts?|Baseline|Journey|Lifecycle|Funnel|Signals?|Interventions?|Experiments?|Friction|Evidence|Maturity|Native|Fallback|Hybrid|ITT|DSL|Randomization|Guardrails?|Revisions?|Membership Episodes?|Eligibility|Posterior|Credible Interval|Deterministic threshold)\b|アクティベーション|コホート|ランダム化|ガードレール|割付|施策|実験|成熟|シグナル/i;
+ for(const name of ['Overview','New Members','Improve','Results','Settings','Community','Compare','Channels']){await page.getByRole('button',{name,exact:true}).click();await expect(page.locator('main')).not.toContainText(forbidden);}
  await page.locator('.sidebar-bottom').getByRole('button',{name:'日本語',exact:true}).click();
- for(const name of ['ホーム','新しいメンバー','改善','結果','設定','コミュニティ','比較','チャンネル']){await page.getByRole('button',{name,exact:true}).click();await expect(page.locator('main')).not.toContainText(forbidden);}
+ for(const name of ['概要','新しいメンバー','改善','結果','設定','コミュニティ','比較','チャンネル']){await page.getByRole('button',{name,exact:true}).click();await expect(page.locator('main')).not.toContainText(forbidden);}
 });
 test('saves a multi-channel analysis scope and shows the community comparison pages',async({page})=>{
  await page.goto('/');

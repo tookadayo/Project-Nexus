@@ -17,14 +17,16 @@ export function canAdmin(permissions:string,roles:string[],adminRole:string|null
 export class Components {
  constructor(private readonly key:string){}
  private mac(id:string){return createHmac('sha256',this.key).update(id).digest('base64url').slice(0,22);}
+ static kind(token:string):'modal'|'navigation'|'ordinary'{return token.startsWith('modal:')?'modal':token.startsWith('nav:')?'navigation':'ordinary';}
  async issue(tx:Tx,s:Scope,intent:Record<string,unknown>,actorHash:string|null=null,ttl=900){
   const id=randomUUID();
   await sql`INSERT INTO component_tokens(organization_id,guild_id,id,actor_hash,intent,expires_at)
     VALUES(${s.organizationId}::uuid,${s.guildId},${id}::uuid,${actorHash},${json(intent)},${new Date(Date.now()+ttl*1000)})`.execute(tx);
-  return `${id}.${this.mac(id)}`;
+  const prefix=intent.action==='editNodeOpen'?'modal:':intent.action==='controlNavigate'?'nav:':'';
+  return `${prefix}${id}.${this.mac(id)}`;
  }
  async read(tx:Tx,s:Scope,token:string,actorHash:string){
-  const [id,mac]=token.split('.');assert(id&&mac&&/^[a-f\d-]{36}$/.test(id),'INVALID_COMPONENT');
+  const [id,mac]=token.replace(/^(modal:|nav:)/,'').split('.');assert(id&&mac&&/^[a-f\d-]{36}$/.test(id),'INVALID_COMPONENT');
   const expected=Buffer.from(this.mac(id));const supplied=Buffer.from(mac);
   assert(supplied.length===expected.length&&timingSafeEqual(supplied,expected),'INVALID_COMPONENT');
   const {rows}=await sql<{actor_hash:string|null,intent:Record<string,unknown>}>`SELECT actor_hash,intent FROM component_tokens

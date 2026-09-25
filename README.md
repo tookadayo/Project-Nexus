@@ -1,4 +1,4 @@
-# NEXUS v0.5.1
+# NEXUS v0.5.2
 
 NEXUS は、Discord に新しく参加した人が最初の活動、交流、別の日の参加、1週間後の活動へ進む様子を集計します。普段から参加している人との違いや、改善テストの結果も確認できます。ゲームコミュニティ向けのツールです。メッセージ本文、添付、DM、プレゼンスは分析用に保存しません。
 
@@ -8,6 +8,8 @@ NEXUS は、Discord に新しく参加した人が最初の活動、交流、別
 2. Discord Developer Portal の **Interactions Endpoint URL を空欄**にします。Gateway で Slash Command、ボタン、メニューを受ける設定です。[Discord の説明](https://docs.discord.com/developers/interactions/receiving-and-responding)
 3. `NEXUS SETUP.cmd` をダブルクリックします。Discord Application ID、サーバー ID、Bot Token を入力します。依存関係、専用 Redis、`.env`、ランダムな秘密鍵と Web のビルドを準備し、PostgreSQL と Web を起動します。DB migration と Command 登録は起動時に自動実行します。
 4. 表示されたローカル Web パスワードを保存し、[http://localhost:3100](http://localhost:3100) を開きます。
+
+起動後はスタッフ用チャンネルで `/nexus panel` を実行します。NEXUS はサーバーごとに1つの管理パネルを保存し、ページ移動や更新では同じメッセージを編集します。概要、新しいメンバー、コミュニティ、チャンネル、改善、結果、設定、診断をメニューから開けます。設定変更や改善の有効化には管理権限が必要です。
 
 | ファイル | 役割 |
 | --- | --- |
@@ -28,6 +30,8 @@ PowerShell の Execution Policy を恒久的に変更する必要はありませ
 5. **改善／結果**で、観測された傾向に基づく改善策を確認し、改善テストとその結果を見ます。比較から原因を断定しません。
 6. **設定**で「分析する範囲」をサーバー全体、指定チャンネルのみ、指定チャンネルを除外から選びます。スタッフのロールも設定できます。初期値はサーバー全体です。
 
+管理パネルの「新しいメンバー」は返信待ちの投稿を本文なしで示し、投稿へのリンクを表示します。任意で Helper 通知先を設定できます。同じ投稿への再通知を避け、通知間隔と1日6件の上限を守ります。Web の設定では LFG、意見、不具合報告、試遊などの重要な場所を指定できます。時間帯別の返信時間は個人別のランキングを作らずに表示します。
+
 Discord では閲覧だけの行動を観測できません。「1週間後も活動が確認できた」は参加7〜14日後の観測可能な活動を意味します。結果が確定していない人と計測不足の人は、活動しなかった人として数えません。比較・改善提案には少なくとも5人の対象が必要です。分析用の日数閾値は設定スキーマで変更できる構造です。
 
 ## 詳細設定
@@ -46,6 +50,7 @@ corepack pnpm test:integration
 corepack pnpm build
 corepack pnpm test:e2e
 corepack pnpm test:runtime
+corepack pnpm test:performance
 ```
 
 統合テストはローカルの埋め込み PostgreSQL と専用 Redis を利用します。Docker を使う場合は `NEXUS_TEST_INFRA=docker` を設定します。Windows の起動停止テストは偽サービスを隔離した一時ディレクトリで実行し、他アプリのポート利用者が停止されないことを確認します。

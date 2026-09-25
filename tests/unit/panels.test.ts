@@ -1,6 +1,7 @@
 import {ComponentType} from 'discord-api-types/v10';
 import {describe,expect,it} from 'vitest';
-import {coverageLabel,diagnosticsPanel,errorPanel,experimentsPanel,experimentMethodPanel,formatDuration,formatPercentage,guidedSetupPanel,improvePanel,lifecyclePanel,overviewPanel,resolveLocale,rootPanel,settingsPanel,type MetricLike,type Panel} from '../../packages/discord-panels/src/index.js';
+import {coverageLabel,controlPanel,controlPages,diagnosticsPanel,errorPanel,experimentsPanel,experimentMethodPanel,formatDuration,formatPercentage,guidedSetupPanel,improvePanel,lifecyclePanel,overviewPanel,resolveLocale,rootPanel,settingsPanel,type MetricLike,type Panel} from '../../packages/discord-panels/src/index.js';
+import {en,ja} from '../../packages/discord-panels/src/i18n/index.js';
 import {buildNexusCommand} from '../../scripts/commands.js';
 
 let counter=0;const issue=async()=>`opaque-${counter++}`;
@@ -38,7 +39,15 @@ describe('NEXUS Discord design system',()=>{
  it('renders Japanese safe errors',async()=>{const value=json(await errorPanel(issue,'generic','ja','NXS-ABC123'));expect(value).toContain('処理結果を確認できませんでした');expect(value).toContain('エラー参照ID');});
  it('renders Japanese lifecycle stages',async()=>{const value=json(await lifecyclePanel(issue,metrics(),'ja'));for(const stage of ['参加','参加手続きを完了','最初の成功に到達','返信を受けた','その後も活動'])expect(value).toContain(`### ${stage}`);});
  it('renders Japanese experiment evidence',async()=>{const value=json(await experimentsPanel(issue,experiment('SUPPORTED'),'ja'));expect(value).toContain('現在の結果は改善を支持しています');expect(value).not.toContain('ランダム化実験');});
- it('registers only six public commands',()=>{const command=buildNexusCommand().toJSON(),status=command.options?.find(option=>option.name==='status');expect(command.description_localizations?.ja).toContain('コミュニティ');expect(status?.name_localizations?.ja).toBe('状態');expect(command.options?.map(option=>option.name)).toEqual(['panel','personalize','privacy','setup','settings','status']);});
+ it('keeps one main panel command and only direct self-service checks',()=>{const command=buildNexusCommand().toJSON(),status=command.options?.find(option=>option.name==='status');expect(command.description_localizations?.ja).toContain('コミュニティ');expect(status?.name_localizations?.ja).toBe('状態');expect(command.options?.map(option=>option.name)).toEqual(['panel','personalize','privacy','status']);});
+ it('keeps English and Japanese copy complete and short in the control panel',async()=>{
+  expect(Object.keys(ja).sort()).toEqual(Object.keys(en).sort());
+  for(const key of Object.keys(en) as Array<keyof typeof en>){expect(en[key].trim(),key).not.toBe('');expect(ja[key].trim(),key).not.toBe('');}
+  const banned=/\b(?:Activation|Retention|Cohort|Baseline|Journey|Lifecycle|Funnel|Intervention|Experiment|Friction|Maturity|Fallback|Hybrid)\b/i;
+  for(const [key,value] of Object.entries(en))if(key.startsWith('control.')||key.startsWith('helper.'))expect(value,key).not.toMatch(banned);
+  for(const locale of ['ja','en'] as const)for(const page of controlPages){const panel=await controlPanel(issue,page,{},locale);expect(panel.flags).toBe(32768);expect(panel.components?.length).toBeLessThanOrEqual(5);expect(json(panel)).not.toMatch(/undefined|\{(?:count|from|to)\}/);}
+  const known=await errorPanel(issue,'permission','en');expect(json(known)).not.toContain('NXS-');expect(json(known)).toContain('Run Diagnostics');
+ });
  it('keeps onboarding optional in guided setup',async()=>{const setup={required:false,recommendedMode:null,activationPreset:'reply',activationWindowDays:7,steps:[{key:'connect',complete:true,reason:'ready'},{key:'activation',complete:true,reason:'ready'},{key:'onboarding',complete:false,reason:'fallback_not_ready'},{key:'measuring',complete:false,reason:'measurement_waiting'}]} as Parameters<typeof guidedSetupPanel>[1];const value=json(await guidedSetupPanel(issue,setup));expect(value).toContain('optional');expect(value).toContain('View newcomers');expect(value).not.toContain('Configure onboarding');});
  it('observes Discord onboarding without changing it during first run',async()=>{const setup={required:true,recommendedMode:'native',nativeOnboardingEnabled:true,activationPreset:'not_configured',activationWindowDays:7,steps:[{key:'connect',complete:true,reason:'ready'},{key:'activation',complete:false,reason:'activation_missing'},{key:'onboarding',complete:true,reason:'ready'},{key:'measuring',complete:false,reason:'measurement_waiting'}]} as Parameters<typeof guidedSetupPanel>[1];const value=json(await guidedSetupPanel(issue,setup));expect(value).toContain('already in use');expect(value).toContain('without changing it');expect(value).toContain('Choose first success');});
  it('gives a direct channel permission fix and keeps the reference',async()=>{const value=json(await errorPanel(issue,'generic','en','NXS-ABC123','CHANNEL_PERMISSION_MISSING'));expect(value).toContain('Choose another channel');expect(value).toContain('View and Send permissions');expect(value).toContain('NXS-ABC123');expect(value).not.toContain('CHANNEL_PERMISSION_MISSING');});

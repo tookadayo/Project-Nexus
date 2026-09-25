@@ -29,6 +29,7 @@ import {StreamConsumer,scrubStream} from '../../apps/worker/src/streams.js';
 import {PresentationService} from '../../packages/presentation/src/index.js';
 import {CommunityService} from '../../packages/presentation/src/community.js';
 import {WeeklySummaryWorker} from '../../apps/worker/src/weekly.js';
+import {HelperWorker} from '../../apps/worker/src/helpers.js';
 let infra:Awaited<ReturnType<typeof infrastructure>>,db:Database;const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32));
 const user='922222222222222222',channel='933333333333333333';let counter=0;
 const actor:Actor={key:'admin',permissions:'32',roles:[],source:'DISCORD_PANEL',requestId:'v02-test'};
@@ -283,6 +284,14 @@ it('records optional suggestion feedback without member identifiers',async()=>{
  expect((await sql`SELECT 1 FROM membership_episodes WHERE ${tenant(ctx.s)}`.execute(db)).rows).toHaveLength(0);
  await api.close();
 });
+it('shows administrator setting changes without exposing saved configuration values',async()=>{
+ const ctx=await setup(),cfg=await ctx.settings.get(ctx.s),who='922222222222222224';
+ await ctx.settings.update(ctx.s,{...actor,key:vault.hash(ctx.s,who),encryptedUserId:vault.seal(ctx.s,who)},cfg.revision,{analysisScope:{mode:'include',channelIds:[channel]}});
+ const key='v052-audit',api=createApi(new AnalyticsService(db,ctx.settings),key,db,ctx.discord,undefined,vault),base=`/v3/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}`;
+ const reply=await api.inject({method:'GET',url:base+'/audit',headers:{authorization:`Bearer ${apiToken(key,ctx.s)}`}});
+ expect(reply.statusCode).toBe(200);expect(reply.json()).toEqual(expect.arrayContaining([expect.objectContaining({actorId:who,changed:expect.arrayContaining(['analysisScope'])})]));
+ expect(JSON.stringify(reply.json())).not.toContain(channel);await api.close();
+});
 it('hides a channel when repeated events come from fewer than three newcomers',async()=>{
  const ctx=await setup(),joined=new Date(Date.now()-3*86400000),identities:string[]=[];
  for(let i=0;i<3;i++){
@@ -304,16 +313,97 @@ it('marks an expired weekly send as unknown without resending it',async()=>{
  expect(ctx.discord.calls.filter(call=>call==='sendPanel')).toHaveLength(0);
  expect((await sql<{state:string;status_note:string}>`SELECT state,status_note FROM weekly_summary_deliveries WHERE ${tenant(ctx.s)}`.execute(db)).rows).toMatchObject([{state:'unknown',status_note:'送信結果を確認できませんでした'}]);
 });
+it('retries a weekly summary when analytics fails before Discord sending starts',async()=>{
+ const ctx=await setup(),cfg=await ctx.settings.get(ctx.s);await ctx.settings.update(ctx.s,actor,cfg.revision,{weeklySummaryEnabled:true,weeklySummaryChannelId:channel});
+ const broken={canonical:async()=>{throw new Error('temporary analytics failure');}} as unknown as AnalyticsService;
+ const at=new Date('2026-09-24T12:00:00.000Z');
+ expect(await new WeeklySummaryWorker(db,ctx.discord,ctx.settings,broken).tick(ctx.s,at)).toBe(false);
+ expect((await sql<{state:string;attempted_at:Date|null}>`SELECT state,attempted_at FROM weekly_summary_deliveries WHERE ${tenant(ctx.s)}`.execute(db)).rows).toMatchObject([{state:'ready',attempted_at:null}]);
+ expect(ctx.discord.calls.filter(call=>call==='sendPanel')).toHaveLength(0);
+ expect(await new WeeklySummaryWorker(db,ctx.discord).tick(ctx.s,at)).toBe(true);
+ expect((await sql<{state:string}>`SELECT state FROM weekly_summary_deliveries WHERE ${tenant(ctx.s)}`.execute(db)).rows).toMatchObject([{state:'sent'}]);
+});
+it('does not retry a weekly summary when Discord sending has an uncertain result',async()=>{
+ const ctx=await setup(),cfg=await ctx.settings.get(ctx.s);await ctx.settings.update(ctx.s,actor,cfg.revision,{weeklySummaryEnabled:true,weeklySummaryChannelId:channel});
+ const uncertain=new Proxy(ctx.discord,{get(target,key){if(key==='sendPanel')return async()=>{throw new Error('connection closed after request');};const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}});
+ const at=new Date('2026-09-24T12:00:00.000Z'),worker=new WeeklySummaryWorker(db,uncertain);
+ expect(await worker.tick(ctx.s,at)).toBe(false);
+ expect((await sql<{state:string}>`SELECT state FROM weekly_summary_deliveries WHERE ${tenant(ctx.s)}`.execute(db)).rows).toMatchObject([{state:'unknown'}]);
+ expect(await new WeeklySummaryWorker(db,ctx.discord).tick(ctx.s,at)).toBe(false);
+ expect(ctx.discord.calls.filter(call=>call==='sendPanel')).toHaveLength(0);
+});
 it('allows a plan override only in explicit development mode',async()=>{
  const ctx=await setup();
  try{vi.stubEnv('NEXUS_DEV_PLAN','FREE');vi.stubEnv('NODE_ENV','production');expect(await new EntitlementService(db).plan(ctx.s)).toBe('GROWTH');vi.stubEnv('NODE_ENV','development');expect(await new EntitlementService(db).plan(ctx.s)).toBe('FREE');}
  finally{vi.unstubAllEnvs();}
+});
+it('counts each reply partner once and removes both sides of a deleted member pair',async()=>{
+ const ctx=await setup(),joined=new Date(Date.now()-20*86400000),targetEpisode=await join(ctx,joined),targetMessage='988000000000000001';
+ const send=async(userId:string,kind:'member.joined'|'message.sent',at:Date,messageId?:string,referenceId?:string)=>ctx.lifecycle.process({...ctx.s,shardId:0,gatewaySessionId:'partners',sequence:++counter,kind,at:at.toISOString(),joinedAt:kind==='member.joined'?joined.toISOString():undefined,context:'PRODUCTION',encryptedUserId:vault.seal(ctx.s,userId),channelId:kind==='message.sent'?channel:undefined,messageId,messageType:kind==='message.sent'?0:undefined,referenceId});
+ await send(user,'message.sent',new Date(joined.getTime()+60000),targetMessage);
+ for(let i=0;i<2;i++){
+  const peer=String(989000000000000000n+BigInt(i));ctx.discord.members.set(peer,{roles:[],permissions:'0',bot:false,joinedAt:joined.toISOString()});await send(peer,'member.joined',joined);
+  for(let repeat=0;repeat<(i===0?2:1);repeat++)await send(peer,'message.sent',new Date(joined.getTime()+120000+i*60000+repeat*1000),String(989100000000000000n+BigInt(i*10+repeat)),targetMessage);
+ }
+ const rows=(await sql<{episode_id:string;peer_identity_id:string}>`SELECT episode_id,peer_identity_id FROM member_interaction_pairs WHERE ${tenant(ctx.s)}`.execute(db)).rows;
+ expect(rows.filter(row=>row.episode_id===targetEpisode)).toHaveLength(2);
+ expect(rows).toHaveLength(4);expect(JSON.stringify(rows)).not.toContain(user);
+ await new PrivacyService(db,vault,ctx.settings).delete(ctx.s,user,{...actor,key:vault.hash(ctx.s,user)});
+ expect((await sql`SELECT 1 FROM member_interaction_pairs WHERE ${tenant(ctx.s)}`.execute(db)).rows).toHaveLength(0);
+});
+it('shows a newcomer reply queue and sends one capped helper alert without message content',async()=>{
+ const ctx=await setup(),now=new Date(),joined=new Date(now.getTime()-2*3600000),episode=await join(ctx,joined),messageId='988000000000000101';
+ const cfg=await ctx.settings.get(ctx.s);await ctx.settings.update(ctx.s,actor,cfg.revision,{helperChannelId:channel,helperEnabled:true});
+ await ctx.lifecycle.process({...ctx.s,shardId:0,gatewaySessionId:'helper',sequence:++counter,kind:'message.sent',at:new Date(joined.getTime()+60000).toISOString(),context:'PRODUCTION',encryptedUserId:vault.seal(ctx.s,user),channelId:channel,messageId,messageType:0});
+ await sql`INSERT INTO telemetry_cursor VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${new Date(joined.getTime()-1000)},${now})`.execute(db);
+ const view=await new CommunityService(db).overview(ctx.s,7,now);expect(view.daily.attentionCount).toBe(1);expect(view.attention).toMatchObject([{messageId,channelId:channel}]);expect(JSON.stringify(view.attention)).not.toContain(user);
+ const worker=new HelperWorker(db,ctx.discord,ctx.settings);expect(await worker.tick(ctx.s,now)).toBe(true);expect(await worker.tick(ctx.s,now)).toBe(false);
+ expect(ctx.discord.calls.filter(call=>call==='sendPanel')).toHaveLength(1);expect(JSON.stringify([...ctx.discord.panels.values()][0])).toContain(messageId);
+ expect((await sql`SELECT state FROM helper_alerts WHERE ${tenant(ctx.s)}`.execute(db)).rows).toMatchObject([{state:'sent'}]);
+ await new PrivacyService(db,vault,ctx.settings).delete(ctx.s,user,{...actor,key:vault.hash(ctx.s,user)});
+ expect((await sql`SELECT 1 FROM helper_alerts WHERE ${tenant(ctx.s)}`.execute(db)).rows).toHaveLength(0);
+ expect((await sql`SELECT 1 FROM membership_episodes WHERE ${tenant(ctx.s)} AND id=${episode}::uuid`.execute(db)).rows).toHaveLength(0);
+});
+it('compares tagged feedback places and reply coverage without identifying helpers',async()=>{
+ const ctx=await setup(),now=new Date(),joined=new Date(now.getTime()-20*86400000),cfg=await ctx.settings.get(ctx.s);
+ await ctx.settings.update(ctx.s,actor,cfg.revision,{goalPreset:'early_access',importantChannels:[{channelId:channel,purpose:'feedback'}]});
+ await sql`INSERT INTO telemetry_cursor VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${new Date(joined.getTime()-1000)},${now})`.execute(db);
+ for(let i=0;i<5;i++){
+  const identity=await vault.resolve(db,ctx.s,String(988200000000000000n+BigInt(i))),episode=randomUUID(),first=new Date(joined.getTime()+3600000),reply=new Date(first.getTime()+3600000);
+  await sql`INSERT INTO membership_episodes VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${episode}::uuid,${identity}::uuid,${joined},NULL,'PRODUCTION')`.execute(db);
+  await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',${first},'PRODUCTION',${json({channelId:channel,messageId:String(988300000000000000n+BigInt(i))})}),(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'reply.received',${reply},'PRODUCTION',${json({channelId:channel,latencySeconds:3600})})`.execute(db);
+ }
+ const view=await new CommunityService(db).overview(ctx.s,30,now);
+ expect(view.goalPreset).toBe('early_access');expect(view.importantPlaces).toMatchObject([{channelId:channel,purpose:'feedback',newcomers:5,receivedReplyPercent:100}]);
+ expect(view.helperCoverage).toMatchObject([{sample:5,medianReplyMinutes:60}]);expect(JSON.stringify(view.helperCoverage)).not.toContain('identity');
 });
 it('compares age-matched activity and separates mature newcomer outcomes',async()=>{
  const ctx=await setup(),now=new Date('2026-09-24T12:00:00.000Z'),newJoin=new Date(now.getTime()-20*86400000),oldJoin=new Date(now.getTime()-45*86400000);
  await sql`INSERT INTO telemetry_cursor VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${new Date(newJoin.getTime()-1000)},${now})`.execute(db);
  for(let i=0;i<15;i++){const identity=await vault.resolve(db,ctx.s,String(990000000000000000n+BigInt(i))),episode=randomUUID(),joined=i<10?newJoin:oldJoin;await sql`INSERT INTO membership_episodes VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${episode}::uuid,${identity}::uuid,${joined},NULL,'PRODUCTION')`.execute(db);const activity=i<10?new Date(joined.getTime()+60000):new Date(now.getTime()-2*86400000);await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',${activity},'PRODUCTION',${json({messageId:String(991000000000000000n+BigInt(i)),channelId:channel})})`.execute(db);if(i<10){await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'reply.received',${new Date(activity.getTime()+600000)},'PRODUCTION',${json({channelId:channel,latencySeconds:600})})`.execute(db);if(i<5){for(const day of [3,8])await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'reaction.added',${new Date(joined.getTime()+day*86400000)},'PRODUCTION',${json({channelId:channel,messageId:String(992000000000000000n+BigInt(i*10+day))})})`.execute(db);}}else await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'reaction.added',${new Date(now.getTime()-86400000)},'PRODUCTION',${json({channelId:channel,messageId:String(993000000000000000n+BigInt(i))})})`.execute(db);}
  const view=await new CommunityService(db).overview(ctx.s,30,now);expect(view.classification.continuing).toBe(5);expect(view.compare.available).toBe(true);expect(view.outcomes).toMatchObject({retained:5,notRetained:5,pending:0,insufficient:0});expect(view.stages.map(stage=>stage.count)).toEqual([10,10,10,5,5]);expect(JSON.stringify(view)).not.toContain('episode_id');
+ const sevenDays=await new CommunityService(db).overview(ctx.s,7,now);expect(sevenDays.stages.map(stage=>stage.count)).toEqual([10,10,10,5,5]);expect(sevenDays.cohortWindow).toMatchObject({observedThroughDays:14,total:10});
  await sql`INSERT INTO telemetry_health VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${new Date(now.getTime()-2*86400000)},${new Date(now.getTime()-86400000)},'test gap')`.execute(db);
  const incomplete=await new CommunityService(db).overview(ctx.s,30,now);expect(incomplete.compare.available).toBe(false);expect(incomplete.compare.continuing).toBeNull();
+ await sql`DELETE FROM telemetry_health WHERE ${tenant(ctx.s)}`.execute(db);
+ const departing=(await sql<{id:string}>`SELECT id FROM membership_episodes WHERE ${tenant(ctx.s)} AND joined_at=${oldJoin} LIMIT 1`.execute(db)).rows[0]!;
+ await sql`UPDATE membership_episodes SET left_at=${new Date(now.getTime()-86400000)} WHERE ${tenant(ctx.s)} AND id=${departing.id}::uuid`.execute(db);
+ const afterExit=await new CommunityService(db).overview(ctx.s,30,now);expect(afterExit.classification.continuing).toBe(4);expect(afterExit.classification.exited).toBe(1);expect(afterExit.compare.available).toBe(false);
+});
+it('attributes replies and later channel activity to the correct channel and time order',async()=>{
+ const ctx=await setup(),now=new Date('2026-09-24T12:00:00.000Z'),joined=new Date(now.getTime()-5*86400000),other='777111111111111111';
+ await sql`INSERT INTO telemetry_cursor VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${new Date(joined.getTime()-1000)},${now})`.execute(db);
+ for(let i=0;i<3;i++){
+  const identity=await vault.resolve(db,ctx.s,String(996000000000000000n+BigInt(i))),episode=randomUUID();
+  await sql`INSERT INTO membership_episodes VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${episode}::uuid,${identity}::uuid,${joined},NULL,'PRODUCTION')`.execute(db);
+  for(const [hour,target] of [[1,other],[4,channel],...(i===0?[[6,other]]:[])] as Array<[number,string]>){
+   await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',${new Date(joined.getTime()+hour*3600000)},'PRODUCTION',${json({channelId:target,messageId:String(997000000000000000n+BigInt(i*10+hour))})})`.execute(db);
+  }
+  await sql`INSERT INTO lifecycle_events VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'reply.received',${new Date(joined.getTime()+5*3600000)},'PRODUCTION',${json({channelId:other,latencySeconds:60})})`.execute(db);
+ }
+ const view=await new CommunityService(db).overview(ctx.s,7,now),intro=view.channels.find(item=>item.channelId===channel),general=view.channels.find(item=>item.channelId===other);
+ expect(intro).toMatchObject({newcomers:3,receivedReplyPercent:0,laterElsewherePercent:33});
+ expect(general).toMatchObject({newcomers:3,receivedReplyPercent:100,laterElsewherePercent:100});
+ expect(view.transitions).toContainEqual({from:other,to:channel,count:3});
+ expect(view.transitions).not.toContainEqual({from:channel,to:other,count:3});
 });

@@ -9,9 +9,10 @@ import {selectedOptions} from '../../../packages/onboarding/src/flow.js';
 import {audit,SettingsService} from '../../../packages/settings/src/index.js';
 import type {Panel} from '../../../packages/discord-panels/src/index.js';
 import {InterventionWorker} from './interventions.js';
+import type {InteractionHealth} from '../../interaction/src/health.js';
 type Action={id:string,kind:ActionKind,payload:Record<string,unknown>,attempts:number};
 export class ActionWorker {
- constructor(private readonly db:Database,private readonly vault:IdentityVault,private readonly discord:DiscordPort,private readonly onboarding:OnboardingService){}
+ constructor(private readonly db:Database,private readonly vault:IdentityVault,private readonly discord:DiscordPort,private readonly onboarding:OnboardingService,private readonly interactionHealth?:InteractionHealth){}
  async tick(s:Scope):Promise<boolean>{
   // A crashed worker may have performed a REST operation; never blindly retry its expired lease.
   await sql`UPDATE action_outbox SET state='UNKNOWN',last_error='worker lease expired' WHERE ${tenant(s)} AND state='RUNNING' AND lease_until<now()`.execute(this.db);
@@ -27,7 +28,7 @@ export class ActionWorker {
    const state=run?.state==='queued'?'PENDING':run?.state==='delivered'?'SUCCEEDED':run?.state==='unknown'||run?.state==='running'?'UNKNOWN':'FAILED';
    await sql`UPDATE action_outbox SET state=${state},available_at=${run?.available_at??new Date()},lease_until=NULL WHERE ${tenant(s)} AND id=${action.id}::uuid`.execute(this.db);return true;
   }
-  let sideEffectStarted=false;
+  let sideEffectStarted=false,replyCompleted=false;
   try{await this.db.connection().execute(async tx=>{
    const privacyKey='privacy:'+s.organizationId+':'+s.guildId;let roleKey:string|null=null;
    await sql`SELECT pg_advisory_lock_shared(hashtextextended(${privacyKey},0))`.execute(tx);
@@ -73,8 +74,9 @@ export class ActionWorker {
    }else if(action.kind==='COMMANDS_REGISTER'){
     sideEffectStarted=true;await this.discord.registerCommands(s.guildId,z.array(z.unknown()).parse(action.payload.commands));
    }else{
-    const payload=action.payload as {encryptedToken:string,applicationId:string,body:Panel};
-    sideEffectStarted=true;await this.discord.editReply(payload.applicationId,this.vault.open(s,payload.encryptedToken),payload.body);
+    const payload=action.payload as {encryptedToken:string,applicationId:string,body:Panel,interactionHash?:string};
+    sideEffectStarted=true;await this.discord.editReply(payload.applicationId,this.vault.open(s,payload.encryptedToken),payload.body);replyCompleted=true;
+    if(payload.interactionHash)await sql`UPDATE interaction_diagnostics SET result='completed',completed_at=now() WHERE ${tenant(s)} AND interaction_hash=${payload.interactionHash}`.execute(tx);
    }
    await sql`UPDATE action_outbox SET state='SUCCEEDED',lease_until=NULL WHERE ${tenant(s)} AND id=${action.id}::uuid`.execute(tx);
    await audit(tx,s,{key:'system',permissions:'0',roles:[],source:'SYSTEM',requestId:action.id},'action.executed',null,{kind:action.kind,id:action.id});
@@ -82,12 +84,13 @@ export class ActionWorker {
     if(roleKey)await sql`SELECT pg_advisory_unlock(hashtextextended(${roleKey},0))`.execute(tx);
     await sql`SELECT pg_advisory_unlock_shared(hashtextextended(${privacyKey},0))`.execute(tx);
    }
-  });}catch(error){
+  });if(replyCompleted)this.interactionHealth?.completed();}catch(error){
    const known=error instanceof DiscordFailure;
    const canRetry=known&&(error.status===429||error.status>=500)&&(!sideEffectStarted||error.status===429||action.kind==='REPLY_EDIT');
    const state=canRetry&&action.attempts<5?'PENDING':sideEffectStarted&&(!known||error.status>=500)?'UNKNOWN':'FAILED';
    await sql`UPDATE action_outbox SET state=${state},lease_until=NULL,last_error=${known?`HTTP ${error.status}`:sideEffectStarted?'Ambiguous side effect':'Precondition failed'},
     available_at=${new Date(Date.now()+(known?Math.max(error.retryAfter,2**action.attempts):1)*1000)} WHERE ${tenant(s)} AND id=${action.id}::uuid`.execute(this.db);
+   if(action.kind==='REPLY_EDIT'){this.interactionHealth?.failed('reply_failed');const hash=typeof action.payload.interactionHash==='string'?action.payload.interactionHash:null;if(hash)await sql`UPDATE interaction_diagnostics SET result=${state==='UNKNOWN'?'unknown':state==='FAILED'?'failed':'queued'},error_code=${known?`HTTP_${error.status}`:'REPLY_ERROR'} WHERE ${tenant(s)} AND interaction_hash=${hash}`.execute(this.db);}
   }
   return true;
  }

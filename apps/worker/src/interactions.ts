@@ -5,7 +5,7 @@ import type {IdentityVault} from '../../../packages/identity/src/index.js';
 import {Components,canAdmin} from '../../../packages/security/src/index.js';
 import {SettingsService,templates,type Actor} from '../../../packages/settings/src/index.js';
 import {OnboardingService,type Session} from '../../../packages/onboarding/src/index.js';
-import {rootPanel,settingsPanel,basicSettingsPanel,improvePanel,privacyPanel,questionPanel,confirmation,errorPanel,activationPanel,activationPreviewPanel,billingPanel,lifecyclePanel,diagnosticsPanel,interventionsPanel,interventionPreviewPanel,experimentsPanel,experimentMethodPanel,cohortsPanel,reportsPanel,overviewPanel,publishedPanel,successPanel,panelInstalledPanel,rolloutPreviewPanel,onboardingModePreviewPanel,onboardingNotConfiguredPanel,onboardingFlowPanel,editQuestionPanel,roleMappingPanel,sessionCompletePanel,activationReadinessPanel,guidedSetupPanel,diagnosisLabel,resolveLocale,t,type Panel,type Issue,type ReadinessCheck,type UiLocale,type MetricLike} from '../../../packages/discord-panels/src/index.js';
+import {controlPanel,controlPages,settingsPanel,basicSettingsPanel,improvePanel,privacyPanel,questionPanel,confirmation,errorPanel,activationPanel,activationPreviewPanel,billingPanel,lifecyclePanel,diagnosticsPanel,interventionsPanel,interventionPreviewPanel,experimentsPanel,experimentMethodPanel,cohortsPanel,reportsPanel,overviewPanel,publishedPanel,successPanel,panelInstalledPanel,rolloutPreviewPanel,onboardingModePreviewPanel,onboardingNotConfiguredPanel,onboardingFlowPanel,editQuestionPanel,roleMappingPanel,sessionCompletePanel,activationReadinessPanel,guidedSetupPanel,resolveLocale,t,type Panel,type Issue,type ReadinessCheck,type UiLocale,type ControlPage} from '../../../packages/discord-panels/src/index.js';
 import {enqueue} from '../../../packages/discord/src/outbox.js';
 import type {DiscordPort} from '../../../packages/discord/src/rest.js';
 import {assert,DomainError,type Scope} from '../../../packages/shared/src/index.js';
@@ -17,11 +17,14 @@ import {domainRevisions} from '../../../packages/settings/src/domain-config.js';
 import {InterventionService,interventionSchema} from '../../../packages/lifecycle/src/interventions.js';
 import {ExperimentService,experimentSchema} from '../../../packages/lifecycle/src/experiments.js';
 import {diagnose} from '../../../packages/analytics/src/diagnoses.js';
-import {PresentationService,compileActionTemplate,type ActionTemplateKey} from '../../../packages/presentation/src/index.js';
+import {PresentationService,compileActionTemplate} from '../../../packages/presentation/src/index.js';
+import {CommunityService} from '../../../packages/presentation/src/community.js';
+import type {InteractionHealthSnapshot} from '../../interaction/src/health.js';
 type DeleteData=(s:Scope,userId:string,actor:Actor,guild:boolean)=>Promise<void>;
 export class InteractionWorker {
  constructor(private readonly db:Database,private readonly vault:IdentityVault,private readonly tokens:Components,private readonly discord:DiscordPort,
- private readonly settings:SettingsService,private readonly onboarding:OnboardingService,private readonly deletion:DeleteData){}
+ private readonly settings:SettingsService,private readonly onboarding:OnboardingService,private readonly deletion:DeleteData,
+ private readonly runtime?:()=>{gatewayConnected:boolean;interaction:InteractionHealthSnapshot;commandHash:string}){}
  async tick(s:Scope){
   const job=await this.db.transaction().execute(async tx=>{
    const row=(await sql<{id:string,encrypted_payload:string}>`SELECT id,encrypted_payload FROM interaction_jobs WHERE ${tenant(s)}
@@ -35,25 +38,27 @@ export class InteractionWorker {
    const kind=error instanceof DomainError?error.code==='REVISION_CONFLICT'?'revision':error.code==='ADMIN_REQUIRED'?'permission':error.code==='ENTITLEMENT_REQUIRED'?'entitlement':'generic':'generic';
    const actorHash=this.vault.hash(s,input.userId),issue:Issue=(data,publicEntry=false)=>this.tokens.issue(this.db,s,data,publicEntry?null:actorHash,publicEntry?31536000:900);
    let language:'auto'|'ja'|'en'|'bilingual'='auto';try{language=(await this.settings.get(s)).uiLanguage;}catch{/* Error response still has interaction locale. */}
-   const locale=resolveLocale(language,{interactionLocale:input.locale,guildLocale:input.guildLocale}),reference=`NXS-${randomBytes(3).toString('hex').toUpperCase()}`;
-   process.stderr.write(`[${reference}] ${error instanceof DomainError?error.code:error instanceof Error?error.name:'UNKNOWN_ERROR'}\n`);
+   const locale=resolveLocale(language,{interactionLocale:input.locale,guildLocale:input.guildLocale}),internal=!(error instanceof DomainError||error instanceof z.ZodError),reference=internal?`NXS-${randomBytes(3).toString('hex').toUpperCase()}`:undefined;
+   if(reference)process.stderr.write(`[${reference}] ${error instanceof Error?error.name:'UNKNOWN_ERROR'}\n`);
    body=await errorPanel(issue,kind,locale,reference,error instanceof DomainError?error.code:undefined);
   }
   await this.db.transaction().execute(async tx=>{
-   await enqueue(tx,s,`reply:${input.id}`,'REPLY_EDIT',{applicationId:input.applicationId,encryptedToken:this.vault.seal(s,input.token),body});
+   const interactionHash=this.vault.hash(s,input.id);
+   await enqueue(tx,s,`reply:${input.id}`,'REPLY_EDIT',{applicationId:input.applicationId,encryptedToken:this.vault.seal(s,input.token),body,interactionHash});
+   await sql`UPDATE interaction_diagnostics SET result='queued' WHERE ${tenant(s)} AND interaction_hash=${interactionHash}`.execute(tx);
    await sql`UPDATE interaction_jobs SET state='SUCCEEDED',lease_until=NULL WHERE ${tenant(s)} AND id=${input.id}`.execute(tx);
   });return true;
  }
  async dispatch(s:Scope,input:InteractionJob):Promise<Panel>{
   const member=await this.discord.member(s.guildId,input.userId);const actorHash=this.vault.hash(s,input.userId);
-  const actor:Actor={key:actorHash,permissions:member.permissions,roles:member.roles,source:'DISCORD_PANEL',requestId:input.id};
+  const actor:Actor={key:actorHash,permissions:member.permissions,roles:member.roles,source:'DISCORD_PANEL',requestId:input.id,encryptedUserId:this.vault.seal(s,input.userId)};
   const current=await this.settings.get(s);const admin=canAdmin(member.permissions,member.roles,current.adminRoleId);
   const locale=resolveLocale(current.uiLanguage,{interactionLocale:input.locale,guildLocale:input.guildLocale});
   const publicLocale=resolveLocale(current.uiLanguage,{interactionLocale:input.locale,guildLocale:input.guildLocale,publicPanel:true});
   const intent=input.customId?await this.tokens.read(this.db,s,input.customId,actorHash):{action:input.command};
   const action=String(intent.action??'');
   const issue:Issue=(data,publicEntry=false)=>this.tokens.issue(this.db,s,data,publicEntry?null:actorHash,publicEntry?31536000:900);
-  const adminActions=['panel','panelRefresh','setup','recommendedSetup','rolloutPreview','rolloutConfirm','modePreview','modeConfirm','lifecycle','activation','activationDraft','activationPublish','cohorts','diagnose','improve','interventions','interventionDraft','interventionApprove','experiments','experimentMethod','experimentDraft','configPublish','reports','billing','advanced','settings','status','flows','template','startChannel','adminNotificationChannel','uiLanguage','enabled','onboardingEnabled','mapOption','mapRole','editNode','editNodeOpen','editNodeSave','rollback','preview','deleteGuildConfirm','deleteGuild','overview','dashboard'];
+  const adminActions=['panel','panelRefresh','setup','recommendedSetup','rolloutPreview','rolloutConfirm','modePreview','modeConfirm','lifecycle','activation','activationDraft','activationPublish','cohorts','diagnose','improve','interventions','interventionDraft','interventionApprove','experiments','experimentMethod','experimentDraft','configPublish','reports','billing','advanced','settings','status','flows','template','startChannel','adminNotificationChannel','helperChannel','helperEnabled','uiLanguage','enabled','onboardingEnabled','mapOption','mapRole','editNode','editNodeOpen','editNodeSave','rollback','preview','deleteGuildConfirm','deleteGuild','overview','dashboard'];
   if(adminActions.includes(action))assert(admin,'ADMIN_REQUIRED',403);
   if(action==='setup'){
    if(!current.enabled)await this.settings.update(s,actor,current.revision,{enabled:true});
@@ -135,13 +140,23 @@ export class InteractionWorker {
   if(action==='reports')return reportsPanel(issue,locale);
   if(action==='advanced')return settingsPanel(issue,current,locale);
   if(action==='panel'){
-   assert(input.channelId,'CHANNEL_REQUIRED');await this.discord.checkChannel(s.guildId,input.channelId);
+   assert(input.channelId,'CHANNEL_REQUIRED');
+   const installed=(await sql<{channel_id:string}>`SELECT channel_id FROM settings_panels WHERE ${tenant(s)}`.execute(this.db)).rows[0];
+   const targetChannel=installed?.channel_id??input.channelId;
+   await this.discord.checkChannel(s.guildId,targetChannel);
    if(!current.enabled)await this.settings.update(s,actor,current.revision,{enabled:true});
-   const root=await this.communityPanel(issue,s,publicLocale);await enqueue(this.db,s,`panel:${input.id}`,'PANEL_UPSERT',{channelId:input.channelId,body:root});
+   const root=await this.communityPanel(issue,s,publicLocale);await enqueue(this.db,s,`panel:${input.id}`,'PANEL_UPSERT',{channelId:targetChannel,body:root});
    return panelInstalledPanel(issue,locale);
   }
   if(action==='panelRefresh'){
    const saved=(await sql<{channel_id:string}>`SELECT channel_id FROM settings_panels WHERE ${tenant(s)}`.execute(this.db)).rows[0];assert(saved,'PANEL_NOT_CONFIGURED');const root=await this.communityPanel(issue,s,publicLocale);await enqueue(this.db,s,`panel-refresh:${input.id}`,'PANEL_UPSERT',{channelId:saved.channel_id,body:root});return successPanel(issue,t(locale,'success.panelRefreshed'),t(locale,'success.panelRefreshedDetail'),{label:t(locale,'common.settings'),action:'advanced'},locale);
+  }
+  if(action==='controlNavigate'||action==='controlRefresh'){
+   const saved=(await sql<{channel_id:string;message_id:string}>`SELECT channel_id,message_id FROM settings_panels WHERE ${tenant(s)}`.execute(this.db)).rows[0];assert(saved,'PANEL_NOT_CONFIGURED');
+   assert(!input.messageId||input.messageId===saved.message_id,'COMPONENT_EXPIRED');
+   const page=z.enum(controlPages).parse(action==='controlNavigate'?input.values?.[0]:intent.page);
+   const body=await this.communityPanel(issue,s,publicLocale,page);await enqueue(this.db,s,`control:${input.id}`,'PANEL_UPSERT',{channelId:saved.channel_id,body});
+   return successPanel(issue,t(publicLocale,`control.${page}`),t(publicLocale,'control.updated',{time:`<t:${Math.floor(Date.now()/1000)}:R>`}),undefined,locale);
   }
   if(action==='settings')return basicSettingsPanel(issue,current,locale);
   if(action==='template')await this.onboarding.chooseTemplate(s,actor,z.number().parse(intent.revision),z.enum(templates).parse(input.values?.[0]));
@@ -152,6 +167,14 @@ export class InteractionWorker {
   else if(action==='adminNotificationChannel'){
    const channel=z.string().regex(/^\d{17,20}$/).parse(input.values?.[0]);await this.discord.checkChannel(s.guildId,channel);
    await this.settings.update(s,actor,z.number().parse(intent.revision),{adminNotificationChannelId:channel});
+  }
+  else if(action==='helperChannel'){
+   const channel=z.string().regex(/^\d{17,20}$/).parse(input.values?.[0]);await this.discord.checkChannel(s.guildId,channel);
+   await this.settings.update(s,actor,z.number().parse(intent.revision),{helperChannelId:channel});
+  }
+  else if(action==='helperEnabled'){
+   const value=z.boolean().parse(intent.value);assert(!value||current.helperChannelId,'HELPER_CHANNEL_REQUIRED');
+   await this.settings.update(s,actor,z.number().parse(intent.revision),{helperEnabled:value});
   }
   else if(action==='enabled'||action==='onboardingEnabled')await this.settings.update(s,actor,z.number().parse(intent.revision),{[action]:z.boolean().parse(intent.value)});
   else if(action==='flows'){
@@ -208,13 +231,15 @@ export class InteractionWorker {
     {label:t(locale,'health.webDashboard'),status:validWeb?'Ready':'Not configured',detail:validWeb?undefined:t(locale,'health.fixWebDashboard')}
    ];return activationReadinessPanel(issue,checks,locale);
   }else throw new DomainError('UNKNOWN_ACTION');
-  const updated=await this.settings.get(s),updatedLocale=resolveLocale(updated.uiLanguage,{interactionLocale:input.locale,guildLocale:input.guildLocale});return action==='uiLanguage'||action==='adminNotificationChannel'?basicSettingsPanel(issue,updated,updatedLocale):settingsPanel(issue,updated,updatedLocale);
+  const updated=await this.settings.get(s),updatedLocale=resolveLocale(updated.uiLanguage,{interactionLocale:input.locale,guildLocale:input.guildLocale});return ['uiLanguage','adminNotificationChannel','helperChannel','helperEnabled'].includes(action)?basicSettingsPanel(issue,updated,updatedLocale):settingsPanel(issue,updated,updatedLocale);
  }
- private async communityPanel(issue:Issue,s:Scope,locale:UiLocale){
-  const home=await new PresentationService(this.db).home(s),experiment=(await sql<{state:string}>`SELECT COALESCE(c.state,'running') AS state FROM guild_config_heads h LEFT JOIN experiment_controls c ON c.organization_id=h.organization_id AND c.guild_id=h.guild_id AND c.revision_id=h.revision_id WHERE h.organization_id=${s.organizationId}::uuid AND h.guild_id=${s.guildId} AND h.domain='experiment'`.execute(this.db)).rows[0],remaining=home.setup.steps.slice(0,2).filter(step=>!step.complete).length,collecting=home.kpis.slice(1).every(k=>k.current===null||k.sampleSize<20||k.maturity!=='mature'),state=home.setup.required?'SETUP_REQUIRED':experiment&&experiment.state!=='stopped'?'EXPERIMENT_RUNNING':home.communityOpportunity?'NEEDS_ATTENTION':collecting?'COLLECTING_DATA':'HEALTHY';
-  const metric=(key:'activation_rate'|'direct_reply_connection_rate'|'d7_active_retention'):MetricLike|undefined=>{const k=home.kpis.find(item=>item.key===key);if(!k)return;const expected=k.coverage.coverageRatio===null?null:100,observed=k.coverage.coverageRatio===null?null:Math.round(k.coverage.coverageRatio*100);return {metricKey:key,value:k.current,sampleSize:k.sampleSize,provisional:k.maturity==='provisional',dataCoverage:{status:k.coverage.status,expected,observed}};};
-  const actionKeys:Record<ActionTemplateKey,Parameters<typeof t>[1]>={reply_rescue:'root.action.replyRescue',welcome_helper:'root.action.welcomeHelper',inactive_follow_up:'root.action.inactiveFollowup',channel_recommendation:'root.action.channelRecommendation',event_recommendation:'root.action.eventRecommendation'};
-  return rootPanel(issue,locale,{state,newMembers:home.kpis.find(item=>item.key==='new_members')?.current,activation:metric('activation_rate'),connection:metric('direct_reply_connection_rate'),retention:metric('d7_active_retention'),attention:home.communityOpportunity?diagnosisLabel(home.communityOpportunity.type,locale):null,suggestedAction:home.suggestedAction?t(locale,actionKeys[home.suggestedAction]):null,setupRemaining:remaining,updatedAt:new Date(home.generatedAt),dashboardUrl:process.env.NEXUS_WEB_URL});
+ private async communityPanel(issue:Issue,s:Scope,locale:UiLocale,page:ControlPage='overview'){
+  const data:Parameters<typeof controlPanel>[2]={dashboardUrl:process.env.NEXUS_WEB_URL,updatedAt:new Date()};
+  if(['overview','newMembers','community','channels','improve'].includes(page))data.community=await new CommunityService(this.db,this.settings).overview(s,30);
+  if(page==='settings'){const current=await this.settings.get(s);data.settings={analysisScope:current.analysisScope,weeklySummaryEnabled:current.weeklySummaryEnabled,helperEnabled:current.helperEnabled,goalPreset:current.goalPreset,uiLanguage:current.uiLanguage};}
+  if(page==='results'){const active=await domainRevisions(this.db).current(s,'experiment');if(active){const result=await new ExperimentService(this.db).result(s,active.id);data.results={controlRate:result.controlRate,treatmentRate:result.treatmentRate,controlN:result.controlN,treatmentN:result.treatmentN,state:result.state};}}
+  if(page==='diagnostics'){const command=(await sql<{definition_hash:string}>`SELECT definition_hash FROM guild_command_sync WHERE ${tenant(s)}`.execute(this.db)).rows[0],last=(await sql<{received_at:Date;result:string}>`SELECT received_at,result FROM interaction_diagnostics WHERE ${tenant(s)} ORDER BY received_at DESC LIMIT 1`.execute(this.db)).rows[0],runtime=this.runtime?.();data.diagnostics={gatewayConnected:runtime?.gatewayConnected??false,transport:runtime?.interaction.transport??'gateway',commandsRegistered:Boolean(command&&runtime&&command.definition_hash===runtime.commandHash),lastReceivedAt:runtime?.interaction.lastReceivedAt??last?.received_at.toISOString()??null,lastResult:runtime?.interaction.lastResult??last?.result??null};}
+  return controlPanel(issue,page,data,locale);
  }
  private async sessionPanel(issue:Issue,session:Session,locale:ReturnType<typeof resolveLocale>){
   if(session.state.complete)return sessionCompletePanel(issue,locale);

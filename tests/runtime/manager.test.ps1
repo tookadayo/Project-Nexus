@@ -21,7 +21,7 @@ function PortOwner([int]$Port) {
 }
 try {
     New-Item -ItemType Directory -Path $bin,(Join-Path $root 'node_modules') -Force | Out-Null
-    foreach($name in @('runtime-common.ps1','runtime-child.ps1','start-nexus.ps1','stop-nexus.ps1','restart-nexus.ps1')) { $contents=Get-Content -LiteralPath (Join-Path $source $name) -Raw;foreach($old in $portMap.Keys){$contents=$contents.Replace($old,$portMap[$old])};Set-Content -LiteralPath (Join-Path $root $name) -Value $contents -Encoding UTF8 }
+    foreach($name in @('runtime-common.ps1','runtime-child.ps1','start-nexus.ps1','stop-nexus.ps1','restart-nexus.ps1','status-nexus.ps1','doctor-nexus.ps1','setup-nexus.ps1')) { $contents=Get-Content -LiteralPath (Join-Path $source $name) -Raw;foreach($old in $portMap.Keys){$contents=$contents.Replace($old,$portMap[$old])};Set-Content -LiteralPath (Join-Path $root $name) -Value $contents -Encoding UTF8 }
     Set-Content -LiteralPath (Join-Path $root '.env') -Value 'NEXUS_WEB_AUTH_MODE=development' -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $root 'package.json') -Value '{}' -Encoding ASCII
     @'
@@ -43,7 +43,7 @@ node "%~dp0fake-service.cjs" %role%
 node "%~dp0fake-service.cjs" ngrok
 '@ | Set-Content -LiteralPath (Join-Path $bin 'ngrok.cmd') -Encoding ASCII
     $env:PATH = "$bin;$env:PATH"
-    foreach($name in @('runtime-common.ps1','runtime-child.ps1','start-nexus.ps1','stop-nexus.ps1','restart-nexus.ps1')) {
+    foreach($name in @('runtime-common.ps1','runtime-child.ps1','start-nexus.ps1','stop-nexus.ps1','restart-nexus.ps1','status-nexus.ps1','doctor-nexus.ps1','setup-nexus.ps1')) {
         $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $root $name),[ref]$tokens,[ref]$errors)|Out-Null
         Assert ($errors.Count -eq 0) "PowerShell 5.1 parse failed: $name"
     }
@@ -82,6 +82,21 @@ node "%~dp0fake-service.cjs" ngrok
     Assert ((Invoke-Launcher 'stop-nexus.ps1').code -eq 0) 'Stale PID STOP failed'
     Assert (-not $unrelated.HasExited) 'Stale or reused PID killed an unrelated Node process'
     Stop-Process -Id $unrelated.Id -Force -ErrorAction SilentlyContinue
+    $pgData=Join-Path $root '.local\pg';New-Item -ItemType Directory -Path $pgData -Force|Out-Null
+    @('424242',$pgData,'1727251200',[string]$pgPort)|Set-Content -LiteralPath (Join-Path $pgData 'postmaster.pid') -Encoding ASCII
+    . (Join-Path $root 'runtime-common.ps1')
+    $ownBinary=Join-Path $root 'node_modules\.pnpm\@embedded-postgres+windows-x64@18.4.0-beta.17\node_modules\@embedded-postgres\windows-x64\bin\postgres.exe'
+    $script:mockProcesses=@(
+        [pscustomobject]@{Name='postgres.exe';ProcessId=424243;ParentProcessId=424242;CommandLine='postgres.exe --fork backend';ExecutablePath=$ownBinary;CreationDate=(Get-Date)},
+        [pscustomobject]@{Name='postgres.exe';ProcessId=424244;ParentProcessId=424242;CommandLine='postgres.exe --fork backend';ExecutablePath='C:\Other\postgres.exe';CreationDate=(Get-Date)}
+    )
+    function Get-NexusPortOwner([int]$Port) { return 0 }
+    function Get-CimInstance { param([string]$ClassName,[string]$Filter) if($Filter){foreach($item in $script:mockProcesses){if($Filter -eq "ProcessId = $($item.ProcessId)"){return $item}};return};return $script:mockProcesses }
+    $found=@(Get-NexusOrphanProcesses)
+    Assert ($found.Count -eq 1 -and $found[0].ProcessId -eq 424243) 'Orphan PostgreSQL worker was not isolated from an unrelated worker'
+    $script:stopped=@();function Stop-Process { param([int]$Id,[switch]$Force) $script:stopped+= $Id }
+    Stop-NexusOrphans
+    Assert ($script:stopped.Count -eq 1 -and $script:stopped[0] -eq 424243) 'Orphan cleanup touched the wrong PostgreSQL worker'
     Write-Host 'Runtime manager tests passed.'
 } finally {
     Remove-Item Env:NEXUS_FAKE_FAIL -ErrorAction SilentlyContinue

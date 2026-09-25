@@ -12,6 +12,7 @@ export * from './types.js';
 export * from './views/activation.js';
 export * from './views/billing.js';
 export * from './views/cohorts.js';
+export * from './views/control.js';
 export * from './views/diagnostics.js';
 export * from './views/errors.js';
 export * from './views/experiments.js';

@@ -10,6 +10,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - run: corepack enable
       - run: corepack pnpm install --frozen-lockfile
       - run: corepack pnpm lint
       - run: corepack pnpm typecheck
@@ -18,6 +19,9 @@ jobs:
       - run: corepack pnpm exec playwright install --with-deps chromium
       - run: corepack pnpm test:e2e
       - run: corepack pnpm test:integration
+        env:
+          NEXUS_TEST_INFRA: docker
+      - run: corepack pnpm test:performance
         env:
           NEXUS_TEST_INFRA: docker
   windows-runtime:

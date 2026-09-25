@@ -11,8 +11,9 @@ import type {DiscordPort} from '../../../packages/discord/src/rest.js';
 import {randomUUID} from 'node:crypto';
 import {CommunityService} from '../../../packages/presentation/src/community.js';
 import {PermissionFlagsBits} from 'discord-api-types/v10';
+import type {IdentityVault} from '../../../packages/identity/src/index.js';
 
-export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:DiscordPort){
+export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:DiscordPort,vault?:IdentityVault){
  const base='/v3/organizations/:organizationId/guilds/:guildId',presentation=new PresentationService(db);
  const roleCache=new Map<string,{at:number;ids:string[]}>();
  const automaticStaffRoles=async(guildId:string)=>{const cached=roleCache.get(guildId);if(cached&&Date.now()-cached.at<1800000)return cached.ids;if(!discord)return [];try{const roles=await discord.roles(guildId),flags=PermissionFlagsBits.Administrator|PermissionFlagsBits.ManageGuild|PermissionFlagsBits.ManageMessages|PermissionFlagsBits.ModerateMembers,ids=roles.filter(role=>(BigInt(role.permissions)&flags)!==0n).map(role=>role.id);roleCache.set(guildId,{at:Date.now(),ids});return ids;}catch{return cached?.ids??[];}};
@@ -35,6 +36,13 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
  app.get(base+'/home',async(req,reply)=>presentation.home(getScope(req,reply)));
  app.get(base+'/community',async(req,reply)=>{const s=getScope(req,reply),range=z.coerce.number().pipe(z.union([z.literal(7),z.literal(30),z.literal(90)])).catch(30).parse((req.query as {range?:unknown}).range);return new CommunityService(db).overview(s,range,new Date(),await automaticStaffRoles(s.guildId));});
  app.get(base+'/weekly-summary/status',async(req,reply)=>{const s=getScope(req,reply);return (await sql<{state:string;status_note:string|null;attempted_at:Date}>`SELECT state,status_note,attempted_at FROM weekly_summary_deliveries WHERE ${tenant(s)} ORDER BY week_start DESC LIMIT 1`.execute(db)).rows[0]??null;});
+ app.get(base+'/audit',async(req,reply)=>{
+  const s=getScope(req,reply),rows=(await sql<{action:string;source:string;actor_identity_ciphertext:string|null;before_value:Record<string,unknown>|null;after_value:Record<string,unknown>|null;occurred_at:Date}>`SELECT action,source,actor_identity_ciphertext,before_value,after_value,occurred_at FROM audit_logs WHERE ${tenant(s)} AND action IN ('settings.updated','config.published') ORDER BY occurred_at DESC LIMIT 30`.execute(db)).rows;
+  return rows.map(row=>{let actorId:string|null=null;try{if(vault&&row.actor_identity_ciphertext)actorId=vault.open(s,row.actor_identity_ciphertext);}catch{/* Historical or deleted identity remains unnamed. */}
+   const before=row.before_value??{},after=row.after_value??{},changed=Object.keys(after).filter(field=>JSON.stringify(before[field])!==JSON.stringify(after[field]));
+   return {at:row.occurred_at.toISOString(),action:row.action,source:row.source,actorId,changed};
+  });
+ });
  app.get(base+'/journey',async(req,reply)=>{const s=getScope(req,reply),range=z.coerce.number().pipe(z.union([z.literal(7),z.literal(30),z.literal(90)])).catch(30).parse((req.query as {range?:unknown}).range);return presentation.journey(s,range);});
  app.get(base+'/opportunities',async(req,reply)=>presentation.opportunities(getScope(req,reply)));
  app.post(base+'/opportunities/dismiss',async(req,reply)=>{
@@ -67,6 +75,21 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
   if(input.enabled){assert(discord,'DISCORD_UNAVAILABLE',503);await discord.checkChannel(s.guildId,input.channelId!);}
   const actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
   return new SettingsService(db).update(s,actor,input.revision,{weeklySummaryEnabled:input.enabled,weeklySummaryChannelId:input.channelId});
+ });
+ app.post(base+'/settings/helper',async(req,reply)=>{
+  const s=getScope(req,reply),input=z.object({enabled:z.boolean(),channelId:z.string().regex(/^\d{17,20}$/).nullable(),roleId:z.string().regex(/^\d{17,20}$/).nullable(),responseMinutes:z.number().int().min(1).max(1440),cooldownMinutes:z.number().int().min(15).max(1440),revision:z.number().int().nonnegative()}).strict().parse(req.body);
+  assert(!input.enabled||input.channelId,'HELPER_CHANNEL_REQUIRED');
+  if(input.channelId){assert(discord,'DISCORD_UNAVAILABLE',503);await discord.checkChannel(s.guildId,input.channelId);}
+  if(input.roleId){assert(discord,'DISCORD_UNAVAILABLE',503);assert((await discord.roles(s.guildId)).some(role=>role.id===input.roleId),'HELPER_ROLE_NOT_FOUND');}
+  const actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
+  return new SettingsService(db).update(s,actor,input.revision,{helperEnabled:input.enabled,helperChannelId:input.channelId,helperRoleId:input.roleId,firstResponseMinutes:input.responseMinutes,helperAlertCooldownMinutes:input.cooldownMinutes});
+ });
+ app.post(base+'/settings/goals',async(req,reply)=>{
+  const s=getScope(req,reply),input=z.object({preset:z.enum(['multiplayer','early_access','live_service']).nullable(),channels:z.array(z.object({channelId:z.string().regex(/^\d{17,20}$/),purpose:z.enum(['lfg','feedback','bug','playtest','discussion'])})).max(20),revision:z.number().int().nonnegative()}).strict().parse(req.body);
+  assert(new Set(input.channels.map(item=>item.channelId)).size===input.channels.length,'DUPLICATE_CHANNEL');
+  if(discord?.options){const available=await discord.options(s.guildId);assert(input.channels.every(item=>available.channels.some(channel=>channel.id===item.channelId)),'CHANNEL_NOT_FOUND');}
+  const actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
+  return new SettingsService(db).update(s,actor,input.revision,{goalPreset:input.preset,importantChannels:input.channels});
  });
  app.post(base+'/settings/analysis-scope',async(req,reply)=>{
   const s=getScope(req,reply),input=z.object({revision:z.number().int().nonnegative(),mode:z.enum(['all','include','exclude']),channelIds:z.array(z.string().regex(/^\d{17,20}$/)).max(100),staffRoleIds:z.array(z.string().regex(/^\d{17,20}$/)).max(30)}).strict().parse(req.body);
