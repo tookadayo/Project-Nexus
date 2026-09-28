@@ -8,7 +8,8 @@ const id=z.string().regex(/^\d{17,20}$/);
 export const settingsSchema=z.object({enabled:z.boolean().default(true),onboardingEnabled:z.boolean().default(false),template:z.enum(templates).default('General Community'),
  uiLanguage:z.enum(['auto','ja','en','bilingual']).default('auto'),
  startChannelId:id.nullable().default(null),adminNotificationChannelId:id.nullable().default(null),adminRoleId:id.nullable().default(null),managerRoleIds:z.array(id).max(20).default([]),helperRoleIds:z.array(id).max(20).default([]),flowVersionId:z.uuid().nullable().default(null),
- weeklySummaryEnabled:z.boolean().default(false),weeklySummaryChannelId:id.nullable().default(null),weeklySummaryDay:z.number().int().min(0).max(6).default(1),weeklySummaryHour:z.number().int().min(0).max(23).default(9),timezone:z.string().max(64).refine(value=>{try{new Intl.DateTimeFormat('en',{timeZone:value});return true;}catch{return false;}}).default('Asia/Tokyo'),
+ weeklySummaryEnabled:z.boolean().default(false),weeklySummaryChannelId:id.nullable().default(null),weeklySummaryDay:z.number().int().min(0).max(6).default(1),weeklySummaryHour:z.number().int().min(0).max(23).default(9),timezone:z.string().max(64).refine(value=>{try{new Intl.DateTimeFormat('en',{timeZone:value});return true;}catch{return false;}}).default('UTC'),
+ setupVersion:z.number().int().min(1).default(2),
  setupSteps:z.object({scope:z.boolean(),team:z.boolean(),notifications:z.boolean(),goals:z.boolean()}).strict().default({scope:false,team:false,notifications:false,goals:false}),
  goalPreset:z.enum(['multiplayer','early_access','live_service']).nullable().default(null),newMemberGoals:z.array(z.enum(['reply','lfg','voice','event','feedback','bug','playtest'])).max(7).default([]),importantChannels:z.array(z.object({channelId:id,purpose:z.enum(['lfg','feedback','bug','playtest','discussion'])}).strict()).max(20).default([]),
  analysisScope:z.object({mode:z.enum(['all','include','exclude']).default('all'),channelIds:z.array(id).max(100).default([])}).strict().default({mode:'all',channelIds:[]}),
@@ -33,7 +34,9 @@ export class SettingsService {
  async get(s:Scope,tx:Tx=this.db):Promise<SettingsView>{
   const {rows}=await sql<{settings:Settings,revision:number}>`SELECT settings,revision FROM guild_settings WHERE ${tenant(s)}`.execute(tx);
   const saved=rows[0]?.settings,settings=settingsSchema.parse(saved??{});
+  if(saved&&!Object.hasOwn(saved,'timezone'))settings.timezone='Asia/Tokyo';
   if(saved&&!Object.hasOwn(saved,'setupSteps'))settings.setupSteps={scope:true,team:true,notifications:true,goals:true};
+  if(saved&&!Object.hasOwn(saved,'setupVersion'))settings.setupVersion=1;
   return {...settings,revision:rows[0]?.revision??0};
  }
  async mutate(s:Scope,actor:Actor,revision:number,change:(current:Settings,tx:Tx)=>Promise<Settings>,redactAudit=false):Promise<SettingsView>{

@@ -15,9 +15,11 @@ import {ActionWorker} from '../../apps/worker/src/actions.js';
 import {InteractionWorker} from '../../apps/worker/src/interactions.js';
 import {DiscordFailure} from '../../packages/discord/src/rest.js';
 import {PrivacyService} from '../../packages/security/src/privacy.js';
-const server=new EmbeddedPostgres({databaseDir:resolve('.local/test-pg'),user:'nexus',password:'nexus',port:55433,persistent:true,onLog:()=>{},onError:()=>{}});
-const db=connect('postgresql://nexus:nexus@127.0.0.1:55433/postgres');
-beforeAll(async()=>{if(!existsSync('.local/test-pg/PG_VERSION'))await server.initialise();await server.start();await migrate(db);});
+import {CommunityService} from '../../packages/presentation/src/community.js';
+import {HelperWorker} from '../../apps/worker/src/helpers.js';
+const server=new EmbeddedPostgres({databaseDir:resolve('.local/test-pg-v060b'),user:'nexus',password:'nexus',port:55435,persistent:true,onLog:()=>{},onError:()=>{}});
+const db=connect('postgresql://nexus:nexus@127.0.0.1:55435/postgres');
+beforeAll(async()=>{if(!existsSync('.local/test-pg-v060b/PG_VERSION'))await server.initialise();await server.start();await migrate(db);});
 afterAll(async()=>{await db.destroy();await server.stop();});
 it('runs migrations idempotently and enforces guild ownership',async()=>{
  await migrate(db);
@@ -34,6 +36,7 @@ it('preserves completed setup for existing v0.5.2 settings rows',async()=>{
  await sql`INSERT INTO guild_settings(organization_id,guild_id,revision,settings) VALUES(${s.organizationId}::uuid,${s.guildId},0,'{"enabled":true}'::jsonb) ON CONFLICT(organization_id,guild_id) DO UPDATE SET revision=0,settings=EXCLUDED.settings`.execute(db);
  const settings=new SettingsService(db),legacy=await settings.get(s);
  expect(legacy.setupSteps).toEqual({scope:true,team:true,notifications:true,goals:true});
+ expect(legacy.setupVersion).toBe(1);expect(legacy.timezone).toBe('Asia/Tokyo');
  await settings.update(s,{key:'admin',permissions:'8',roles:[],source:'DISCORD_PANEL',requestId:randomUUID()},0,{helperEnabled:false});
  expect((await settings.get(s)).setupSteps).toEqual(legacy.setupSteps);
 });
@@ -44,7 +47,7 @@ it.each([
  ['role deleted',new DiscordFailure(404),'FAILED'],
  ['permission revoked',new DiscordFailure(403),'FAILED']
 ] as const)('handles %s without inventing role ownership',async(_name,failure,expected)=>{
- const s=scopeForGuild(String(BigInt('600000000000000000')+BigInt(Math.floor(Math.random()*100000))));await ensureGuild(db,s);
+ const s=scopeForGuild(String(BigInt('600000000000000000')+BigInt(Math.floor(Math.random()*100000))));await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
  const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32));const settings=new SettingsService(db);const onboarding=new OnboardingService(db,settings,vault);const discord=new FakeDiscord();const user='700000000000000000';
  discord.members.set(user,{roles:[],permissions:'0',joinedAt:new Date().toISOString(),bot:false});
  const actor={key:'admin',permissions:'8',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};const flow=templateFlow('Gaming');flow.nodes[0]!.options[1]!.roleId='800000000000000000';
@@ -106,6 +109,82 @@ it('completes Discord panel configuration, pinned branching flow and ownership-s
  discord.panels.clear();await interactions.dispatch(s,{...base,id:'100000000000000002',command:'panel'});while(await actions.tick(s)){/* drain */}
  expect(discord.calls.filter(c=>c==='sendPanel')).toHaveLength(2);
  await expect(interactions.dispatch(s,{...base,userId,command:'panel'})).rejects.toThrow('ADMIN_REQUIRED');
+});
+it('moves a panel only after the new message is created and keeps the old panel on failure',async()=>{
+ const s=scopeForGuild('644444444444444444');await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
+ const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32)),settings=new SettingsService(db),discord=new FakeDiscord(),tokens=new Components('test'),onboarding=new OnboardingService(db,settings,vault);
+ const userId='644444444444444445',channelA='644444444444444446',channelB='644444444444444447';discord.members.set(userId,{roles:[],permissions:'8',joinedAt:'2026-09-01T00:00:00Z',bot:false});
+ const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,async()=>{}),actions=new ActionWorker(db,vault,discord,onboarding);
+ const base={id:'644444444444444448',applicationId:'644444444444444449',token:'test',userId,channelId:channelA};
+ await interactions.dispatch(s,{...base,command:'panel'});while(await actions.tick(s)){/* drain outbox */}
+ const original=(await sql<{channel_id:string;message_id:string}>`SELECT channel_id,message_id FROM settings_panels WHERE guild_id=${s.guildId}`.execute(db)).rows[0]!;
+ const preview=await interactions.dispatch(s,{...base,id:'644444444444444450',channelId:channelB,command:'panel'}),controls=JSON.stringify(preview);
+ expect(controls).toContain('Move to this channel');
+ expect((await sql<{channel_id:string}>`SELECT channel_id FROM settings_panels WHERE guild_id=${s.guildId}`.execute(db)).rows[0]?.channel_id).toBe(channelA);
+ const find=(node:unknown):string|undefined=>{if(!node||typeof node!=='object')return;const item=node as {label?:string;custom_id?:string;components?:unknown[]};if(item.label==='Move to this channel')return item.custom_id;for(const child of item.components??[]){const found=find(child);if(found)return found;}};
+ const customId=find(preview);expect(customId).toBeDefined();
+ await interactions.dispatch(s,{...base,id:'644444444444444451',channelId:channelB,customId,command:''});
+ discord.failure=new DiscordFailure(403);await actions.tick(s);
+ expect((await sql<{channel_id:string;message_id:string}>`SELECT channel_id,message_id FROM settings_panels WHERE guild_id=${s.guildId}`.execute(db)).rows[0]).toEqual(original);
+ discord.failure=null;
+ await interactions.dispatch(s,{...base,id:'644444444444444452',channelId:channelB,customId,command:''});while(await actions.tick(s)){/* drain outbox */}
+ const moved=(await sql<{channel_id:string;message_id:string}>`SELECT channel_id,message_id FROM settings_panels WHERE guild_id=${s.guildId}`.execute(db)).rows[0]!;
+ expect(moved.channel_id).toBe(channelB);expect(moved.message_id).not.toBe(original.message_id);expect(discord.panels.has(original.message_id)).toBe(false);
+ const staleAction=await tokens.issue(db,s,{action:'controlTryImprove'},null,900);
+ await expect(interactions.dispatch(s,{...base,id:'644444444444444453',customId:staleAction,messageId:original.message_id,command:''})).rejects.toThrow('COMPONENT_EXPIRED');
+});
+it('completes setup with optional choices and confirms manager role grants',async()=>{
+ const s=scopeForGuild('655555555555555555');await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
+ const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32)),settings=new SettingsService(db),discord=new FakeDiscord(),tokens=new Components('test'),onboarding=new OnboardingService(db,settings,vault);
+ const userId='655555555555555556',channelId='655555555555555557',roleId='655555555555555558';discord.members.set(userId,{roles:[],permissions:'8',joinedAt:'2026-09-01T00:00:00Z',bot:false});discord.roles=async()=>[{id:roleId,managed:false,permissions:'0',position:1}];
+ const worker=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,async()=>{}),actions=new ActionWorker(db,vault,discord,onboarding);
+ const base={applicationId:'655555555555555559',token:'test',userId,channelId};await worker.dispatch(s,{...base,id:'655555555555555560',command:'panel'});while(await actions.tick(s)){/* drain outbox */}
+ const messageId=(await sql<{message_id:string}>`SELECT message_id FROM settings_panels WHERE guild_id=${s.guildId}`.execute(db)).rows[0]!.message_id;
+ let serial=561;const dispatchAction=async(action:string,values?:string[])=>{const current=await settings.get(s),customId=await tokens.issue(db,s,{action,revision:current.revision},null,900);return worker.dispatch(s,{...base,id:`655555555555555${serial++}`,command:'',customId,messageId,values});};
+ for(const action of ['controlScopeDefault','controlSkipTeam','controlSkipNotifications','controlSkipGoals'])await dispatchAction(action);
+ const done=await settings.get(s);expect(done.setupSteps).toEqual({scope:true,team:true,notifications:true,goals:true});expect(done.managerRoleIds).toEqual([]);expect(done.helperEnabled).toBe(false);expect(done.newMemberGoals).toEqual([]);
+ const preview=await dispatchAction('controlManagers',[roleId]);expect(JSON.stringify(preview)).toContain('Confirm roles');expect((await settings.get(s)).managerRoleIds).toEqual([]);
+ const find=(node:unknown):string|undefined=>{if(!node||typeof node!=='object')return;const item=node as {label?:string;custom_id?:string;components?:unknown[]};if(item.label==='Confirm roles')return item.custom_id;for(const child of item.components??[]){const found=find(child);if(found)return found;}};
+ const confirm=find(preview);expect(confirm).toBeDefined();await worker.dispatch(s,{...base,id:'655555555555555570',command:'',customId:confirm});expect((await settings.get(s)).managerRoleIds).toEqual([roleId]);
+ const revision=(await settings.get(s)).revision,clear=await tokens.issue(db,s,{action:'controlClearManagers',revision},null,900),clearPreview=await worker.dispatch(s,{...base,id:'655555555555555571',command:'',customId:clear,messageId});
+ expect((await settings.get(s)).managerRoleIds).toEqual([roleId]);await worker.dispatch(s,{...base,id:'655555555555555572',command:'',customId:find(clearPreview)});expect((await settings.get(s)).managerRoleIds).toEqual([]);
+ const withHelper=await settings.update(s,{key:vault.hash(s,userId),permissions:'8',roles:[],source:'DISCORD_PANEL',requestId:randomUUID()},(await settings.get(s)).revision,{helperRoleIds:[roleId]});
+ const clearHelpers=await tokens.issue(db,s,{action:'controlClearHelpers',revision:withHelper.revision},null,900);await worker.dispatch(s,{...base,id:'655555555555555573',command:'',customId:clearHelpers,messageId});expect((await settings.get(s)).helperRoleIds).toEqual([]);
+});
+it('previews an improvement without saving, cancels cleanly, and applies on confirmation',async()=>{
+ const s=scopeForGuild('666666666666666661');await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
+ const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32)),settings=new SettingsService(db),discord=new FakeDiscord(),tokens=new Components('test'),onboarding=new OnboardingService(db,settings,vault);
+ const userId='666666666666666662',channelId='666666666666666663';discord.members.set(userId,{roles:[],permissions:'8',joinedAt:'2026-09-01T00:00:00Z',bot:false});
+ const worker=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,async()=>{}),actor={key:vault.hash(s,userId),permissions:'8',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};
+ await settings.update(s,actor,0,{helperChannelId:channelId});
+ const base={applicationId:'666666666666666664',token:'test',userId,channelId,command:''},issue=async(action:string)=>tokens.issue(db,s,{action},null,900);
+ const find=(node:unknown,label:string):string|undefined=>{if(!node||typeof node!=='object')return;const item=node as {label?:string;custom_id?:string;components?:unknown[]};if(item.label===label)return item.custom_id;for(const child of item.components??[]){const found=find(child,label);if(found)return found;}};
+ const preview=await worker.dispatch(s,{...base,id:'666666666666666665',customId:await issue('controlTryImprove')});expect(JSON.stringify(preview)).toContain('Preview:');expect((await settings.get(s)).helperEnabled).toBe(false);
+ await worker.dispatch(s,{...base,id:'666666666666666666',customId:find(preview,'Cancel')});expect((await settings.get(s)).helperEnabled).toBe(false);
+ const again=await worker.dispatch(s,{...base,id:'666666666666666667',customId:await issue('controlTryImprove')});await worker.dispatch(s,{...base,id:'666666666666666668',customId:find(again,'Enable notification')});
+ expect((await settings.get(s)).helperEnabled).toBe(true);expect((await settings.get(s)).firstResponseMinutes).toBe(20);
+});
+it('snoozes an attention item, shows it after expiry, and suppresses it when resolved',async()=>{
+ const s=scopeForGuild('677777777777777771');await sql`DELETE FROM attention_items WHERE guild_id=${s.guildId}`.execute(db);await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
+ const identity=randomUUID(),episode=randomUUID(),channelId='677777777777777772',messageId='677777777777777773';
+ await sql`INSERT INTO member_identity_map(organization_id,guild_id,id,lookup_hash,encrypted_id) VALUES(${s.organizationId}::uuid,${s.guildId},${identity}::uuid,'attention-test','cipher')`.execute(db);
+ await sql`INSERT INTO membership_episodes(organization_id,guild_id,id,identity_id,joined_at,context) VALUES(${s.organizationId}::uuid,${s.guildId},${episode}::uuid,${identity}::uuid,now()-interval '2 days','PRODUCTION')`.execute(db);
+ await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',now()-interval '1 hour','PRODUCTION',jsonb_build_object('channelId',${channelId}::text,'messageId',${messageId}::text))`.execute(db);
+ await sql`INSERT INTO telemetry_cursor(organization_id,guild_id,first_seen,last_seen) VALUES(${s.organizationId}::uuid,${s.guildId},now()-interval '3 days',now())`.execute(db);
+ const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32)),settings=new SettingsService(db),discord=new FakeDiscord(),tokens=new Components('test'),onboarding=new OnboardingService(db,settings,vault),userId='677777777777777774';discord.members.set(userId,{roles:[],permissions:'8',joinedAt:'2026-09-01T00:00:00Z',bot:false});
+ const worker=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,async()=>{}),base={applicationId:'677777777777777775',token:'test',userId,channelId,command:''};
+ const issue=async(action:string,extra:Record<string,unknown>={})=>tokens.issue(db,s,{action,channelId,messageId,...extra},null,900);
+ const actor={key:vault.hash(s,userId),permissions:'8',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};await settings.update(s,actor,0,{helperChannelId:channelId,helperEnabled:true});const helpers=new HelperWorker(db,discord,settings);
+ expect((await new CommunityService(db).overview(s)).attention.map(item=>item.messageId)).toContain(messageId);
+ await worker.dispatch(s,{...base,id:'677777777777777776',customId:await issue('controlSnooze',{minutes:30})});
+ expect((await new CommunityService(db).overview(s)).attention).toHaveLength(0);
+ expect(await helpers.tick(s)).toBe(false);
+ await sql`UPDATE attention_items SET snooze_until=now()-interval '1 minute' WHERE guild_id=${s.guildId}`.execute(db);
+ expect((await new CommunityService(db).overview(s)).attention.map(item=>item.messageId)).toContain(messageId);
+ await worker.dispatch(s,{...base,id:'677777777777777777',customId:await issue('controlResolve')});
+ expect((await new CommunityService(db).overview(s)).attention).toHaveLength(0);
+ expect(await helpers.tick(s)).toBe(false);
+ expect((await sql<{status:string}>`SELECT status FROM attention_items WHERE guild_id=${s.guildId}`.execute(db)).rows[0]?.status).toBe('RESOLVED');
 });
 it('serializes settings revisions, authorization and audit atomically',async()=>{
  const s=scopeForGuild('444444444444444444');await ensureGuild(db,s);

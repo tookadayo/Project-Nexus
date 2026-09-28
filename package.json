@@ -1,6 +1,6 @@
 {
   "name": "nexus",
-  "version": "0.5.3",
+  "version": "0.6.0-alpha.1",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.19.0",
@@ -21,6 +21,7 @@
     "dev": "tsx scripts/dev.ts",
     "infra": "tsx scripts/infra.ts",
     "register": "tsx scripts/register.ts",
+    "install-url": "tsx scripts/install-url.ts",
     "web": "tsx scripts/web.ts"
   },
   "dependencies": {

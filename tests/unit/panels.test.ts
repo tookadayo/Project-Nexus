@@ -51,7 +51,7 @@ describe('NEXUS Discord design system',()=>{
  it('navigates all staff pages inside one control panel',async()=>{
   const intents:Record<string,unknown>[]=[];const capture=async(data:Record<string,unknown>)=>{intents.push(data);return `opaque-${intents.length}`;};
   for(const page of controlPages)await controlPanel(capture,page,{},'en');
-  expect(controlPages).toEqual(['overview','newMembers','attention','channels','community','improve','results','settings','diagnostics']);
+  expect(controlPages).toEqual(['overview','newMembers','attention','analysis','results','settings']);
   expect(intents.filter(intent=>intent.action==='controlNavigate')).toHaveLength(controlPages.length);
   expect(intents.some(intent=>intent.action==='settings'||intent.action==='improve')).toBe(false);
  });

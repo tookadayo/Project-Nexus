@@ -71,6 +71,7 @@ export class ActionWorker {
     if(!id){sideEffectStarted=true;id=await this.discord.sendPanel(payload.channelId,payload.body,action.id);}
     await sql`INSERT INTO settings_panels(organization_id,guild_id,channel_id,message_id) VALUES(${s.organizationId}::uuid,${s.guildId},${payload.channelId},${id})
      ON CONFLICT(organization_id,guild_id) DO UPDATE SET channel_id=EXCLUDED.channel_id,message_id=EXCLUDED.message_id`.execute(tx);
+    if(existing&&existing.channel_id!==payload.channelId&&this.discord.deletePanel){try{await this.discord.deletePanel(existing.channel_id,existing.message_id);}catch{/* New panel is active; the old panel cannot change settings after its token check. */}}
    }else if(action.kind==='COMMANDS_REGISTER'){
     sideEffectStarted=true;await this.discord.registerCommands(s.guildId,z.array(z.unknown()).parse(action.payload.commands));
    }else if(action.kind==='TEST_MESSAGE'){

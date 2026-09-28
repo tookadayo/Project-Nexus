@@ -1,6 +1,10 @@
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'runtime-common.ps1')
 Write-Host 'NEXUS Status'
+$release=Get-NexusRelease
+Write-Host "Version       $($release.Version)"
+Write-Host "Build         $($release.Build)"
+Write-Host "Channel       $($release.Channel)"
 $manifest=Read-NexusManifest
 foreach($item in @(@('Database',55432),@('Redis',56379),@('API',3001),@('Web',3100))) {
     $owner=Get-NexusPortOwner ([int]$item[1])

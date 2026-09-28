@@ -29,6 +29,8 @@ import {HelperWorker} from '../apps/worker/src/helpers.js';
 import {scopeSchema,type Scope} from '../packages/shared/src/index.js';
 import {createHash} from 'node:crypto';
 import {buildNexusCommand} from './commands.js';
+import {releaseInfo} from '../packages/shared/src/runtime-info.js';
+import {recordProductEvent} from '../packages/shared/src/product-telemetry.js';
 import {CommandRetry} from './command-retry.js';
 import {scopeForGuild} from '../packages/security/src/index.js';
 try{loadEnvFile();}catch{/* Config validation below reports missing fields. */}
@@ -46,7 +48,7 @@ const helpers=new HelperWorker(db,discord,settings);
 const actions=new ActionWorker(db,vault,discord,onboarding,interactionHealth);const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,(s,user,actor,guild)=>privacy.delete(s,user,actor,guild),()=>({gatewayConnected:gateway.client.isReady(),redisConnected:redis.status==='ready',interaction:interactionHealth.snapshot(),commandHash:hash}));
 const wake=async(s:Scope,id:string)=>{await queue.add('guild',s,{jobId:`interaction-${id}`,removeOnComplete:true,removeOnFail:true,attempts:3,backoff:{type:'exponential',delay:1000}});};
 const http=createInteractionServer({db,vault,publicKey:cfg.DISCORD_PUBLIC_KEY,applicationId:cfg.DISCORD_APPLICATION_ID,components:tokens,discord,health:interactionHealth,wake});
-const gateway=createGateway(redis,vault,()=>process.stderr.write('Gateway operation failed\n'),db,cfg.NEXUS_INTERACTION_TRANSPORT==='gateway'?interaction=>handleGatewayInteraction(interaction,{db,vault,components:tokens,health:interactionHealth,wake}):undefined);const api=createApi(analytics,cfg.API_KEY,db,discord,()=>({discordConnected:gateway.client.isReady(),interaction:interactionHealth.snapshot(),commandHash:hash}),vault);
+const gateway=createGateway(redis,vault,()=>process.stderr.write('Gateway operation failed\n'),db,cfg.NEXUS_INTERACTION_TRANSPORT==='gateway'?interaction=>handleGatewayInteraction(interaction,{db,vault,components:tokens,health:interactionHealth,wake}):undefined);const api=createApi(analytics,cfg.API_KEY,db,discord,()=>({discordConnected:gateway.client.isReady(),redisConnected:redis.status==='ready',interaction:interactionHealth.snapshot(),commandHash:hash}),vault);
 const capabilities=new CapabilityService(db,discord,()=>{const ready=gateway.client.isReady()?true:null;return {members:ready,messages:ready,reactions:ready,voice:ready,scheduledEvents:ready};});
 // Tenant registry discovery is scheduler-only; every domain operation receives the explicit scope.
 async function scopes(){return (await sql<{organization_id:string,guild_id:string}>`SELECT organization_id,guild_id FROM guilds`.execute(db)).rows.map(row=>({organizationId:row.organization_id,guildId:row.guild_id}));}
@@ -65,6 +67,7 @@ const worker=new Worker<Scope>('nexus-work',async job=>{
 },{connection,concurrency:4});worker.on('error',()=>process.stderr.write('Background worker unavailable\n'));
 let stopped=false;let lastMaintenance=0;let lastAggregate=0;let lastCapabilities=0;let lastWeekly=0;
 const commandRetries=new CommandRetry();
+const commandVerifiedAt=new Map<string,number>();
 async function retryCommands(s:Scope){if(!commandRetries.due(s.guildId))return;try{await syncCommands(s);commandRetries.success(s.guildId);}catch{commandRetries.fail(s.guildId);process.stderr.write('Command registration pending\n');}}
 const loop=async()=>{while(!stopped){try{
  await consumer.tick();
@@ -82,10 +85,12 @@ const loop=async()=>{while(!stopped){try{
 await Promise.all([...(cfg.NEXUS_INTERACTION_TRANSPORT==='webhook'?[http.listen({host:'127.0.0.1',port:cfg.INTERACTION_PORT})]:[]),api.listen({host:'127.0.0.1',port:cfg.API_PORT}),gateway.client.login(cfg.DISCORD_TOKEN)]);
 async function syncCommands(s:Scope){
  const old=(await sql<{definition_hash:string}>`SELECT definition_hash FROM guild_command_sync WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId}`.execute(db)).rows[0];
- if(old?.definition_hash!==hash){await discord.registerCommands(s.guildId,[command]);await sql`INSERT INTO guild_command_sync(organization_id,guild_id,definition_hash) VALUES(${s.organizationId}::uuid,${s.guildId},${hash}) ON CONFLICT(organization_id,guild_id) DO UPDATE SET definition_hash=EXCLUDED.definition_hash,registered_at=now()`.execute(db);}
+ if(old?.definition_hash===hash&&(commandVerifiedAt.get(s.guildId)??0)>Date.now()-1800000)return;
+ if(old?.definition_hash!==hash||!await discord.commandsMatch(s.guildId,[command])){await discord.registerCommands(s.guildId,[command]);await sql`INSERT INTO guild_command_sync(organization_id,guild_id,definition_hash) VALUES(${s.organizationId}::uuid,${s.guildId},${hash}) ON CONFLICT(organization_id,guild_id) DO UPDATE SET definition_hash=EXCLUDED.definition_hash,registered_at=now()`.execute(db);}
+ commandVerifiedAt.set(s.guildId,Date.now());
 }
 for(const guild of gateway.client.guilds.cache.values()){const s=scopeForGuild(guild.id);await db.transaction().execute(tx=>ensureGuild(tx,s));await retryCommands(s);}
-gateway.client.on('guildCreate',guild=>{const s=scopeForGuild(guild.id);void db.transaction().execute(tx=>ensureGuild(tx,s)).then(()=>retryCommands(s)).catch(()=>process.stderr.write('Command registration pending\n'));});
-process.stdout.write(`Interaction ${cfg.NEXUS_INTERACTION_TRANSPORT}; API :${cfg.API_PORT}\n`);const running=loop();
+gateway.client.on('guildCreate',guild=>{const s=scopeForGuild(guild.id);void db.transaction().execute(tx=>ensureGuild(tx,s)).then(async()=>{await recordProductEvent(db,s,'guild_installed');await retryCommands(s);}).catch(()=>process.stderr.write('Command registration pending\n'));});
+process.stdout.write(`NEXUS ${releaseInfo().version} build ${releaseInfo().buildSha} (${releaseInfo().releaseChannel}); Interaction ${cfg.NEXUS_INTERACTION_TRANSPORT}; API :${cfg.API_PORT}\n`);const running=loop();
 async function stop(){if(stopped)return;stopped=true;await running;await gateway.stop();await worker.close();await queue.close();if(cfg.NEXUS_INTERACTION_TRANSPORT==='webhook')await http.close();await api.close();await redis.quit();await db.destroy();await sdk?.shutdown();}
 process.on('SIGINT',()=>{void stop();});process.on('SIGTERM',()=>{void stop();});

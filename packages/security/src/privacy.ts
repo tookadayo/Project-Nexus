@@ -4,6 +4,7 @@ import {SettingsService,settingsSchema,audit,type Actor} from '../../settings/sr
 import {canAdmin,canOperatePanel} from './index.js';
 import type {IdentityVault} from '../../identity/src/index.js';
 import {assert,type Scope} from '../../shared/src/index.js';
+import {productGuildHash} from '../../shared/src/product-telemetry.js';
 export class PrivacyService {
  constructor(private readonly db:Database,private readonly vault:IdentityVault,private readonly settings:SettingsService,private readonly scrubQueue:(s:Scope,hash:string|null)=>Promise<void>=async()=>{}){}
  async delete(s:Scope,userId:string,actor:Actor,guild=false){
@@ -14,8 +15,9 @@ export class PrivacyService {
    await this.settings.mutate(s,actor,current.revision,async(_before,tx)=>{
     await sql`SELECT pg_advisory_xact_lock(hashtextextended(${'privacy:'+s.organizationId+':'+s.guildId},0))`.execute(tx);
     // Only an audit tombstone and disabled settings remain. Published flows can be deleted, never mutated.
-    for(const table of ['suggestion_feedback','weekly_summary_deliveries','helper_alerts','retention_tracking','retention_cohorts','gateway_ingest','usage_counters','guild_subscriptions','guild_capabilities','guild_config_heads','guild_config_revisions','data_coverage_snapshots','action_outbox','interaction_jobs','interaction_diagnostics','component_tokens','settings_panels','guild_command_sync','event_inbox','telemetry_health','telemetry_cursor','daily_guild_metrics','member_interaction_pairs','member_identity_map','flow_versions','audit_logs','deletion_requests'])
+    for(const table of ['suggestion_feedback','weekly_summary_deliveries','helper_alerts','attention_items','retention_tracking','retention_cohorts','gateway_ingest','usage_counters','guild_subscriptions','guild_capabilities','guild_config_heads','guild_config_revisions','data_coverage_snapshots','action_outbox','interaction_jobs','interaction_diagnostics','component_tokens','settings_panels','guild_command_sync','event_inbox','telemetry_health','telemetry_cursor','daily_guild_metrics','member_interaction_pairs','member_identity_map','flow_versions','audit_logs','deletion_requests'])
      await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)}`.execute(tx);
+    if(process.env.LOOKUP_KEY)await sql`DELETE FROM product_telemetry WHERE guild_hash=${productGuildHash(s.guildId,process.env.LOOKUP_KEY)}`.execute(tx);
     await sql`INSERT INTO deletion_requests(organization_id,guild_id,id,completed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,now())`.execute(tx);
     await audit(tx,s,{...actor,key:'deleted-admin',encryptedUserId:undefined},'guild.deleted',null,{completed:true});
     return settingsSchema.parse({enabled:false});
@@ -25,6 +27,7 @@ export class PrivacyService {
    await sql`SELECT pg_advisory_xact_lock(hashtextextended(${'privacy:'+s.organizationId+':'+s.guildId},0))`.execute(tx);
    await sql`SELECT pg_advisory_xact_lock(hashtextextended(${s.guildId+hash},0))`.execute(tx);
    const ids=(await sql<{id:string}>`SELECT id FROM member_identity_map WHERE ${tenant(s)} AND lookup_hash=${hash}`.execute(tx)).rows.map(r=>r.id);
+   await sql`DELETE FROM attention_items a USING lifecycle_events f JOIN membership_episodes e ON e.organization_id=f.organization_id AND e.guild_id=f.guild_id AND e.id=f.episode_id WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND a.organization_id=f.organization_id AND a.guild_id=f.guild_id AND a.message_id=f.data->>'messageId' AND e.identity_id=ANY(${ids}::uuid[])`.execute(tx);
    await sql`DELETE FROM helper_alerts a USING lifecycle_events f JOIN membership_episodes e ON e.organization_id=f.organization_id AND e.guild_id=f.guild_id AND e.id=f.episode_id WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND a.organization_id=f.organization_id AND a.guild_id=f.guild_id AND a.message_id=f.data->>'messageId' AND e.identity_id=ANY(${ids}::uuid[])`.execute(tx);
    const sessions=(await sql<{id:string}>`SELECT f.id FROM flow_sessions f JOIN membership_episodes e ON f.organization_id=e.organization_id AND f.guild_id=e.guild_id AND f.episode_id=e.id
     WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND e.identity_id=ANY(${ids}::uuid[])`.execute(tx)).rows.map(r=>r.id);
@@ -48,6 +51,8 @@ export class PrivacyService {
    await sql`DELETE FROM interaction_jobs WHERE ${tenant(s)} AND created_at<now()-interval '15 minutes'`.execute(tx);
    await sql`DELETE FROM interaction_diagnostics WHERE ${tenant(s)} AND received_at<${cutoff}`.execute(tx);
    await sql`DELETE FROM helper_alerts WHERE ${tenant(s)} AND created_at<${cutoff}`.execute(tx);
+   await sql`DELETE FROM attention_items WHERE ${tenant(s)} AND detected_at<${cutoff}`.execute(tx);
+   if(process.env.LOOKUP_KEY)await sql`DELETE FROM product_telemetry WHERE guild_hash=${productGuildHash(s.guildId,process.env.LOOKUP_KEY)} AND occurred_at<now()-interval '90 days'`.execute(tx);
    await sql`DELETE FROM member_interaction_pairs WHERE ${tenant(s)} AND first_at<${cutoff}`.execute(tx);
    await sql`DELETE FROM component_tokens WHERE ${tenant(s)} AND expires_at<now()`.execute(tx);
    await sql`DELETE FROM action_outbox WHERE ${tenant(s)} AND kind='REPLY_EDIT' AND created_at<now()-interval '15 minutes'`.execute(tx);

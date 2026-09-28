@@ -13,3 +13,4 @@
 .channel-table { overflow-x: auto; }
 .channel-table table { width: 100%; border-collapse: collapse; text-align: left; }
 .channel-table th,.channel-table td { padding: .75rem; border-bottom: 1px solid var(--border, #d8dde4); }
+.legal-page{max-width:800px;margin:0 auto;padding:48px 24px;line-height:1.7}.legal-page h1{font-size:2rem}.legal-page h2{margin-top:2rem}.legal-page a,.product-footer a{color:var(--lime)}.legal-page p{color:#cbd6c9}

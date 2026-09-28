@@ -100,7 +100,8 @@ it('runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
   adminMessageId=publicPanelId;
   const pageControl=controls(discord.panels.get(fixed.message_id)).find(item=>item.placeholder==='Choose a page')!;
   expect(pageControl).toBeDefined();
-  await deliver(admin,{custom_id:pageControl.custom_id,values:['channels']},3,fixed.message_id);
+  await deliver(admin,{custom_id:pageControl.custom_id,values:['analysis']},3,fixed.message_id);
+  await deliver(admin,{custom_id:control('Analysis'),values:['channels']});
   expect(JSON.stringify(discord.panels.get(fixed.message_id))).toContain('Channels');
   expect(discord.calls.filter(call=>call==='sendPanel')).toHaveLength(1);
   const settingControl=controls(discord.panels.get(fixed.message_id)).find(item=>item.placeholder==='Choose a page')!;

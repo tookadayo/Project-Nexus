@@ -36,7 +36,7 @@ for(const size of [10000,50000])it(`serves overview, comparison and channels for
  const started=performance.now(),result=await api.inject({method:'GET',url:path,headers:{authorization:`Bearer ${apiToken(key,s)}`}}),duration=performance.now()-started;
  expect(result.statusCode).toBe(200);
  const body=result.json();expect(body.eligibleMembers).toBe(size);expect(body.channels.length).toBeGreaterThanOrEqual(3);expect(body.channels[0].newcomers).toBeGreaterThan(0);expect(body.compare).toBeDefined();
- if(size===10000){tenThousandDuration=duration;expect(duration).toBeLessThan(30000);}else expect(duration).toBeLessThan(Math.max(45000,tenThousandDuration*10));
+ if(size===10000){tenThousandDuration=duration;expect(duration).toBeLessThan(7000);}else expect(duration).toBeLessThan(Math.max(18000,tenThousandDuration*3));
  process.stdout.write(`Community ${size}: ${Math.round(duration)} ms\n`);
  await api.close();
 },120000);

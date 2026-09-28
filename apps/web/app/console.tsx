@@ -2,6 +2,7 @@
 import { useState } from "react";
 import type {CommunityService} from '../../../packages/presentation/src/community';
 import {t} from '../../../packages/discord-panels/src/i18n/index';
+import {VERSION,RELEASE_CHANNEL} from '../../../packages/shared/src/version';
 import {messages,opportunityNames,semantic,replyLabels,metricLabel,learning,evidenceNames,type Copy} from '../../../packages/discord-panels/src/i18n/web';
 import type {
   ActionsPresentation,
@@ -23,7 +24,7 @@ import {
 } from "./charts";
 
 type Locale = "en" | "ja";
-const navPages=[{key:'overview',view:0,icon:'⌂'},{key:'newMembers',view:1,icon:'↗'},{key:'attention',view:8,icon:'!'},{key:'channels',view:7,icon:'#'},{key:'community',view:5,icon:'◉'},{key:'improve',view:2,icon:'◇'},{key:'results',view:3,icon:'◎'},{key:'settings',view:4,icon:'⚙'}] as const;
+const navPages=[{key:'overview',view:0,icon:'🏠'},{key:'newMembers',view:1,icon:'👋'},{key:'attention',view:8,icon:'📥'},{key:'analysis',view:5,icon:'📊'},{key:'results',view:3,icon:'🧪'},{key:'settings',view:4,icon:'⚙️'}] as const;
 const goalChoices=['reply','lfg','voice','event','feedback','bug','playtest'] as const;
 const wholePercent=(n:number|null)=>n===null?'—':`${n}%`;
 type Preview = {
@@ -52,8 +53,9 @@ export type ProductData = {
   audit:{at:string;action:string;source:string;actorId:string|null;changed:string[]}[];
   options: DiscordOptions;
   admin: Admin | null;
-  guilds?:{id:string;name:string}[];
+  guilds?:{id:string;name:string;installed:boolean;installUrl:string|null}[];
   selectedGuildId?:string;
+  runtime?:{version:string;buildSha:string;releaseChannel:string;guildHash:string;gatewayConnected:boolean;commandsRegistered:boolean;interactionTransport:string;lastInteractionResult:string};
 };
 const templateNameKeys:Record<ActionTemplateKey,'testAction.reply_rescue'|'testAction.welcome_helper'|'testAction.inactive_follow_up'|'testAction.channel_recommendation'|'testAction.event_recommendation'>={reply_rescue:'testAction.reply_rescue',welcome_helper:'testAction.welcome_helper',inactive_follow_up:'testAction.inactive_follow_up',channel_recommendation:'testAction.channel_recommendation',event_recommendation:'testAction.event_recommendation'};
 const internalTemplateNames:Record<ActionTemplateKey,string>={reply_rescue:"Reply Rescue",welcome_helper:"Welcome Helper",inactive_follow_up:"Inactive Newcomer Follow-up",channel_recommendation:"Channel Recommendation",event_recommendation:"Event Recommendation"};
@@ -78,6 +80,7 @@ const signed = (n: number | null, rate = true) =>
 export default function Console({ data, initialLocale = "en" }: { data: ProductData; initialLocale?: Locale }) {
   const [locale, setLocale] = useState<Locale>(initialLocale),
     [page, setPage] = useState(0),
+    [analysisTab,setAnalysisTab]=useState<'overall'|'channels'|'behavior'>('overall'),
     [journey, setJourney] = useState(data.journey),
     [range, setRange] = useState<7 | 30 | 90>(data.journey?.range ?? 30),
     [journeyLoading, setJourneyLoading] = useState(false),
@@ -93,7 +96,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
     [weeklyChannelId, setWeeklyChannelId] = useState(String(data.admin?.settings.weeklySummaryChannelId??data.options.channels[0]?.id??"")),
     [weeklyDay,setWeeklyDay]=useState(Number(data.admin?.settings.weeklySummaryDay??1)),
     [weeklyHour,setWeeklyHour]=useState(Number(data.admin?.settings.weeklySummaryHour??9)),
-    [timezone,setTimezone]=useState(String(data.admin?.settings.timezone??'Asia/Tokyo')),
+    [timezone,setTimezone]=useState(String(data.admin?.settings.timezone??'UTC')),
     [helperEnabled,setHelperEnabled]=useState(Boolean(data.admin?.settings.helperEnabled)),
     [helperChannelId,setHelperChannelId]=useState(String(data.admin?.settings.helperChannelId??data.options.channels[0]?.id??"")),
     [helperRoleId,setHelperRoleId]=useState(String(data.admin?.settings.helperRoleId??"")),
@@ -135,6 +138,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
         }),
         result = await response.json();
       if (!response.ok) {
+        if(response.status===401&&result.error==='SESSION_EXPIRED'){window.location.href='/auth/expired';throw new Error(locale==='ja'?'Discordでもう一度ログインしてください':'Sign in with Discord again.');}
         const code = String(result.message ?? result.error ?? "");
         const channel = data.options.channels.find(item => item.id === channelId)?.label ?? (t(locale,"web.the_selected_channel"));
         const explanation = code.includes("CHANNEL_PERMISSION_MISSING") || code.includes("INVALID_START_CHANNEL") || code.includes("Discord HTTP 403") || code.includes("Discord HTTP 404")
@@ -996,7 +1000,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
           <label>{t(locale,"web.destination")}<select value={weeklyChannelId} disabled={busy||!data.options.available} onChange={e=>setWeeklyChannelId(e.target.value)}>{data.options.channels.map(option=><option key={option.id} value={option.id}>{option.label}</option>)}</select></label>
           <label>{t(locale,'control.day')}<select value={weeklyDay} onChange={e=>setWeeklyDay(Number(e.target.value))}>{[0,1,2,3,4,5,6].map(day=><option key={day} value={day}>{t(locale,`control.day${day}` as 'control.day0')}</option>)}</select></label>
           <label>{t(locale,'control.time')}<select value={weeklyHour} onChange={e=>setWeeklyHour(Number(e.target.value))}>{Array.from({length:24},(_,hour)=><option key={hour} value={hour}>{String(hour).padStart(2,'0')}:00</option>)}</select></label>
-          <label>{t(locale,'control.timezone')}<select value={timezone} onChange={e=>setTimezone(e.target.value)}>{['Asia/Tokyo','UTC','America/New_York','Europe/London','Australia/Sydney'].map(zone=><option key={zone} value={zone}>{zone}</option>)}</select></label>
+          <label>{t(locale,'control.timezone')}<select value={timezone} onChange={e=>setTimezone(e.target.value)}>{['UTC','America/Los_Angeles','America/Denver','America/Chicago','America/New_York','Europe/London','Europe/Paris','Europe/Berlin','Asia/Tokyo','Asia/Seoul','Asia/Singapore','Asia/Kolkata','Australia/Sydney'].map(zone=><option key={zone} value={zone}>{zone}</option>)}</select></label>
           <button disabled={busy||!weeklyChannelId} onClick={()=>void saveWeekly(weeklyEnabled)}>{t(locale,"web.save_schedule")}</button>
           <p>{t(locale,"web.a_short_update_with_newcomer_progress")}</p>
           {data.weeklyStatus?.state==='unknown'&&<p role="status">{t(locale,'weekly.deliveryUnknown')}</p>}
@@ -1027,6 +1031,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
           <h2>{t(locale,"web.setting_changes")}</h2>
           {data.audit.length?data.audit.slice(0,10).map((entry,index)=><p key={`${entry.at}-${index}`}>{new Date(entry.at).toLocaleString(t(locale,"web.en_us"))} · {entry.changed.includes('analysisScope')?t(locale,"web.analysis_range_changed"):entry.changed.includes('weeklySummaryEnabled')?t(locale,"web.weekly_summary_changed"):t(locale,"web.settings_changed")} · {entry.actorId?`@${entry.actorId}`:entry.source==='WEB_DASHBOARD'?t(locale,"web.web_admin"):t(locale,"web.administrator")}</p>):<p>{t(locale,"web.no_setting_changes_yet")}</p>}
         </article>
+        <article className="surface"><h2>NEXUS Alpha · {VERSION}</h2><p>{locale==='ja'?'問題や意見をお寄せください。':'Report a problem or send feedback.'}</p><a href="/support">{locale==='ja'?'問題を報告':'Report a problem'}</a> · <a href="/support">{locale==='ja'?'意見を送る':'Send feedback'}</a><p><button onClick={()=>{if(data.runtime)void navigator.clipboard.writeText(JSON.stringify(data.runtime,null,2));}}>{locale==='ja'?'診断情報をコピー':'Copy diagnostics'}</button></p></article>
       </section>
     </>
   );
@@ -1049,7 +1054,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
           N<span>✦</span>XUS
         </a>
         <p>NEXUS</p>
-        {data.guilds&&data.guilds.length>1&&<label>{t(locale,"web.server")}<select value={data.selectedGuildId} onChange={e=>{window.location.href=`/auth/select?guild=${encodeURIComponent(e.target.value)}`;}}>{data.guilds.map(guild=><option key={guild.id} value={guild.id}>{guild.name}</option>)}</select></label>}
+        {data.guilds&&data.guilds.length>1&&<><label>{t(locale,"web.server")}<select value={data.selectedGuildId} onChange={e=>{window.location.href=`/auth/select?guild=${encodeURIComponent(e.target.value)}`;}}>{data.guilds.filter(guild=>guild.installed).map(guild=><option key={guild.id} value={guild.id}>{guild.name}</option>)}</select></label><a href="/servers">{locale==='ja'?'サーバーを管理':'Manage servers'}</a></>}
         <nav>
           {navPages.map(item => (
             <button
@@ -1068,7 +1073,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
           <button onClick={() => { const next=locale === "en" ? "ja" : "en"; setLocale(next); document.cookie=`nexus_locale=${next}; Path=/; Max-Age=31536000; SameSite=Lax`; }}>
             {locale === "en" ? t('ja','settings.japanese') : t('ja','settings.english')}
           </button>
-          <small>v0.5.3 · {t(locale,"web.production")}</small>
+          <small>NEXUS {VERSION} · {data.runtime?.buildSha??'unknown'} · {RELEASE_CHANNEL}</small>
           {data.guilds?.[0]?.name!=="Development guild"&&<a href="/auth/logout">{t(locale,"web.sign_out")}</a>}
         </div>
       </aside>
@@ -1088,12 +1093,12 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
             ))}
           </select>
         </div>
-        {page===8?attentionView:page===5?<>{views[5]}{views[6]}</>:views[page]}
+        {page===8?attentionView:page===5?<><div className="surface" role="tablist" aria-label={t(locale,'control.analysis')}>{(['overall','channels','behavior'] as const).map(tab=><button key={tab} role="tab" aria-selected={analysisTab===tab} onClick={()=>setAnalysisTab(tab)}>{t(locale,`control.${tab}`)}</button>)}</div>{analysisTab==='overall'?<>{views[5]}{views[6]}{opportunityView}</>:analysisTab==='channels'?views[7]:<section className="surface"><h1>{t(locale,'control.behavior')}</h1>{data.community?.compare.available?<><p>{t(locale,'control.replyAlert')}: {wholePercent(data.community.compare.newcomers?.receivedReplyPercent??null)}</p><p>{t(locale,'control.voice')}: {wholePercent(data.community.compare.newcomers?.voicePercent??null)}</p><p>{t(locale,'control.goalEvent')}: {wholePercent(data.community.compare.newcomers?.eventPercent??null)}</p></>:<p>{t(locale,'control.noComparison')}</p>}{data.community?.transitions.length?<><h2>{t(locale,'control.moves')}</h2>{data.community.transitions.slice(0,5).map((move,index)=><p key={index}>{move.from==='voice'?t(locale,'control.voice'):data.options.channels.find(item=>item.id===move.from)?.label??`#${move.from}`} → {move.to==='voice'?t(locale,'control.voice'):data.options.channels.find(item=>item.id===move.to)?.label??`#${move.to}`}</p>)}</>:null}</section>}</>:views[page]}
         <p className="status" role="status">
           {status}
         </p>
         <footer className="product-footer">
-          {t(locale,"web.uses_only_the_activity_data_needed")}
+          {t(locale,"web.uses_only_the_activity_data_needed")} · NEXUS {VERSION} · {data.runtime?.buildSha??'unknown'} · {RELEASE_CHANNEL} · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/support">Support</a>
         </footer>
       </main>
     </div>

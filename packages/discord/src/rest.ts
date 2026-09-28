@@ -16,6 +16,7 @@ export interface DiscordPort {
  options?(guildId:string):Promise<DiscordEntityOptions>;
  memberSnapshot?(guildId:string,userId:string):Promise<Member>;
  registerCommands(guildId:string,commands:unknown[]):Promise<void>;
+ commandsMatch?(guildId:string,commands:unknown[]):Promise<boolean>;
  member(guildId:string,userId:string):Promise<Member>;
  roles(guildId:string):Promise<Role[]>;
  checkChannel(guildId:string,channelId:string):Promise<void>;
@@ -24,14 +25,21 @@ export interface DiscordPort {
  removeRole(guildId:string,userId:string,roleId:string):Promise<void>;
  sendPanel(channelId:string,body:RESTPostAPIChannelMessageJSONBody,nonce:string):Promise<string>;
  editPanel(channelId:string,messageId:string,body:RESTPostAPIChannelMessageJSONBody):Promise<void>;
+ deletePanel?(channelId:string,messageId:string):Promise<void>;
  editReply(applicationId:string,token:string,body:RESTPostAPIChannelMessageJSONBody):Promise<void>;
  followup?(applicationId:string,token:string,body:RESTPostAPIChannelMessageJSONBody):Promise<void>;
  publicChannel?(guildId:string,channelId:string):Promise<boolean>;
+ channelVisibility?(guildId:string,channelId:string):Promise<'everyone_visible'|'restricted'|'unknown'>;
 }
 export class DiscordRest implements DiscordPort {
  private cooldownUntil=0;
  constructor(private readonly token:string,private readonly botId:string){}
  async registerCommands(guildId:string,commands:unknown[]){await this.request(`/applications/${this.botId}/guilds/${guildId}/commands`,'PUT',commands);}
+ async commandsMatch(guildId:string,commands:unknown[]){
+  const actual=await this.request<Record<string,unknown>[]>(`/applications/${this.botId}/guilds/${guildId}/commands?with_localizations=true`);
+  const matches=(found:unknown,expected:unknown):boolean=>{if(Array.isArray(expected))return Array.isArray(found)&&found.length===expected.length&&expected.every((item,index)=>matches(found[index],item));if(expected&&typeof expected==='object'){if(!found||typeof found!=='object')return false;return Object.entries(expected).filter(([key])=>['type','name','name_localizations','description','description_localizations','required','options','choices','min_value','max_value','min_length','max_length'].includes(key)).every(([key,value])=>matches((found as Record<string,unknown>)[key],value));}return found===expected;};
+  return actual.length===commands.length&&commands.every(expected=>{const item=expected as Record<string,unknown>,found=actual.find(row=>row.name===item.name);return found&&matches(found,expected);});
+ }
  private async request<T>(path:string,method='GET',body?:unknown):Promise<T>{
   if(this.cooldownUntil>Date.now())throw new DiscordFailure(429,(this.cooldownUntil-Date.now())/1000);
   const res=await fetch(`https://discord.com/api/v10${path}`,{method,headers:{Authorization:`Bot ${this.token}`,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(8000)});
@@ -78,15 +86,15 @@ export class DiscordRest implements DiscordPort {
    assert((bits&PermissionFlagsBits.ViewChannel)!==0n&&(bits&PermissionFlagsBits.SendMessages)!==0n,'CHANNEL_PERMISSION_MISSING');
   }
  }
- async publicChannel(guildId:string,channelId:string){
+ async channelVisibility(guildId:string,channelId:string):Promise<'everyone_visible'|'restricted'|'unknown'>{
   const [channel,roles]=await Promise.all([this.request<{guild_id:string;permission_overwrites:{id:string;type:number;allow:string;deny:string}[]}>(`/channels/${channelId}`),this.roles(guildId)]);
   assert(channel.guild_id===guildId,'INVALID_START_CHANNEL');
-  const everyone=roles.find(role=>role.id===guildId);if(!everyone)return true;
+  const everyone=roles.find(role=>role.id===guildId);if(!everyone)return 'unknown';
   let bits=BigInt(everyone.permissions);const overwrite=channel.permission_overwrites.find(row=>row.id===guildId);
   if(overwrite)bits=(bits&~BigInt(overwrite.deny))|BigInt(overwrite.allow);
-  if((bits&PermissionFlagsBits.ViewChannel)!==0n)return true;
-  return channel.permission_overwrites.some(row=>row.type===0&&row.id!==guildId&&(BigInt(row.allow)&PermissionFlagsBits.ViewChannel)!==0n);
+  return (bits&PermissionFlagsBits.ViewChannel)!==0n?'everyone_visible':'restricted';
  }
+ async publicChannel(guildId:string,channelId:string){return (await this.channelVisibility(guildId,channelId))!=='restricted';}
  async validateRole(guildId:string,roleId:string){
   const [roles,bot]=await Promise.all([this.roles(guildId),this.member(guildId,this.botId)]);
   const role=roles.find(r=>r.id===roleId);const highest=Math.max(0,...roles.filter(r=>bot.roles.includes(r.id)).map(r=>r.position));
@@ -100,6 +108,7 @@ export class DiscordRest implements DiscordPort {
  async sendPanel(channelId:string,body:RESTPostAPIChannelMessageJSONBody,nonce:string){return (await this.request<{id:string}>(`/channels/${channelId}/messages`,'POST',{...body,nonce:nonce.replaceAll('-','').slice(0,25),enforce_nonce:true})).id;}
  async sendDirectMessage(userId:string,text:string,nonce:string){const dm=await this.request<{id:string}>('/users/@me/channels','POST',{recipient_id:userId});return this.sendPanel(dm.id,{content:text,allowed_mentions:{parse:[]}},nonce);}
  async editPanel(channelId:string,messageId:string,body:RESTPostAPIChannelMessageJSONBody){await this.request(`/channels/${channelId}/messages/${messageId}`,'PATCH',body);}
+ async deletePanel(channelId:string,messageId:string){await this.request(`/channels/${channelId}/messages/${messageId}`,'DELETE');}
  async editReply(applicationId:string,token:string,body:RESTPostAPIChannelMessageJSONBody){await this.request(`/webhooks/${applicationId}/${encodeURIComponent(token)}/messages/@original`,'PATCH',body);}
  async followup(applicationId:string,token:string,body:RESTPostAPIChannelMessageJSONBody){await this.request(`/webhooks/${applicationId}/${encodeURIComponent(token)}`,'POST',{...body,flags:64});}
 }

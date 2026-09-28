@@ -1,44 +1,41 @@
-# NEXUS v0.5.2
+# NEXUS
 
-NEXUS は、Discord に新しく参加した人が最初の活動、交流、別の日の参加、1週間後の活動へ進む様子を集計します。普段から参加している人との違いや、改善テストの結果も確認できます。ゲームコミュニティ向けのツールです。メッセージ本文、添付、DM、プレゼンスは分析用に保存しません。
+NEXUS は、ゲームコミュニティに新しく参加した人が「参加 → 最初の活動 → 交流 → 別の日の活動 → 1週間後の活動」へ進む様子を、Discord で観測できる活動から集計します。管理者は対応が必要な投稿を確認し、改善策をプレビューしてから有効化し、結果を見られます。比較から原因を断定せず、少人数の詳細は表示しません。
 
-## Windows で始める
+現在のリリースは **0.6.0-alpha.1** です。バージョンはルートの `package.json` を唯一のリリース版ソースとし、`MAJOR.MINOR.PATCH-prerelease` の SemVer に従います。例: `0.6.0-alpha.2`、`0.6.0-beta.1`、`0.6.0-rc.1`、`0.6.0`。Build は Git の短縮 SHA です。パッケージ環境では `NEXUS_BUILD_SHA` を指定できます。
 
-1. Node.js 24 をインストールします。Discord Developer Portal で **Server Members Intent** を有効にし、Bot をサーバーへ追加します。Message Content Intent は不要です。
-2. Discord Developer Portal の **Interactions Endpoint URL を空欄**にします。Gateway で Slash Command、ボタン、メニューを受ける設定です。[Discord の説明](https://docs.discord.com/developers/interactions/receiving-and-responding)
-3. `NEXUS SETUP.cmd` をダブルクリックします。Discord Application ID、サーバー ID、Bot Token を入力します。依存関係、専用 Redis、`.env`、ランダムな秘密鍵と Web のビルドを準備し、PostgreSQL と Web を起動します。DB migration と Command 登録は起動時に自動実行します。
-4. 表示されたローカル Web パスワードを保存し、[http://localhost:3100](http://localhost:3100) を開きます。
+## Development self-host
 
-起動後はスタッフ用チャンネルで `/nexus panel` を実行します。NEXUS はサーバーごとに1つの管理パネルを保存し、ページ移動や更新では同じメッセージを編集します。概要、新しいメンバー、コミュニティ、チャンネル、改善、結果、設定、診断をメニューから開けます。設定変更や改善の有効化には管理権限が必要です。
+1. Node.js 24 を用意します。Discord Developer Portal で Bot の **Server Members Intent** を有効にします。Message Content Intent は不要です。
+2. Gateway を使う場合、Developer Portal の **Interactions Endpoint URL を空欄**にします。Webhook を選ぶ場合のみ公開 HTTPS URL と `DISCORD_PUBLIC_KEY` が必要です。
+3. Windows では `NEXUS SETUP.cmd` を実行し、Application ID、開発サーバー ID、Bot Token を設定します。`.env.example` にすべての環境変数があります。`START NEXUS.cmd` で起動します。
+4. スタッフ専用チャンネルで `/nexus panel` を実行します。Web は既定で [http://localhost:3100](http://localhost:3100) です。
 
-| ファイル | 役割 |
-| --- | --- |
-| `START NEXUS.cmd` | PostgreSQL、Redis、Bot/API、Web を起動。起動済みなら状態を確認 |
-| `STOP NEXUS.cmd` | NEXUS と確認できたプロセスを停止 |
-| `RESTART NEXUS.cmd` | 停止してから再起動 |
-| `NEXUS STATUS.cmd` | サービス、Discord 接続、最近のイベントを確認 |
-| `NEXUS DOCTOR.cmd` | 環境・ポート・残留プロセスを診断。`-Repair` で確認済み孤児プロセスを回収 |
+CLI で起動する場合は `corepack pnpm install`、`corepack pnpm migrate`、`corepack pnpm dev` を使います。PostgreSQL と Redis が必要です。`NEXUS STATUS.cmd` はサービスと Interaction の状態、`NEXUS DOCTOR.cmd` は環境と残留プロセスを診断します。両方で Version / Build / Channel を表示します。Windows の停止処理は NEXUS が所有すると確認できたプロセスのみを対象にします。
 
-PowerShell の Execution Policy を恒久的に変更する必要はありません。内部の pnpm 実行には `corepack pnpm` を使い、`corepack enable` は不要です。起動失敗時は画面にエラーを残し、`.local/runtime/*.err.log` を参照できます。ポート 55432、56379、3001、3100 を使用します。Webhook を明示した場合のみ 3002 も使用します。起動・停止はリポジトリ由来と確認できたプロセスだけを操作し、判定できないポート所有者は停止しません。
+## Discord Control Panel
 
-## 見る順序
+上位ページは **🏠 ホーム、👋 新しいメンバー、📥 対応、📊 分析、🧪 結果、⚙️ 設定** の6つです。分析では「全体・チャンネル・行動」を切り替えます。設定は「基本、運営、通知、新しいメンバーの目標、週次まとめ、プライバシー、パネル、診断、詳細設定」の順です。改善策はホームや分析で見つかった問題から開き、プレビュー後に確認して有効化します。
 
-1. **ホーム**で、十分な観測期間がある新規メンバーの参加段階と、次へ進んでいない人が多い場所を確認します。
-2. **新しいメンバー**で、最初の目標と参加後の流れを確認します。目標は既存のルール定義を使用します。
-3. **コミュニティ／比較**で、普段参加している人との最初の3日間相当の活動を比較します。継続して参加している人、最近活動が確認できない人、スタッフを分けます。
-4. **チャンネル**で、新しい人が返信を受けた割合や他の場所で活動した割合を見ます。3人未満のチャンネル詳細は隠します。
-5. **改善／結果**で、観測された傾向に基づく改善策を確認し、改善テストとその結果を見ます。比較から原因を断定しません。
-6. **設定**で「分析する範囲」をサーバー全体、指定チャンネルのみ、指定チャンネルを除外から選びます。スタッフのロールも設定できます。初期値はサーバー全体です。
+初回設定では分析範囲、運営、通知、目標の各項目を選択します。追加管理ロール、通知、目標を設定しない選択でも完了できます。旧 Guild には一度だけ設定確認が表示され、現在の設定を使うこともできます。管理ロール変更は確認画面を経て反映されます。管理・補助ロールはすべて解除できます。
 
-管理パネルの「新しいメンバー」は返信待ちの投稿を本文なしで示し、投稿へのリンクを表示します。任意で Helper 通知先を設定できます。同じ投稿への再通知を避け、通知間隔と1日6件の上限を守ります。Web の設定では LFG、意見、不具合報告、試遊などの重要な場所を指定できます。時間帯別の返信時間は個人別のランキングを作らずに表示します。
+対応ページでは返信が確認できない投稿を開き、確認中、30分・1時間・今日中の再確認、対応済みにできます。保存するのは Guild、Channel ID、Message ID、検出時刻、状態と再確認・解決時刻のみです。本文は保存しません。対応済みや再確認待ちの投稿は通知しません。
 
-Discord では閲覧だけの行動を観測できません。「1週間後も活動が確認できた」は参加7〜14日後の観測可能な活動を意味します。結果が確定していない人と計測不足の人は、活動しなかった人として数えません。比較・改善提案には少なくとも5人の対象が必要です。分析用の日数閾値は設定スキーマで変更できる構造です。
+`/nexus panel` を別チャンネルで実行すると移動確認が表示されます。新しいチャンネルと Bot 権限を確認してから新パネルを作り、設定を更新します。以前のパネルは削除を試みます。管理パネルの設置先はスタッフ専用チャンネルを推奨します。`@everyone` が見られないチャンネルは、スタッフロールに閲覧許可があっても公開扱いにしません。
 
-## 詳細設定
+## Hosted Beta とインストール
 
-`.env.example` を参照してください。標準は `NEXUS_INTERACTION_TRANSPORT=gateway` です。Webhook が必要な場合だけ `webhook` に変更し、`DISCORD_PUBLIC_KEY` と外部公開 URL を用意します。ngrok は標準起動に含まれません。
+Hosted Beta は準備中です。外部テスターには Bot Token やローカル起動を求めず、運営側がホストする Bot を通常の Discord OAuth Install で追加するモデルです。管理可能なサーバーは Web の `/servers` で「NEXUSを使用中」と「未導入」に分かれ、未導入サーバーには追加リンクが表示されます。
 
-`NEXUS_DEV_PLAN=GROWTH` は `NODE_ENV=development` の場合だけ使用できます。本番では実際の契約情報を読みます。ローカルセットアップは Web の開発用パスワード方式を選びます。本番では `NODE_ENV=production`、`NEXUS_WEB_AUTH_MODE=oauth`、`DISCORD_CLIENT_SECRET`、HTTPS の `NEXUS_WEB_URL` を設定し、`${NEXUS_WEB_URL}/auth/callback` を Discord OAuth redirect URI に登録します。
+`DISCORD_APPLICATION_ID` を設定して `corepack pnpm install-url` を実行すると Install URL を生成できます。特定サーバー向けは `corepack pnpm install-url <guild-id>` です。基本スコープは `bot applications.commands`、権限は View Channel、Send Messages、Embed Links、Read Message History です。Administrator は要求しません。Role mapping など追加権限が必要な機能は利用時に案内します。Alpha のコマンド登録は Guild 単位です。`NEXUS_COMMAND_SCOPE=guild|global` は将来の切替用で、Alpha では `global` を指定しても Guild 登録を続けます。起動時と定期確認時に Discord 側のコマンド定義を確認し、不一致なら既存の指数 Backoff で再登録します。
+
+Hosted Web は `NODE_ENV=production`、`NEXUS_WEB_AUTH_MODE=oauth`、`DISCORD_CLIENT_SECRET`、HTTPS の `NEXUS_WEB_URL` を設定し、`${NEXUS_WEB_URL}/auth/callback` を Discord OAuth redirect URI に登録します。OAuth セッション期限切れは再ログイン画面へ進み、可能な場合は以前の Guild に戻ります。
+
+## Privacy とサポート
+
+Web の `/privacy`、`/terms`、`/support` に Alpha 向けの方針を掲載しています。詳細データは設定に応じて 7・14・30 日、集計は 3・12・24 か月保持します。削除依頼は `/nexus privacy` から行えます。メッセージ本文、添付、DM 本文、プレゼンスは保存しません。Discord で観測できない閲覧だけの参加は測れません。
+
+製品利用状況の記録はコミュニティ分析と別に保存し、固定したイベント名、ハッシュ化した Guild 識別子、必要な場合の処理時間のみを記録します。Raw user ID、ユーザー名、トークン、本文を含めません。設定画面ではサポート用の診断情報をコピーできます。公開 Beta 前には方針文書の法的レビューを推奨します。フィードバック窓口は `NEXUS_FEEDBACK_URL` で指定します。
 
 ## 検証
 
@@ -53,6 +50,4 @@ corepack pnpm test:runtime
 corepack pnpm test:performance
 ```
 
-統合テストはローカルの埋め込み PostgreSQL と専用 Redis を利用します。Docker を使う場合は `NEXUS_TEST_INFRA=docker` を設定します。Windows の起動停止テストは偽サービスを隔離した一時ディレクトリで実行し、他アプリのポート利用者が停止されないことを確認します。
-
-DB 変更は追加 migration のみで、既存データを削除しません。旧設定には安全なデフォルトを補います。削除依頼とデータ保持の境界は従来どおりです。
+性能の目標は実環境で p50 < 1秒、p95 < 3秒です。これは目標値であり、Hosted Beta の実測達成を意味しません。10k・50k realistic fixture は継続して CI で測定します。既存データを削除する migration は追加していません。

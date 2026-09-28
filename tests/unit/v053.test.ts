@@ -22,9 +22,9 @@ it('warns when regular members can view the panel channel',async()=>{
  visible=false;expect(await discord.publicChannel(guild,channel)).toBe(false);
 });
 
-it('reads v0.5.2 settings with safe v0.5.3 defaults',()=>{
+it('uses UTC for new guilds and accepts optional setup choices',()=>{
  const cfg=settingsSchema.parse({analysisScope:{mode:'all',channelIds:[]}});
- expect(cfg.managerRoleIds).toEqual([]);expect(cfg.helperRoleIds).toEqual([]);expect(cfg.timezone).toBe('Asia/Tokyo');expect(cfg.firstResponseMinutes).toBe(20);
+ expect(cfg.managerRoleIds).toEqual([]);expect(cfg.helperRoleIds).toEqual([]);expect(cfg.timezone).toBe('UTC');expect(cfg.firstResponseMinutes).toBe(20);expect(cfg.setupVersion).toBe(2);
  expect(cfg.setupSteps).toEqual({scope:false,team:false,notifications:false,goals:false});
  expect(()=>settingsSchema.parse({timezone:'Invalid/Zone'})).toThrow();
 });

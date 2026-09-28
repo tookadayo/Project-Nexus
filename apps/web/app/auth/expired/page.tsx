@@ -1,0 +1,1 @@
+export default function Expired(){return <main className="legal-page"><h1>ログインの有効期限が切れました / Session expired</h1><p>Discordでもう一度ログインしてください。ログイン後、前のサーバーへ戻ります。 / Sign in with Discord again. We will return to your previous server when possible.</p><a href="/auth/login">Discordでログイン / Sign in with Discord</a></main>;}

@@ -6,7 +6,7 @@ export type Panel=RESTPostAPIChannelMessageJSONBody;
 export type PanelChild=APIComponentInContainer;
 export type ActionRow=APIActionRowComponent<APIComponentInMessageActionRow>;
 export type InteractiveButtonStyle=ButtonStyle.Primary|ButtonStyle.Secondary|ButtonStyle.Success|ButtonStyle.Danger;
-export type ButtonSpec={label:string;action:string;style?:InteractiveButtonStyle;data?:Record<string,unknown>;publicEntry?:boolean;disabled?:boolean};
+export type ButtonSpec={label:string;action:string;emoji?:string;style?:InteractiveButtonStyle;data?:Record<string,unknown>;publicEntry?:boolean;disabled?:boolean};
 
 export const text=(content:string):PanelChild=>({type:ComponentType.TextDisplay,content});
 export const divider=(large=false):PanelChild=>({type:ComponentType.Separator,divider:true,spacing:large?SeparatorSpacingSize.Large:SeparatorSpacingSize.Small});
@@ -21,7 +21,7 @@ export const statusBanner=(label:string,detail:string):PanelChild=>text(`### ${l
 export const recommendedAction=(title:string,detail:string,heading='Recommended next action'):PanelChild=>text(`### ${heading}\n**${title}**\n${detail}`);
 
 export async function actionRow(issue:Issue,specs:ButtonSpec[]):Promise<ActionRow>{
- const buttons=await Promise.all(specs.slice(0,5).map(async spec=>({type:ComponentType.Button,style:spec.style??ButtonStyle.Secondary,label:spec.label,custom_id:await issue({action:spec.action,...spec.data},spec.publicEntry),disabled:spec.disabled} satisfies APIButtonComponent)));
+ const buttons=await Promise.all(specs.slice(0,5).map(async spec=>({type:ComponentType.Button,style:spec.style??ButtonStyle.Secondary,label:spec.label,emoji:spec.emoji?{name:spec.emoji}:undefined,custom_id:await issue({action:spec.action,...spec.data},spec.publicEntry),disabled:spec.disabled} satisfies APIButtonComponent)));
  return {type:ComponentType.ActionRow,components:buttons};
 }
 

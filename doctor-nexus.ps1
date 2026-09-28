@@ -2,6 +2,10 @@ param([switch]$Repair)
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'runtime-common.ps1')
 Write-Host 'NEXUS Doctor'
+$release=Get-NexusRelease
+Write-Host "Version       $($release.Version)"
+Write-Host "Build         $($release.Build)"
+Write-Host "Channel       $($release.Channel)"
 foreach($tool in @('node','corepack')) { Write-Host ('{0,-14}{1}' -f $tool, $(if(Get-Command $tool -ErrorAction SilentlyContinue){'Available'}else{'Missing'})) }
 if(Get-Command node -ErrorAction SilentlyContinue) { $version=(& node --version).Trim();Write-Host "Node version  $version";if($version -notmatch '^v24\.') { Write-Warning 'Node.js 24 is required.' } }
 $envPath=Join-Path $script:NexusRoot '.env';if(-not (Test-Path -LiteralPath $envPath)) { Write-Warning '.env is missing. Run NEXUS SETUP.cmd.' } else {

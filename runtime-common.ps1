@@ -3,6 +3,16 @@ $script:NexusRoot = [System.IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
 $script:RuntimeDirectory = Join-Path $script:NexusRoot '.local\runtime'
 $script:RuntimeManifest = Join-Path $script:RuntimeDirectory 'runtime.json'
 
+function Get-NexusRelease {
+    $version = [string]((Get-Content -Raw -LiteralPath (Join-Path $script:NexusRoot 'package.json') | ConvertFrom-Json).version)
+    $sha = 'unknown'
+    if (Get-Command git -ErrorAction SilentlyContinue) {
+        try { $value = (& git -C $script:NexusRoot rev-parse --short=7 HEAD 2>$null).Trim(); if ($value -match '^[0-9a-f]{7,40}$') { $sha = $value.Substring(0,7) } } catch {}
+    }
+    $channel = if ($version -match '-alpha\.') { 'Alpha' } elseif ($version -match '-beta\.') { 'Beta' } elseif ($version -match '-rc\.') { 'Release candidate' } else { 'Stable' }
+    return [pscustomobject]@{ Version=$version; Build=$sha; Channel=$channel }
+}
+
 function Get-NexusProcess([int]$ProcessId) {
     if ($ProcessId -le 0) { return $null }
     return Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
