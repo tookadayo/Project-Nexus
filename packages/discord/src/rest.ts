@@ -1,4 +1,5 @@
 import {PermissionFlagsBits,type RESTPostAPIChannelMessageJSONBody} from 'discord-api-types/v10';
+import {createHash} from 'node:crypto';
 import {assert} from '../../shared/src/index.js';
 import {z} from 'zod';
 export type Member={roles:string[],permissions:string,joinedAt:string,bot:boolean,flags?:string,pending?:boolean|null};
@@ -8,7 +9,12 @@ export type GuildNativeState={features:string[],onboarding:NativeOnboarding|null
 export type Role={id:string,position:number,managed:boolean,permissions:string,name?:string};
 export type DiscordEntityOptions={channels:{id:string;label:string}[];roles:{id:string;label:string}[];events:{id:string;label:string}[]};
 export class DiscordFailure extends Error {
- constructor(public readonly status:number,public readonly retryAfter=1){super(`Discord HTTP ${status}`);}
+ constructor(public readonly status:number,public readonly retryAfter=0,public readonly details:{kind?:'http'|'timeout'|'network';rateLimitScope?:string|null;bucket?:string|null;routeCategory?:string;isGlobal?:boolean}={}){super(details.kind==='timeout'?'Discord REST timeout':details.kind==='network'?'Discord REST network failure':`Discord HTTP ${status}`);this.name='DiscordFailure';}
+ get kind(){return this.details.kind??'http';}
+ get rateLimitScope(){return this.details.rateLimitScope??null;}
+ get bucket(){return this.details.bucket??null;}
+ get routeCategory(){return this.details.routeCategory??'unknown';}
+ get isGlobal(){return this.details.isGlobal??false;}
 }
 export interface DiscordPort {
  sendDirectMessage?(userId:string,text:string,nonce:string):Promise<string>;
@@ -32,7 +38,10 @@ export interface DiscordPort {
  channelVisibility?(guildId:string,channelId:string):Promise<'everyone_visible'|'restricted'|'unknown'>;
 }
 export class DiscordRest implements DiscordPort {
- private cooldownUntil=0;
+ private globalUntil=0;
+ private readonly routeBuckets=new Map<string,string>();
+ private readonly bucketUntil=new Map<string,number>();
+ private readonly locks=new Map<string,Promise<void>>();
  constructor(private readonly token:string,private readonly botId:string){}
  async registerCommands(guildId:string,commands:unknown[]){await this.request(`/applications/${this.botId}/guilds/${guildId}/commands`,'PUT',commands);}
  async commandsMatch(guildId:string,commands:unknown[]){
@@ -41,13 +50,63 @@ export class DiscordRest implements DiscordPort {
   return actual.length===commands.length&&commands.every(expected=>{const item=expected as Record<string,unknown>,found=actual.find(row=>row.name===item.name);return found&&matches(found,expected);});
  }
  private async request<T>(path:string,method='GET',body?:unknown):Promise<T>{
-  if(this.cooldownUntil>Date.now())throw new DiscordFailure(429,(this.cooldownUntil-Date.now())/1000);
-  const res=await fetch(`https://discord.com/api/v10${path}`,{method,headers:{Authorization:`Bot ${this.token}`,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(8000)});
-  const reset=Number(res.headers.get('x-ratelimit-reset-after')??0);
-  if(res.headers.get('x-ratelimit-remaining')==='0'&&Number.isFinite(reset))this.cooldownUntil=Math.max(this.cooldownUntil,Date.now()+reset*1000);
-  if(!res.ok){let retry=Number(res.headers.get('retry-after')??1);try{const data=await res.json() as {retry_after?:number};retry=data.retry_after??retry;}catch{/* no response details are logged */}if(res.status===429)this.cooldownUntil=Math.max(this.cooldownUntil,Date.now()+retry*1000);throw new DiscordFailure(res.status,retry);}
-  return (res.status===204?undefined:await res.json()) as T;
+  const route=this.route(path,method),signal=AbortSignal.timeout(8000);
+  // Serialize each route, including the discovery request before Discord sends a bucket.
+  // Known routes sharing a bucket also serialize against one another.
+  const routeLock=this.acquire(route.key);let bucketLock:ReturnType<DiscordRest['acquire']>|undefined;
+  try{
+   await this.waitFor(routeLock.previous,signal);
+   const observed=this.routeBuckets.get(route.key);
+   if(observed&&observed!==route.key){bucketLock=this.acquire(observed);await this.waitFor(bucketLock.previous,signal);}
+   for(let attempt=0;attempt<3;attempt++){
+    const bucket=this.routeBuckets.get(route.key)??route.key;
+    await this.waitForCooldown(Math.max(this.globalUntil,this.bucketUntil.get(bucket)??0),signal);
+    let res:Response;
+    try{res=await fetch(`https://discord.com/api/v10${path}`,{method,headers:{Authorization:`Bot ${this.token}`,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal});}
+    catch(error){if(signal.aborted||error instanceof Error&&/abort|timeout/i.test(error.name))throw new DiscordFailure(0,0,{kind:'timeout',routeCategory:route.category});throw new DiscordFailure(0,0,{kind:'network',routeCategory:route.category});}
+    const bucketId=res.headers.get('x-ratelimit-bucket'),scope=res.headers.get('x-ratelimit-scope');
+    const bucketKey=bucketId?`${bucketId}:${route.major}`:bucket;
+    if(bucketId)this.routeBuckets.set(route.key,bucketKey);
+    const resetAfterHeader=res.headers.get('x-ratelimit-reset-after'),absoluteResetHeader=res.headers.get('x-ratelimit-reset');
+    const resetAfter=resetAfterHeader===null?NaN:Number(resetAfterHeader),absoluteReset=absoluteResetHeader===null?NaN:Number(absoluteResetHeader);
+    const resetMs=Number.isFinite(resetAfter)&&resetAfter>=0?resetAfter*1000:Number.isFinite(absoluteReset)?Math.max(0,absoluteReset*1000-Date.now()):0;
+    if(res.headers.get('x-ratelimit-remaining')==='0'&&resetMs>0)this.bucketUntil.set(bucketKey,Math.max(this.bucketUntil.get(bucketKey)??0,Date.now()+resetMs));
+    if(res.ok){if(res.status===204)return undefined as T;try{return await res.json() as T;}catch{throw new DiscordFailure(res.status,0,{routeCategory:route.category});}}
+    const retryHeader=res.headers.get('retry-after');let retryAfter=retryHeader===null?NaN:Number(retryHeader);let bodyRetry:number|undefined;let bodyGlobal=false;
+    if(res.status===429)try{const data=await res.json() as {retry_after?:number;global?:boolean};bodyRetry=data.retry_after;bodyGlobal=data.global===true;}catch{/* Response body is never logged. */}
+    if(!Number.isFinite(retryAfter)||retryAfter<0)retryAfter=bodyRetry!==undefined&&Number.isFinite(bodyRetry)&&bodyRetry>=0?bodyRetry:1;
+    const isGlobal=res.status===429&&(bodyGlobal||scope==='global');
+    const failure=new DiscordFailure(res.status,res.status===429?retryAfter:0,{rateLimitScope:scope,bucket:bucketId,routeCategory:route.category,isGlobal});
+    if(res.status===429){const until=Date.now()+Math.max(0,retryAfter*1000);if(isGlobal)this.globalUntil=Math.max(this.globalUntil,until);else this.bucketUntil.set(bucketKey,Math.max(this.bucketUntil.get(bucketKey)??0,until));}
+    if((res.status===429||res.status>=500)&&attempt<2){
+     const delay=res.status===429?retryAfter*1000:Math.min(1000,250*2**attempt);
+     if(delay>=8000||signal.aborted)throw failure;
+     await this.waitForCooldown(Date.now()+delay,signal);
+     continue;
+    }
+    throw failure;
+   }
+   throw new DiscordFailure(429,0,{routeCategory:route.category});
+  }finally{bucketLock?.release();routeLock.release();}
  }
+ private acquire(key:string){
+  const previous=this.locks.get(key)??Promise.resolve();let done!:()=>void;
+  const current=new Promise<void>(resolve=>{done=resolve;});const tail=previous.then(()=>current);
+  this.locks.set(key,tail);
+  return {previous,release:()=>{done();if(this.locks.get(key)===tail)this.locks.delete(key);}};
+ }
+ private route(path:string,method:string){
+  const parts=path.split('?')[0]!.split('/').filter(Boolean),category=parts[0]==='webhooks'?'webhook':parts[0]==='applications'?'commands':parts[0]==='guilds'?parts[2]??'guild':parts[0]==='channels'?parts[2]??'channel':parts[0]??'unknown';
+  const major=parts[0]==='guilds'||parts[0]==='channels'?parts[1]??'':parts[0]==='webhooks'?`${parts[1]??''}:${createHash('sha256').update(parts[2]??'').digest('hex').slice(0,12)}`:'';
+  const normalized=parts.map((part,index)=>index===1&&major?part:/^\d{17,20}$/.test(part)?':id':parts[0]==='webhooks'&&index===2?':token':part).join('/');
+  return {key:`${method}:${normalized}:${major}`,major,category};
+ }
+ private async waitFor(promise:Promise<void>,signal:AbortSignal){
+  if(signal.aborted)throw new DiscordFailure(0,0,{kind:'timeout'});
+  let abort!:()=>void;const cancelled=new Promise<never>((_,reject)=>{abort=()=>reject(new DiscordFailure(0,0,{kind:'timeout'}));signal.addEventListener('abort',abort,{once:true});});
+  try{await Promise.race([promise,cancelled]);}finally{signal.removeEventListener('abort',abort);}
+ }
+ private async waitForCooldown(until:number,signal:AbortSignal){const ms=until-Date.now();if(ms<=0)return;await this.waitFor(new Promise(resolve=>setTimeout(resolve,ms)),signal);}
  async roles(guildId:string){return this.request<Role[]>(`/guilds/${guildId}/roles`);}
  async options(guildId:string):Promise<DiscordEntityOptions>{
   const [channels,roles,events]=await Promise.all([this.request<{id:string;name:string;type:number}[]>(`/guilds/${guildId}/channels`),this.roles(guildId),this.request<{id:string;name:string;status:number}[]>(`/guilds/${guildId}/scheduled-events`)]);

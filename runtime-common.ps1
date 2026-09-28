@@ -67,6 +67,39 @@ function Get-NexusPortOwner([int]$Port) {
     if ($null -eq $connection) { return 0 }
     return [int]$connection.OwningProcess
 }
+function Get-NexusPortDiagnostic([int]$Port, $Manifest) {
+    $owner = Get-NexusPortOwner $Port
+    if ($owner -eq 0) { return [pscustomobject]@{Port=$Port;Pid=0;State='Free';Name='';Path='';CreatedAt='';Ownership='None'} }
+    $process = Get-NexusProcess $owner
+    if ($null -eq $process) { return [pscustomobject]@{Port=$Port;Pid=$owner;State='Ghost listener';Name='Unavailable';Path='Unavailable';CreatedAt='Unavailable';Ownership='Unverified'} }
+    $verified = $false
+    foreach ($role in @('infra','nexus','web')) {
+        $entry = Get-NexusRoleEntry $Manifest $role
+        if (Test-NexusOwner $entry $role) {
+            $childOwned=@(Get-NexusDescendants ([int]$entry.pid)) -contains $owner -and ([string]$process.Name -match '^(node|node.exe|postgres.exe|redis-server.exe|powershell.exe|cmd.exe)$') -and (Test-NexusRootText ([string]$process.CommandLine))
+            if ([int]$entry.pid -eq $owner -or $childOwned) { $verified = $true; break }
+        }
+    }
+    if (-not $verified) { $verified = @((Get-NexusOrphanProcesses) | Where-Object { $_.ProcessId -eq $owner }).Count -gt 0 }
+    return [pscustomobject]@{Port=$Port;Pid=$owner;State='Listening';Name=[string]$process.Name;Path=[string]$process.ExecutablePath;CreatedAt=[string]$process.CreationDate;Ownership=$(if($verified){'Verified NEXUS'}else{'External or ambiguous'})}
+}
+function Wait-NexusPortsReleased([int[]]$Ports, [int]$Seconds=5) {
+    $deadline=(Get-Date).AddSeconds($Seconds)
+    do {
+        $occupied=@($Ports | Where-Object { (Get-NexusPortOwner $_) -ne 0 })
+        if($occupied.Count -eq 0) { return $true }
+        Start-Sleep -Milliseconds 250
+    } while((Get-Date) -lt $deadline)
+    return $false
+}
+function Get-NexusWebReachability {
+    try { $null=Invoke-WebRequest 'http://127.0.0.1:3100' -UseBasicParsing -TimeoutSec 3; return 'Reachable' }
+    catch {
+        $response=$_.Exception.Response
+        if($response -and [int]$response.StatusCode -in @(401,403)){return 'Authentication required'}
+        return 'Unavailable'
+    }
+}
 function Test-NexusRootText([string]$Value) {
     if ([string]::IsNullOrEmpty($Value)) { return $false }
     $normalized=$Value.Replace('/','\')
@@ -122,6 +155,17 @@ function Get-NexusOrphanProcesses {
     }
     return @($ownedProcesses.ToArray())
 }
+function Get-NexusUnmanagedOrphans($Manifest) {
+    $managed=New-Object System.Collections.Generic.HashSet[int]
+    foreach($role in @('infra','nexus','web','ngrok')) {
+        $entry=Get-NexusRoleEntry $Manifest $role
+        if(Test-NexusOwner $entry $role){
+            $null=$managed.Add([int]$entry.pid)
+            foreach($child in @(Get-NexusDescendants ([int]$entry.pid))){$null=$managed.Add([int]$child)}
+        }
+    }
+    return @(Get-NexusOrphanProcesses|Where-Object {-not $managed.Contains([int]$_.ProcessId)})
+}
 function Stop-NexusOrphans {
     $owned = @(Get-NexusOrphanProcesses)
     # Stop children first. Every candidate has independent project evidence; PID alone is never sufficient.
@@ -135,13 +179,19 @@ function Stop-NexusOrphans {
 function Stop-NexusManaged($Manifest) {
     if ($null -eq $Manifest) { return }
     if ([string]$Manifest.projectRoot -ne $script:NexusRoot) { throw 'Runtime manifest belongs to a different project root.' }
+    $ownedIds=New-Object System.Collections.Generic.HashSet[int]
+    foreach($process in @(Get-NexusOrphanProcesses)){$null=$ownedIds.Add([int]$process.ProcessId)}
     foreach ($role in @('ngrok','web','nexus','infra')) {
         $entry = Get-NexusRoleEntry $Manifest $role
         if (-not (Test-NexusOwner $entry $role)) { continue }
         $rootPid = [int]$entry.pid
         $descendants = @(Get-NexusDescendants $rootPid)
         [array]::Reverse($descendants)
-        foreach ($childPid in $descendants) { Stop-Process -Id $childPid -Force -ErrorAction SilentlyContinue }
+        foreach ($childPid in $descendants) {
+            $child=Get-NexusProcess ([int]$childPid)
+            $lineageOwned=$child -and ([string]$child.Name -match '^(node|node.exe|postgres.exe|redis-server.exe|powershell.exe|cmd.exe)$') -and (Test-NexusRootText ([string]$child.CommandLine))
+            if($ownedIds.Contains([int]$childPid) -or $lineageOwned){Stop-Process -Id $childPid -Force -ErrorAction SilentlyContinue}
+        }
         Stop-Process -Id $rootPid -Force -ErrorAction SilentlyContinue
     }
 }

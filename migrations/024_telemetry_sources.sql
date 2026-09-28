@@ -1,0 +1,2 @@
+ALTER TABLE product_telemetry DROP CONSTRAINT product_telemetry_event_check;
+ALTER TABLE product_telemetry ADD CONSTRAINT product_telemetry_event_check CHECK (event IN ('guild_installed','setup_started','setup_scope_completed','setup_team_completed','setup_notification_completed','setup_goal_completed','setup_completed','panel_opened','discord_panel_opened','web_dashboard_opened','attention_opened','analysis_opened','settings_opened','setting_saved','test_notification_sent','interaction_failed','interaction_latency','page_render_latency'));

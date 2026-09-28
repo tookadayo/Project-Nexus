@@ -23,7 +23,7 @@ export default async function Page(){
  const diagnosticKey=process.env.LOOKUP_KEY??process.env.NEXUS_SESSION_SECRET;
  data.runtime={...releaseInfo(),guildHash:diagnosticKey?createHmac('sha256',diagnosticKey).update(context.guildId).digest('hex').slice(0,12):'unknown',gatewayConnected:health?.discordConnected??false,commandsRegistered:health?.commands?.registered??false,interactionTransport:health?.interaction?.transport??'unknown',lastInteractionResult:health?.interaction?.lastResult??'unknown'};
  const eventUrl=`${context.base}/v3/organizations/${context.organizationId}/guilds/${context.guildId}/product-event`,eventHeaders={Authorization:`Bearer ${context.token}`,'Content-Type':'application/json'};
- await Promise.allSettled(['panel_opened','page_render_latency'].map(event=>fetch(eventUrl,{method:'POST',headers:eventHeaders,body:JSON.stringify({event,...(event==='page_render_latency'?{durationMs:Date.now()-started}:{})}),cache:'no-store',signal:AbortSignal.timeout(3000)})));
+ await Promise.allSettled(['web_dashboard_opened','page_render_latency'].map(event=>fetch(eventUrl,{method:'POST',headers:eventHeaders,body:JSON.stringify({event,...(event==='page_render_latency'?{durationMs:Date.now()-started}:{})}),cache:'no-store',signal:AbortSignal.timeout(3000)})));
  const saved=cookieStore.get('nexus_locale')?.value,preferred=String(data.admin?.settings.uiLanguage??''),accept=(await headers()).get('accept-language')??'';
  const initialLocale=saved==='ja'||saved==='en'?saved:preferred==='ja'||preferred==='en'?preferred:accept.toLowerCase().startsWith('ja')?'ja':'en';
  return <Console data={data} initialLocale={initialLocale}/>;

@@ -364,6 +364,35 @@ it('shows a newcomer reply queue and sends one capped helper alert without messa
  expect((await sql`SELECT 1 FROM helper_alerts WHERE ${tenant(ctx.s)}`.execute(db)).rows).toHaveLength(0);
  expect((await sql`SELECT 1 FROM membership_episodes WHERE ${tenant(ctx.s)} AND id=${episode}::uuid`.execute(db)).rows).toHaveLength(0);
 });
+it('suppresses acknowledged, snoozed and resolved attention alerts',async()=>{
+ const ctx=await setup(),now=new Date(),joined=new Date(now.getTime()-2*3600000),messageId='988000000000000102';await join(ctx,joined);
+ const cfg=await ctx.settings.get(ctx.s);await ctx.settings.update(ctx.s,actor,cfg.revision,{helperChannelId:channel,helperEnabled:true});
+ const detected=new Date(joined.getTime()+60000);
+ await ctx.lifecycle.process({...ctx.s,shardId:0,gatewaySessionId:'attention',sequence:++counter,kind:'message.sent',at:detected.toISOString(),context:'PRODUCTION',encryptedUserId:vault.seal(ctx.s,user),channelId:channel,messageId,messageType:0});
+ await sql`INSERT INTO telemetry_cursor VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${new Date(joined.getTime()-1000)},${now})`.execute(db);
+ await sql`INSERT INTO attention_items(organization_id,guild_id,channel_id,message_id,detected_at,status) VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${channel},${messageId},${detected},'ACKNOWLEDGED')`.execute(db);
+ const worker=new HelperWorker(db,ctx.discord,ctx.settings);expect(await worker.tick(ctx.s,now)).toBe(false);
+ expect((await new CommunityService(db).overview(ctx.s,7,now)).attention[0]?.status).toBe('ACKNOWLEDGED');
+ await sql`UPDATE attention_items SET status='SNOOZED',snooze_until=${new Date(now.getTime()+3600000)} WHERE ${tenant(ctx.s)} AND message_id=${messageId}`.execute(db);
+ expect(await worker.tick(ctx.s,now)).toBe(false);expect((await new CommunityService(db).overview(ctx.s,7,now)).attention[0]?.status).toBe('SNOOZED');
+ await sql`UPDATE attention_items SET status='RESOLVED',resolved_at=${now} WHERE ${tenant(ctx.s)} AND message_id=${messageId}`.execute(db);
+ expect(await worker.tick(ctx.s,now)).toBe(false);expect((await new CommunityService(db).overview(ctx.s,7,now)).attention).toHaveLength(0);
+ expect((await sql`SELECT 1 FROM helper_alerts WHERE ${tenant(ctx.s)}`.execute(db)).rows).toHaveLength(0);
+});
+it('uses the guild calendar for Today and pages attention without changing its target',async()=>{
+ const ctx=await setup(),now=new Date('2026-09-29T02:00:00Z'),joined=new Date('2026-09-28T23:30:00Z');
+ let cfg=await ctx.settings.get(ctx.s);cfg=await ctx.settings.update(ctx.s,actor,cfg.revision,{timezone:'Asia/Tokyo'});
+ for(let i=0;i<2;i++){
+  const identity=await vault.resolve(db,ctx.s,String(988000000000000200n+BigInt(i))),episode=randomUUID(),messageId=String(988000000000000300n+BigInt(i));
+  await sql`INSERT INTO membership_episodes(organization_id,guild_id,id,identity_id,joined_at,left_at,context) VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${episode}::uuid,${identity}::uuid,${joined},NULL,'PRODUCTION')`.execute(db);
+  await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data) VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',${new Date(joined.getTime()+i*60000)},'PRODUCTION',${json({channelId:channel,messageId})})`.execute(db);
+ }
+ await sql`INSERT INTO telemetry_cursor VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${new Date(joined.getTime()-1000)},${now})`.execute(db);
+ const community=new CommunityService(db),first=await community.overview(ctx.s,7,now,[],0),second=await community.overview(ctx.s,7,now,[],1);
+ expect(first.daily.todayJoined).toBe(2);expect(first.daily.attentionCount).toBe(2);expect(first.attention).toHaveLength(1);expect(second.attention).toHaveLength(1);expect(first.attention[0]!.messageId).not.toBe(second.attention[0]!.messageId);
+ await ctx.settings.update(ctx.s,actor,cfg.revision,{timezone:'UTC'});
+ expect((await community.overview(ctx.s,7,now)).daily.todayJoined).toBe(0);
+});
 it('compares tagged feedback places and reply coverage without identifying helpers',async()=>{
  const ctx=await setup(),now=new Date(),joined=new Date(now.getTime()-20*86400000),cfg=await ctx.settings.get(ctx.s);
  await ctx.settings.update(ctx.s,actor,cfg.revision,{goalPreset:'early_access',importantChannels:[{channelId:channel,purpose:'feedback'}]});

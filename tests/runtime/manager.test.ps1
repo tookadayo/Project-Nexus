@@ -8,9 +8,9 @@ for($i=0;$i -lt 5;$i++){ $listener=[System.Net.Sockets.TcpListener]::new([System
 $pgPort=$chosen[0];$redisPort=$chosen[1];$apiPort=$chosen[2];$interactionPort=$chosen[3];$webPort=$chosen[4]
 $portMap=@{'55432'=[string]$pgPort;'56379'=[string]$redisPort;'3001'=[string]$apiPort;'3002'=[string]$interactionPort;'3100'=[string]$webPort}
 function Assert($Condition,[string]$Message) { if (-not $Condition) { throw $Message } }
-function Invoke-Launcher([string]$Name) {
+function Invoke-Launcher([string]$Name,[string]$Extra='') {
     $info=New-Object System.Diagnostics.ProcessStartInfo
-    $info.FileName='powershell.exe';$info.Arguments='-NoLogo -NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $root $Name)+'"';$info.UseShellExecute=$false;$info.CreateNoWindow=$true
+    $info.FileName='powershell.exe';$info.Arguments='-NoLogo -NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $root $Name)+'" '+$Extra;$info.UseShellExecute=$false;$info.CreateNoWindow=$true
     $process=New-Object System.Diagnostics.Process;$process.StartInfo=$info;$null=$process.Start()
     if(-not $process.WaitForExit(180000)){Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue;throw "Launcher timed out: $Name"}
     return @{code=$process.ExitCode;text=$Name}
@@ -76,6 +76,8 @@ node "%~dp0fake-service.cjs" ngrok
     Assert ((PortOwner $webPort) -eq $unrelated.Id) 'Unrelated port holder did not start'
     $occupied=Invoke-Launcher 'start-nexus.ps1';Assert ($occupied.code -ne 0) 'Occupied port did not block START'
     Assert (-not $unrelated.HasExited) 'START killed an unrelated Node process'
+    $repair=Invoke-Launcher 'doctor-nexus.ps1' '-Repair';Assert ($repair.code -ne 0) 'Doctor Repair accepted an external port owner'
+    Assert (-not $unrelated.HasExited) 'Doctor Repair killed an unrelated Node process'
     $stale=@{projectRoot=$root;startedAt='2020-01-01T00:00:00Z';processes=@{infra=@{pid=999999;createdAt='2020-01-01T00:00:00Z'};nexus=@{pid=$unrelated.Id;createdAt='2020-01-01T00:00:00Z'}};infraPid=999999;nexusPid=$unrelated.Id;webPid=$null;ngrokPid=$null}
     New-Item -ItemType Directory -Path (Split-Path $manifestPath) -Force|Out-Null
     $stale|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $manifestPath -Encoding UTF8
@@ -101,6 +103,11 @@ node "%~dp0fake-service.cjs" ngrok
     Assert ($script:stopped.Count -eq 3 -and (@($script:stopped | Sort-Object) -join ',') -eq '424243,424245,424246') 'Orphan cleanup touched the wrong PostgreSQL worker'
     function Get-NexusPortOwner([int]$Port) { return 424244 }
     Assert (@(Get-NexusOrphanProcesses).Count -eq 0) 'Unrelated PostgreSQL port owner allowed cleanup'
+    $external=Get-NexusPortDiagnostic $pgPort $null
+    Assert ($external.Ownership -eq 'External or ambiguous') 'External listener was marked NEXUS-owned'
+    function Get-NexusPortOwner([int]$Port) { return 999999 }
+    $ghost=Get-NexusPortDiagnostic $pgPort $null
+    Assert ($ghost.State -eq 'Ghost listener' -and $ghost.Ownership -eq 'Unverified') 'Unresolvable listener was not diagnosed safely'
     Write-Host 'Runtime manager tests passed.'
 } finally {
     Remove-Item Env:NEXUS_FAKE_FAIL -ErrorAction SilentlyContinue

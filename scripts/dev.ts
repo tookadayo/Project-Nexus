@@ -33,6 +33,7 @@ import {releaseInfo} from '../packages/shared/src/runtime-info.js';
 import {recordProductEvent} from '../packages/shared/src/product-telemetry.js';
 import {CommandRetry} from './command-retry.js';
 import {scopeForGuild} from '../packages/security/src/index.js';
+import {logFailure} from '../packages/shared/src/diagnostics.js';
 try{loadEnvFile();}catch{/* Config validation below reports missing fields. */}
 const cfg=readConfig();const db=connect(cfg.DATABASE_URL);await migrate(db);
 const interactionHealth=new InteractionHealth(cfg.NEXUS_INTERACTION_TRANSPORT);
@@ -68,12 +69,12 @@ const worker=new Worker<Scope>('nexus-work',async job=>{
 let stopped=false;let lastMaintenance=0;let lastAggregate=0;let lastCapabilities=0;let lastWeekly=0;
 const commandRetries=new CommandRetry();
 const commandVerifiedAt=new Map<string,number>();
-async function retryCommands(s:Scope){if(!commandRetries.due(s.guildId))return;try{await syncCommands(s);commandRetries.success(s.guildId);}catch{commandRetries.fail(s.guildId);process.stderr.write('Command registration pending\n');}}
+async function retryCommands(s:Scope){if(!commandRetries.due(s.guildId))return;try{await syncCommands(s);commandRetries.success(s.guildId);}catch(error){commandRetries.fail(s.guildId);logFailure({action:'command_registration',stage:'sync_commands',error});}}
 const loop=async()=>{while(!stopped){try{
  await consumer.tick();
  await gateway.publisher.recover();
  if(Date.now()-lastMaintenance>10000){
-  if(Date.now()-lastCapabilities>1800000){for(const s of await scopes()){const configuration=await settings.get(s);if(configuration.enabled)await capabilities.refresh(s,configuration.onboardingMode).catch(()=>process.stderr.write('Capability refresh unavailable\n'));}lastCapabilities=Date.now();}
+  if(Date.now()-lastCapabilities>1800000){for(const s of await scopes()){const configuration=await settings.get(s);if(configuration.enabled)await capabilities.refresh(s,configuration.onboardingMode).catch(error=>logFailure({action:'capability_refresh',stage:'discord_rest',error}));}lastCapabilities=Date.now();}
   if(Date.now()-lastAggregate>3600000){for(const s of await scopes())await analytics.materialize(s);lastAggregate=Date.now();}
   if(Date.now()-lastWeekly>3600000){for(const s of await scopes())await weekly.tick(s);lastWeekly=Date.now();}
   for(const s of await scopes()){await retryCommands(s);await queue.add('guild',s,{jobId:s.guildId,removeOnComplete:true,removeOnFail:true,attempts:3,backoff:{type:'exponential',delay:1000}});await helpers.tick(s);await privacy.purge(s);}
@@ -90,7 +91,7 @@ async function syncCommands(s:Scope){
  commandVerifiedAt.set(s.guildId,Date.now());
 }
 for(const guild of gateway.client.guilds.cache.values()){const s=scopeForGuild(guild.id);await db.transaction().execute(tx=>ensureGuild(tx,s));await retryCommands(s);}
-gateway.client.on('guildCreate',guild=>{const s=scopeForGuild(guild.id);void db.transaction().execute(tx=>ensureGuild(tx,s)).then(async()=>{await recordProductEvent(db,s,'guild_installed');await retryCommands(s);}).catch(()=>process.stderr.write('Command registration pending\n'));});
+gateway.client.on('guildCreate',guild=>{const s=scopeForGuild(guild.id);void db.transaction().execute(tx=>ensureGuild(tx,s)).then(async()=>{await recordProductEvent(db,s,'guild_installed');await retryCommands(s);}).catch(error=>logFailure({action:'guild_create',stage:'command_registration',error}));});
 process.stdout.write(`NEXUS ${releaseInfo().version} build ${releaseInfo().buildSha} (${releaseInfo().releaseChannel}); Interaction ${cfg.NEXUS_INTERACTION_TRANSPORT}; API :${cfg.API_PORT}\n`);const running=loop();
 async function stop(){if(stopped)return;stopped=true;await running;await gateway.stop();await worker.close();await queue.close();if(cfg.NEXUS_INTERACTION_TRANSPORT==='webhook')await http.close();await api.close();await redis.quit();await db.destroy();await sdk?.shutdown();}
 process.on('SIGINT',()=>{void stop();});process.on('SIGTERM',()=>{void stop();});

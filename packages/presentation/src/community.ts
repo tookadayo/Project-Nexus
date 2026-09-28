@@ -1,5 +1,6 @@
 import {sql,tenant,type Database} from '../../db/src/index.js';
 import type {Scope} from '../../shared/src/index.js';
+import {zonedDayStart} from '../../shared/src/timezones.js';
 import {SettingsService} from '../../settings/src/index.js';
 
 const DAY=86400000;
@@ -12,7 +13,7 @@ const channel=(fact:Fact)=>typeof fact.data.channelId==='string'?fact.data.chann
 const percent=(part:number,total:number)=>total?Math.round(part/total*100):null;
 export class CommunityService{
  constructor(private readonly db:Database,private readonly settings=new SettingsService(db)){}
- async overview(s:Scope,range:7|30|90=30,now=new Date(),autoStaffRoleIds:string[]=[]){
+ async overview(s:Scope,range:7|30|90=30,now=new Date(),autoStaffRoleIds:string[]=[],attentionOffset=0){
   const cfg=await this.settings.get(s),from=new Date(now.getTime()-Math.max(range+cfg.memberStages.retainedThroughDay,cfg.memberStages.recentDays,cfg.detailedRetentionDays)*DAY),cursor=(await sql<{first_seen:Date;last_seen:Date}>`SELECT first_seen,last_seen FROM telemetry_cursor WHERE ${tenant(s)}`.execute(this.db)).rows[0],gaps=(await sql<{started_at:Date;ended_at:Date|null}>`SELECT started_at,ended_at FROM telemetry_health WHERE ${tenant(s)} AND started_at<${now} AND (ended_at IS NULL OR ended_at>${from})`.execute(this.db)).rows;
   const episodes=(await sql<Episode>`SELECT e.id,e.identity_id,e.joined_at,e.left_at,st.roles FROM membership_episodes e LEFT JOIN member_observable_state st ON st.organization_id=e.organization_id AND st.guild_id=e.guild_id AND st.episode_id=e.id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND e.context='PRODUCTION' AND (e.left_at IS NULL OR e.left_at>=${from})`.execute(this.db)).rows;
   // Keep only the first and last observation per member, signal, channel and day.
@@ -55,13 +56,13 @@ export class CommunityService{
    WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.context='PRODUCTION' AND f.kind='message.sent'
     AND e.context='PRODUCTION' AND e.left_at IS NULL AND e.joined_at>=${new Date(now.getTime()-3*DAY)} AND f.occurred_at>=${new Date(now.getTime()-DAY)} AND f.occurred_at<=${new Date(now.getTime()-cfg.firstResponseMinutes*60000)}
     AND f.data->>'messageId' ~ '^[0-9]{17,20}$' AND f.data->>'channelId' ~ '^[0-9]{17,20}$' AND f.data->>'receivedExplicitReply' IS DISTINCT FROM 'true'
-    AND (item.status IS NULL OR item.status IN ('OPEN','ACKNOWLEDGED') OR item.status='SNOOZED' AND item.snooze_until<=${now})
+    AND (item.status IS NULL OR item.status IN ('OPEN','ACKNOWLEDGED','SNOOZED'))
     AND NOT(COALESCE(state.roles,'{}'::text[]) && ${[...staffRoles]}::text[])
     AND (${cfg.analysisScope.mode}='all' OR (${cfg.analysisScope.mode}='include')=(f.data->>'channelId'=ANY(${cfg.analysisScope.channelIds}::text[])))
-  ) SELECT channel_id,message_id,occurred_at,status,count(*) OVER()::integer AS total FROM candidates WHERE member_rank=1 ORDER BY occurred_at LIMIT 5`.execute(this.db)).rows:[];
-  const yesterdayStart=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate()-1)),todayStart=new Date(yesterdayStart.getTime()+DAY),yesterday=members.filter(m=>m.stage!=='staff'&&m.episode.joined_at>=yesterdayStart&&m.episode.joined_at<todayStart);
+  ) SELECT channel_id,message_id,occurred_at,status,count(*) OVER()::integer AS total FROM candidates WHERE member_rank=1 ORDER BY occurred_at LIMIT 1 OFFSET ${Math.max(0,Math.min(1000,attentionOffset))}`.execute(this.db)).rows:[];
+  const todayStart=zonedDayStart(now,cfg.timezone),yesterdayStart=zonedDayStart(new Date(todayStart.getTime()-1),cfg.timezone),yesterday=members.filter(m=>m.stage!=='staff'&&m.episode.joined_at>=yesterdayStart&&m.episode.joined_at<todayStart);
   const today=members.filter(m=>m.stage!=='staff'&&m.episode.joined_at>=todayStart&&m.episode.joined_at<=now);
-  const daily={ready:live,todayJoined:live?today.length:null,todayConnected:live?today.filter(m=>m.connected&&m.connected.occurred_at<=now).length:null,yesterdayJoined:live?yesterday.length:null,yesterdayConnected:live?yesterday.filter(m=>m.connected&&m.connected.occurred_at<new Date(m.episode.joined_at.getTime()+DAY)).length:null,attentionCount:live?(attention[0]?.total??0):null};
+  const daily={ready:live,todayJoined:live?today.length:null,todayConnected:live?today.filter(m=>m.connected&&m.connected.occurred_at>=todayStart&&m.connected.occurred_at<=now).length:null,yesterdayJoined:live?yesterday.length:null,yesterdayConnected:live?yesterday.filter(m=>m.connected&&m.connected.occurred_at>=yesterdayStart&&m.connected.occurred_at<todayStart).length:null,attentionCount:live?(attention[0]?.total??0):null};
   const coverageRows=(await sql<{bucket:number;sample:number;median_minutes:number}>`SELECT (floor(extract(hour FROM (occurred_at-(data->>'latencySeconds')::numeric*interval '1 second') AT TIME ZONE 'UTC')/6)*6)::integer AS bucket,count(*)::integer AS sample,percentile_cont(0.5) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS median_minutes FROM lifecycle_events WHERE ${tenant(s)} AND context='PRODUCTION' AND kind='reply.received' AND occurred_at>=${new Date(now.getTime()-30*DAY)} AND occurred_at<=${now} AND jsonb_typeof(data->'latencySeconds')='number' GROUP BY bucket HAVING count(*)>=5 ORDER BY bucket`.execute(this.db)).rows;
   const helperCoverage=coverageRows.map(row=>({fromHourUtc:row.bucket,throughHourUtc:row.bucket+6,sample:row.sample,medianReplyMinutes:Math.round(row.median_minutes)}));
   return {generatedAt:now.toISOString(),range,scope:cfg.analysisScope,goalPreset:cfg.goalPreset,importantPlaces,arrivalCount:entered.length,cohortWindow:{joinedFrom:cohortFrom.toISOString(),joinedThrough:cohortThrough.toISOString(),observedThroughDays:maturityDays,total:matureCohort.length},stages:steps,eligibleMembers:eligible.length,largestDrop:eligible.length>=5?largest:null,classification:{new:members.filter(m=>m.stage==='new').length,starting:members.filter(m=>m.stage==='starting').length,continuing:continuing.length,inactive:members.filter(m=>m.stage==='inactive').length,exited:members.filter(m=>m.stage==='exited').length,staffExcluded:members.filter(m=>m.stage==='staff').length},compare,outcomes,channels:channelSummary,hiddenChannelCount:channels.size-channelSummary.length,transitions,suggestion,attention:attention.map(row=>({channelId:row.channel_id,messageId:row.message_id,status:row.status,waitingMinutes:Math.max(0,Math.floor((now.getTime()-row.occurred_at.getTime())/60000)),url:`https://discord.com/channels/${s.guildId}/${row.channel_id}/${row.message_id}`})),daily,helperCoverage,dataReady:eligible.length>=5};

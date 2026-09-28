@@ -2,7 +2,7 @@ import {readFileSync,readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import {afterEach,expect,it,vi} from 'vitest';
 import {VERSION,RELEASE_CHANNEL,shortSha,buildLabel} from '../../packages/shared/src/version.js';
-import {configSchema} from '../../packages/config/src/index.js';
+import {configSchema,readConfig} from '../../packages/config/src/index.js';
 import {DiscordRest} from '../../packages/discord/src/rest.js';
 import {productGuildHash,productEvents} from '../../packages/shared/src/product-telemetry.js';
 import {controlPanel,controlPages,settingsSections,type ControlData} from '../../packages/discord-panels/src/index.js';
@@ -20,6 +20,8 @@ it('validates future command scope while keeping guild default',()=>{
  expect(configSchema.shape.NEXUS_COMMAND_SCOPE.parse(undefined)).toBe('guild');
  expect(configSchema.shape.NEXUS_COMMAND_SCOPE.parse('global')).toBe('global');
  expect(()=>configSchema.shape.NEXUS_COMMAND_SCOPE.parse('server')).toThrow();
+ const env={NODE_ENV:'test' as const,DATABASE_URL:'postgres://localhost/nexus',REDIS_URL:'redis://localhost:6379',IDENTITY_KEY:'a'.repeat(64),LOOKUP_KEY:'b'.repeat(64),COMPONENT_KEY:'c'.repeat(64),DISCORD_TOKEN:'test',DISCORD_APPLICATION_ID:'111111111111111111',API_KEY:'d'.repeat(32),NEXUS_COMMAND_SCOPE:'global'};
+ expect(()=>readConfig(env)).toThrow('Global command registration is not available');
 });
 it('generates an install link without Administrator permission',()=>{
  const url=new URL(discordInstallUrl('123456789012345678','222222222222222222'));

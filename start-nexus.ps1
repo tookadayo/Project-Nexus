@@ -1,7 +1,12 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'runtime-common.ps1')
 $manifest = $null
+$script:StartStage='Preflight'
+$script:StartPort=0
+$script:StartLog='.local\runtime\nexus.err.log'
+Write-Host 'NEXUS START'
 try {
+    Write-Host "`n[1/5] Preflight"
     foreach ($name in @('.env','package.json','node_modules')) {
         if (-not (Test-Path -LiteralPath (Join-Path $script:NexusRoot $name))) { throw "$name is missing from $script:NexusRoot" }
     }
@@ -10,11 +15,16 @@ try {
     }
     $version = [version]((& node --version).Trim().TrimStart('v'))
     if ($version.Major -ne 24) { throw "Node.js 24.x is required; found $version." }
+    Write-Host '      [OK] Node.js 24 / environment'
     $transport = if (@(Get-Content -LiteralPath (Join-Path $script:NexusRoot '.env') | Where-Object { $_ -match '^NEXUS_INTERACTION_TRANSPORT=webhook\s*$' }).Count -gt 0) { 'webhook' } else { 'gateway' }
     $existing = Read-NexusManifest
+    $ports = if ($transport -eq 'webhook') { @(55432,56379,3001,3002,3100) } else { @(55432,56379,3001,3100) }
+    foreach($port in $ports){
+        $info=Get-NexusPortDiagnostic $port $existing
+        if($info.Ownership -eq 'External or ambiguous' -or $info.Ownership -eq 'Unverified'){$script:StartPort=$port;throw "Port $port is not verified as NEXUS-owned. Run NEXUS DOCTOR.cmd."}
+    }
     if ($null -ne $existing) {
         $alive = @('infra','nexus','web') | Where-Object { Test-NexusOwner (Get-NexusRoleEntry $existing $_) $_ }
-        $ports = if ($transport -eq 'webhook') { @(55432,56379,3001,3002,3100) } else { @(55432,56379,3001,3100) }
         if ($alive.Count -eq 3 -and @($ports | Where-Object { (Get-NexusPortOwner $_) -eq 0 }).Count -eq 0) {
             Write-Host 'NEXUS is already running. Dashboard: http://localhost:3100'
             exit 0
@@ -26,10 +36,13 @@ try {
     Start-Sleep -Milliseconds 800
     $requiredPorts = if ($transport -eq 'webhook') { @(55432,56379,3001,3002,3100) } else { @(55432,56379,3001,3100) }
     foreach ($port in $requiredPorts) {
-        if ((Get-NexusPortOwner $port) -ne 0) { throw "Port $port is occupied by an unrelated process. Nothing was started." }
+        if ((Get-NexusPortOwner $port) -ne 0) { $script:StartPort=$port; throw "Port $port is occupied. Nothing was started." }
     }
+    Write-Host '      [OK] Required ports available'
     $manifest = @{projectRoot=$script:NexusRoot;startedAt=(Get-Date).ToUniversalTime().ToString('o');processes=@{};infraPid=$null;nexusPid=$null;webPid=$null;ngrokPid=$null}
     function Start-NexusRole([string]$Role, [int[]]$Ports) {
+        $script:StartStage=$Role
+        $script:StartLog=".local\runtime\$Role.err.log"
         $args = @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + (Join-Path $script:NexusRoot 'runtime-child.ps1') + '"'),'-Role',$Role,'-Root',('"' + $script:NexusRoot + '"'))
         $process = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -WorkingDirectory $script:NexusRoot -ArgumentList $args -PassThru -RedirectStandardOutput (Join-Path $script:RuntimeDirectory "$Role.out.log") -RedirectStandardError (Join-Path $script:RuntimeDirectory "$Role.err.log")
         $info = Get-NexusProcess $process.Id
@@ -38,6 +51,7 @@ try {
         $manifest["${Role}Pid"] = $process.Id
         Write-NexusManifest $manifest
         foreach ($port in $Ports) {
+            $script:StartPort=$port
             $deadline = (Get-Date).AddSeconds(120)
             while ((Get-Date) -lt $deadline) {
                 if (-not (Test-NexusOwner $manifest.processes[$Role] $Role)) { throw "$Role exited before port $port opened. Check .local\runtime\$Role.err.log" }
@@ -53,14 +67,25 @@ try {
         }
     }
     New-Item -ItemType Directory -Path $script:RuntimeDirectory -Force | Out-Null
+    Write-Host "`n[2/5] Database"
     Start-NexusRole 'infra' @(55432,56379)
+    Write-Host '      [OK] PostgreSQL :55432'
+    Write-Host "`n[3/5] Cache"
+    Write-Host '      [OK] Redis :56379'
+    Write-Host "`n[4/5] NEXUS"
     Start-NexusRole 'nexus' $(if ($transport -eq 'webhook') { @(3001,3002) } else { @(3001) })
+    Write-Host '      [OK] API :3001'
+    Write-Host "      [OK] Discord interaction transport: $transport"
+    Write-Host "`n[5/5] Web"
     Start-NexusRole 'web' @(3100)
-    Write-Host 'NEXUS is ready. Dashboard: http://localhost:3100'
-    Write-Host "Database 55432; Redis 56379; API 3001; Discord interactions: $transport."
+    Write-Host '      [OK] Dashboard :3100'
+    Write-Host "`nNEXUS is ready. Dashboard: http://localhost:3100"
     exit 0
 } catch {
-    [Console]::Error.WriteLine("NEXUS startup failed: $($_.Exception.Message)")
+    [Console]::Error.WriteLine("FAILED [$script:StartStage] $($_.Exception.Message)")
+    if($script:StartPort -gt 0){$info=Get-NexusPortDiagnostic $script:StartPort $manifest;[Console]::Error.WriteLine("Port: $script:StartPort  PID: $($info.Pid)  Process: $($info.Name)  Ownership: $($info.Ownership)")}
+    [Console]::Error.WriteLine('Recommended: NEXUS DOCTOR.cmd')
+    [Console]::Error.WriteLine("Log: $script:StartLog")
     if ($null -ne $manifest) { Stop-NexusManaged $manifest }
     Stop-NexusOrphans
     if ($null -ne $manifest -and (Test-Path -LiteralPath $script:RuntimeManifest)) { Remove-Item -LiteralPath $script:RuntimeManifest -Force }

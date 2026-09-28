@@ -145,11 +145,22 @@ it('completes setup with optional choices and confirms manager role grants',asyn
  const done=await settings.get(s);expect(done.setupSteps).toEqual({scope:true,team:true,notifications:true,goals:true});expect(done.managerRoleIds).toEqual([]);expect(done.helperEnabled).toBe(false);expect(done.newMemberGoals).toEqual([]);
  const preview=await dispatchAction('controlManagers',[roleId]);expect(JSON.stringify(preview)).toContain('Confirm roles');expect((await settings.get(s)).managerRoleIds).toEqual([]);
  const find=(node:unknown):string|undefined=>{if(!node||typeof node!=='object')return;const item=node as {label?:string;custom_id?:string;components?:unknown[]};if(item.label==='Confirm roles')return item.custom_id;for(const child of item.components??[]){const found=find(child);if(found)return found;}};
+ const findCancel=(node:unknown):string|undefined=>{if(!node||typeof node!=='object')return;const item=node as {label?:string;custom_id?:string;components?:unknown[]};if(item.label==='Cancel')return item.custom_id;for(const child of item.components??[]){const found=findCancel(child);if(found)return found;}};
+ expect(findCancel(preview)).toBeDefined();const cancelled=await worker.dispatch(s,{...base,id:'655555555555555574',command:'',customId:findCancel(preview)});
+ expect(JSON.stringify(cancelled)).toContain('Roles that can manage NEXUS');expect(JSON.stringify(cancelled)).not.toContain('Reply Rescue');
  const confirm=find(preview);expect(confirm).toBeDefined();await worker.dispatch(s,{...base,id:'655555555555555570',command:'',customId:confirm});expect((await settings.get(s)).managerRoleIds).toEqual([roleId]);
  const revision=(await settings.get(s)).revision,clear=await tokens.issue(db,s,{action:'controlClearManagers',revision},null,900),clearPreview=await worker.dispatch(s,{...base,id:'655555555555555571',command:'',customId:clear,messageId});
  expect((await settings.get(s)).managerRoleIds).toEqual([roleId]);await worker.dispatch(s,{...base,id:'655555555555555572',command:'',customId:find(clearPreview)});expect((await settings.get(s)).managerRoleIds).toEqual([]);
  const withHelper=await settings.update(s,{key:vault.hash(s,userId),permissions:'8',roles:[],source:'DISCORD_PANEL',requestId:randomUUID()},(await settings.get(s)).revision,{helperRoleIds:[roleId]});
  const clearHelpers=await tokens.issue(db,s,{action:'controlClearHelpers',revision:withHelper.revision},null,900);await worker.dispatch(s,{...base,id:'655555555555555573',command:'',customId:clearHelpers,messageId});expect((await settings.get(s)).helperRoleIds).toEqual([]);
+ const old=await settings.update(s,{key:vault.hash(s,userId),permissions:'8',roles:[],source:'DISCORD_PANEL',requestId:randomUUID()},(await settings.get(s)).revision,{setupVersion:1});
+ const review=await tokens.issue(db,s,{action:'controlReviewSetup'},null,900);expect(JSON.stringify(await worker.dispatch(s,{...base,id:'655555555555555575',command:'',customId:review,messageId}))).toContain('Setup 1/4');
+ for(const [index,step] of (['scope','team','notifications','goals'] as const).entries()){
+  const revision=(await settings.get(s)).revision,token=await tokens.issue(db,s,{action:'setupNext',step,revision},null,900);
+  await worker.dispatch(s,{...base,id:`65555555555555557${index+6}`,command:'',customId:token});
+ }
+ const upgraded=await settings.get(s);expect(upgraded.setupVersion).toBe(2);expect(upgraded.managerRoleIds).toEqual(old.managerRoleIds);
+ const status=await worker.dispatch(s,{...base,id:'655555555555555580',command:'status'});expect(JSON.stringify(status)).toContain('0.6.0-alpha.1');expect(JSON.stringify(status)).not.toContain('PID');
 });
 it('previews an improvement without saving, cancels cleanly, and applies on confirmation',async()=>{
  const s=scopeForGuild('666666666666666661');await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
@@ -177,7 +188,7 @@ it('snoozes an attention item, shows it after expiry, and suppresses it when res
  const actor={key:vault.hash(s,userId),permissions:'8',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};await settings.update(s,actor,0,{helperChannelId:channelId,helperEnabled:true});const helpers=new HelperWorker(db,discord,settings);
  expect((await new CommunityService(db).overview(s)).attention.map(item=>item.messageId)).toContain(messageId);
  await worker.dispatch(s,{...base,id:'677777777777777776',customId:await issue('controlSnooze',{minutes:30})});
- expect((await new CommunityService(db).overview(s)).attention).toHaveLength(0);
+ expect((await new CommunityService(db).overview(s)).attention[0]?.status).toBe('SNOOZED');
  expect(await helpers.tick(s)).toBe(false);
  await sql`UPDATE attention_items SET snooze_until=now()-interval '1 minute' WHERE guild_id=${s.guildId}`.execute(db);
  expect((await new CommunityService(db).overview(s)).attention.map(item=>item.messageId)).toContain(messageId);
