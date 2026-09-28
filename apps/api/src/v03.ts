@@ -5,13 +5,14 @@ import {assert,scopeSchema} from '../../../packages/shared/src/index.js';
 import {validApiToken} from '../../../packages/security/src/index.js';
 import {PresentationService,compileActionTemplate,type ActionTemplateKey} from '../../../packages/presentation/src/index.js';
 import {domainRevisions} from '../../../packages/settings/src/domain-config.js';
-import {SettingsService,type Actor} from '../../../packages/settings/src/index.js';
+import {SettingsService,settingsSchema,type Actor} from '../../../packages/settings/src/index.js';
 import {EntitlementService} from '../../../packages/settings/src/entitlements.js';
 import type {DiscordPort} from '../../../packages/discord/src/rest.js';
 import {randomUUID} from 'node:crypto';
 import {CommunityService} from '../../../packages/presentation/src/community.js';
 import {PermissionFlagsBits} from 'discord-api-types/v10';
 import type {IdentityVault} from '../../../packages/identity/src/index.js';
+import {resolveLocale,t} from '../../../packages/discord-panels/src/i18n/index.js';
 
 export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:DiscordPort,vault?:IdentityVault){
  const base='/v3/organizations/:organizationId/guilds/:guildId',presentation=new PresentationService(db);
@@ -70,11 +71,11 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
   return new SettingsService(db).update(s,actor,input.revision,{detailedRetentionDays:input.days});
  });
  app.post(base+'/settings/weekly-summary',async(req,reply)=>{
-  const s=getScope(req,reply),input=z.object({enabled:z.boolean(),channelId:z.string().regex(/^\d{17,20}$/).nullable(),revision:z.number().int().nonnegative()}).strict().parse(req.body);
+  const s=getScope(req,reply),input=z.object({enabled:z.boolean(),channelId:z.string().regex(/^\d{17,20}$/).nullable(),day:z.number().int().min(0).max(6).optional(),hour:z.number().int().min(0).max(23).optional(),timezone:settingsSchema.shape.timezone.optional(),revision:z.number().int().nonnegative()}).strict().parse(req.body);
   assert(!input.enabled||input.channelId,'CHANNEL_REQUIRED');
   if(input.enabled){assert(discord,'DISCORD_UNAVAILABLE',503);await discord.checkChannel(s.guildId,input.channelId!);}
   const actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
-  return new SettingsService(db).update(s,actor,input.revision,{weeklySummaryEnabled:input.enabled,weeklySummaryChannelId:input.channelId});
+  return new SettingsService(db).update(s,actor,input.revision,{weeklySummaryEnabled:input.enabled,weeklySummaryChannelId:input.channelId,...(input.day===undefined?{}:{weeklySummaryDay:input.day}),...(input.hour===undefined?{}:{weeklySummaryHour:input.hour}),...(input.timezone===undefined?{}:{timezone:input.timezone})});
  });
  app.post(base+'/settings/helper',async(req,reply)=>{
   const s=getScope(req,reply),input=z.object({enabled:z.boolean(),channelId:z.string().regex(/^\d{17,20}$/).nullable(),roleId:z.string().regex(/^\d{17,20}$/).nullable(),responseMinutes:z.number().int().min(1).max(1440),cooldownMinutes:z.number().int().min(15).max(1440),revision:z.number().int().nonnegative()}).strict().parse(req.body);
@@ -85,11 +86,11 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
   return new SettingsService(db).update(s,actor,input.revision,{helperEnabled:input.enabled,helperChannelId:input.channelId,helperRoleId:input.roleId,firstResponseMinutes:input.responseMinutes,helperAlertCooldownMinutes:input.cooldownMinutes});
  });
  app.post(base+'/settings/goals',async(req,reply)=>{
-  const s=getScope(req,reply),input=z.object({preset:z.enum(['multiplayer','early_access','live_service']).nullable(),channels:z.array(z.object({channelId:z.string().regex(/^\d{17,20}$/),purpose:z.enum(['lfg','feedback','bug','playtest','discussion'])})).max(20),revision:z.number().int().nonnegative()}).strict().parse(req.body);
+  const s=getScope(req,reply),input=z.object({preset:z.enum(['multiplayer','early_access','live_service']).nullable(),goals:settingsSchema.shape.newMemberGoals.optional(),channels:z.array(z.object({channelId:z.string().regex(/^\d{17,20}$/),purpose:z.enum(['lfg','feedback','bug','playtest','discussion'])})).max(20),revision:z.number().int().nonnegative()}).strict().parse(req.body);
   assert(new Set(input.channels.map(item=>item.channelId)).size===input.channels.length,'DUPLICATE_CHANNEL');
   if(discord?.options){const available=await discord.options(s.guildId);assert(input.channels.every(item=>available.channels.some(channel=>channel.id===item.channelId)),'CHANNEL_NOT_FOUND');}
   const actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
-  return new SettingsService(db).update(s,actor,input.revision,{goalPreset:input.preset,importantChannels:input.channels});
+  const current=await new SettingsService(db).get(s);return new SettingsService(db).update(s,actor,input.revision,{goalPreset:input.preset,importantChannels:input.channels,...(input.goals===undefined?{}:{newMemberGoals:input.goals,setupSteps:{...current.setupSteps,goals:input.goals.length>0}})});
  });
  app.post(base+'/settings/analysis-scope',async(req,reply)=>{
   const s=getScope(req,reply),input=z.object({revision:z.number().int().nonnegative(),mode:z.enum(['all','include','exclude']),channelIds:z.array(z.string().regex(/^\d{17,20}$/)).max(100),staffRoleIds:z.array(z.string().regex(/^\d{17,20}$/)).max(30)}).strict().parse(req.body);
@@ -113,8 +114,8 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
   assert(discord&&input.channelId,'CHANNEL_REQUIRED');
   // This direct bot message is explicitly a TEST. It creates no member episode,
   // intervention run, outbox entry, assignment, exposure, or metric record.
-  const ja=(await new SettingsService(db).get(s)).uiLanguage==='ja',names={reply_rescue:ja?'返信がない人をスタッフに知らせる':'Notify staff when someone has no reply',welcome_helper:ja?'参加後に困っている人をスタッフに知らせる':'Notify staff when a newcomer may need help',channel_recommendation:ja?'おすすめチャンネルを案内する':'Show recommended channels',event_recommendation:ja?'イベントを案内する':'Recommend an event',inactive_follow_up:''};
-  await discord.sendPanel(input.channelId,{content:`[TEST] NEXUS · ${names[input.templateKey]}\n${ja?'設定確認です。新規メンバーには連絡していません。':'This is a setup check. No newcomer was contacted.'}`,allowed_mentions:{parse:[]}},randomUUID());
+  const locale=resolveLocale((await new SettingsService(db).get(s)).uiLanguage),names={reply_rescue:'testAction.reply_rescue',welcome_helper:'testAction.welcome_helper',channel_recommendation:'testAction.channel_recommendation',event_recommendation:'testAction.event_recommendation',inactive_follow_up:'testAction.inactive_follow_up'} as const;
+  await discord.sendPanel(input.channelId,{content:`[TEST] NEXUS · ${t(locale,names[input.templateKey])}\n${t(locale,'testAction.notice')}`,allowed_mentions:{parse:[]}},randomUUID());
   return {status:'sent',context:'TEST'};
  });
  app.post(base+'/setup/onboarding/recommended',async(req,reply)=>{

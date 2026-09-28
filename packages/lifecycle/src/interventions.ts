@@ -3,7 +3,7 @@ import {z} from 'zod';
 import {sql,tenant,type Database,type Tx} from '../../db/src/index.js';
 import {assert,type Scope} from '../../shared/src/index.js';
 import {SettingsService,audit,type Actor} from '../../settings/src/index.js';
-import {canAdmin} from '../../security/src/index.js';
+import {canAdmin,canOperatePanel} from '../../security/src/index.js';
 import {conditionSchema,evaluateCondition,unavailableSignals,type Evidence} from './activation.js';
 import {EntitlementService} from '../../settings/src/entitlements.js';
 import {signalSchema} from '../../events/src/registry.js';
@@ -58,7 +58,7 @@ export class InterventionService {
  }
  async approve(s:Scope,actor:Actor,id:string){
   return this.db.transaction().execute(async tx=>{
-   const cfg=await new SettingsService(this.db).get(s,tx);assert(canAdmin(actor.permissions,actor.roles,cfg.adminRoleId),'ADMIN_REQUIRED',403);
+   const cfg=await new SettingsService(this.db).get(s,tx);assert((actor.source==='DISCORD_PANEL'?canOperatePanel:canAdmin)(actor.permissions,actor.roles,[cfg.adminRoleId,...cfg.managerRoleIds]),'ADMIN_REQUIRED',403);
    assert(cfg.flags.interventions_v2&&await new EntitlementService(tx).can(s,'interventions'),'ENTITLEMENT_REQUIRED',403);
    const updated=await sql`UPDATE intervention_runs SET state='queued',available_at=now(),approved_by=${actor.key} WHERE ${tenant(s)} AND id=${id}::uuid AND state IN ('suggested','approval') RETURNING id`.execute(tx);assert(updated.rows.length,'RUN_NOT_APPROVABLE');
    await enqueue(tx,s,`intervention:${id}`,'INTERVENTION_DELIVER',{runId:id});

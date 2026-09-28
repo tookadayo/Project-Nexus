@@ -29,6 +29,7 @@ import {HelperWorker} from '../apps/worker/src/helpers.js';
 import {scopeSchema,type Scope} from '../packages/shared/src/index.js';
 import {createHash} from 'node:crypto';
 import {buildNexusCommand} from './commands.js';
+import {CommandRetry} from './command-retry.js';
 import {scopeForGuild} from '../packages/security/src/index.js';
 try{loadEnvFile();}catch{/* Config validation below reports missing fields. */}
 const cfg=readConfig();const db=connect(cfg.DATABASE_URL);await migrate(db);
@@ -42,9 +43,10 @@ const nativeSnapshots=new NativeMemberSnapshotWorker(db,vault,discord);
 const optimization=new OptimizationWorker(db);
 const weekly=new WeeklySummaryWorker(db,discord);
 const helpers=new HelperWorker(db,discord,settings);
-const actions=new ActionWorker(db,vault,discord,onboarding,interactionHealth);const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,(s,user,actor,guild)=>privacy.delete(s,user,actor,guild),()=>({gatewayConnected:gateway.client.isReady(),interaction:interactionHealth.snapshot(),commandHash:hash}));
-const http=createInteractionServer({db,vault,publicKey:cfg.DISCORD_PUBLIC_KEY,applicationId:cfg.DISCORD_APPLICATION_ID,components:tokens,discord,health:interactionHealth});
-const gateway=createGateway(redis,vault,()=>process.stderr.write('Gateway operation failed\n'),db,cfg.NEXUS_INTERACTION_TRANSPORT==='gateway'?interaction=>handleGatewayInteraction(interaction,{db,vault,components:tokens,health:interactionHealth}):undefined);const api=createApi(analytics,cfg.API_KEY,db,discord,()=>({discordConnected:gateway.client.isReady(),interaction:interactionHealth.snapshot(),commandHash:hash}),vault);
+const actions=new ActionWorker(db,vault,discord,onboarding,interactionHealth);const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,(s,user,actor,guild)=>privacy.delete(s,user,actor,guild),()=>({gatewayConnected:gateway.client.isReady(),redisConnected:redis.status==='ready',interaction:interactionHealth.snapshot(),commandHash:hash}));
+const wake=async(s:Scope,id:string)=>{await queue.add('guild',s,{jobId:`interaction-${id}`,removeOnComplete:true,removeOnFail:true,attempts:3,backoff:{type:'exponential',delay:1000}});};
+const http=createInteractionServer({db,vault,publicKey:cfg.DISCORD_PUBLIC_KEY,applicationId:cfg.DISCORD_APPLICATION_ID,components:tokens,discord,health:interactionHealth,wake});
+const gateway=createGateway(redis,vault,()=>process.stderr.write('Gateway operation failed\n'),db,cfg.NEXUS_INTERACTION_TRANSPORT==='gateway'?interaction=>handleGatewayInteraction(interaction,{db,vault,components:tokens,health:interactionHealth,wake}):undefined);const api=createApi(analytics,cfg.API_KEY,db,discord,()=>({discordConnected:gateway.client.isReady(),interaction:interactionHealth.snapshot(),commandHash:hash}),vault);
 const capabilities=new CapabilityService(db,discord,()=>{const ready=gateway.client.isReady()?true:null;return {members:ready,messages:ready,reactions:ready,voice:ready,scheduledEvents:ready};});
 // Tenant registry discovery is scheduler-only; every domain operation receives the explicit scope.
 async function scopes(){return (await sql<{organization_id:string,guild_id:string}>`SELECT organization_id,guild_id FROM guilds`.execute(db)).rows.map(row=>({organizationId:row.organization_id,guildId:row.guild_id}));}
@@ -62,6 +64,8 @@ const worker=new Worker<Scope>('nexus-work',async job=>{
  }finally{span.end();}});
 },{connection,concurrency:4});worker.on('error',()=>process.stderr.write('Background worker unavailable\n'));
 let stopped=false;let lastMaintenance=0;let lastAggregate=0;let lastCapabilities=0;let lastWeekly=0;
+const commandRetries=new CommandRetry();
+async function retryCommands(s:Scope){if(!commandRetries.due(s.guildId))return;try{await syncCommands(s);commandRetries.success(s.guildId);}catch{commandRetries.fail(s.guildId);process.stderr.write('Command registration pending\n');}}
 const loop=async()=>{while(!stopped){try{
  await consumer.tick();
  await gateway.publisher.recover();
@@ -69,7 +73,7 @@ const loop=async()=>{while(!stopped){try{
   if(Date.now()-lastCapabilities>1800000){for(const s of await scopes()){const configuration=await settings.get(s);if(configuration.enabled)await capabilities.refresh(s,configuration.onboardingMode).catch(()=>process.stderr.write('Capability refresh unavailable\n'));}lastCapabilities=Date.now();}
   if(Date.now()-lastAggregate>3600000){for(const s of await scopes())await analytics.materialize(s);lastAggregate=Date.now();}
   if(Date.now()-lastWeekly>3600000){for(const s of await scopes())await weekly.tick(s);lastWeekly=Date.now();}
-  for(const s of await scopes()){await queue.add('guild',s,{jobId:s.guildId,removeOnComplete:true,removeOnFail:true,attempts:3,backoff:{type:'exponential',delay:1000}});await helpers.tick(s);await privacy.purge(s);}
+  for(const s of await scopes()){await retryCommands(s);await queue.add('guild',s,{jobId:s.guildId,removeOnComplete:true,removeOnFail:true,attempts:3,backoff:{type:'exponential',delay:1000}});await helpers.tick(s);await privacy.purge(s);}
   await redis.xtrim(STREAM,'MINID',`${Date.now()-86400000}-0`);lastMaintenance=Date.now();
  }
  }catch{process.stderr.write('Worker recovery pending\n');}
@@ -80,8 +84,8 @@ async function syncCommands(s:Scope){
  const old=(await sql<{definition_hash:string}>`SELECT definition_hash FROM guild_command_sync WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId}`.execute(db)).rows[0];
  if(old?.definition_hash!==hash){await discord.registerCommands(s.guildId,[command]);await sql`INSERT INTO guild_command_sync(organization_id,guild_id,definition_hash) VALUES(${s.organizationId}::uuid,${s.guildId},${hash}) ON CONFLICT(organization_id,guild_id) DO UPDATE SET definition_hash=EXCLUDED.definition_hash,registered_at=now()`.execute(db);}
 }
-for(const guild of gateway.client.guilds.cache.values()){const s=scopeForGuild(guild.id);await db.transaction().execute(tx=>ensureGuild(tx,s));await syncCommands(s).catch(()=>process.stderr.write('Command registration pending\n'));}
-gateway.client.on('guildCreate',guild=>{const s=scopeForGuild(guild.id);void db.transaction().execute(tx=>ensureGuild(tx,s)).then(()=>syncCommands(s)).catch(()=>process.stderr.write('Command registration pending\n'));});
+for(const guild of gateway.client.guilds.cache.values()){const s=scopeForGuild(guild.id);await db.transaction().execute(tx=>ensureGuild(tx,s));await retryCommands(s);}
+gateway.client.on('guildCreate',guild=>{const s=scopeForGuild(guild.id);void db.transaction().execute(tx=>ensureGuild(tx,s)).then(()=>retryCommands(s)).catch(()=>process.stderr.write('Command registration pending\n'));});
 process.stdout.write(`Interaction ${cfg.NEXUS_INTERACTION_TRANSPORT}; API :${cfg.API_PORT}\n`);const running=loop();
 async function stop(){if(stopped)return;stopped=true;await running;await gateway.stop();await worker.close();await queue.close();if(cfg.NEXUS_INTERACTION_TRANSPORT==='webhook')await http.close();await api.close();await redis.quit();await db.destroy();await sdk?.shutdown();}
 process.on('SIGINT',()=>{void stop();});process.on('SIGTERM',()=>{void stop();});

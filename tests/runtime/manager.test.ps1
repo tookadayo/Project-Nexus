@@ -88,15 +88,19 @@ node "%~dp0fake-service.cjs" ngrok
     $ownBinary=Join-Path $root 'node_modules\.pnpm\@embedded-postgres+windows-x64@18.4.0-beta.17\node_modules\@embedded-postgres\windows-x64\bin\postgres.exe'
     $script:mockProcesses=@(
         [pscustomobject]@{Name='postgres.exe';ProcessId=424243;ParentProcessId=424242;CommandLine='postgres.exe --fork backend';ExecutablePath=$ownBinary;CreationDate=(Get-Date)},
+        [pscustomobject]@{Name='postgres.exe';ProcessId=424245;ParentProcessId=400001;CommandLine='postgres.exe --fork checkpointer';ExecutablePath=$ownBinary;CreationDate=(Get-Date)},
+        [pscustomobject]@{Name='postgres.exe';ProcessId=424246;ParentProcessId=400002;CommandLine='postgres.exe --fork walwriter';ExecutablePath=$ownBinary;CreationDate=(Get-Date)},
         [pscustomobject]@{Name='postgres.exe';ProcessId=424244;ParentProcessId=424242;CommandLine='postgres.exe --fork backend';ExecutablePath='C:\Other\postgres.exe';CreationDate=(Get-Date)}
     )
-    function Get-NexusPortOwner([int]$Port) { return 0 }
+    function Get-NexusPortOwner([int]$Port) { return 424243 }
     function Get-CimInstance { param([string]$ClassName,[string]$Filter) if($Filter){foreach($item in $script:mockProcesses){if($Filter -eq "ProcessId = $($item.ProcessId)"){return $item}};return};return $script:mockProcesses }
     $found=@(Get-NexusOrphanProcesses)
-    Assert ($found.Count -eq 1 -and $found[0].ProcessId -eq 424243) 'Orphan PostgreSQL worker was not isolated from an unrelated worker'
+    Assert ($found.Count -eq 3 -and (@($found.ProcessId | Sort-Object) -join ',') -eq '424243,424245,424246') 'Multi-parent orphan workers were not isolated from an unrelated worker'
     $script:stopped=@();function Stop-Process { param([int]$Id,[switch]$Force) $script:stopped+= $Id }
     Stop-NexusOrphans
-    Assert ($script:stopped.Count -eq 1 -and $script:stopped[0] -eq 424243) 'Orphan cleanup touched the wrong PostgreSQL worker'
+    Assert ($script:stopped.Count -eq 3 -and (@($script:stopped | Sort-Object) -join ',') -eq '424243,424245,424246') 'Orphan cleanup touched the wrong PostgreSQL worker'
+    function Get-NexusPortOwner([int]$Port) { return 424244 }
+    Assert (@(Get-NexusOrphanProcesses).Count -eq 0) 'Unrelated PostgreSQL port owner allowed cleanup'
     Write-Host 'Runtime manager tests passed.'
 } finally {
     Remove-Item Env:NEXUS_FAKE_FAIL -ErrorAction SilentlyContinue

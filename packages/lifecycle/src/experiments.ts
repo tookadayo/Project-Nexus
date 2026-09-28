@@ -6,7 +6,7 @@ import {conditionSchema,evaluateCondition} from './activation.js';
 import {evidence,InterventionService} from './interventions.js';
 import {EntitlementService} from '../../settings/src/entitlements.js';
 import {SettingsService,audit,type Actor} from '../../settings/src/index.js';
-import {canAdmin} from '../../security/src/index.js';
+import {canAdmin,canOperatePanel} from '../../security/src/index.js';
 import {coverage} from '../../analytics/src/index.js';
 import {canonicalSignal,signalRegistry} from '../../events/src/registry.js';
 export const experimentSchema=z.object({name:z.string().min(1).max(100),eligibility:z.array(conditionSchema).max(20),randomization:z.enum(['member','time_block']),blockSeconds:z.number().int().min(3600).max(604800),variants:z.array(z.object({key:z.enum(['control','treatment']),weight:z.number().int().positive().max(100),interventionRevisionId:z.uuid().nullable()}).strict()).length(2),primaryMetric:z.enum(['activation','connection','retention']),windowSeconds:z.number().int().min(3600).max(2592000),minimumSample:z.number().int().min(20),guardrails:z.object({maxLeaveRate:z.number().min(0).max(1),maxFailureRate:z.number().min(0).max(1),maxAlerts:z.number().int().positive()}).strict()}).strict().refine(d=>new Set(d.variants.map(v=>v.key)).size===2,'Control and treatment required');
@@ -100,7 +100,7 @@ export class ExperimentService {
  }
  async control(s:Scope,actor:Actor,revisionId:string,state:'running'|'paused'|'stopped'){
   await this.db.transaction().execute(async tx=>{
-   const cfg=await new SettingsService(this.db).get(s,tx);assert(canAdmin(actor.permissions,actor.roles,cfg.adminRoleId),'ADMIN_REQUIRED',403);
+   const cfg=await new SettingsService(this.db).get(s,tx);assert((actor.source==='DISCORD_PANEL'?canOperatePanel:canAdmin)(actor.permissions,actor.roles,[cfg.adminRoleId,...cfg.managerRoleIds]),'ADMIN_REQUIRED',403);
    const revision=(await sql`SELECT id FROM guild_config_revisions WHERE ${tenant(s)} AND id=${revisionId}::uuid AND domain='experiment' AND state='published'`.execute(tx)).rows[0];assert(revision,'EXPERIMENT_NOT_FOUND');
    const previous=(await sql<{state:string}>`SELECT state FROM experiment_controls WHERE ${tenant(s)} AND revision_id=${revisionId}::uuid FOR UPDATE`.execute(tx)).rows[0];assert(previous?.state!=='stopped'||state==='stopped','STOPPED_EXPERIMENT_IMMUTABLE');
    await sql`INSERT INTO experiment_controls(organization_id,guild_id,revision_id,state) VALUES(${s.organizationId}::uuid,${s.guildId},${revisionId}::uuid,${state}) ON CONFLICT(organization_id,guild_id,revision_id) DO UPDATE SET state=EXCLUDED.state,updated_at=now()`.execute(tx);

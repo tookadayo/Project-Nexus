@@ -10,9 +10,13 @@ export function verifyInteraction(publicKey:string,signature:string,timestamp:st
   return verify(null,Buffer.concat([Buffer.from(timestamp),body]),key,Buffer.from(signature,'hex'));
  }catch{return false;}
 }
-export function canAdmin(permissions:string,roles:string[],adminRole:string|null){
+export function canOperatePanel(permissions:string,roles:string[],adminRole:string|null|Array<string|null>){
  const bits=BigInt(permissions);
- return (bits&PermissionFlagsBits.ManageGuild)!==0n || (bits&PermissionFlagsBits.Administrator)!==0n || (adminRole!==null&&roles.includes(adminRole));
+ const allowed=Array.isArray(adminRole)?adminRole:[adminRole];
+ return (bits&PermissionFlagsBits.Administrator)!==0n || allowed.some(role=>role!==null&&roles.includes(role));
+}
+export function canAdmin(permissions:string,roles:string[],adminRole:string|null|Array<string|null>){
+ return canOperatePanel(permissions,roles,adminRole)||(BigInt(permissions)&PermissionFlagsBits.ManageGuild)!==0n;
 }
 export class Components {
  constructor(private readonly key:string){}

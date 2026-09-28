@@ -1,6 +1,6 @@
 import Fastify from 'fastify';
 import {z} from 'zod';
-import {verifyInteraction,scopeForGuild,Components,canAdmin} from '../../../packages/security/src/index.js';
+import {verifyInteraction,scopeForGuild,Components,canOperatePanel} from '../../../packages/security/src/index.js';
 import {SettingsService} from '../../../packages/settings/src/index.js';
 import {resolveLocale,t} from '../../../packages/discord-panels/src/index.js';
 import {ensureGuild,sql,type Database,type Tx} from '../../../packages/db/src/index.js';
@@ -26,7 +26,10 @@ async function beforeDeadline<T>(work:Promise<T>,milliseconds:number):Promise<T>
  try{return await Promise.race([work,new Promise<T>((_resolve,reject)=>{timer=setTimeout(()=>reject(new Error('INTERACTION_ACK_DEADLINE')),milliseconds);})]);}
  finally{if(timer)clearTimeout(timer);}
 }
-export async function handleGatewayInteraction(input:Interaction,opts:{db:Database,vault:IdentityVault,components:Components,health?:InteractionHealth}){
+export async function saveThenWake<T>(save:()=>Promise<T>,wake?:()=>Promise<void>):Promise<T>{
+ const result=await save();void wake?.().catch(()=>{});return result;
+}
+export async function handleGatewayInteraction(input:Interaction,opts:{db:Database,vault:IdentityVault,components:Components,health?:InteractionHealth,wake?:(s:Scope,id:string)=>Promise<void>}){
  if(!input.inGuild()||!input.guildId||(!input.isChatInputCommand()&&!input.isMessageComponent()&&!input.isModalSubmit()))return;
  const receivedAt=new Date();opts.health?.received(receivedAt);
  const s=scopeForGuild(input.guildId),userId=input.user.id,customId=input.isMessageComponent()||input.isModalSubmit()?input.customId:undefined;
@@ -36,7 +39,7 @@ export async function handleGatewayInteraction(input:Interaction,opts:{db:Databa
     const settings=await new SettingsService(opts.db).get(s),locale=resolveLocale(settings.uiLanguage,{interactionLocale:input.locale,guildLocale:input.guildLocale??undefined}),intent=await opts.components.read(opts.db,s,customId,opts.vault.hash(s,userId));
     if(intent.action!=='editNodeOpen')throw new Error('INVALID_MODAL_ACTION');
     const roles=input.member&&'roles' in input.member?Array.isArray(input.member.roles)?input.member.roles:[...input.member.roles.cache.keys()]:[];
-    if(!canAdmin(input.memberPermissions?.bitfield.toString()??'0',roles,settings.adminRoleId))throw new Error('ADMIN_REQUIRED');
+    if(!canOperatePanel(input.memberPermissions?.bitfield.toString()??'0',roles,[settings.adminRoleId,...settings.managerRoleIds]))throw new Error('ADMIN_REQUIRED');
     const id=await opts.components.issue(opts.db,s,{...intent,action:'editNodeSave'},opts.vault.hash(s,userId));
     return {title:t(locale,'modal.title').slice(0,45),custom_id:id,components:[{type:1 as const,components:[{type:4 as const,style:1 as const,custom_id:'question',label:t(locale,'modal.question').slice(0,45),value:String(intent.question),required:true,max_length:500}]},{type:1 as const,components:[{type:4 as const,style:2 as const,custom_id:'options',label:t(locale,'modal.options').slice(0,45),value:String(intent.options),required:true,max_length:2000}]}]};
    })(),1200);
@@ -48,13 +51,13 @@ export async function handleGatewayInteraction(input:Interaction,opts:{db:Databa
    return;
   }
  }
- try{await input.deferReply({flags:64});opts.health?.acknowledged();}catch{opts.health?.failed('ack_failed');return;}
- const job:InteractionJob={id:input.id,applicationId:input.applicationId,token:input.token,userId,channelId:input.channelId??undefined,messageId:input.isMessageComponent()?input.message.id:undefined,command:input.isChatInputCommand()&&input.commandName==='nexus'?input.options.getSubcommand(false)??undefined:undefined,customId,values:input.isStringSelectMenu()?input.values:undefined,fields:input.isModalSubmit()?Object.fromEntries(input.fields.fields.map((field,id)=>[id,'value' in field?String(field.value):''])):undefined,locale:input.locale,guildLocale:input.guildLocale??undefined};
+ try{if(input.isMessageComponent())await input.deferUpdate();else await input.deferReply({flags:64});opts.health?.acknowledged();}catch{opts.health?.failed('ack_failed');return;}
+ const job:InteractionJob={id:input.id,applicationId:input.applicationId,token:input.token,userId,channelId:input.channelId??undefined,messageId:input.isMessageComponent()?input.message.id:undefined,command:input.isChatInputCommand()&&input.commandName==='nexus'?input.options.getSubcommand(false)??undefined:undefined,customId,values:input.isAnySelectMenu()?input.values:undefined,fields:input.isModalSubmit()?Object.fromEntries(input.fields.fields.map((field,id)=>[id,'value' in field?String(field.value):''])):undefined,locale:input.locale,guildLocale:input.guildLocale??undefined};
  const acknowledgedAt=new Date();
- try{await opts.db.transaction().execute(async tx=>{await ensureGuild(tx,s);await saveDiagnostic(tx,s,opts.vault,{id:input.id,kind:input.isChatInputCommand()?'command':input.isModalSubmit()?'modal':'component',action:job.command??'component',receivedAt,acknowledgedAt});await sql`INSERT INTO interaction_jobs(organization_id,guild_id,id,encrypted_payload) VALUES(${s.organizationId}::uuid,${s.guildId},${job.id},${opts.vault.seal(s,JSON.stringify(job))}) ON CONFLICT DO NOTHING`.execute(tx);});}
- catch{opts.health?.failed('queue_failed');const locale=resolveLocale('auto',{interactionLocale:input.locale,guildLocale:input.guildLocale??undefined});await input.editReply({content:t(locale,'interaction.saveFailed')}).catch(()=>{});}
+ try{await saveThenWake(()=>opts.db.transaction().execute(async tx=>{await ensureGuild(tx,s);await saveDiagnostic(tx,s,opts.vault,{id:input.id,kind:input.isChatInputCommand()?'command':input.isModalSubmit()?'modal':'component',action:job.command??'component',receivedAt,acknowledgedAt});await sql`INSERT INTO interaction_jobs(organization_id,guild_id,id,encrypted_payload) VALUES(${s.organizationId}::uuid,${s.guildId},${job.id},${opts.vault.seal(s,JSON.stringify(job))}) ON CONFLICT DO NOTHING`.execute(tx);}),()=>opts.wake?.(s,job.id)??Promise.resolve());}
+ catch{opts.health?.failed('queue_failed');const locale=resolveLocale('auto',{interactionLocale:input.locale,guildLocale:input.guildLocale??undefined});if(input.isMessageComponent())await input.followUp({content:t(locale,'interaction.saveFailed'),flags:64}).catch(()=>{});else await input.editReply({content:t(locale,'interaction.saveFailed')}).catch(()=>{});}
 }
-export function createInteractionServer(opts:{db:Database,vault:IdentityVault,publicKey:string,applicationId:string,components?:Components,discord?:DiscordPort,health?:InteractionHealth}){
+export function createInteractionServer(opts:{db:Database,vault:IdentityVault,publicKey:string,applicationId:string,components?:Components,discord?:DiscordPort,health?:InteractionHealth,wake?:(s:Scope,id:string)=>Promise<void>}){
  const app=Fastify({logger:false,bodyLimit:65536,requestTimeout:2000});
  app.removeContentTypeParser('application/json');app.addContentTypeParser('application/json',{parseAs:'buffer'},(_request,body,done)=>done(null,body));
  app.get('/health',()=>({status:'ok'}));
@@ -76,7 +79,7 @@ export function createInteractionServer(opts:{db:Database,vault:IdentityVault,pu
     let intent;try{intent=await opts.components!.read(tx,s,input.data.custom_id!,opts.vault.hash(s,input.member.user.id));}
     catch{return {type:4,data:{flags:64,content:t(locale,'modal.expired')}};}
     if(intent.action!=='editNodeOpen')return {type:4,data:{flags:64,content:t(locale,'modal.expired')}};
-    if(!canAdmin(input.member.permissions,input.member.roles,settings.adminRoleId))return {type:4,data:{flags:64,content:t(locale,'modal.admin')}};
+    if(!canOperatePanel(input.member.permissions,input.member.roles,[settings.adminRoleId,...settings.managerRoleIds]))return {type:4,data:{flags:64,content:t(locale,'modal.admin')}};
     const customId=await opts.components!.issue(tx,s,{...intent,action:'editNodeSave'},opts.vault.hash(s,input.member.user.id));
     return {type:9,data:{title:t(locale,'modal.title').slice(0,45),custom_id:customId,components:[
      {type:1,components:[{type:4,style:1,custom_id:'question',label:t(locale,'modal.question').slice(0,45),value:String(intent.question),required:true,max_length:500}]},
@@ -90,16 +93,16 @@ export function createInteractionServer(opts:{db:Database,vault:IdentityVault,pu
   // The response must finish before queueing can acquire a database connection.
   reply.raw.once('finish',()=>{
    const acknowledgedAt=new Date();opts.health?.acknowledged(acknowledgedAt);
-   void opts.db.transaction().execute(async tx=>{
+   void saveThenWake(()=>opts.db.transaction().execute(async tx=>{
     await sql`SET LOCAL transaction_timeout='1700ms'`.execute(tx);
     await sql`SET LOCAL statement_timeout='1200ms'`.execute(tx);await sql`SET LOCAL lock_timeout='500ms'`.execute(tx);
     await ensureGuild(tx,s);
     await saveDiagnostic(tx,s,opts.vault,{id:input.id,kind:input.type===2?'command':input.type===5?'modal':'component',action:job.command??'component',receivedAt,acknowledgedAt});
     await sql`INSERT INTO interaction_jobs(organization_id,guild_id,id,encrypted_payload) VALUES
      (${s.organizationId}::uuid,${s.guildId},${job.id},${opts.vault.seal(s,JSON.stringify(job))}) ON CONFLICT DO NOTHING`.execute(tx);
-   }).catch(async()=>{opts.health?.failed('queue_failed');await opts.discord?.editReply(input.application_id,input.token,{content:t(immediateLocale,'interaction.saveFailed')}).catch(()=>{});});
+   }),()=>opts.wake?.(s,job.id)??Promise.resolve()).catch(async()=>{opts.health?.failed('queue_failed');if(input.type===3)await opts.discord?.followup?.(input.application_id,input.token,{content:t(immediateLocale,'interaction.saveFailed')}).catch(()=>{});else await opts.discord?.editReply(input.application_id,input.token,{content:t(immediateLocale,'interaction.saveFailed')}).catch(()=>{});});
   });
-  return reply.send({type:5,data:{flags:64}});
+  return reply.send(input.type===3?{type:6}:{type:5,data:{flags:64}});
  });
  return app;
 }

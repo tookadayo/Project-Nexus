@@ -32,7 +32,7 @@ import {WeeklySummaryWorker} from '../../apps/worker/src/weekly.js';
 import {HelperWorker} from '../../apps/worker/src/helpers.js';
 let infra:Awaited<ReturnType<typeof infrastructure>>,db:Database;const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32));
 const user='922222222222222222',channel='933333333333333333';let counter=0;
-const actor:Actor={key:'admin',permissions:'32',roles:[],source:'DISCORD_PANEL',requestId:'v02-test'};
+const actor:Actor={key:'admin',permissions:'8',roles:[],source:'DISCORD_PANEL',requestId:'v02-test'};
 beforeAll(async()=>{infra=await infrastructure();db=connect(infra.databaseUrl);await migrate(db);});
 afterAll(async()=>{await db?.destroy();await infra?.stop();});
 async function setup(){
@@ -274,7 +274,7 @@ it('sends one concise optional weekly summary and never duplicates its delivery'
  const ctx=await setup(),cfg=await ctx.settings.get(ctx.s);await ctx.settings.update(ctx.s,actor,cfg.revision,{weeklySummaryEnabled:true,weeklySummaryChannelId:channel});
  const worker=new WeeklySummaryWorker(db,ctx.discord);expect(await worker.tick(ctx.s,new Date('2026-09-24T12:00:00.000Z'))).toBe(true);expect(await worker.tick(ctx.s,new Date('2026-09-24T12:00:00.000Z'))).toBe(false);
  expect(ctx.discord.calls.filter(call=>call==='sendPanel')).toHaveLength(1);
- const content=JSON.stringify([...ctx.discord.panels.values()][0]);expect(content).toContain('Weekly growth summary');expect(content).toContain('View improvement');
+ const content=JSON.stringify([...ctx.discord.panels.values()][0]);expect(content).toContain('Weekly summary');expect(content).toContain('View improvements');
  expect((await sql`SELECT state FROM weekly_summary_deliveries WHERE ${tenant(ctx.s)}`.execute(db)).rows).toMatchObject([{state:'sent'}]);
 });
 it('records optional suggestion feedback without member identifiers',async()=>{
@@ -311,7 +311,7 @@ it('marks an expired weekly send as unknown without resending it',async()=>{
  await sql`INSERT INTO weekly_summary_deliveries(organization_id,guild_id,week_start,channel_id,state,attempted_at,lease_until) VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},'2026-09-14'::date,${channel},'sending','2026-09-22'::timestamptz,'2026-09-22'::timestamptz)`.execute(db);
  const worker=new WeeklySummaryWorker(db,ctx.discord);expect(await worker.tick(ctx.s,new Date('2026-09-24T12:00:00.000Z'))).toBe(false);
  expect(ctx.discord.calls.filter(call=>call==='sendPanel')).toHaveLength(0);
- expect((await sql<{state:string;status_note:string}>`SELECT state,status_note FROM weekly_summary_deliveries WHERE ${tenant(ctx.s)}`.execute(db)).rows).toMatchObject([{state:'unknown',status_note:'送信結果を確認できませんでした'}]);
+ expect((await sql<{state:string;status_note:string}>`SELECT state,status_note FROM weekly_summary_deliveries WHERE ${tenant(ctx.s)}`.execute(db)).rows).toMatchObject([{state:'unknown',status_note:'weekly.deliveryUnknown'}]);
 });
 it('retries a weekly summary when analytics fails before Discord sending starts',async()=>{
  const ctx=await setup(),cfg=await ctx.settings.get(ctx.s);await ctx.settings.update(ctx.s,actor,cfg.revision,{weeklySummaryEnabled:true,weeklySummaryChannelId:channel});
