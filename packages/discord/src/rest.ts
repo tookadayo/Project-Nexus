@@ -25,6 +25,8 @@ export interface DiscordPort {
  sendPanel(channelId:string,body:RESTPostAPIChannelMessageJSONBody,nonce:string):Promise<string>;
  editPanel(channelId:string,messageId:string,body:RESTPostAPIChannelMessageJSONBody):Promise<void>;
  editReply(applicationId:string,token:string,body:RESTPostAPIChannelMessageJSONBody):Promise<void>;
+ followup?(applicationId:string,token:string,body:RESTPostAPIChannelMessageJSONBody):Promise<void>;
+ publicChannel?(guildId:string,channelId:string):Promise<boolean>;
 }
 export class DiscordRest implements DiscordPort {
  private cooldownUntil=0;
@@ -76,6 +78,15 @@ export class DiscordRest implements DiscordPort {
    assert((bits&PermissionFlagsBits.ViewChannel)!==0n&&(bits&PermissionFlagsBits.SendMessages)!==0n,'CHANNEL_PERMISSION_MISSING');
   }
  }
+ async publicChannel(guildId:string,channelId:string){
+  const [channel,roles]=await Promise.all([this.request<{guild_id:string;permission_overwrites:{id:string;type:number;allow:string;deny:string}[]}>(`/channels/${channelId}`),this.roles(guildId)]);
+  assert(channel.guild_id===guildId,'INVALID_START_CHANNEL');
+  const everyone=roles.find(role=>role.id===guildId);if(!everyone)return true;
+  let bits=BigInt(everyone.permissions);const overwrite=channel.permission_overwrites.find(row=>row.id===guildId);
+  if(overwrite)bits=(bits&~BigInt(overwrite.deny))|BigInt(overwrite.allow);
+  if((bits&PermissionFlagsBits.ViewChannel)!==0n)return true;
+  return channel.permission_overwrites.some(row=>row.type===0&&row.id!==guildId&&(BigInt(row.allow)&PermissionFlagsBits.ViewChannel)!==0n);
+ }
  async validateRole(guildId:string,roleId:string){
   const [roles,bot]=await Promise.all([this.roles(guildId),this.member(guildId,this.botId)]);
   const role=roles.find(r=>r.id===roleId);const highest=Math.max(0,...roles.filter(r=>bot.roles.includes(r.id)).map(r=>r.position));
@@ -90,4 +101,5 @@ export class DiscordRest implements DiscordPort {
  async sendDirectMessage(userId:string,text:string,nonce:string){const dm=await this.request<{id:string}>('/users/@me/channels','POST',{recipient_id:userId});return this.sendPanel(dm.id,{content:text,allowed_mentions:{parse:[]}},nonce);}
  async editPanel(channelId:string,messageId:string,body:RESTPostAPIChannelMessageJSONBody){await this.request(`/channels/${channelId}/messages/${messageId}`,'PATCH',body);}
  async editReply(applicationId:string,token:string,body:RESTPostAPIChannelMessageJSONBody){await this.request(`/webhooks/${applicationId}/${encodeURIComponent(token)}/messages/@original`,'PATCH',body);}
+ async followup(applicationId:string,token:string,body:RESTPostAPIChannelMessageJSONBody){await this.request(`/webhooks/${applicationId}/${encodeURIComponent(token)}`,'POST',{...body,flags:64});}
 }

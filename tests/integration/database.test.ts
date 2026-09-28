@@ -29,6 +29,14 @@ it('runs migrations idempotently and enforces guild ownership',async()=>{
  await expect(ensureGuild(db,{...scope,organizationId:randomUUID()})).rejects.toThrow('Tenant mismatch');
  await expect(sql`INSERT INTO guild_settings VALUES(${randomUUID()}::uuid,${scope.guildId},0,'{}')`.execute(db)).rejects.toThrow();
 });
+it('preserves completed setup for existing v0.5.2 settings rows',async()=>{
+ const s=scopeForGuild('623456789012345678');await ensureGuild(db,s);
+ await sql`INSERT INTO guild_settings(organization_id,guild_id,revision,settings) VALUES(${s.organizationId}::uuid,${s.guildId},0,'{"enabled":true}'::jsonb) ON CONFLICT(organization_id,guild_id) DO UPDATE SET revision=0,settings=EXCLUDED.settings`.execute(db);
+ const settings=new SettingsService(db),legacy=await settings.get(s);
+ expect(legacy.setupSteps).toEqual({scope:true,team:true,notifications:true,goals:true});
+ await settings.update(s,{key:'admin',permissions:'8',roles:[],source:'DISCORD_PANEL',requestId:randomUUID()},0,{helperEnabled:false});
+ expect((await settings.get(s)).setupSteps).toEqual(legacy.setupSteps);
+});
 it.each([
  ['Discord 429',new DiscordFailure(429,0.01),'PENDING'],
  ['Discord 500',new DiscordFailure(500),'UNKNOWN'],
@@ -39,7 +47,7 @@ it.each([
  const s=scopeForGuild(String(BigInt('600000000000000000')+BigInt(Math.floor(Math.random()*100000))));await ensureGuild(db,s);
  const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32));const settings=new SettingsService(db);const onboarding=new OnboardingService(db,settings,vault);const discord=new FakeDiscord();const user='700000000000000000';
  discord.members.set(user,{roles:[],permissions:'0',joinedAt:new Date().toISOString(),bot:false});
- const actor={key:'admin',permissions:'32',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};const flow=templateFlow('Gaming');flow.nodes[0]!.options[1]!.roleId='800000000000000000';
+ const actor={key:'admin',permissions:'8',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};const flow=templateFlow('Gaming');flow.nodes[0]!.options[1]!.roleId='800000000000000000';
  const cfg=await onboarding.publish(s,actor,0,flow);await settings.update(s,actor,cfg.revision,{enabled:true,onboardingEnabled:true,startChannelId:'900000000000000000'});
  const session=await onboarding.start(s,user,new Date(discord.members.get(user)!.joinedAt));await onboarding.answer(s,user,session.id,0,'purpose','community');
  const worker=new ActionWorker(db,vault,discord,onboarding);await worker.tick(s);discord.mutationFailure=failure;await worker.tick(s);
@@ -53,7 +61,7 @@ it.each([
 it('deletes member and guild data with an audit tombstone and ingestion suppression',async()=>{
  const s=scopeForGuild('611111111111111111');await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
  const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32));const settings=new SettingsService(db);const onboarding=new OnboardingService(db,settings,vault);const privacy=new PrivacyService(db,vault,settings);const user='711111111111111111';
- const actor={key:vault.hash(s,user),permissions:'32',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};
+ const actor={key:vault.hash(s,user),permissions:'8',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};
  const cfg=await onboarding.chooseTemplate(s,actor,0,'Gaming');await settings.update(s,actor,cfg.revision,{enabled:true,onboardingEnabled:true,startChannelId:'811111111111111111'});
  await onboarding.start(s,user,new Date());await privacy.delete(s,user,actor);
  expect((await sql`SELECT id FROM member_identity_map WHERE guild_id=${s.guildId}`.execute(db)).rows).toHaveLength(0);
@@ -67,8 +75,8 @@ it('completes Discord panel configuration, pinned branching flow and ownership-s
  await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
  const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32));const settings=new SettingsService(db);const onboarding=new OnboardingService(db,settings,vault);const discord=new FakeDiscord();
  const adminId='666666666666666666',userId='777777777777777777',managedRole='888888888888888888',manualRole='999999999999999999';
- discord.members.set(adminId,{roles:[],permissions:'32',joinedAt:'2026-09-01T00:00:00Z',bot:false});discord.members.set(userId,{roles:[manualRole],permissions:'0',joinedAt:'2026-09-20T00:00:00Z',bot:false});
- const actor={key:vault.hash(s,adminId),permissions:'32',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};
+ discord.members.set(adminId,{roles:[],permissions:'8',joinedAt:'2026-09-01T00:00:00Z',bot:false});discord.members.set(userId,{roles:[manualRole],permissions:'0',joinedAt:'2026-09-20T00:00:00Z',bot:false});
+ const actor={key:vault.hash(s,adminId),permissions:'8',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};
  const tokens=new Components('test');const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,async()=>{});
  const actions=new ActionWorker(db,vault,discord,onboarding);
  const base={id:'100000000000000001',applicationId:'111111111111111111',token:'test',userId:adminId,channelId:'111111111111111112'};
@@ -102,7 +110,7 @@ it('completes Discord panel configuration, pinned branching flow and ownership-s
 it('serializes settings revisions, authorization and audit atomically',async()=>{
  const s=scopeForGuild('444444444444444444');await ensureGuild(db,s);
  await sql`DELETE FROM guild_settings WHERE guild_id=${s.guildId}`.execute(db);
- const settings=new SettingsService(db);const actor={key:'internal-admin',permissions:'32',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};
+ const settings=new SettingsService(db);const actor={key:'internal-admin',permissions:'8',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};
  const updates=await Promise.allSettled([settings.update(s,actor,0,{enabled:true}),settings.update(s,actor,0,{enabled:false})]);
  expect(updates.filter(r=>r.status==='fulfilled')).toHaveLength(1);
  expect(updates.filter(r=>r.status==='rejected')).toHaveLength(1);
@@ -117,7 +125,7 @@ it('HTTP ACK is signed, durable, deduplicated and drops all unsolicited fields',
  const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32));
  const app=createInteractionServer({db,vault,publicKey,applicationId:'111111111111111111'});
  const data={id:String(BigInt('200000000000000000')+BigInt(Date.now())),application_id:'111111111111111111',type:2,token:'test-token',guild_id:'222222222222222222',locale:'ja',guild_locale:'en-US',
-  member:{user:{id:'333333333333333333'},permissions:'32',roles:[]},data:{name:'nexus',options:[{name:'panel'}]},content:'PRIVATE BODY',attachments:['PRIVATE FILE']};
+  member:{user:{id:'333333333333333333'},permissions:'8',roles:[]},data:{name:'nexus',options:[{name:'panel'}]},content:'PRIVATE BODY',attachments:['PRIVATE FILE']};
  const body=JSON.stringify(data);const ts=String(Math.floor(Date.now()/1000));
  const headers={'content-type':'application/json','x-signature-timestamp':ts,'x-signature-ed25519':sign(null,Buffer.from(ts+body),keys.privateKey).toString('hex')};
  const start=performance.now();const response=await app.inject({method:'POST',url:'/interactions',payload:body,headers});

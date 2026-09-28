@@ -4,14 +4,14 @@ import type {Interaction} from 'discord.js';
 import type {Database} from '../../packages/db/src/index.js';
 import type {IdentityVault} from '../../packages/identity/src/index.js';
 import {Components} from '../../packages/security/src/index.js';
-import {handleGatewayInteraction,createInteractionServer} from '../../apps/interaction/src/server.js';
+import {handleGatewayInteraction,createInteractionServer,saveThenWake} from '../../apps/interaction/src/server.js';
 
 it('acknowledges a Gateway command before a blocked database and reports a queue failure',async()=>{
  const order:string[]=[],editReply=vi.fn(async()=>{});
  let rejectDatabase:(error:Error)=>void=()=>{};
  const blocked=new Promise<never>((_resolve,reject)=>{rejectDatabase=reject;});
  const db={transaction:()=>({execute:()=>{order.push('database');return blocked;}})} as unknown as Database;
- const input={inGuild:()=>true,guildId:'111111111111111111',user:{id:'222222222222222222'},isChatInputCommand:()=>true,isMessageComponent:()=>false,isModalSubmit:()=>false,isStringSelectMenu:()=>false,
+ const input={inGuild:()=>true,guildId:'111111111111111111',user:{id:'222222222222222222'},isChatInputCommand:()=>true,isMessageComponent:()=>false,isModalSubmit:()=>false,isAnySelectMenu:()=>false,
   id:'333333333333333333',applicationId:'444444444444444444',token:'secret',channelId:'555555555555555555',commandName:'nexus',options:{getSubcommand:()=> 'panel'},locale:'en-US',guildLocale:'en-US',
   deferReply:vi.fn(async()=>{order.push('ack');}),editReply} as unknown as Interaction;
  const work=handleGatewayInteraction(input,{db,vault:{} as IdentityVault,components:new Components('test')});
@@ -41,4 +41,20 @@ it('uses explicit component prefixes only for immediate modal and navigation cal
  expect(Components.kind('modal:token')).toBe('modal');
  expect(Components.kind('nav:token')).toBe('navigation');
  expect(Components.kind('token')).toBe('ordinary');
+});
+it('starts the guild worker only after the interaction job is durable',async()=>{
+ const order:string[]=[];let finish:(value:string)=>void=()=>{};
+ const pending=new Promise<string>(resolve=>{finish=resolve;});
+ const result=saveThenWake(async()=>{order.push('save');return pending;},async()=>{order.push('wake');});
+ expect(order).toEqual(['save']);finish('committed');expect(await result).toBe('committed');expect(order).toEqual(['save','wake']);
+ await expect(saveThenWake(async()=>{throw new Error('rollback');},async()=>{order.push('bad wake');})).rejects.toThrow('rollback');expect(order).not.toContain('bad wake');
+});
+it('uses a message update ACK for components and keeps save errors private',async()=>{
+ const order:string[]=[],followUp=vi.fn(async()=>{});
+ const db={transaction:()=>({execute:async()=>{order.push('database');throw new Error('offline');}})} as unknown as Database;
+ const input={inGuild:()=>true,guildId:'111111111111111111',user:{id:'222222222222222222'},isChatInputCommand:()=>false,isMessageComponent:()=>true,isModalSubmit:()=>false,isAnySelectMenu:()=>false,
+  id:'333333333333333333',applicationId:'444444444444444444',token:'secret',channelId:'555555555555555555',customId:'ordinary',message:{id:'666666666666666666'},locale:'en-US',guildLocale:'en-US',
+  deferUpdate:vi.fn(async()=>{order.push('update');}),followUp,editReply:vi.fn()} as unknown as Interaction;
+ await handleGatewayInteraction(input,{db,vault:{} as IdentityVault,components:new Components('test')});
+ expect(order).toEqual(['update','database']);expect(followUp).toHaveBeenCalledWith(expect.objectContaining({flags:64}));
 });

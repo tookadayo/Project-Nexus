@@ -1,5 +1,5 @@
-import {en,type MessageKey} from './en.js';
-import {ja} from './ja.js';
+import {en,type MessageKey} from './en';
+import {ja} from './ja';
 
 export type UiLanguage='auto'|'ja'|'en'|'bilingual';
 export type UiLocale=Exclude<UiLanguage,'auto'>;

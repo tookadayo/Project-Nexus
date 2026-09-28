@@ -59,7 +59,16 @@ function Get-NexusPortOwner([int]$Port) {
 }
 function Test-NexusRootText([string]$Value) {
     if ([string]::IsNullOrEmpty($Value)) { return $false }
-    return $Value.Replace('/','\').IndexOf($script:NexusRoot,[System.StringComparison]::OrdinalIgnoreCase) -ge 0
+    $normalized=$Value.Replace('/','\')
+    $offset=0
+    while($offset -lt $normalized.Length){
+        $index=$normalized.IndexOf($script:NexusRoot,$offset,[System.StringComparison]::OrdinalIgnoreCase)
+        if($index -lt 0){return $false}
+        $end=$index+$script:NexusRoot.Length
+        if($end -eq $normalized.Length -or $normalized[$end] -in @('\','"',' ',';')){return $true}
+        $offset=$end
+    }
+    return $false
 }
 function Get-NexusDedicatedPostgresPid {
     $file = Join-Path $script:NexusRoot '.local\pg\postmaster.pid'
@@ -70,25 +79,31 @@ function Get-NexusDedicatedPostgresPid {
     if (-not $data.Equals((Join-Path $script:NexusRoot '.local\pg'),[System.StringComparison]::OrdinalIgnoreCase) -or $lines[3] -ne '55432') { return 0 }
     $pidNumber = 0
     if (-not [int]::TryParse($lines[0],[ref]$pidNumber)) { return 0 }
-    $owner = Get-NexusPortOwner 55432
-    # Windows can report 0 for an orphaned PostgreSQL worker. A positive owner
-    # belonging to another process is never evidence for a NEXUS cleanup.
-    if ($owner -gt 0 -and $owner -ne $pidNumber) { return 0 }
     return $pidNumber
+}
+function Test-NexusBundledPostgres($Process) {
+    if($null -eq $Process -or [string]$Process.Name -ine 'postgres.exe'){return $false}
+    $binaryPath=([string]$Process.ExecutablePath).Replace('/','\')
+    return (Test-NexusRootText $binaryPath) -and ($binaryPath -match '\\node_modules\\\.pnpm\\@embedded-postgres\+windows-x64@|\\node_modules\\@embedded-postgres\\windows-x64\\') -and ([string]$Process.CommandLine -match 'postgres.exe|--fork')
 }
 function Get-NexusOrphanProcesses {
     $all = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
     $postgresPid = Get-NexusDedicatedPostgresPid
+    $postgresOwner=Get-NexusPortOwner 55432
+    $ownerProcess=$all | Where-Object { $_.ProcessId -eq $postgresOwner } | Select-Object -First 1
+    $postgresPortTrusted=$postgresOwner -eq 0 -or $postgresOwner -eq $postgresPid -or (Test-NexusBundledPostgres $ownerProcess)
     $ownedProcesses = New-Object System.Collections.Generic.List[object]
     foreach ($process in $all) {
         $command = [string]$process.CommandLine
         $executable = [string]$process.ExecutablePath
         $name = [string]$process.Name
         $owned = $false
-        if ($name -ieq 'postgres.exe' -and $postgresPid -gt 0 -and ($process.ProcessId -eq $postgresPid -or $process.ParentProcessId -eq $postgresPid)) {
-            $binaryPath = $executable.Replace('/','\')
-            $fromBundledBinary = (Test-NexusRootText $binaryPath) -and ($binaryPath -match '\\node_modules\\\.pnpm\\@embedded-postgres\+windows-x64@|\\node_modules\\@embedded-postgres\\windows-x64\\')
-            $owned = ((Test-NexusRootText $command) -and $command -match 'embedded-postgres|postgres.exe') -or ($fromBundledBinary -and $command -match 'postgres.exe|--fork')
+        if ($name -ieq 'postgres.exe' -and $postgresPid -gt 0 -and $postgresPortTrusted) {
+            $fromBundledBinary=Test-NexusBundledPostgres $process
+            $direct=$process.ProcessId -eq $postgresPid -or $process.ParentProcessId -eq $postgresPid
+            # A vanished postmaster can leave workers with different recycled parent IDs.
+            # The project binary, matching data/port metadata and trusted port owner are required.
+            $owned=$fromBundledBinary -and ($direct -or $command -match '--fork')
         }
         if ($name -ieq 'redis-server.exe' -and ((Test-NexusRootText $executable) -or (Test-NexusRootText $command)) -and ($executable.Replace('/','\') -like "$(Join-Path $script:NexusRoot '.local\redis')\*" -or $command.Replace('/','\') -like "*$(Join-Path $script:NexusRoot '.local\redis')\*redis-server.exe*") -and $command -match '56379') { $owned = $true }
         if ($name -match '^(node|node.exe)$' -and (Test-NexusRootText $command) -and $command -match 'scripts[\\/]dev\.ts|scripts[\\/]infra\.ts|scripts[\\/]web\.ts|apps[\\/]web[\\/]node_modules[\\/]next') { $owned = $true }

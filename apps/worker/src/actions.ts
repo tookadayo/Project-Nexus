@@ -73,6 +73,12 @@ export class ActionWorker {
      ON CONFLICT(organization_id,guild_id) DO UPDATE SET channel_id=EXCLUDED.channel_id,message_id=EXCLUDED.message_id`.execute(tx);
    }else if(action.kind==='COMMANDS_REGISTER'){
     sideEffectStarted=true;await this.discord.registerCommands(s.guildId,z.array(z.unknown()).parse(action.payload.commands));
+   }else if(action.kind==='TEST_MESSAGE'){
+    const payload=action.payload as {channelId:string,body:Panel};await this.discord.checkChannel(s.guildId,payload.channelId);sideEffectStarted=true;await this.discord.sendPanel(payload.channelId,payload.body,action.id);
+   }else if(action.kind==='REPLY_FOLLOWUP'){
+    const payload=action.payload as {encryptedToken:string,applicationId:string,body:Panel};
+    if(!this.discord.followup)throw new Error('FOLLOWUP_UNAVAILABLE');sideEffectStarted=true;await this.discord.followup(payload.applicationId,this.vault.open(s,payload.encryptedToken),payload.body);replyCompleted=true;
+    if('interactionHash' in payload&&typeof payload.interactionHash==='string')await sql`UPDATE interaction_diagnostics SET result='completed',completed_at=now() WHERE ${tenant(s)} AND interaction_hash=${payload.interactionHash}`.execute(tx);
    }else{
     const payload=action.payload as {encryptedToken:string,applicationId:string,body:Panel,interactionHash?:string};
     sideEffectStarted=true;await this.discord.editReply(payload.applicationId,this.vault.open(s,payload.encryptedToken),payload.body);replyCompleted=true;

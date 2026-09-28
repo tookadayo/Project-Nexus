@@ -26,7 +26,7 @@ it('runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
  const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32)),tokens=new Components('slice-component-key');
  const settings=new SettingsService(db),onboarding=new OnboardingService(db,settings,vault),discord=new FakeDiscord();
  const now=Date.now(),joined=new Date(now-8*86400000);
- discord.members.set(admin,{joinedAt:new Date(now-90*86400000).toISOString(),roles:[],permissions:'32',bot:false});
+ discord.members.set(admin,{joinedAt:new Date(now-90*86400000).toISOString(),roles:[],permissions:'8',bot:false});
  discord.members.set(user,{joinedAt:joined.toISOString(),roles:[],permissions:'0',bot:false});
  const analytics=new AnalyticsService(db,settings),lifecycle=new LifecycleService(db,vault,settings,discord);
  const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,async()=>{});
@@ -37,7 +37,7 @@ it('runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
  const redisUrl=new URL(infra.redisUrl),connection={host:redisUrl.hostname,port:Number(redisUrl.port)};
  const queueName=`slice-${randomUUID()}`,queue=new Queue(queueName,{connection});
  const worker=new Worker(queueName,async()=>{while(await interactions.tick(s)){/* drain durable jobs */}while(await actions.tick(s)){/* drain outbox */}},{connection});
- let sequence=0;
+ let sequence=0,publicPanelId:string|undefined,adminMessageId:string|undefined;
  const controls=(node:unknown):Record<string,unknown>[]=>{
   if(Array.isArray(node))return node.flatMap(controls);
   if(typeof node!=='object'||node===null)return [];
@@ -45,15 +45,17 @@ it('runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
   return [...(typeof value.custom_id==='string'?[value]:[]),...Object.values(value).flatMap(controls)];
  };
  const control=(label:string)=>{
-  const found=controls(discord.panels.get('reply')).find(c=>c.label===label||c.placeholder===label);
+  const found=controls(discord.panels.get(adminMessageId!)).find(c=>c.label===label||c.placeholder===label);
   expect(found,`Missing control: ${label}`).toBeDefined();return String(found!.custom_id);
  };
  const deliver=async(userId:string,data:Record<string,unknown>,type=3,messageId?:string)=>{
+  if(type===3&&userId===admin&&!messageId)messageId=adminMessageId;
+  discord.replyTarget=messageId??null;
   const id=String(BigInt('631111111111111111')+BigInt(++sequence));
   const body=JSON.stringify({id,application_id:'531111111111111119',type,token:`token-${id}`,guild_id:s.guildId,channel_id:channel,message:messageId?{id:messageId}:undefined,
-   member:{user:{id:userId},permissions:userId===admin?'32':'0',roles:[]},data});
+   member:{user:{id:userId},permissions:userId===admin?'8':'0',roles:[]},data});
   const ts=String(Math.floor(Date.now()/1000));const res=await http.inject({method:'POST',url:'/interactions',payload:body,headers:{'content-type':'application/json','x-signature-timestamp':ts,'x-signature-ed25519':sign(null,Buffer.from(ts+body),keys.privateKey).toString('hex')}});
-  expect(res.statusCode).toBe(200);expect(res.json()).toEqual({type:5,data:{flags:64}});
+  expect(res.statusCode).toBe(200);expect(res.json()).toEqual(type===3?{type:6}:{type:5,data:{flags:64}});
   await expect.poll(async()=>(await sql`SELECT id FROM interaction_jobs WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId} AND id=${id}`.execute(db)).rows.length,{timeout:10000}).toBe(1);
   const job=await queue.add('interaction',{});
   await expect.poll(async()=> (await queue.getJob(job.id!))?.getState(),{timeout:10000}).toBe('completed');
@@ -61,24 +63,26 @@ it('runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
  try{
   await deliver(admin,{name:'nexus',options:[{name:'panel'}]},2);
   expect(JSON.stringify(discord.panels.get('reply'))).toContain('NEXUS panel is ready');
-  await deliver(admin,{custom_id:control('Settings')});
+  publicPanelId=(await sql<{message_id:string}>`SELECT message_id FROM settings_panels WHERE guild_id=${s.guildId}`.execute(db)).rows[0]!.message_id;
+  await deliver(admin,{name:'nexus',options:[{name:'settings'}]},2);
+  adminMessageId='930000000000000999';discord.panels.set(adminMessageId,discord.panels.get('reply'));
   await deliver(admin,{custom_id:control('Advanced')});
   await deliver(admin,{custom_id:control('Choose community template'),values:['Gaming']});
   await deliver(admin,{custom_id:control('Choose a start channel'),values:[channel]});
   await deliver(admin,{custom_id:control('Enable onboarding')});
   await deliver(admin,{custom_id:control('Role mappings')});
   await deliver(admin,{custom_id:control('Choose an answer to map a role'),values:['purpose:community']});
-  const roleSelect=controls(discord.panels.get('reply')).find(c=>c.type===6)!;
+   const roleSelect=controls(discord.panels.get(adminMessageId!)).find(c=>c.type===6)!;
   await deliver(admin,{custom_id:roleSelect.custom_id,values:[role]});
   // This slice exercises the legacy start-channel success rule.
-  const configured=await settings.get(s);await settings.update(s,{key:'admin',permissions:'32',roles:[],source:'DISCORD_PANEL',requestId:'legacy-slice'},configured.revision,{flags:{...configured.flags,activation_dsl_v2:false}});
+  const configured=await settings.get(s);await settings.update(s,{key:'admin',permissions:'8',roles:[],source:'DISCORD_PANEL',requestId:'legacy-slice'},configured.revision,{flags:{...configured.flags,activation_dsl_v2:false}});
   const publisher=new GatewayPublisher(redis),consumer=new StreamConsumer(redis,lifecycle,'slice-consumer',0);await consumer.init();
   const event=normalize({t:'GUILD_MEMBER_ADD',s:1,d:{guild_id:s.guildId,user:{id:user},joined_at:joined.toISOString()}},0,'slice-gateway',vault)!;
   await publisher.publish(event);await consumer.tick();
   await deliver(user,{name:'nexus',options:[{name:'personalize'}]},2);
   await deliver(user,{custom_id:controls(discord.panels.get('reply'))[0]!.custom_id,values:['community']});
   expect(discord.members.get(user)!.roles).toEqual([role]);
-  const restart=control('Update Preferences / Restart Setup');
+  const restart=String(controls(discord.panels.get('reply')).find(c=>c.label==='Update Preferences / Restart Setup')!.custom_id);
   await publisher.publish(normalize({t:'MESSAGE_CREATE',s:2,d:{guild_id:s.guildId,id:'531111111111111118',channel_id:channel,author:{id:user},type:0,timestamp:new Date(joined.getTime()+60000).toISOString()}},0,'slice-gateway',vault)!);await consumer.tick();
   await lifecycle.process({...s,shardId:0,gatewaySessionId:'slice-health',sequence:1,kind:'telemetry.connected',at:joined.toISOString(),context:'PRODUCTION'});
   await lifecycle.process({...s,shardId:0,gatewaySessionId:'slice-health',sequence:2,kind:'telemetry.heartbeat',at:new Date(joined.getTime()+30000).toISOString(),context:'PRODUCTION'});
@@ -93,15 +97,26 @@ it('runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
   expect(discord.members.get(user)!.roles).toEqual([]);
   expect((await sql`SELECT role_id FROM nexus_role_grants WHERE guild_id=${s.guildId} AND revoked_at IS NOT NULL`.execute(db)).rows).toHaveLength(1);
   const fixed=(await sql<{message_id:string}>`SELECT message_id FROM settings_panels WHERE guild_id=${s.guildId}`.execute(db)).rows[0]!;
+  adminMessageId=publicPanelId;
   const pageControl=controls(discord.panels.get(fixed.message_id)).find(item=>item.placeholder==='Choose a page')!;
   expect(pageControl).toBeDefined();
   await deliver(admin,{custom_id:pageControl.custom_id,values:['channels']},3,fixed.message_id);
   expect(JSON.stringify(discord.panels.get(fixed.message_id))).toContain('Channels');
   expect(discord.calls.filter(call=>call==='sendPanel')).toHaveLength(1);
-  const settingControl=controls(discord.panels.get(fixed.message_id)).find(item=>item.label==='Change settings')!;
-  await deliver(user,{custom_id:settingControl.custom_id},3,fixed.message_id);
+  const settingControl=controls(discord.panels.get(fixed.message_id)).find(item=>item.placeholder==='Choose a page')!;
+  await deliver(user,{custom_id:settingControl.custom_id,values:['settings']},3,fixed.message_id);
   expect(JSON.stringify(discord.panels.get('reply'))).toContain('permission');
   expect(JSON.stringify(discord.panels.get(fixed.message_id))).toContain('Channels');
+  const latest=await settings.get(s);await settings.update(s,{key:'admin',permissions:'8',roles:[],source:'DISCORD_PANEL',requestId:'test-alert'},latest.revision,{helperChannelId:channel});
+  await deliver(admin,{custom_id:pageControl.custom_id,values:['settings']});
+  await deliver(admin,{custom_id:control('Choose a setting'),values:['notifications']});
+  await deliver(admin,{custom_id:control('Send test alert')});
+  expect(JSON.stringify(discord.panels.get('930000000000000002'))).toContain('NEXUS test alert');
+  await deliver(admin,{custom_id:control('Choose a setting'),values:['advanced']});
+  const before=JSON.stringify(discord.panels.get(fixed.message_id));
+  await deliver(admin,{custom_id:control('Advanced settings')});
+  expect(JSON.stringify(discord.panels.get(fixed.message_id))).toBe(before);
+  expect(JSON.stringify(discord.panels.get('reply'))).toContain('Settings');
  }finally{await worker.close();await queue.close();await http.close();await api.close();}
 });
 it('uses real Streams, reclaims a crashed delivery and deduplicates lifecycle and activation',async()=>{
@@ -109,7 +124,7 @@ it('uses real Streams, reclaims a crashed delivery and deduplicates lifecycle an
  const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32));const settings=new SettingsService(db);const onboarding=new OnboardingService(db,settings,vault);const discord=new FakeDiscord();
  const user='111111111111111114',helper='111111111111111115',channel='111111111111111116';const now=Date.now();const join=new Date(now-8*86400000);
  discord.members.set(user,{joinedAt:join.toISOString(),roles:[],permissions:'0',bot:false});discord.members.set(helper,{joinedAt:new Date(now-30*86400000).toISOString(),roles:[],permissions:'0',bot:false});
- const actor={key:'admin',permissions:'32',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};
+ const actor={key:'admin',permissions:'8',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};
  const cfg=await onboarding.chooseTemplate(s,actor,0,'Gaming');await settings.update(s,actor,cfg.revision,{enabled:true,onboardingEnabled:true,startChannelId:channel,flags:{...cfg.flags,activation_dsl_v2:false}});
  const lifecycle=new LifecycleService(db,vault,settings,discord);const publisher=new GatewayPublisher(redis);const worker=new StreamConsumer(redis,lifecycle,'worker-1',0);await worker.init();
  const joined=normalize({t:'GUILD_MEMBER_ADD',s:1,d:{guild_id:s.guildId,user:{id:user},joined_at:join.toISOString()}},0,'session',vault)!;
@@ -135,7 +150,7 @@ it('uses real Streams, reclaims a crashed delivery and deduplicates lifecycle an
 it('closes out-of-order leave/join episodes and creates a distinct rejoin',async()=>{
  const s=scopeForGuild('211111111111111113');await ensureGuild(db,s);
  const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32));const settings=new SettingsService(db);const discord=new FakeDiscord();
- await settings.update(s,{key:'admin',permissions:'32',roles:[],source:'DISCORD_PANEL',requestId:'rejoin'},0,{enabled:true});
+ await settings.update(s,{key:'admin',permissions:'8',roles:[],source:'DISCORD_PANEL',requestId:'rejoin'},0,{enabled:true});
  const service=new LifecycleService(db,vault,settings,discord);const user='211111111111111114';
  const base={...s,shardId:0,gatewaySessionId:'rejoin',context:'PRODUCTION' as const,encryptedUserId:vault.seal(s,user)};
  await service.process({...base,sequence:1,kind:'member.left',at:'2026-09-10T00:00:00.000Z'});
@@ -156,7 +171,7 @@ it('recovers a deleted consumer group and records stream loss as incomplete cove
 });
 it('does not starve fresh messages behind unresolved reply references',async()=>{
  const s=scopeForGuild('741111111111111111');await ensureGuild(db,s);const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32));const settings=new SettingsService(db);const discord=new FakeDiscord();
- await settings.update(s,{key:'admin',permissions:'32',roles:[],source:'DISCORD_PANEL',requestId:'pending'},0,{enabled:true,flags:{...(await settings.get(s)).flags,activation_dsl_v2:false}});
+ await settings.update(s,{key:'admin',permissions:'8',roles:[],source:'DISCORD_PANEL',requestId:'pending'},0,{enabled:true,flags:{...(await settings.get(s)).flags,activation_dsl_v2:false}});
  const now=Date.now(),user='741111111111111112',helper='741111111111111113',helper2='741111111111111117';
  discord.members.set(user,{joinedAt:new Date(now-60000).toISOString(),permissions:'0',roles:[],bot:false});discord.members.set(helper,{joinedAt:new Date(now-86400000).toISOString(),permissions:'0',roles:[],bot:false});discord.members.set(helper2,{...discord.members.get(helper)!});
  const service=new LifecycleService(db,vault,settings,discord),consumer=new StreamConsumer(redis,service,'reply-consumer',0),publisher=new GatewayPublisher(redis);await consumer.init();

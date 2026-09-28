@@ -1,4 +1,5 @@
 import {afterEach,expect,it,vi} from 'vitest';
+import {readFileSync} from 'node:fs';
 import {NextRequest} from '../../apps/web/node_modules/next/server.js';
 import {authorizedGuilds,dashboardContext,openSession,sealSession,validOAuthState} from '../../apps/web/app/auth/session';
 import {GET as selectGuild} from '../../apps/web/app/auth/select/route';
@@ -10,6 +11,7 @@ import {planRegistry} from '../../packages/settings/src/entitlements.js';
 import {toOpportunity} from '../../packages/presentation/src/adapters.js';
 import {en} from '../../packages/discord-panels/src/i18n/en.js';
 import {ja} from '../../packages/discord-panels/src/i18n/ja.js';
+import {webEn,webJa,messages,opportunityNames,evidenceNames} from '../../packages/discord-panels/src/i18n/web.js';
 
 afterEach(()=>{vi.unstubAllGlobals();vi.unstubAllEnvs();});
 it('starts measurement by default while leaving improvements and weekly messages off',()=>{
@@ -63,7 +65,31 @@ it('uses the last complete UTC week for the optional summary',()=>{
  expect(week.from.toISOString()).toBe('2026-09-14T00:00:00.000Z');
  expect(week.to.toISOString()).toBe('2026-09-21T00:00:00.000Z');
 });
+it('uses server local week boundaries across a time-zone offset',()=>{
+ const week=previousCompleteWeek(new Date('2026-09-24T09:00:00.000Z'),'Asia/Tokyo');
+ expect(week.from.toISOString()).toBe('2026-09-13T15:00:00.000Z');
+ expect(week.to.toISOString()).toBe('2026-09-20T15:00:00.000Z');
+});
+it('keeps local week boundaries across daylight saving changes',()=>{
+ const week=previousCompleteWeek(new Date('2026-03-16T15:00:00.000Z'),'America/New_York');
+ expect(week.from.toISOString()).toBe('2026-03-09T04:00:00.000Z');
+ expect(week.to.toISOString()).toBe('2026-03-16T04:00:00.000Z');
+ const prior=previousCompleteWeek(week.from,'America/New_York');
+ expect(prior.from.toISOString()).toBe('2026-03-02T05:00:00.000Z');
+});
 it('keeps forbidden product jargon out of Discord panel translations',()=>{
- const forbidden=/\b(?:Activation|Cohorts?|Interventions?|Experiments?|ITT|DSL|Randomization|Guardrails?|Revisions?|Membership Episodes?|Maturity|Eligibility|Posterior|Credible Interval|Deterministic threshold)\b|アクティベーション|コホート|ランダム化|ガードレール|割付|リビジョン|成熟|実験|施策/i;
- for(const dictionary of [en,ja])for(const value of Object.values(dictionary))expect(value.replace(/\{[^}]+\}/g,'')).not.toMatch(forbidden);
+ const forbidden=/\b(?:Activation|Retention|Cohorts?|Baseline|Lifecycle|Journey|Interventions?|Treatment|Signals?|Native|Fallback|Hybrid|D1|D7|D30|Experiments?|ITT|DSL|Randomization|Guardrails?|Revisions?|Membership Episodes?|Maturity|Eligibility|Posterior|Credible Interval|Deterministic threshold)\b|アクティベーション|コホート|ランダム化|ガードレール|割付|リビジョン|成熟|実験|施策/i;
+ for(const dictionary of [en,ja,messages.en,messages.ja,opportunityNames.en,opportunityNames.ja,evidenceNames.en,evidenceNames.ja])for(const value of Object.values(dictionary))expect(value.replace(/\{[^}]+\}/g,'')).not.toMatch(forbidden);
+});
+it('provides explicit Japanese text for every shared UI key',()=>{
+ const source=readFileSync('packages/discord-panels/src/i18n/ja.ts','utf8');
+ const explicit=new Set([...source.matchAll(/'([^']+)':'/g)].map(match=>match[1]));
+ expect(Object.keys(en).filter(key=>!explicit.has(key)&&!Object.hasOwn(webJa,key))).toEqual([]);
+ expect(Object.keys(webEn).sort()).toEqual(Object.keys(webJa).sort());
+ for(const key of Object.keys(webEn) as Array<keyof typeof webEn>){
+  const placeholders=(value:string)=>[...value.matchAll(/\{([a-zA-Z]+)\}/g)].map(match=>match[1]).sort();
+  expect(placeholders(webJa[key]),key).toEqual(placeholders(webEn[key]));
+ }
+ expect(Object.keys(messages.en).sort()).toEqual(Object.keys(messages.ja).sort());
+ expect(Object.keys(opportunityNames.en).sort()).toEqual(Object.keys(opportunityNames.ja).sort());
 });

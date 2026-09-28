@@ -2,7 +2,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {z} from 'zod';
 import {sql,tenant,json,type Database,type Tx} from '../../db/src/index.js';
 import {assert,type Scope} from '../../shared/src/index.js';
-import {canAdmin} from '../../security/src/index.js';
+import {canAdmin,canOperatePanel} from '../../security/src/index.js';
 import {audit,SettingsService,settingsSchema,type Actor} from './index.js';
 import {EntitlementService} from './entitlements.js';
 
@@ -17,7 +17,7 @@ export function configHash(value:unknown){return createHash('sha256').update(can
 export class RevisionService {
  constructor(private readonly db:Database,private readonly schemas:Partial<Record<ConfigDomain,z.ZodType>>){ }
  private validate(domain:ConfigDomain,value:unknown){const schema=this.schemas[domain];assert(schema,'UNSUPPORTED_CONFIG_DOMAIN');return schema.parse(value);}
- private async authorize(tx:Tx,s:Scope,actor:Actor){const cfg=await new SettingsService(this.db).get(s,tx);assert(canAdmin(actor.permissions,actor.roles,cfg.adminRoleId),'ADMIN_REQUIRED',403);}
+ private async authorize(tx:Tx,s:Scope,actor:Actor){const cfg=await new SettingsService(this.db).get(s,tx);assert((actor.source==='DISCORD_PANEL'?canOperatePanel:canAdmin)(actor.permissions,actor.roles,[cfg.adminRoleId,...cfg.managerRoleIds]),'ADMIN_REQUIRED',403);}
  async draft(s:Scope,actor:Actor,domain:ConfigDomain,value:unknown){
   const definition=this.validate(domain,value);
   return this.db.transaction().execute(async tx=>{

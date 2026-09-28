@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {sql,tenant,type Database} from '../../db/src/index.js';
 import {SettingsService,settingsSchema,audit,type Actor} from '../../settings/src/index.js';
-import {canAdmin} from './index.js';
+import {canAdmin,canOperatePanel} from './index.js';
 import type {IdentityVault} from '../../identity/src/index.js';
 import {assert,type Scope} from '../../shared/src/index.js';
 export class PrivacyService {
@@ -10,7 +10,7 @@ export class PrivacyService {
   const current=await this.settings.get(s);const hash=this.vault.hash(s,userId);
   assert(actor.key===hash,'ACTOR_MISMATCH',403);
   if(guild){
-   assert(canAdmin(actor.permissions,actor.roles,current.adminRoleId),'ADMIN_REQUIRED',403);
+   assert((actor.source==='DISCORD_PANEL'?canOperatePanel:canAdmin)(actor.permissions,actor.roles,[current.adminRoleId,...current.managerRoleIds]),'ADMIN_REQUIRED',403);
    await this.settings.mutate(s,actor,current.revision,async(_before,tx)=>{
     await sql`SELECT pg_advisory_xact_lock(hashtextextended(${'privacy:'+s.organizationId+':'+s.guildId},0))`.execute(tx);
     // Only an audit tombstone and disabled settings remain. Published flows can be deleted, never mutated.
