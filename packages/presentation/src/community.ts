@@ -56,7 +56,7 @@ export class CommunityService{
    WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.context='PRODUCTION' AND f.kind='message.sent'
     AND e.context='PRODUCTION' AND e.left_at IS NULL AND e.joined_at>=${new Date(now.getTime()-3*DAY)} AND f.occurred_at>=${new Date(now.getTime()-DAY)} AND f.occurred_at<=${new Date(now.getTime()-cfg.firstResponseMinutes*60000)}
     AND f.data->>'messageId' ~ '^[0-9]{17,20}$' AND f.data->>'channelId' ~ '^[0-9]{17,20}$' AND f.data->>'receivedExplicitReply' IS DISTINCT FROM 'true'
-    AND (item.status IS NULL OR item.status IN ('OPEN','ACKNOWLEDGED','SNOOZED'))
+    AND (item.status IS NULL OR item.status IN ('OPEN','ACKNOWLEDGED') OR (item.status='SNOOZED' AND item.snooze_until IS NOT NULL AND item.snooze_until<=${now}))
     AND NOT(COALESCE(state.roles,'{}'::text[]) && ${[...staffRoles]}::text[])
     AND (${cfg.analysisScope.mode}='all' OR (${cfg.analysisScope.mode}='include')=(f.data->>'channelId'=ANY(${cfg.analysisScope.channelIds}::text[])))
   ) SELECT channel_id,message_id,occurred_at,status,count(*) OVER()::integer AS total FROM candidates WHERE member_rank=1 ORDER BY occurred_at LIMIT 1 OFFSET ${Math.max(0,Math.min(1000,attentionOffset))}`.execute(this.db)).rows:[];

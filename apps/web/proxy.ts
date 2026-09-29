@@ -1,9 +1,9 @@
 import {NextResponse,type NextRequest} from 'next/server';
 import {timingSafeEqual} from 'node:crypto';
 export function proxy(req:NextRequest){
- if(req.nextUrl.pathname.startsWith('/auth/'))return NextResponse.next();
+ if(req.nextUrl.pathname.startsWith('/auth/')||['/pricing','/support','/privacy','/terms'].includes(req.nextUrl.pathname))return NextResponse.next();
  if(process.env.NEXUS_WEB_AUTH_MODE!=='development'){
-  if(!req.cookies.get('nexus_session')?.value)return NextResponse.redirect(new URL('/auth/login',req.url));
+  if(!req.cookies.get('nexus_session')?.value){const login=new URL('/auth/login',req.url);if(/^\/dashboard\/\d{17,20}$/.test(req.nextUrl.pathname))login.searchParams.set('next',req.nextUrl.pathname);return NextResponse.redirect(login);}
   return NextResponse.next();
  }
  const secret=process.env.NEXUS_WEB_PASSWORD;const header=req.headers.get('authorization')??'';

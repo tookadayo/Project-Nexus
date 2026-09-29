@@ -93,10 +93,10 @@ function Wait-NexusPortsReleased([int[]]$Ports, [int]$Seconds=5) {
     return $false
 }
 function Get-NexusWebReachability {
-    try { $null=Invoke-WebRequest 'http://127.0.0.1:3100' -UseBasicParsing -TimeoutSec 3; return 'Reachable' }
+    try { $null=Invoke-WebRequest 'http://127.0.0.1:3100' -UseBasicParsing -MaximumRedirection 0 -TimeoutSec 3; return 'Reachable' }
     catch {
         $response=$_.Exception.Response
-        if($response -and [int]$response.StatusCode -in @(401,403)){return 'Authentication required'}
+        if($response -and [int]$response.StatusCode -in @(301,302,303,307,308,401,403)){return 'Authentication required'}
         return 'Unavailable'
     }
 }

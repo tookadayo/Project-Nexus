@@ -50,7 +50,8 @@ export class DiscordRest implements DiscordPort {
   return actual.length===commands.length&&commands.every(expected=>{const item=expected as Record<string,unknown>,found=actual.find(row=>row.name===item.name);return found&&matches(found,expected);});
  }
  private async request<T>(path:string,method='GET',body?:unknown):Promise<T>{
-  const route=this.route(path,method),signal=AbortSignal.timeout(8000);
+  const route=this.route(path,method),signal=AbortSignal.timeout(20000);
+  const retrySafe=method==='GET'||method==='PUT'||method==='DELETE'||method==='PATCH'||method==='POST'&&typeof body==='object'&&body!==null&&'enforce_nonce' in body&&(body as {enforce_nonce?:unknown}).enforce_nonce===true;
   // Serialize each route, including the discovery request before Discord sends a bucket.
   // Known routes sharing a bucket also serialize against one another.
   const routeLock=this.acquire(route.key);let bucketLock:ReturnType<DiscordRest['acquire']>|undefined;
@@ -62,8 +63,8 @@ export class DiscordRest implements DiscordPort {
     const bucket=this.routeBuckets.get(route.key)??route.key;
     await this.waitForCooldown(Math.max(this.globalUntil,this.bucketUntil.get(bucket)??0),signal);
     let res:Response;
-    try{res=await fetch(`https://discord.com/api/v10${path}`,{method,headers:{Authorization:`Bot ${this.token}`,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal});}
-    catch(error){if(signal.aborted||error instanceof Error&&/abort|timeout/i.test(error.name))throw new DiscordFailure(0,0,{kind:'timeout',routeCategory:route.category});throw new DiscordFailure(0,0,{kind:'network',routeCategory:route.category});}
+    try{res=await fetch(`https://discord.com/api/v10${path}`,{method,headers:{Authorization:`Bot ${this.token}`,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.any([signal,AbortSignal.timeout(6000)])});}
+    catch(error){const failure=new DiscordFailure(0,0,{kind:signal.aborted||error instanceof Error&&/abort|timeout/i.test(error.name)?'timeout':'network',routeCategory:route.category});if(retrySafe&&attempt<2&&!signal.aborted){await this.waitForCooldown(Date.now()+Math.min(1000,250*2**attempt),signal);continue;}throw failure;}
     const bucketId=res.headers.get('x-ratelimit-bucket'),scope=res.headers.get('x-ratelimit-scope');
     const bucketKey=bucketId?`${bucketId}:${route.major}`:bucket;
     if(bucketId)this.routeBuckets.set(route.key,bucketKey);
@@ -78,7 +79,7 @@ export class DiscordRest implements DiscordPort {
     const isGlobal=res.status===429&&(bodyGlobal||scope==='global');
     const failure=new DiscordFailure(res.status,res.status===429?retryAfter:0,{rateLimitScope:scope,bucket:bucketId,routeCategory:route.category,isGlobal});
     if(res.status===429){const until=Date.now()+Math.max(0,retryAfter*1000);if(isGlobal)this.globalUntil=Math.max(this.globalUntil,until);else this.bucketUntil.set(bucketKey,Math.max(this.bucketUntil.get(bucketKey)??0,until));}
-    if((res.status===429||res.status>=500)&&attempt<2){
+    if((res.status===429||res.status>=500&&retrySafe)&&attempt<2){
      const delay=res.status===429?retryAfter*1000:Math.min(1000,250*2**attempt);
      if(delay>=8000||signal.aborted)throw failure;
      await this.waitForCooldown(Date.now()+delay,signal);

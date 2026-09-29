@@ -66,6 +66,18 @@ it('classifies global 429, timeout and network errors without response bodies',a
  vi.stubGlobal('fetch',vi.fn(async()=>{throw new TypeError('network unreachable');}));
  await expect(new DiscordRest('test-only-token',botId).roles(guildId)).rejects.toMatchObject({kind:'network'});
 });
+it('retries transient GET network failures but never retries an unsafe POST or 403/404',async()=>{
+ let calls=0;vi.stubGlobal('fetch',vi.fn(async()=>{calls++;if(calls<3)throw new TypeError('network unavailable');return new Response(JSON.stringify(roles),{status:200});}));
+ expect(await new DiscordRest('test-only-token',botId).roles(guildId)).toEqual(roles);expect(calls).toBe(3);
+ calls=0;vi.stubGlobal('fetch',vi.fn(async()=>{calls++;return new Response('{}',{status:503});}));
+ await expect(new DiscordRest('test-only-token',botId).followup(botId,'private-interaction-token',{content:'hello'})).rejects.toMatchObject({status:503});expect(calls).toBe(1);
+ for(const status of [403,404]){calls=0;vi.stubGlobal('fetch',vi.fn(async()=>{calls++;return new Response('{}',{status});}));await expect(new DiscordRest('test-only-token',botId).roles(guildId)).rejects.toMatchObject({status});expect(calls).toBe(1);}
+});
+it('retries nonce-protected panel sends with the same nonce',async()=>{
+ const bodies:string[]=[];vi.stubGlobal('fetch',vi.fn(async(_url:string,init:RequestInit)=>{bodies.push(String(init.body));return bodies.length===1?new Response('{}',{status:503}):new Response(JSON.stringify({id:'999999999999999999'}),{status:200});}));
+ expect(await new DiscordRest('test-only-token',botId).sendPanel('888888888888888888',{content:'panel'},'same-action-id')).toBe('999999999999999999');
+ expect(bodies).toHaveLength(2);expect(bodies[0]).toBe(bodies[1]);
+});
 it('rejects an above-bot role before making a role mutation',async()=>{
  vi.stubGlobal('fetch',vi.fn(async(url:string)=>new Response(JSON.stringify(url.endsWith('/roles')?[...roles,{id:'777777777777777777',name:'Owner',position:9,permissions:'0',managed:false}]:url.includes('/members/')?member:guild),{status:200})));
  await expect(new DiscordRest('test-only-token',botId).validateRole(guildId,'777777777777777777')).rejects.toThrow('ROLE_NOT_MANAGEABLE');

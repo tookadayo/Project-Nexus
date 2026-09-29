@@ -3,6 +3,7 @@ import {sql,tenant,type Database} from '../../../packages/db/src/index.js';
 import type {Scope} from '../../../packages/shared/src/index.js';
 import {IdentityVault} from '../../../packages/identity/src/index.js';
 import {DiscordFailure,type DiscordPort} from '../../../packages/discord/src/rest.js';
+import {errorReference,logFailure} from '../../../packages/shared/src/diagnostics.js';
 import {enqueue,type ActionKind} from '../../../packages/discord/src/outbox.js';
 import {OnboardingService} from '../../../packages/onboarding/src/index.js';
 import {selectedOptions} from '../../../packages/onboarding/src/flow.js';
@@ -15,7 +16,7 @@ export class ActionWorker {
  constructor(private readonly db:Database,private readonly vault:IdentityVault,private readonly discord:DiscordPort,private readonly onboarding:OnboardingService,private readonly interactionHealth?:InteractionHealth){}
  async tick(s:Scope):Promise<boolean>{
   // A crashed worker may have performed a REST operation; never blindly retry its expired lease.
-  await sql`UPDATE action_outbox SET state='UNKNOWN',last_error='worker lease expired' WHERE ${tenant(s)} AND state='RUNNING' AND lease_until<now()`.execute(this.db);
+  await sql`UPDATE action_outbox SET state=CASE WHEN kind IN ('PANEL_UPSERT','PANEL_DELETE') THEN 'PENDING' ELSE 'UNKNOWN' END,last_error='worker lease expired',lease_until=NULL WHERE ${tenant(s)} AND state='RUNNING' AND lease_until<now()`.execute(this.db);
   const action=await this.db.transaction().execute(async tx=>{
    const row=(await sql<Action>`SELECT id,kind,payload,attempts FROM action_outbox WHERE ${tenant(s)} AND state='PENDING' AND available_at<=now() ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1`.execute(tx)).rows[0];
    if(row)await sql`UPDATE action_outbox SET state='RUNNING',attempts=attempts+1,lease_until=now()+interval '60 seconds' WHERE ${tenant(s)} AND id=${row.id}::uuid`.execute(tx);
@@ -71,7 +72,11 @@ export class ActionWorker {
     if(!id){sideEffectStarted=true;id=await this.discord.sendPanel(payload.channelId,payload.body,action.id);}
     await sql`INSERT INTO settings_panels(organization_id,guild_id,channel_id,message_id) VALUES(${s.organizationId}::uuid,${s.guildId},${payload.channelId},${id})
      ON CONFLICT(organization_id,guild_id) DO UPDATE SET channel_id=EXCLUDED.channel_id,message_id=EXCLUDED.message_id`.execute(tx);
-    if(existing&&existing.channel_id!==payload.channelId&&this.discord.deletePanel){try{await this.discord.deletePanel(existing.channel_id,existing.message_id);}catch{/* New panel is active; the old panel cannot change settings after its token check. */}}
+    if(existing&&existing.message_id!==id&&this.discord.deletePanel)await enqueue(tx,s,`panel-delete:${existing.message_id}`,'PANEL_DELETE',{channelId:existing.channel_id,messageId:existing.message_id});
+   }else if(action.kind==='PANEL_DELETE'){
+    const payload=z.object({channelId:z.string(),messageId:z.string()}).parse(action.payload);
+    const active=(await sql<{message_id:string}>`SELECT message_id FROM settings_panels WHERE ${tenant(s)}`.execute(tx)).rows[0];
+    if(active?.message_id!==payload.messageId&&this.discord.deletePanel){try{sideEffectStarted=true;await this.discord.deletePanel(payload.channelId,payload.messageId);}catch(error){if(!(error instanceof DiscordFailure)||error.status!==404)throw error;}}
    }else if(action.kind==='COMMANDS_REGISTER'){
     sideEffectStarted=true;await this.discord.registerCommands(s.guildId,z.array(z.unknown()).parse(action.payload.commands));
    }else if(action.kind==='TEST_MESSAGE'){
@@ -93,8 +98,10 @@ export class ActionWorker {
    }
   });if(replyCompleted)this.interactionHealth?.completed();}catch(error){
    const known=error instanceof DiscordFailure;
-   const canRetry=known&&(error.status===429||error.status>=500)&&(!sideEffectStarted||error.status===429||action.kind==='REPLY_EDIT');
-   const state=canRetry&&action.attempts<5?'PENDING':sideEffectStarted&&(!known||error.status>=500)?'UNKNOWN':'FAILED';
+   logFailure({reference:errorReference(),action:action.kind,stage:'action_execution',error});
+   const panelRetry=['PANEL_UPSERT','PANEL_DELETE'].includes(action.kind)&&(!known||error.status===0||error.status>=500);
+   const canRetry=panelRetry||known&&(error.status===429||error.status>=500)&&(!sideEffectStarted||error.status===429||action.kind==='REPLY_EDIT');
+   const state=canRetry&&action.attempts<5?'PENDING':sideEffectStarted&&(!known||error.status>=500||error.status===0)?'UNKNOWN':'FAILED';
    await sql`UPDATE action_outbox SET state=${state},lease_until=NULL,last_error=${known?`HTTP ${error.status}`:sideEffectStarted?'Ambiguous side effect':'Precondition failed'},
     available_at=${new Date(Date.now()+(known?Math.max(error.retryAfter,2**action.attempts):1)*1000)} WHERE ${tenant(s)} AND id=${action.id}::uuid`.execute(this.db);
    if(action.kind==='REPLY_EDIT'){this.interactionHealth?.failed('reply_failed');const hash=typeof action.payload.interactionHash==='string'?action.payload.interactionHash:null;if(hash)await sql`UPDATE interaction_diagnostics SET result=${state==='UNKNOWN'?'unknown':state==='FAILED'?'failed':'queued'},error_code=${known?`HTTP_${error.status}`:'REPLY_ERROR'} WHERE ${tenant(s)} AND interaction_hash=${hash}`.execute(this.db);}

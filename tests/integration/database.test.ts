@@ -1,4 +1,4 @@
-import {beforeAll,afterAll,expect,it} from 'vitest';
+import {beforeAll,afterAll,expect,it,vi} from 'vitest';
 import EmbeddedPostgres from 'embedded-postgres';
 import {connect,migrate,ensureGuild,sql} from '../../packages/db/src/index.js';
 import {randomUUID,generateKeyPairSync,sign} from 'node:crypto';
@@ -127,11 +127,45 @@ it('moves a panel only after the new message is created and keeps the old panel 
  discord.failure=new DiscordFailure(403);await actions.tick(s);
  expect((await sql<{channel_id:string;message_id:string}>`SELECT channel_id,message_id FROM settings_panels WHERE guild_id=${s.guildId}`.execute(db)).rows[0]).toEqual(original);
  discord.failure=null;
- await interactions.dispatch(s,{...base,id:'644444444444444452',channelId:channelB,customId,command:''});while(await actions.tick(s)){/* drain outbox */}
+ const remove=discord.deletePanel.bind(discord);discord.deletePanel=async()=>{throw new DiscordFailure(503);};
+ await interactions.dispatch(s,{...base,id:'644444444444444452',channelId:channelB,customId,command:''});await actions.tick(s);
  const moved=(await sql<{channel_id:string;message_id:string}>`SELECT channel_id,message_id FROM settings_panels WHERE guild_id=${s.guildId}`.execute(db)).rows[0]!;
- expect(moved.channel_id).toBe(channelB);expect(moved.message_id).not.toBe(original.message_id);expect(discord.panels.has(original.message_id)).toBe(false);
+ expect(moved.channel_id).toBe(channelB);expect(moved.message_id).not.toBe(original.message_id);
+ await actions.tick(s);expect(discord.panels.has(original.message_id)).toBe(true);
+ expect((await sql<{state:string}>`SELECT state FROM action_outbox WHERE guild_id=${s.guildId} AND kind='PANEL_DELETE'`.execute(db)).rows[0]?.state).toBe('PENDING');
+ discord.deletePanel=remove;await sql`UPDATE action_outbox SET available_at=now() WHERE guild_id=${s.guildId} AND kind='PANEL_DELETE'`.execute(db);await actions.tick(s);
+ expect(discord.panels.has(original.message_id)).toBe(false);
  const staleAction=await tokens.issue(db,s,{action:'controlTryImprove'},null,900);
  await expect(interactions.dispatch(s,{...base,id:'644444444444444453',customId:staleAction,messageId:original.message_id,command:''})).rejects.toThrow('COMPONENT_EXPIRED');
+});
+it('records the panel failure stage and safe REST metadata when status still works',async()=>{
+ const s=scopeForGuild('645555555555555555');await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
+ const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32)),settings=new SettingsService(db),discord=new FakeDiscord(),tokens=new Components('test'),onboarding=new OnboardingService(db,settings,vault);
+ const userId='645555555555555556',channelId='645555555555555557',secret='interaction-private-token';discord.members.set(userId,{roles:[],permissions:'8',joinedAt:new Date().toISOString(),bot:false});
+ const worker=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,async()=>{});
+ const base={applicationId:'645555555555555558',token:secret,userId,channelId};
+ expect(JSON.stringify(await worker.dispatch(s,{...base,id:'645555555555555559',command:'status'}))).toContain('Discord');
+ discord.failure=new DiscordFailure(503,0,{routeCategory:'channel',rateLimitScope:'shared',bucket:'panel-bucket'});
+ const job={...base,id:'645555555555555560',command:'panel'};
+ await sql`INSERT INTO interaction_jobs(organization_id,guild_id,id,encrypted_payload) VALUES(${s.organizationId}::uuid,${s.guildId},${job.id},${vault.seal(s,JSON.stringify(job))})`.execute(db);
+ const logs:string[]=[];const writer=vi.spyOn(process.stderr,'write').mockImplementation(value=>{logs.push(String(value));return true;});
+ try{expect(await worker.tick(s)).toBe(true);}finally{writer.mockRestore();}
+ const failure=logs.map(line=>{try{return JSON.parse(line) as Record<string,unknown>;}catch{return null;}}).find(row=>row?.command==='panel');
+ expect(failure).toMatchObject({action:'panel',stage:'panel_channel_validation',httpStatus:503,routeCategory:'channel',rateLimitScope:'shared',bucket:'panel-bucket'});
+ expect(failure?.reference).toMatch(/^NXS-[A-F0-9]{12}$/);expect(JSON.stringify(failure)).not.toContain(secret);
+});
+it('reconciles a crashed panel send by nonce without activating a second panel',async()=>{
+ const s=scopeForGuild('646666666666666666');await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
+ const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32)),settings=new SettingsService(db),discord=new FakeDiscord(),tokens=new Components('test'),onboarding=new OnboardingService(db,settings,vault);
+ const userId='646666666666666667',channelId='646666666666666668';discord.members.set(userId,{roles:[],permissions:'8',joinedAt:new Date().toISOString(),bot:false});
+ const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,async()=>{}),actions=new ActionWorker(db,vault,discord,onboarding);
+ await interactions.dispatch(s,{id:'646666666666666669',applicationId:'646666666666666670',token:'test',userId,channelId,command:'panel'});
+ const pending=(await sql<{id:string;payload:{body:unknown}}>`SELECT id,payload FROM action_outbox WHERE guild_id=${s.guildId} AND kind='PANEL_UPSERT'`.execute(db)).rows[0]!;
+ const sent=await discord.sendPanel(channelId,pending.payload.body as Parameters<FakeDiscord['sendPanel']>[1],pending.id);
+ await sql`UPDATE action_outbox SET state='RUNNING',lease_until=now()-interval '1 minute' WHERE guild_id=${s.guildId} AND id=${pending.id}::uuid`.execute(db);
+ expect(await actions.tick(s)).toBe(true);
+ expect((await sql<{message_id:string}>`SELECT message_id FROM settings_panels WHERE guild_id=${s.guildId}`.execute(db)).rows[0]?.message_id).toBe(sent);
+ expect(discord.panels.size).toBe(1);
 });
 it('completes setup with optional choices and confirms manager role grants',async()=>{
  const s=scopeForGuild('655555555555555555');await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
@@ -160,7 +194,28 @@ it('completes setup with optional choices and confirms manager role grants',asyn
   await worker.dispatch(s,{...base,id:`65555555555555557${index+6}`,command:'',customId:token});
  }
  const upgraded=await settings.get(s);expect(upgraded.setupVersion).toBe(2);expect(upgraded.managerRoleIds).toEqual(old.managerRoleIds);
- const status=await worker.dispatch(s,{...base,id:'655555555555555580',command:'status'});expect(JSON.stringify(status)).toContain('0.6.0-alpha.1');expect(JSON.stringify(status)).not.toContain('PID');
+ const status=await worker.dispatch(s,{...base,id:'655555555555555580',command:'status'});expect(JSON.stringify(status)).toContain('0.6.0-alpha.2');expect(JSON.stringify(status)).not.toContain('PID');
+});
+it('distinguishes setup approval from safe skip during a legacy guild review',async()=>{
+ const s=scopeForGuild('656666666666666666');await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
+ const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32)),settings=new SettingsService(db),discord=new FakeDiscord(),tokens=new Components('test'),onboarding=new OnboardingService(db,settings,vault);
+ const userId='656666666666666667',channelId='656666666666666668',roleId='656666666666666669';discord.members.set(userId,{roles:[],permissions:'8',joinedAt:new Date().toISOString(),bot:false});
+ const actor={key:vault.hash(s,userId),permissions:'8',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};
+ await settings.update(s,actor,0,{setupVersion:1,setupSteps:{scope:true,team:true,notifications:true,goals:true},analysisScope:{mode:'include',channelIds:[channelId]},managerRoleIds:[roleId],helperRoleIds:[roleId],helperEnabled:true,helperChannelId:channelId,goalPreset:'multiplayer',newMemberGoals:['reply']});
+ const worker=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,async()=>{}),base={applicationId:'656666666666666670',token:'test',userId,channelId,command:''};
+ await worker.dispatch(s,{...base,id:'656666666666666676',customId:await tokens.issue(db,s,{action:'controlReviewSetup'},null,900)});
+ expect((await settings.get(s)).setupVersion).toBe(1);
+ let serial=671;let oldToken='';
+ for(const [step,mode] of [['scope','complete'],['team','skip'],['notifications','complete'],['goals','skip']] as const){
+  const current=await settings.get(s),customId=await tokens.issue(db,s,{action:'setupNext',step,mode,revision:current.revision},null,900);
+  if(step==='scope')oldToken=customId;
+  await worker.dispatch(s,{...base,id:`656666666666666${serial++}`,customId});
+ }
+ const done=await settings.get(s);
+ expect(done.setupVersion).toBe(2);expect(done.analysisScope).toEqual({mode:'include',channelIds:[channelId]});
+ expect(done.managerRoleIds).toEqual([]);expect(done.helperRoleIds).toEqual([]);expect(done.helperEnabled).toBe(true);
+ expect(done.goalPreset).toBeNull();expect(done.newMemberGoals).toEqual([]);
+ await expect(worker.dispatch(s,{...base,id:'656666666666666675',customId:oldToken})).rejects.toThrow('REVISION_CONFLICT');
 });
 it('previews an improvement without saving, cancels cleanly, and applies on confirmation',async()=>{
  const s=scopeForGuild('666666666666666661');await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
@@ -187,12 +242,21 @@ it('snoozes an attention item, shows it after expiry, and suppresses it when res
  const issue=async(action:string,extra:Record<string,unknown>={})=>tokens.issue(db,s,{action,channelId,messageId,...extra},null,900);
  const actor={key:vault.hash(s,userId),permissions:'8',roles:[],source:'DISCORD_PANEL' as const,requestId:randomUUID()};await settings.update(s,actor,0,{helperChannelId:channelId,helperEnabled:true});const helpers=new HelperWorker(db,discord,settings);
  expect((await new CommunityService(db).overview(s)).attention.map(item=>item.messageId)).toContain(messageId);
- await worker.dispatch(s,{...base,id:'677777777777777776',customId:await issue('controlSnooze',{minutes:30})});
- expect((await new CommunityService(db).overview(s)).attention[0]?.status).toBe('SNOOZED');
+ for(const [index,choice] of [{minutes:30},{minutes:60},{until:'today'}].entries()){
+  await worker.dispatch(s,{...base,id:`67777777777777778${index}`,customId:await issue('controlSnooze',choice)});
+  expect((await new CommunityService(db).overview(s)).attention).toHaveLength(0);
+  expect(await helpers.tick(s)).toBe(false);
+  await sql`UPDATE attention_items SET snooze_until=now()-interval '1 minute' WHERE guild_id=${s.guildId}`.execute(db);
+  expect((await new CommunityService(db).overview(s)).attention.map(item=>item.messageId)).toContain(messageId);
+ }
+ await sql`UPDATE attention_items SET snooze_until=NULL WHERE guild_id=${s.guildId}`.execute(db);
+ expect((await new CommunityService(db).overview(s)).attention).toHaveLength(0);
  expect(await helpers.tick(s)).toBe(false);
  await sql`UPDATE attention_items SET snooze_until=now()-interval '1 minute' WHERE guild_id=${s.guildId}`.execute(db);
- expect((await new CommunityService(db).overview(s)).attention.map(item=>item.messageId)).toContain(messageId);
- await worker.dispatch(s,{...base,id:'677777777777777777',customId:await issue('controlResolve')});
+ await worker.dispatch(s,{...base,id:'677777777777777790',customId:await issue('controlAcknowledge')});
+ expect((await new CommunityService(db).overview(s)).attention[0]?.status).toBe('ACKNOWLEDGED');
+ expect(await helpers.tick(s)).toBe(false);
+ await worker.dispatch(s,{...base,id:'677777777777777791',customId:await issue('controlResolve')});
  expect((await new CommunityService(db).overview(s)).attention).toHaveLength(0);
  expect(await helpers.tick(s)).toBe(false);
  expect((await sql<{status:string}>`SELECT status FROM attention_items WHERE guild_id=${s.guildId}`.execute(db)).rows[0]?.status).toBe('RESOLVED');

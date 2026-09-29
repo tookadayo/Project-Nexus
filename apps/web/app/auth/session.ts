@@ -26,6 +26,8 @@ export async function authorizedGuilds(token:string):Promise<AuthorizedGuild[]>{
  if(!response.ok)throw new Error('DISCORD_GUILDS_UNAVAILABLE');
  const rows=await response.json() as {id:string;name:string;owner?:boolean;permissions?:string}[];
  const installed=await installedGuildIds();
+ // Web administration requires Discord ownership, Manage Guild, or Administrator.
+ // Configured managerRoleIds apply only to Discord controls and never grant Web access.
  return rows.filter(row=>row.owner===true||((BigInt(row.permissions??'0')&32n)!==0n)||((BigInt(row.permissions??'0')&8n)!==0n)).map(row=>({id:row.id,name:row.name,installed:installed.has(row.id),installUrl:installUrl(row.id)}));
 }
 export async function dashboardContext(sessionCookie:string|undefined,guildCookie:string|undefined){

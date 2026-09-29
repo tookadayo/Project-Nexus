@@ -122,10 +122,10 @@ export async function controlPanel(issue:Issue,page:ControlPage,data:ControlData
   const actions:ButtonSpec[]=[...(community?.attention.length?[{label:t(locale,'control.attention'),action:'controlOpenAttention',publicEntry:true,emoji:'📥'}]:[]),...(community?.suggestion?.key==='reply_rescue'?[{label:t(locale,'control.tryImprovement'),action:'controlTryImprove',publicEntry:true,style:ButtonStyle.Primary as const}]:[]),...(data.settings?.setupSteps&&!Object.values(data.settings.setupSteps).every(Boolean)?[{label:t(locale,'control.openSettings'),action:'controlReviewSetup',publicEntry:true,emoji:'⚙️'}]:[])];
   if(actions.length)rows.push(await actionRow(issue,actions));
  }
- if(page==='settings'&&data.settings&&['scope','team','notifications','goals'].includes(section)&&(data.settings.setupVersion===1||data.settings.setupSteps&&!Object.values(data.settings.setupSteps).every(Boolean))){
+ if(page==='settings'&&data.settings&&['scope','team','notifications','goals'].includes(section)&&data.settings.setupSteps&&!Object.values(data.settings.setupSteps).every(Boolean)){
   const steps=['scope','team','notifications','goals'],number=steps.indexOf(section)+1;
   children.unshift(callout(locale==='ja'?`セットアップ ${number}/4`:`Setup ${number}/4`,t(locale,`control.${section}`)));
-  const wizard=await actionRow(issue,[{label:locale==='ja'?'完了して次へ':'Complete and continue',action:'setupNext',data:{step:section,revision:data.settings.revision},style:ButtonStyle.Primary},{label:locale==='ja'?'スキップして次へ':'Skip and continue',action:'setupNext',data:{step:section,revision:data.settings.revision}}]);
+  const wizard=await actionRow(issue,[{label:locale==='ja'?'完了して次へ':'Complete and continue',action:'setupNext',data:{step:section,revision:data.settings.revision,mode:'complete'},style:ButtonStyle.Primary},{label:locale==='ja'?'スキップして次へ':'Skip and continue',action:'setupNext',data:{step:section,revision:data.settings.revision,mode:'skip'}}]);
   if(rows.length>=5){const last=rows[rows.length-1]!;if(last.components.every(component=>component.type===ComponentType.Button)&&last.components.length+wizard.components.length<=5)(last.components as APIButtonComponent[]).push(...wizard.components as APIButtonComponent[]);else{rows.pop();rows.push(wizard);}}
   else rows.push(wizard);
  }

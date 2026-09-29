@@ -13,8 +13,9 @@ export async function GET(req:NextRequest){
   const identified=await fetch('https://discord.com/api/v10/users/@me',{headers:{Authorization:`Bearer ${token.access_token}`},cache:'no-store',signal:AbortSignal.timeout(8000)});
   if(!identified.ok)return new NextResponse('Discord identity unavailable',{status:401});
   const user=await identified.json() as {id:string};if(!/^\d{17,20}$/.test(user.id))return new NextResponse('Invalid Discord identity',{status:401});
-  const response=NextResponse.redirect(new URL('/',process.env.NEXUS_WEB_URL));
+  const next=req.cookies.get('nexus_oauth_next')?.value;
+  const response=NextResponse.redirect(new URL(next&&/^\/dashboard\/\d{17,20}$/.test(next)?next:'/',process.env.NEXUS_WEB_URL));
   response.cookies.set('nexus_session',sealSession({accessToken:token.access_token,userId:user.id,expiresAt:Date.now()+Math.min(token.expires_in,604800)*1000}),{httpOnly:true,secure:secureCookies(),sameSite:'lax',path:'/',maxAge:Math.min(token.expires_in,604800)});
-  response.cookies.delete('nexus_oauth_state');return response;
+  response.cookies.delete('nexus_oauth_state');response.cookies.delete('nexus_oauth_next');return response;
  }catch{return new NextResponse('Discord sign-in unavailable',{status:503});}
 }

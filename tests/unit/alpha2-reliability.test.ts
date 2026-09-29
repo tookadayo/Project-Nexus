@@ -3,6 +3,7 @@ import {errorReference,logFailure,redactSecrets} from '../../packages/shared/src
 import {nextZonedDayStart,zonedDayStart,zonedDateKey} from '../../packages/shared/src/timezones.js';
 import {controlPanel,type ControlData} from '../../packages/discord-panels/src/index.js';
 import {advanceSetup,setupOrder} from '../../packages/shared/src/setup-flow.js';
+import {discordDashboardLink} from '../../packages/shared/src/web-link.js';
 
 it('logs an actionable NXS reference while redacting credentials and stack secrets',()=>{
  const reference=errorReference();expect(reference).toMatch(/^NXS-[A-F0-9]{12}$/);
@@ -48,4 +49,10 @@ it('advances all four setup steps and upgrades a reviewed existing guild',()=>{
  const existing={setupVersion:1,setupSteps:{scope:true,team:true,notifications:true,goals:true}};
  expect(advanceSetup(existing,'goals')).toMatchObject({setupVersion:2,next:null,setupSteps:existing.setupSteps});
  expect(existing.setupVersion).toBe(1);
+});
+it('builds a guild-specific dashboard link without exposing local or credential URLs',()=>{
+ const id='123456789012345678';
+ expect(discordDashboardLink('https://nexus.example',id)).toBe(`https://nexus.example/dashboard/${id}`);
+ for(const unsafe of ['http://localhost:3100','https://127.0.0.1:3100','https://user:secret@nexus.example','https://nexus.example/?token=secret','javascript:alert(1)'])expect(discordDashboardLink(unsafe,id)).toBeUndefined();
+ expect(discordDashboardLink('http://localhost:3100',id,true)).toBe(`http://localhost:3100/dashboard/${id}`);
 });

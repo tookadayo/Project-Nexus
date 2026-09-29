@@ -51,7 +51,7 @@ test('chooses a goal, tests an improvement and sees a useful small-community com
  await page.goto('/');
  await page.getByRole('radio',{name:'Receive a reply'}).check();
  await page.getByRole('button',{name:'Save success goal'}).click();
- await page.getByRole('button',{name:'Enable'}).first().click();
+ await Promise.all([page.waitForEvent('load'),page.getByRole('button',{name:'Enable'}).first().click()]);
  await page.getByRole('button',{name:'Analysis',exact:true}).click();
  await page.getByRole('button',{name:'Alert staff when a direct reply is not confirmed',exact:true}).click();
  await expect(page.getByLabel('Improvement preview')).toContainText('1 hour');

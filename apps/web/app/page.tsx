@@ -7,11 +7,17 @@ import type {CommunityService} from '../../../packages/presentation/src/communit
 import {releaseInfo} from '../../../packages/shared/src/runtime-info';
 import {createHmac} from 'node:crypto';
 export const dynamic='force-dynamic';
-export default async function Page(){
+export default async function Page({guildId}:{guildId?:string}={}){
  const started=Date.now();
  const cookieStore=await cookies();
- let context;try{context=await dashboardContext(cookieStore.get('nexus_session')?.value,cookieStore.get('nexus_guild')?.value);}catch{context=null;}
- if(!context){const sessionCookie=cookieStore.get('nexus_session')?.value;if(authMode()==='oauth'&&!sessionCookie)redirect('/auth/login');if(authMode()==='oauth'&&!openSession(sessionCookie))redirect('/auth/expired');redirect('/servers');}
+ const selectedCookie=cookieStore.get('nexus_guild')?.value;
+ if(guildId&&!/^\d{17,20}$/.test(guildId))redirect('/servers');
+ const sessionCookie=cookieStore.get('nexus_session')?.value;
+ if(guildId&&authMode()==='oauth'&&!openSession(sessionCookie))redirect(`/auth/login?next=/dashboard/${guildId}`);
+ if(guildId&&selectedCookie!==guildId)redirect(`/auth/select?guild=${guildId}`);
+ let context;try{context=await dashboardContext(sessionCookie,guildId??selectedCookie);}catch{context=null;}
+ if(guildId&&context?.guildId!==guildId)redirect('/servers');
+ if(!context){if(authMode()==='oauth'&&!sessionCookie)redirect('/auth/login');if(authMode()==='oauth'&&!openSession(sessionCookie))redirect('/auth/expired');redirect('/servers');}
  const data:ProductData={home:null,journey:null,community:null,opportunities:null,actions:null,results:null,weeklyStatus:null,audit:[],options:{channels:[],roles:[],events:[],available:false},admin:null,guilds:context.guilds,selectedGuildId:context.guildId};
  {
   const headers={Authorization:`Bearer ${context.token}`},base=`${context.base}/v3/organizations/${context.organizationId}/guilds/${context.guildId}`;

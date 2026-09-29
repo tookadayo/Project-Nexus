@@ -374,7 +374,7 @@ it('suppresses acknowledged, snoozed and resolved attention alerts',async()=>{
  const worker=new HelperWorker(db,ctx.discord,ctx.settings);expect(await worker.tick(ctx.s,now)).toBe(false);
  expect((await new CommunityService(db).overview(ctx.s,7,now)).attention[0]?.status).toBe('ACKNOWLEDGED');
  await sql`UPDATE attention_items SET status='SNOOZED',snooze_until=${new Date(now.getTime()+3600000)} WHERE ${tenant(ctx.s)} AND message_id=${messageId}`.execute(db);
- expect(await worker.tick(ctx.s,now)).toBe(false);expect((await new CommunityService(db).overview(ctx.s,7,now)).attention[0]?.status).toBe('SNOOZED');
+ expect(await worker.tick(ctx.s,now)).toBe(false);expect((await new CommunityService(db).overview(ctx.s,7,now)).attention).toHaveLength(0);
  await sql`UPDATE attention_items SET status='RESOLVED',resolved_at=${now} WHERE ${tenant(ctx.s)} AND message_id=${messageId}`.execute(db);
  expect(await worker.tick(ctx.s,now)).toBe(false);expect((await new CommunityService(db).overview(ctx.s,7,now)).attention).toHaveLength(0);
  expect((await sql`SELECT 1 FROM helper_alerts WHERE ${tenant(ctx.s)}`.execute(db)).rows).toHaveLength(0);

@@ -3,6 +3,7 @@ import {readFileSync} from 'node:fs';
 import {NextRequest} from '../../apps/web/node_modules/next/server.js';
 import {authorizedGuilds,dashboardContext,openSession,sealSession,validOAuthState} from '../../apps/web/app/auth/session';
 import {GET as selectGuild} from '../../apps/web/app/auth/select/route';
+import {GET as oauthLogin} from '../../apps/web/app/auth/login/route';
 import {GET as oauthCallback} from '../../apps/web/app/auth/callback/route';
 import {POST as webControl} from '../../apps/web/app/control/route';
 import {previousCompleteWeek} from '../../apps/worker/src/weekly.js';
@@ -53,9 +54,17 @@ it('authorizes only guilds with administrative permissions on each request',asyn
  const guilds=await authorizedGuilds('access');expect(guilds.map(guild=>guild.id)).toEqual(['111111111111111111','222222222222222222','555555555555555555']);expect(guilds[2]?.installed).toBe(false);expect(guilds[2]?.installUrl).toContain('guild_id=555555555555555555');
  const session=sealSession({accessToken:'access',userId:'444444444444444444',expiresAt:Date.now()+10000});
  const selected=await dashboardContext(session,'222222222222222222');expect(selected?.guildId).toBe('222222222222222222');
+ const allowed=await selectGuild(new NextRequest('http://localhost:3100/auth/select?guild=222222222222222222',{headers:{cookie:`nexus_session=${session}`}}));expect(allowed.headers.get('location')).toContain('/dashboard/222222222222222222');
  const unauthorized=await dashboardContext(session,'333333333333333333');expect(unauthorized?.guildId).toBe('111111111111111111');
  const response=await selectGuild(new NextRequest('http://localhost:3100/auth/select?guild=333333333333333333',{headers:{cookie:`nexus_session=${session}`}}));expect(response.status).toBe(307);expect(response.headers.get('location')).toContain('/servers');
  const uninstalled=await selectGuild(new NextRequest('http://localhost:3100/auth/select?guild=555555555555555555',{headers:{cookie:`nexus_session=${session}`}}));expect(uninstalled.status).toBe(307);expect(uninstalled.headers.get('location')).toContain('/servers');
+});
+it('keeps OAuth return paths inside a validated guild dashboard route',async()=>{
+ vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_WEB_URL','https://nexus.example');vi.stubEnv('NEXUS_SESSION_SECRET','a'.repeat(64));vi.stubEnv('DISCORD_APPLICATION_ID','123456789012345678');vi.stubEnv('DISCORD_CLIENT_SECRET','test-secret');
+ const valid=await oauthLogin(new NextRequest('https://nexus.example/auth/login?next=/dashboard/222222222222222222'));
+ expect(valid.cookies.get('nexus_oauth_next')?.value).toBe('/dashboard/222222222222222222');
+ const invalid=await oauthLogin(new NextRequest('https://nexus.example/auth/login?next=https://outside.example'));
+ expect(invalid.cookies.get('nexus_oauth_next')?.value).not.toBe('https://outside.example');
 });
 it('returns a clear re-login response for an expired OAuth session',async()=>{
  vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_SESSION_SECRET','a'.repeat(64));

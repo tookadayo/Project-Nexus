@@ -5,7 +5,7 @@ $release=Get-NexusRelease
 $warnings=New-Object System.Collections.Generic.List[string]
 Write-Host 'NEXUS DOCTOR'
 Write-Host "`nRELEASE"
-Write-Host "Version $($release.Version)  Build $($release.Build)  Channel $($release.Channel)"
+Write-Host "Checkout version $($release.Version)  Build $($release.Build)  Channel $($release.Channel)"
 Write-Host "`nENVIRONMENT"
 foreach($tool in @('node','corepack')) {
     $found=Get-Command $tool -ErrorAction SilentlyContinue
@@ -44,11 +44,13 @@ foreach($port in $ports){
     if($info.Path){Write-Host "  Path: $($info.Path)"}
     if($info.CreatedAt){Write-Host "  Created: $($info.CreatedAt)"}
     if($info.Ownership -eq 'External or ambiguous' -or $info.Ownership -eq 'Unverified'){$unsafe+= $info}
-    if($info.State -eq 'Ghost listener'){$warnings.Add("Port $port has a ghost listener: PID $($info.Pid) is not resolvable. Wait, rerun Doctor, then restart Windows if it persists. No process will be terminated automatically.")}
+    if($info.State -eq 'Ghost listener'){Write-Host "  GHOST / UNKNOWN: port $port PID $($info.Pid) has no resolvable Windows process";$warnings.Add("Port $port has a ghost listener: PID $($info.Pid) is not resolvable. Wait, rerun Doctor, then restart Windows if it persists. No process will be terminated automatically.")}
 }
 Write-Host "`nDISCORD / WEB"
+$commandsPending=$false
 try {
     $health=Invoke-RestMethod 'http://127.0.0.1:3001/health' -TimeoutSec 3
+    if($health.PSObject.Properties['version']){Write-Host "Running release  $($health.version)";if($health.version -ne $release.Version){$warnings.Add('Running NEXUS release differs from checkout. Restart NEXUS to activate this release.')}}
     Write-Host "Gateway         $(if($health.discordConnected){'Connected'}else{'Disconnected'})"
     Write-Host "Transport       $($health.interaction.transport)"
     Write-Host "Handler         $(if($health.interaction.handlerRegistered){'Registered'}else{'Unavailable'})"
@@ -58,6 +60,7 @@ try {
     Write-Host "Last completion  $($health.interaction.lastCompletedAt)"
     Write-Host "Last result     $($health.interaction.lastResult)"
     if(-not $health.commands.registered){
+        $commandsPending=$true
         $warnings.Add('Command registration pending. Check nexus.err.log for Discord HTTP status and retry details.')
         $lastCommandFailure=$null
         $log=Join-Path $script:RuntimeDirectory 'nexus.err.log'
@@ -72,7 +75,7 @@ $oauth=@('DISCORD_APPLICATION_ID','DISCORD_CLIENT_SECRET','NEXUS_SESSION_SECRET'
 Write-Host "OAuth           $(if($oauth){'Configured'}else{'Not configured'})"
 Write-Host "`nHEALTH"
 foreach($warning in $warnings){Write-Warning $warning}
-$overall=if($unsafe.Count -gt 0){'ACTION REQUIRED'}elseif($warnings.Count -gt 0 -or $running.Count -lt 3){'DEGRADED'}else{'HEALTHY'}
+$overall=if($unsafe.Count -gt 0 -or $running.Count -eq 0){'UNHEALTHY'}elseif($warnings.Count -gt 0 -or $running.Count -lt 3){'DEGRADED'}else{'HEALTHY'}
 Write-Host "Overall         $overall"
 if($stale.Count -gt 0 -or $orphans.Count -gt 0 -or $running.Count -lt 3){Write-Host 'Recommended     NEXUS DOCTOR.cmd -Repair'}
 if(-not $Repair){return}
@@ -84,7 +87,10 @@ if($unsafe.Count -gt 0 -and @($unsafe|Where-Object {$_.State -ne 'Ghost listener
 }
 if($unsafe.Count -gt 0){Write-Warning 'Repair refused: a listener is external, ambiguous, or has an unresolved PID. No process was terminated.';exit 1}
 if($manifest -and [string]$manifest.projectRoot -ne $script:NexusRoot){Write-Warning 'Repair refused: manifest root does not match this project.';exit 1}
-if($running.Count -eq 3 -and $stale.Count -eq 0 -and $orphans.Count -eq 0 -and @($ports|Where-Object {(Get-NexusPortOwner $_) -eq 0}).Count -eq 0){Write-Host 'Managed runtime is already healthy.';exit 0}
+if($running.Count -eq 3 -and $stale.Count -eq 0 -and $orphans.Count -eq 0 -and @($ports|Where-Object {(Get-NexusPortOwner $_) -eq 0}).Count -eq 0){
+    if($commandsPending -and @($envLines|Where-Object {$_ -match '^DISCORD_GUILD_ID=\d{17,20}\s*$'}).Count){Write-Host 'Queuing NEXUS command registration repair.';& corepack pnpm register;if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}}
+    Write-Host 'Managed runtime is healthy.';exit 0
+}
 if($manifest){Stop-NexusManaged $manifest}
 Stop-NexusOrphans
 if(-not (Wait-NexusPortsReleased $ports 5)){Write-Warning 'Ports did not release within 5 seconds. Manifest was retained for diagnosis.';exit 1}

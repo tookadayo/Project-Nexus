@@ -1,0 +1,1 @@
+export default function Pricing(){return <main className="legal-page"><h1>Pricing / 料金</h1><p>Pricing is being prepared. Contact support for availability. / 料金のご案内は準備中です。利用についてはサポートへお問い合わせください。</p><a href="/support">Support / サポート</a></main>;}

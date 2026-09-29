@@ -1,12 +1,13 @@
 import {z} from 'zod';
 import {errorReference,logFailure} from '../../../packages/shared/src/diagnostics.js';
 import {nextZonedDayStart} from '../../../packages/shared/src/timezones.js';
+import {discordDashboardLink} from '../../../packages/shared/src/web-link.js';
 import {advanceSetup} from '../../../packages/shared/src/setup-flow.js';
 import {PermissionFlagsBits} from 'discord-api-types/v10';
 import {sql,tenant,type Database} from '../../../packages/db/src/index.js';
 import type {IdentityVault} from '../../../packages/identity/src/index.js';
 import {Components,canOperatePanel} from '../../../packages/security/src/index.js';
-import {SettingsService,templates,type Actor} from '../../../packages/settings/src/index.js';
+import {SettingsService,templates,type Actor,type SettingsView} from '../../../packages/settings/src/index.js';
 import {OnboardingService,type Session} from '../../../packages/onboarding/src/index.js';
 import {controlPanel,controlPages,settingsSections,analysisViews,panelPlacementWarning,settingsPanel,basicSettingsPanel,improvePanel,privacyPanel,questionPanel,confirmation,errorPanel,activationPanel,activationPreviewPanel,billingPanel,lifecyclePanel,diagnosticsPanel,interventionsPanel,interventionPreviewPanel,experimentsPanel,experimentMethodPanel,cohortsPanel,reportsPanel,overviewPanel,publishedPanel,successPanel,panelInstalledPanel,rolloutPreviewPanel,onboardingModePreviewPanel,onboardingNotConfiguredPanel,onboardingFlowPanel,editQuestionPanel,roleMappingPanel,sessionCompletePanel,activationReadinessPanel,guidedSetupPanel,resolveLocale,t,nexusPanel,callout,divider,actionRow,type Panel,type Issue,type ReadinessCheck,type UiLocale,type ControlPage,type SettingsSection,type AnalysisView} from '../../../packages/discord-panels/src/index.js';
 import {enqueue} from '../../../packages/discord/src/outbox.js';
@@ -94,16 +95,19 @@ export class InteractionWorker {
   if(action==='setup'){
    void recordProductEvent(this.db,s,'setup_started').catch(()=>{});
    if(!current.enabled)await this.settings.update(s,actor,current.revision,{enabled:true});
+   const review=await this.settings.get(s);if(review.setupVersion===1&&Object.values(review.setupSteps).every(Boolean))await this.settings.update(s,actor,review.revision,{setupSteps:{scope:false,team:false,notifications:false,goals:false}});
    try{await new CapabilityService(this.db,this.discord).refresh(s,current.onboardingMode);}catch{/* Guided setup explains the unavailable connection state. */}
    return this.communityPanel(issue,s,locale,'settings','scope');
   }
   if(action==='setupHome')return this.communityPanel(issue,s,locale,'overview');
   if(action==='setupNext'){
    if(input.messageId&&!setupFlow){const active=(await sql<{message_id:string}>`SELECT message_id FROM settings_panels WHERE ${tenant(s)}`.execute(this.db)).rows[0];assert(active?.message_id===input.messageId,'COMPONENT_EXPIRED');}
-   const step=z.enum(['scope','team','notifications','goals']).parse(intent.step),revision=z.number().parse(intent.revision);
+   const step=z.enum(['scope','team','notifications','goals']).parse(intent.step),revision=z.number().parse(intent.revision),mode=z.enum(['complete','skip']).default('complete').parse(intent.mode);
+   assert(!(current.setupVersion===1&&Object.values(current.setupSteps).every(Boolean)),'SETUP_REVIEW_REQUIRED');
    let progress:ReturnType<typeof advanceSetup>;try{progress=advanceSetup(current,step);}catch{throw new DomainError('SETUP_STEP_OUT_OF_ORDER');}
-   await this.settings.update(s,actor,revision,{setupSteps:progress.setupSteps,setupVersion:progress.setupVersion});
-   if(!progress.next){void recordProductEvent(this.db,s,'setup_completed').catch(()=>{});return successPanel(issue,locale==='ja'?'セットアップ完了':'Setup complete',locale==='ja'?'ホームへ戻れます。':'Return to Home.',{label:locale==='ja'?'ホーム':'Home',action:'setupHome'},locale);}
+   const defaults=mode==='skip'?step==='scope'?{analysisScope:{mode:'all' as const,channelIds:[]}}:step==='team'?{managerRoleIds:[],helperRoleIds:[]}:step==='notifications'?{helperEnabled:false,helperChannelId:null,weeklySummaryEnabled:false,weeklySummaryChannelId:null}: {goalPreset:null,newMemberGoals:[],importantChannels:[]}:{};
+   await this.settings.update(s,actor,revision,{...defaults,setupSteps:progress.setupSteps,setupVersion:progress.setupVersion});
+   if(!progress.next){if(current.setupVersion<2||!Object.values(current.setupSteps).every(Boolean))void recordProductEvent(this.db,s,'setup_completed').catch(()=>{});return successPanel(issue,locale==='ja'?'セットアップ完了':'Setup complete',locale==='ja'?'ホームへ戻れます。':'Return to Home.',{label:locale==='ja'?'ホーム':'Home',action:'setupHome'},locale);}
    return this.communityPanel(issue,s,locale,'settings',progress.next);
   }
   if(action==='recommendedSetup'){
@@ -224,10 +228,12 @@ export class InteractionWorker {
    if(intent.panelMessageId&&!setupFlow){const active=(await sql<{message_id:string}>`SELECT message_id FROM settings_panels WHERE ${tenant(s)}`.execute(this.db)).rows[0];assert(active?.message_id===intent.panelMessageId,'COMPONENT_EXPIRED');}
    assert(input.customId,'CONFIRMATION_REQUIRED');const ids=z.array(z.string().regex(/^\d{17,20}$/)).max(20).parse(intent.ids),roles=await this.discord.roles(s.guildId);
    assert(ids.every(id=>{const role=roles.find(item=>item.id===id);return role&&role.id!==s.guildId&&!role.managed&&(BigInt(role.permissions)&PermissionFlagsBits.Administrator)===0n;}),'INVALID_ROLE');
+   if(!Object.values(current.setupSteps).every(Boolean))try{advanceSetup(current,'team');}catch{throw new DomainError('SETUP_STEP_OUT_OF_ORDER');}
    await this.settings.update(s,actor,z.number().parse(intent.revision),{managerRoleIds:ids,setupSteps:{...current.setupSteps,team:true}});
    void recordProductEvent(this.db,s,'setup_team_completed').catch(()=>{});
-   if(Object.values({...current.setupSteps,team:true}).every(Boolean)&&!Object.values(current.setupSteps).every(Boolean))void recordProductEvent(this.db,s,'setup_completed').catch(()=>{});
-    return this.communityPanel(issue,s,publicLocale,'settings',setupFlow?'notifications':'team');
+   const updated=await this.settings.get(s);
+   if(!Object.values(current.setupSteps).every(Boolean))return this.continueSetup(issue,s,publicLocale,actor,current,updated,'team');
+   return this.communityPanel(issue,s,publicLocale,'settings','team');
   }
   if(action==='controlSnoozeMenu'){
    const channelId=z.string().regex(/^\d{17,20}$/).parse(intent.channelId),messageId=z.string().regex(/^\d{17,20}$/).parse(intent.messageId);
@@ -237,6 +243,8 @@ export class InteractionWorker {
    if(intent.panelMessageId){const active=(await sql<{message_id:string}>`SELECT message_id FROM settings_panels WHERE ${tenant(s)}`.execute(this.db)).rows[0];assert(active?.message_id===intent.panelMessageId,'COMPONENT_EXPIRED');}
    const channelId=z.string().regex(/^\d{17,20}$/).parse(intent.channelId),messageId=z.string().regex(/^\d{17,20}$/).parse(intent.messageId);
    const source=(await sql<{occurred_at:Date}>`SELECT occurred_at FROM lifecycle_events WHERE ${tenant(s)} AND context='PRODUCTION' AND kind='message.sent' AND data->>'messageId'=${messageId} AND data->>'channelId'=${channelId} LIMIT 1`.execute(this.db)).rows[0];assert(source,'ATTENTION_NOT_FOUND');
+   const prior=(await sql<{status:string;snooze_until:Date|null}>`SELECT status,snooze_until FROM attention_items WHERE ${tenant(s)} AND message_id=${messageId}`.execute(this.db)).rows[0];
+   assert(prior?.status!=='RESOLVED'&&!(prior?.status==='SNOOZED'&&(!prior.snooze_until||prior.snooze_until>new Date())),'ATTENTION_NOT_ACTIVE');
    const status=action==='controlResolve'?'RESOLVED':action==='controlAcknowledge'?'ACKNOWLEDGED':'SNOOZED';
    let snoozeUntil:Date|null=null;if(status==='SNOOZED'){
      snoozeUntil=intent.until==='today'?nextZonedDayStart(new Date(),current.timezone):new Date(Date.now()+z.number().int().min(1).max(1440).parse(intent.minutes)*60000);
@@ -247,15 +255,25 @@ export class InteractionWorker {
   if(action==='controlOpenDiagnostics')return this.communityPanel(issue,s,publicLocale,'diagnostics');
   if(action==='controlOpenAttention')return this.communityPanel(issue,s,publicLocale,'attention');
   if(action==='controlAttentionPage')return this.communityPanel(issue,s,publicLocale,'attention','scope',0,'none','none','overall',z.number().int().min(0).max(1000).parse(intent.index));
-  if(action==='controlReviewSetup')return this.communityPanel(issue,s,publicLocale,'settings','scope');
+  if(action==='controlReviewSetup'){
+   if(current.setupVersion===1&&Object.values(current.setupSteps).every(Boolean))await this.settings.update(s,actor,current.revision,{setupSteps:{scope:false,team:false,notifications:false,goals:false}});
+   return this.communityPanel(issue,s,publicLocale,'settings','scope');
+  }
   if(action.startsWith('control')){
    if(!setupFlow){const saved=(await sql<{message_id:string}>`SELECT message_id FROM settings_panels WHERE ${tenant(s)}`.execute(this.db)).rows[0];assert(saved&&input.messageId===saved.message_id,'COMPONENT_EXPIRED');}
    const revision=intent.revision===undefined?current.revision:z.number().parse(intent.revision),value=input.values?.[0];
+   const wizardStep=(['controlScopeDefault','controlScope','controlScopeChannels'].includes(action)?'scope':['controlSkipTeam','controlHelpers','controlClearHelpers'].includes(action)?'team':['controlSkipNotifications','controlHelperChannel','controlHelperToggle','controlAlertDelay'].includes(action)?'notifications':['controlSkipGoals','controlGoal','controlGoalPreset','controlGoalChannel'].includes(action)?'goals':null) as 'scope'|'team'|'notifications'|'goals'|null;
+   const wizardActive=!Object.values(current.setupSteps).every(Boolean);
+   if(wizardActive&&wizardStep)try{advanceSetup(current,wizardStep);}catch{throw new DomainError('SETUP_STEP_OUT_OF_ORDER');}
    if(action==='controlScopeDefault')await this.settings.update(s,actor,revision,{analysisScope:{mode:'all',channelIds:[]},setupSteps:{...current.setupSteps,scope:true}});
-   else if(action==='controlSkipTeam')await this.settings.update(s,actor,revision,{managerRoleIds:[],setupSteps:{...current.setupSteps,team:true}});
-   else if(action==='controlSkipNotifications')await this.settings.update(s,actor,revision,{helperEnabled:false,setupSteps:{...current.setupSteps,notifications:true}});
-   else if(action==='controlSkipGoals')await this.settings.update(s,actor,revision,{newMemberGoals:[],setupSteps:{...current.setupSteps,goals:true}});
-   else if(action==='controlKeepSettings')await this.settings.update(s,actor,revision,{setupVersion:2});
+   else if(action==='controlSkipTeam')await this.settings.update(s,actor,revision,{managerRoleIds:[],helperRoleIds:[],setupSteps:{...current.setupSteps,team:true}});
+   else if(action==='controlSkipNotifications')await this.settings.update(s,actor,revision,{helperEnabled:false,helperChannelId:null,weeklySummaryEnabled:false,weeklySummaryChannelId:null,setupSteps:{...current.setupSteps,notifications:true}});
+   else if(action==='controlSkipGoals')await this.settings.update(s,actor,revision,{goalPreset:null,newMemberGoals:[],importantChannels:[],setupSteps:{...current.setupSteps,goals:true}});
+   else if(action==='controlKeepSettings'){
+    await this.settings.update(s,actor,revision,{setupVersion:2,setupSteps:{scope:true,team:true,notifications:true,goals:true}});
+    if(current.setupVersion<2)void recordProductEvent(this.db,s,'setup_completed').catch(()=>{});
+    return successPanel(issue,locale==='ja'?'セットアップ完了':'Setup complete',locale==='ja'?'ホームへ戻れます。':'Return to Home.',{label:locale==='ja'?'ホーム':'Home',action:'setupHome'},locale);
+   }
    else if(action==='controlClearHelpers')await this.settings.update(s,actor,revision,{helperRoleIds:[]});
    else if(action==='controlScope')await this.settings.update(s,actor,revision,{analysisScope:{...current.analysisScope,mode:z.enum(['all','include','exclude']).parse(value)},setupSteps:{...current.setupSteps,scope:true}});
    else if(action==='controlScopeChannels')await this.settings.update(s,actor,revision,{analysisScope:{...current.analysisScope,channelIds:z.array(z.string().regex(/^\d{17,20}$/)).min(1).max(25).parse(input.values)},setupSteps:{...current.setupSteps,scope:true}});
@@ -283,8 +301,9 @@ export class InteractionWorker {
    const setupEvent=action==='controlScope'||action==='controlScopeDefault'||action==='controlScopeChannels'?'setup_scope_completed':action==='controlSkipTeam'?'setup_team_completed':action==='controlSkipNotifications'||action==='controlHelperChannel'?'setup_notification_completed':action==='controlSkipGoals'||action==='controlGoal'?'setup_goal_completed':null;
    if(setupEvent)void recordProductEvent(this.db,s,setupEvent).catch(()=>{});
    if(action!=='controlTestAlert'&&action!=='controlTestSummary')void recordProductEvent(this.db,s,'setting_saved').catch(()=>{});
-    const updated=await this.settings.get(s);if(Object.values(updated.setupSteps).every(Boolean)&&!Object.values(current.setupSteps).every(Boolean)){void recordProductEvent(this.db,s,'setup_completed').catch(()=>{});return successPanel(issue,locale==='ja'?'セットアップ完了':'Setup complete',locale==='ja'?'ホームへ戻れます。':'Return to Home.',{label:locale==='ja'?'ホーム':'Home',action:'setupHome'},locale);}
-   const section:SettingsSection=action==='controlScope'||action==='controlScopeDefault'||action==='controlScopeChannels'||action==='controlKeepSettings'?'scope':action==='controlHelpers'||action==='controlClearHelpers'||action==='controlSkipTeam'?'team':action.startsWith('controlGoal')||action==='controlSkipGoals'?'goals':action.startsWith('controlWeekly')||action==='controlTimezone'||action==='controlTestSummary'?'summary':'notifications';
+   const updated=await this.settings.get(s);
+   if(wizardActive&&wizardStep)return this.continueSetup(issue,s,publicLocale,actor,current,updated,wizardStep);
+   const section:SettingsSection=action==='controlScope'||action==='controlScopeDefault'||action==='controlScopeChannels'?'scope':action==='controlHelpers'||action==='controlClearHelpers'||action==='controlSkipTeam'?'team':action.startsWith('controlGoal')||action==='controlSkipGoals'?'goals':action.startsWith('controlWeekly')||action==='controlTimezone'||action==='controlTestSummary'?'summary':'notifications';
    return this.communityPanel(issue,s,publicLocale,'settings',section);
   }
   if(action==='settings')return basicSettingsPanel(issue,current,locale);
@@ -362,8 +381,14 @@ export class InteractionWorker {
   }else throw new DomainError('UNKNOWN_ACTION');
   const updated=await this.settings.get(s),updatedLocale=resolveLocale(updated.uiLanguage,{interactionLocale:input.locale,guildLocale:input.guildLocale});return ['uiLanguage','adminNotificationChannel','helperChannel','helperEnabled'].includes(action)?basicSettingsPanel(issue,updated,updatedLocale):settingsPanel(issue,updated,updatedLocale);
  }
+ private async continueSetup(issue:Issue,s:Scope,locale:UiLocale,actor:Actor,before:SettingsView,updated:SettingsView,step:'scope'|'team'|'notifications'|'goals'){
+  const progress=advanceSetup(updated,step);
+  if(progress.setupVersion!==updated.setupVersion||!updated.setupSteps[step])await this.settings.update(s,actor,updated.revision,{setupSteps:progress.setupSteps,setupVersion:progress.setupVersion});
+  if(!progress.next){if(before.setupVersion<2||!Object.values(before.setupSteps).every(Boolean))void recordProductEvent(this.db,s,'setup_completed').catch(()=>{});return successPanel(issue,locale==='ja'?'セットアップ完了':'Setup complete',locale==='ja'?'ホームへ戻れます。':'Return to Home.',{label:locale==='ja'?'ホーム':'Home',action:'setupHome'},locale);}
+  return this.communityPanel(issue,s,locale,'settings',progress.next);
+ }
  private async communityPanel(issue:Issue,s:Scope,locale:UiLocale,page:ControlPage='overview',section:SettingsSection='scope',channelPage=0,summaryField:'none'|'channel'|'day'|'hour'|'timezone'='none',goalPurpose:'none'|'lfg'|'feedback'|'bug'|'playtest'='none',analysisView:AnalysisView='overall',attentionIndex=0){
-  const data:Parameters<typeof controlPanel>[2]={dashboardUrl:process.env.NEXUS_WEB_URL,updatedAt:new Date()};
+  const data:Parameters<typeof controlPanel>[2]={dashboardUrl:discordDashboardLink(process.env.NEXUS_WEB_URL,s.guildId,process.env.NEXUS_WEB_AUTH_MODE==='development'),updatedAt:new Date()};
   if(['overview','newMembers','attention','analysis','community','channels','improve'].includes(page)){
    const community=new CommunityService(this.db,this.settings);data.community=await community.overview(s,30,new Date(),[],page==='attention'?attentionIndex:0);
    if(page==='attention'&&attentionIndex>0&&data.community.attention.length===0){attentionIndex=0;data.community=await community.overview(s,30);}
