@@ -66,6 +66,13 @@ for (let i = 0; i < 24; i++) {
     db,
   );
 }
+const recentJoin=new Date(now.getTime()-2*3600000),recentEpisode=randomUUID();
+const recentIdentity=await vault.resolve(db,s,'421111111111111999');
+await sql`INSERT INTO membership_episodes VALUES(${s.organizationId}::uuid,${s.guildId},${recentEpisode}::uuid,${recentIdentity}::uuid,${recentJoin},NULL,'PRODUCTION')`.execute(db);
+await sql`INSERT INTO lifecycle_events VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${recentEpisode}::uuid,'message.sent',${new Date(now.getTime()-35*60000)},'PRODUCTION',${json({messageId:'521111111111111999',channelId:'621111111111111111'})})`.execute(db);
+const secondEpisode=randomUUID(),secondIdentity=await vault.resolve(db,s,'421111111111111998');
+await sql`INSERT INTO membership_episodes VALUES(${s.organizationId}::uuid,${s.guildId},${secondEpisode}::uuid,${secondIdentity}::uuid,${recentJoin},NULL,'PRODUCTION')`.execute(db);
+await sql`INSERT INTO lifecycle_events VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${secondEpisode}::uuid,'message.sent',${new Date(now.getTime()-40*60000)},'PRODUCTION',${json({messageId:'521111111111111998',channelId:'621111111111111111'})})`.execute(db);
 await sql`INSERT INTO telemetry_cursor VALUES(${s.organizationId}::uuid,${s.guildId},${joined},${now})`.execute(
   db,
 );

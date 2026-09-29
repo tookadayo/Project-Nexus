@@ -32,22 +32,26 @@ export async function controlPanel(issue:Issue,page:ControlPage,data:ControlData
  const children=[divider()],community=data.community;
  if(page==='overview'||page==='newMembers'){
   if(page==='overview'&&data.settings?.setupVersion===1)children.push(callout(t(locale,'control.setupUpgrade'),t(locale,'control.setupGuide')));
-  if(page==='overview')children.push(callout(t(locale,'control.today'),community?.daily.ready?`${t(locale,'control.todayJoined',{count:community.daily.todayJoined??0})}\n${t(locale,'control.todayConnected',{count:community.daily.todayConnected??0})}\n${t(locale,'control.unanswered',{count:community.daily.attentionCount??0})}`:t(locale,'control.queueUnavailable')));
-  if(page==='overview'&&community?.attention.length)children.push(callout(t(locale,'control.attention'),`<#${community.attention[0]!.channelId}> · ${t(locale,'control.attentionCount',{count:community.daily.attentionCount??0})}`));
+  if(page==='overview'){
+   children.push(callout(t(locale,'control.today'),!community?.daily.ready?t(locale,'control.queueUnavailable'):community.daily.attentionCount?`⏳ ${t(locale,'experience.needsReply',{count:community.daily.attentionCount})}`:`✅ ${t(locale,'experience.allClear')}`));
+   if(community?.daily.ready)children.push(metricGrid([{label:t(locale,'control.joined'),value:String(community.daily.todayJoined??0)},{label:t(locale,'control.connected'),value:String(community.daily.todayConnected??0)},{label:t(locale,'control.attention'),value:String(community.daily.attentionCount??0)}]));
+   if(community?.suggestion?.key==='reply_rescue')children.push(callout(t(locale,'control.tryImprovement'),`${t(locale,'experience.suggestionWhy',{new:community.suggestion.basis.newcomerMinutes,regular:community.suggestion.basis.continuingMinutes})}\n${t(locale,'experience.sampleNotice')}`));
+  }
   if(page==='overview'&&data.settings?.setupSteps){const done=Object.values(data.settings.setupSteps).filter(Boolean).length;if(done<4)children.push(callout(t(locale,'control.setupProgress',{done}),t(locale,'control.setupGuide')));}
   if(community){
-   const window=community.cohortWindow;
-   children.push(callout(t(locale,'control.joinedPeriod',{from:date(window.joinedFrom,locale),through:date(new Date(new Date(window.joinedThrough).getTime()-1).toISOString(),locale),days:window.observedThroughDays}),t(locale,'control.sample',{count:community.eligibleMembers})));
-   if(community.dataReady){
-    children.push(metricGrid(community.stages.map(step=>({label:t(locale,`control.${step.key==='joined'?'joined':step.key==='activated'?'activated':step.key==='connected'?'connected':step.key==='repeated'?'repeated':'retained'}`),value:String(step.count)}))));
-    if(community.largestDrop)children.push(callout(t(locale,'control.improve'),t(locale,'control.largestDrop',{from:t(locale,`control.${community.largestDrop.fromKey as 'joined'}`),to:t(locale,`control.${community.largestDrop.toKey as 'joined'}`)})));
-   }else children.push(callout(t(locale,'control.newMembers'),t(locale,'control.moreData')));
-   if(page==='newMembers')children.push(metricGrid([{label:t(locale,'control.retained'),value:String(community.outcomes.retained)},{label:t(locale,'control.moreData'),value:String(community.outcomes.pending+community.outcomes.insufficient)}]));
+   if(page==='newMembers'){
+    const settled=community.outcomes.retained+community.outcomes.notRetained;
+    children.push(metricGrid([{label:t(locale,'control.joined'),value:String(community.arrivalCount),note:t(locale,'control.days',{count:community.range})},{label:t(locale,'control.connected'),value:community.dataReady?`${community.stages[2]?.count??0} / ${community.eligibleMembers}`:t(locale,'experience.pending'),note:t(locale,'experience.observed',{count:community.eligibleMembers})},{label:t(locale,'control.retained'),value:settled>=5?`${community.outcomes.retained} / ${settled}`:t(locale,'experience.pending'),note:settled?t(locale,'experience.observed',{count:settled}):t(locale,'experience.noMature')} ]));
+    if(community.channels.length)children.push(callout(t(locale,'control.channels'),community.channels.slice(0,3).map(row=>`<#${row.channelId}> · ${row.newcomers}`).join('\n')));
+    children.push(callout(t(locale,'experience.rules'),`${t(locale,'experience.replyRule')}\n${t(locale,'experience.reactionWeak')}`));
+    const window=community.cohortWindow;
+    children.push(footer(`${t(locale,'control.joinedPeriod',{from:date(window.joinedFrom,locale),through:date(new Date(new Date(window.joinedThrough).getTime()-1).toISOString(),locale),days:window.observedThroughDays})} ${t(locale,'control.sample',{count:community.eligibleMembers})}`));
+   }
   }else children.push(callout(t(locale,'control.newMembers'),t(locale,'control.moreData')));
  }else if(page==='attention'){
   if(!community?.daily.ready)children.push(callout(t(locale,'control.attention'),t(locale,'control.queueUnavailable')));
-  else if(community.attention.length){const index=Math.min(attentionIndex,community.attention.length-1),item=community.attention[index]!,status={OPEN:locale==='ja'?'未対応':'Open',ACKNOWLEDGED:locale==='ja'?'確認済み':'Acknowledged',SNOOZED:locale==='ja'?'再通知待ち':'Snoozed',RESOLVED:locale==='ja'?'解決済み':'Resolved'}[item.status]??item.status;children.push(callout(t(locale,'control.attention'),`${attentionIndex+1} / ${community.daily.attentionCount??community.attention.length}`));children.push(callout(t(locale,'control.queueTitle',{channel:item.channelId}),`${status} · ${t(locale,'control.minutes',{count:item.waitingMinutes})}\n${item.url}`));}
-  else children.push(callout(t(locale,'control.attention'),t(locale,'control.queueEmpty')));
+  else if(community.attention.length){const index=Math.min(attentionIndex,community.attention.length-1),item=community.attention[index]!,status={OPEN:locale==='ja'?'返信待ち':'Waiting for reply',ACKNOWLEDGED:t(locale,'experience.staffAcknowledged'),SNOOZED:locale==='ja'?'再確認待ち':'Snoozed',RESOLVED:t(locale,'control.resolve')}[item.status]??item.status;children.push(callout(`⏳ ${t(locale,'control.attention')} · ${attentionIndex+1} / ${community.daily.attentionCount??community.attention.length}`,`<#${item.channelId}> · ${t(locale,'control.minutes',{count:item.waitingMinutes})}\n${status}`));children.push(callout(t(locale,'experience.rules'),`${t(locale,'experience.waitReason')}\n${t(locale,'experience.queueRule',{count:data.settings?.firstResponseMinutes??20})}`));children.push(callout(t(locale,'control.openPost'),item.url));}
+  else children.push(callout(`✅ ${t(locale,'experience.allClear')}`,t(locale,'experience.queueRule',{count:data.settings?.firstResponseMinutes??20})));
  }else if(page==='community'||page==='analysis'&&analysisView==='overall'){
   if(community){children.push(metricGrid([{label:t(locale,'control.continuing'),value:String(community.classification.continuing)},{label:t(locale,'control.inactive'),value:String(community.classification.inactive)},{label:t(locale,'control.exited'),value:String(community.classification.exited)},{label:t(locale,'control.staffExcluded'),value:String(community.classification.staffExcluded)}]));
    children.push(callout(t(locale,'control.newMembers'),community.compare.available?t(locale,'control.replyComparison',{new:community.compare.newcomers?.replyMinutes??'—',regular:community.compare.continuing?.replyMinutes??'—'}):t(locale,'control.noComparison')));
@@ -73,6 +77,7 @@ export async function controlPanel(issue:Issue,page:ControlPage,data:ControlData
   else if(section==='notifications')children.push(metricGrid([{label:t(locale,'control.replyAlert'),value:t(locale,s.helperEnabled?'control.on':'control.off')},{label:t(locale,'control.destination'),value:s.helperChannelId?`<#${s.helperChannelId}>`:t(locale,'common.notConfigured')},{label:t(locale,'control.afterMinutes'),value:t(locale,'control.minutes',{count:s.firstResponseMinutes})},{label:t(locale,'control.dailyLimit'),value:t(locale,'control.alertLimit')}]));
   else if(section==='goals'){
    children.push(callout(t(locale,'control.goals'),(['reply','lfg','voice','event','feedback','bug','playtest'] as const).map(goal=>`${s.newMemberGoals.includes(goal)?'☑':'☐'} ${t(locale,`control.goal${goal[0]!.toUpperCase()+goal.slice(1)}` as 'control.goalReply')}`).join('\n')));
+   children.push(callout(t(locale,'experience.rules'),`${t(locale,'experience.replyRule')}\n${t(locale,'experience.voiceRule')}\n${t(locale,'experience.eventRule')}\n${t(locale,'experience.channelRule')}`));
    if(s.goalPreset)children.push(callout(t(locale,'control.gameType'),`${t(locale,`goal.${s.goalPreset}`)} · ${t(locale,`control.recommend${s.goalPreset==='multiplayer'?'Multiplayer':s.goalPreset==='early_access'?'EarlyAccess':'LiveService'}`)}`));
    if(s.importantChannels.length)children.push(callout(t(locale,'control.goalChannels'),s.importantChannels.map(item=>`${t(locale,`goal.${item.purpose as 'lfg'}`)}: <#${item.channelId}>`).join('\n')));
   }

@@ -24,7 +24,7 @@ import {
 } from "./charts";
 
 type Locale = "en" | "ja";
-const navPages=[{key:'overview',view:0,icon:'🏠'},{key:'newMembers',view:1,icon:'👋'},{key:'attention',view:8,icon:'📥'},{key:'analysis',view:5,icon:'📊'},{key:'results',view:3,icon:'🧪'},{key:'settings',view:4,icon:'⚙️'}] as const;
+const navPages=[{label:'control.overview',view:0,icon:'▦'},{label:'control.newMembers',view:1,icon:'◉'},{label:'control.attention',view:8,icon:'⌁'},{label:'experience.insights',view:5,icon:'◎'},{label:'experience.improvements',view:2,icon:'✦'},{label:'control.results',view:3,icon:'◫'},{label:'experience.goalsRules',view:9,icon:'≡'},{label:'control.settings',view:4,icon:'⚙'}] as const;
 const goalChoices=['reply','lfg','voice','event','feedback','bug','playtest'] as const;
 const wholePercent=(n:number|null)=>n===null?'—':`${n}%`;
 type Preview = {
@@ -101,9 +101,11 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
     [helperChannelId,setHelperChannelId]=useState(String(data.admin?.settings.helperChannelId??data.options.channels[0]?.id??"")),
     [helperRoleId,setHelperRoleId]=useState(String(data.admin?.settings.helperRoleId??"")),
     [responseMinutes,setResponseMinutes]=useState(Number(data.admin?.settings.firstResponseMinutes??20)),
+    [savedResponseMinutes,setSavedResponseMinutes]=useState(Number(data.admin?.settings.firstResponseMinutes??20)),
     helperCooldown=Number(data.admin?.settings.helperAlertCooldownMinutes??60),
     [retentionDays, setRetentionDays] = useState(Number(data.admin?.settings.detailedRetentionDays ?? 30)),
     [scopeMode,setScopeMode]=useState<'all'|'include'|'exclude'>((data.admin?.settings.analysisScope as {mode?:'all'|'include'|'exclude'}|undefined)?.mode??'all'),
+    [savedScopeMode,setSavedScopeMode]=useState<'all'|'include'|'exclude'>((data.admin?.settings.analysisScope as {mode?:'all'|'include'|'exclude'}|undefined)?.mode??'all'),
     [scopeChannels,setScopeChannels]=useState<string[]>((data.admin?.settings.analysisScope as {channelIds?:string[]}|undefined)?.channelIds??[]),
     [staffRoles,setStaffRoles]=useState<string[]>((data.admin?.settings.staffRoleIds as string[]|undefined)??[]),
     [goalPreset,setGoalPreset]=useState<'multiplayer'|'early_access'|'live_service'|''>((data.admin?.settings.goalPreset as 'multiplayer'|'early_access'|'live_service'|null)??''),
@@ -122,7 +124,10 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
     [evidence, setEvidence] = useState<string | null>(null),
     [testActionId, setTestActionId] = useState<string | null>(null),
     [actions, setActions] = useState(data.actions),
-    [results, setResults] = useState(data.results);
+    [results, setResults] = useState(data.results),
+    [attentionItems,setAttentionItems]=useState(data.community?.attention??[]),
+    [attentionRemoved,setAttentionRemoved]=useState(0),
+    [attentionSnooze,setAttentionSnooze]=useState<Record<string,'30'|'60'|'today'>>({});
   const c = messages[locale];
   const suggestedExcludedChannels=data.options.channels.filter(option=>/^#?(?:bot|logs?|staff|mod(?:erator)?)(?:[-_]|$)/i.test(option.label)).map(option=>option.id);
   const openImprovement=(key:ActionTemplateKey)=>{setTemplate(key);setPreflightState(null);setTestSent(false);setShowImprovementSetup(true);setPage(2);requestAnimationFrame(()=>document.querySelector('.builder-v3')?.scrollIntoView({behavior:'smooth',block:'start'}));};
@@ -155,6 +160,14 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
       return null;
     } finally {
       setBusy(false);
+    }
+  }
+  async function changeAttention(item:{channelId:string;messageId:string},status:'ACKNOWLEDGED'|'SNOOZED'|'RESOLVED'){
+    const choice=attentionSnooze[item.messageId]??'30';
+    const result=await request({action:'attention_action',channelId:item.channelId,messageId:item.messageId,status,...(status==='SNOOZED'?choice==='today'?{untilToday:true}:{minutes:Number(choice)}:{})});
+    if(result){
+      setAttentionItems(current=>status==='ACKNOWLEDGED'?current.map(row=>row.messageId===item.messageId?{...row,status}:row):current.filter(row=>row.messageId!==item.messageId));
+      if(status!=='ACKNOWLEDGED')setAttentionRemoved(count=>count+1);
     }
   }
   async function prepare(body: unknown, kind: typeof previewKind) {
@@ -240,7 +253,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
   async function saveHelper(enabled=helperEnabled){
     const updated=await request({action:'helper',enabled,channelId:helperChannelId||null,roleId:helperRoleId||null,responseMinutes,cooldownMinutes:helperCooldown,revision:notificationRevision});
     if(!updated)return;
-    setNotificationRevision(Number(updated.revision));setHelperEnabled(enabled);
+    setNotificationRevision(Number(updated.revision));setHelperEnabled(enabled);setSavedResponseMinutes(responseMinutes);
     setStatus(t(locale,"web.helper_alert_settings_saved"));
   }
   async function saveGoals(){
@@ -333,6 +346,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
   const home = (
     <>
       {breadcrumb()}{" "}
+      <section className="operation-banner" role="status"><div><p className="eyebrow">{t(locale,'experience.needsAttention')}</p><h2>{!data.community?.daily.ready?t(locale,'control.queueUnavailable'):Math.max(0,(data.community.daily.attentionCount??0)-attentionRemoved)>0?t(locale,'experience.needsReply',{count:Math.max(0,(data.community.daily.attentionCount??0)-attentionRemoved)}):t(locale,'experience.allClear')}</h2><p>{t(locale,'experience.queueRule',{count:savedResponseMinutes})}</p></div><button onClick={go(8)}>{t(locale,'control.attention')} →</button></section>
       {data.home ? (
         <>
           <section className="hero">
@@ -340,9 +354,9 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
               <p className="eyebrow">
                 NEXUS
               </p>
-              <h1>{c.tagline}</h1>
+              <h1>{t(locale,'experience.homeTitle')}</h1>
               <p className="orientation">
-                {t(locale,"web.understand_community_health_and_decide_what")}
+                {t(locale,'experience.homeLead')}
               </p>
             </div>
             <div className={`coverage-card ${data.home.dataHealth.label}`}>
@@ -370,8 +384,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
               publish={publish}
             />
           )}
-          {data.community && <p>{t(locale,"web.joined_value_value_value_members_have",locale==='ja'?{a:String(new Date(data.community.cohortWindow.joinedFrom).toLocaleDateString('ja-JP',{timeZone:'UTC'})),b:String(new Date(new Date(data.community.cohortWindow.joinedThrough).getTime()-1).toLocaleDateString('ja-JP',{timeZone:'UTC'})),c:String(data.community.cohortWindow.observedThroughDays),d:String(data.community.eligibleMembers)}:{a:String(new Date(data.community.cohortWindow.joinedFrom).toLocaleDateString('en-US',{timeZone:'UTC'})),b:String(new Date(new Date(data.community.cohortWindow.joinedThrough).getTime()-1).toLocaleDateString('en-US',{timeZone:'UTC'})),c:String(data.community.eligibleMembers),d:String(data.community.cohortWindow.observedThroughDays)})}</p>}
-          {data.community?.daily.ready && <p>{t(locale,"web.today_s_staff_check_value_posts",{a:String(data.community.daily.attentionCount),b:String(data.community.daily.yesterdayJoined),c:String(data.community.daily.yesterdayConnected)})}</p>}
+          {data.community && <p className="inline-note"><button onClick={()=>setPage(9)}>{t(locale,'experience.howMeasured')} →</button></p>}
           {data.community && <section className="surface"><h2>{t(locale,"web.how_new_members_are_participating")}</h2>{data.community.dataReady?<><div className="journey-steps">{data.community.stages.map(step=><p key={step.key}><strong>{step.count.toLocaleString()}</strong> {t(locale,`control.${step.key as 'joined'}`)}</p>)}</div>{data.community.largestDrop&&<p>{t(locale,"web.the_largest_observed_drop_is_between",{a:String(t(locale,`control.${data.community.largestDrop.fromKey as 'joined'}`)),b:String(t(locale,`control.${data.community.largestDrop.toKey as 'joined'}`))})}</p>}</>:<p>{t(locale,"web.there_is_not_enough_observed_data")}</p>}<button onClick={go(1)}>{t(locale,"web.see_details")} →</button></section>}
           <section className="kpi-grid">
             {data.home.kpis.filter(k=>k.key!=='activation_rate').map((k) => (
@@ -957,7 +970,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
         </div>
       </div>
       <section className="settings-grid">
-        <article className="surface"><h2>{t(locale,"web.channels_to_analyze")}</h2><p>{t(locale,"web.the_default_is_the_whole_server")}</p><button disabled={!suggestedExcludedChannels.length} onClick={()=>{setScopeMode('exclude');setScopeChannels(suggestedExcludedChannels)}}>{t(locale,"web.select_likely_staff_or_log_channels")}</button><select aria-label={t(locale,"web.channels_to_analyze")} value={scopeMode} onChange={e=>setScopeMode(e.target.value as typeof scopeMode)}><option value="all">{t(locale,"web.whole_server")}</option><option value="include">{t(locale,"web.selected_channels_only")}</option><option value="exclude">{t(locale,"web.exclude_selected_channels")}</option></select>{scopeMode!=='all'&&<div className="scope-list">{data.options.channels.map(option=><label key={option.id}><input type="checkbox" checked={scopeChannels.includes(option.id)} onChange={e=>setScopeChannels(e.target.checked?[...scopeChannels,option.id]:scopeChannels.filter(id=>id!==option.id))}/>{option.label}</label>)}</div>}<h3>{t(locale,"web.staff_roles_excluded_from_comparison")}</h3><div className="scope-list">{data.options.roles.map(option=><label key={option.id}><input type="checkbox" checked={staffRoles.includes(option.id)} onChange={e=>setStaffRoles(e.target.checked?[...staffRoles,option.id]:staffRoles.filter(id=>id!==option.id))}/>{option.label}</label>)}</div><button disabled={busy||scopeMode==='include'&&!scopeChannels.length} onClick={async()=>{const result=await request({action:'analysis_scope',mode:scopeMode,channelIds:scopeChannels,staffRoleIds:staffRoles,revision:notificationRevision});if(result){setNotificationRevision(result.revision);setStatus(t(locale,"web.analysis_scope_saved"));}}}>{t(locale,"web.save_changes")}</button></article>
+        <article className="surface"><h2>{t(locale,"web.channels_to_analyze")}</h2><p>{t(locale,"web.the_default_is_the_whole_server")}</p><button disabled={!suggestedExcludedChannels.length} onClick={()=>{setScopeMode('exclude');setScopeChannels(suggestedExcludedChannels)}}>{t(locale,"web.select_likely_staff_or_log_channels")}</button><select aria-label={t(locale,"web.channels_to_analyze")} value={scopeMode} onChange={e=>setScopeMode(e.target.value as typeof scopeMode)}><option value="all">{t(locale,"web.whole_server")}</option><option value="include">{t(locale,"web.selected_channels_only")}</option><option value="exclude">{t(locale,"web.exclude_selected_channels")}</option></select>{scopeMode!=='all'&&<div className="scope-list">{data.options.channels.map(option=><label key={option.id}><input type="checkbox" checked={scopeChannels.includes(option.id)} onChange={e=>setScopeChannels(e.target.checked?[...scopeChannels,option.id]:scopeChannels.filter(id=>id!==option.id))}/>{option.label}</label>)}</div>}<h3>{t(locale,"web.staff_roles_excluded_from_comparison")}</h3><div className="scope-list">{data.options.roles.map(option=><label key={option.id}><input type="checkbox" checked={staffRoles.includes(option.id)} onChange={e=>setStaffRoles(e.target.checked?[...staffRoles,option.id]:staffRoles.filter(id=>id!==option.id))}/>{option.label}</label>)}</div><button disabled={busy||scopeMode==='include'&&!scopeChannels.length} onClick={async()=>{const result=await request({action:'analysis_scope',mode:scopeMode,channelIds:scopeChannels,staffRoleIds:staffRoles,revision:notificationRevision});if(result){setNotificationRevision(result.revision);setSavedScopeMode(scopeMode);setStatus(t(locale,"web.analysis_scope_saved"));}}}>{t(locale,"web.save_changes")}</button></article>
         <article className="surface">
           <h2>{t(locale,"web.general")}</h2>
           <p>{c.language}</p>
@@ -1036,7 +1049,8 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
     </>
   );
 
-  const attentionView=<section className="surface"><h1>{t(locale,'control.attention')}</h1>{!data.community?.daily.ready?<p>{t(locale,'control.queueUnavailable')}</p>:<><p>{t(locale,'control.attentionCount',{count:data.community.daily.attentionCount??0})}</p>{data.community.attention.length?data.community.attention.map(item=><article key={item.messageId}><h2>{data.options.channels.find(channel=>channel.id===item.channelId)?.label??`#${item.channelId}`}</h2><p>{t(locale,'control.queueUnconfirmed')} · {t(locale,'control.minutes',{count:item.waitingMinutes})}</p><a href={item.url} target="_blank" rel="noopener noreferrer">{t(locale,'control.openPost')}</a></article>):<p>{t(locale,'control.queueEmpty')}</p>}</>}</section>;
+  const attentionView=<section className="surface attention-view"><div className="page-head"><div><p className="eyebrow">ATTENTION</p><h1>{t(locale,'control.attention')}</h1></div><button onClick={()=>window.location.reload()}>{t(locale,'control.refresh')}</button></div>{!data.community?.daily.ready?<div className="empty-state"><h2>{t(locale,'control.queueUnavailable')}</h2><p>{t(locale,'experience.noData')}</p></div>:attentionItems.length?<><p>{t(locale,'experience.queueRule',{count:savedResponseMinutes})}</p><div className="attention-list">{attentionItems.map(item=><article className="attention-card" key={item.messageId}><div><span className="badge badge-amber">{item.status==='ACKNOWLEDGED'?t(locale,'experience.staffAcknowledged'):t(locale,'experience.needsAttention')}</span><h2>{data.options.channels.find(channel=>channel.id===item.channelId)?.label??`#${item.channelId}`}</h2><p>{t(locale,'experience.waitReason')}</p><small>{t(locale,'experience.waiting')}: {t(locale,'control.minutes',{count:item.waitingMinutes})}</small></div><div className="attention-actions"><a className="button button-secondary" href={item.url} target="_blank" rel="noopener noreferrer">{t(locale,'experience.openPost')} ↗</a><button disabled={busy||item.status==='ACKNOWLEDGED'} onClick={()=>void changeAttention(item,'ACKNOWLEDGED')}>{t(locale,'experience.ack')}</button><label>{t(locale,'experience.snooze')}<select value={attentionSnooze[item.messageId]??'30'} onChange={event=>setAttentionSnooze(current=>({...current,[item.messageId]:event.target.value as '30'|'60'|'today'}))}><option value="30">30 min</option><option value="60">1 hour</option><option value="today">{locale==='ja'?'今日いっぱい':'Today'}</option></select></label><button disabled={busy} onClick={()=>void changeAttention(item,'SNOOZED')}>{t(locale,'experience.snooze')}</button><button disabled={busy} onClick={()=>void changeAttention(item,'RESOLVED')}>{t(locale,'experience.resolve')}</button></div></article>)}</div></>:<div className="empty-state"><h2>✅ {t(locale,'experience.allClear')}</h2><p>{t(locale,'experience.queueRule',{count:savedResponseMinutes})}</p><button onClick={()=>setPage(9)}>{t(locale,'experience.howMeasured')}</button></div>}</section>;
+  const rulesView=<section className="rules-view"><div className="page-head"><div><p className="eyebrow">MEASUREMENT</p><h1>{t(locale,'experience.goalsRules')}</h1><p className="orientation">{t(locale,'experience.noData')}</p></div></div><div className="rules-grid"><article className="surface"><h2>{t(locale,'control.connected')}</h2><p>{t(locale,'experience.connectionRule')}</p><dl><div><dt>{t(locale,'experience.observed',{count:data.community?.eligibleMembers??0})}</dt><dd>{data.community?.dataReady?`${data.community.stages[2]?.count??0} / ${data.community.eligibleMembers}`:t(locale,'experience.pending')}</dd></div><div><dt>{t(locale,'control.scope')}</dt><dd>{savedScopeMode==='all'?t(locale,'control.scopeAll'):savedScopeMode==='include'?t(locale,'control.scopeInclude'):t(locale,'control.scopeExclude')}</dd></div></dl><details><summary>{t(locale,'experience.howMeasured')}</summary><p>{t(locale,'experience.replyRule')}</p><p>{t(locale,'experience.voiceRule')}</p><p>{t(locale,'experience.reactionWeak')}</p></details></article><article className="surface"><h2>{t(locale,'control.retained')}</h2><p>{t(locale,'experience.retentionRule')}</p><p>{!data.community||data.community.outcomes.retained+data.community.outcomes.notRetained===0?t(locale,'experience.pending'):`${data.community.outcomes.retained} / ${data.community.outcomes.retained+data.community.outcomes.notRetained}`}</p><details><summary>{t(locale,'experience.howMeasured')}</summary><p>{t(locale,'control.observation')}</p></details></article><article className="surface"><h2>{t(locale,'control.replyAlert')}</h2><p>{t(locale,'experience.queueRule',{count:savedResponseMinutes})}</p><p>{helperEnabled?t(locale,'control.on'):t(locale,'control.off')}</p><button onClick={()=>setPage(4)}>{t(locale,'experience.settingsLink')}</button></article><article className="surface"><h2>{t(locale,'control.goals')}</h2><p>{t(locale,'experience.goalFocus')}</p><ul>{goalChoices.filter(goal=>newMemberGoals.includes(goal)).map(goal=><li key={goal}>{t(locale,`control.goal${goal[0]!.toUpperCase()+goal.slice(1)}` as 'control.goalReply')}</li>)}</ul><details><summary>{t(locale,'experience.howMeasured')}</summary><p>{t(locale,'experience.eventRule')}</p><p>{t(locale,'experience.channelRule')}</p></details><button onClick={()=>setPage(4)}>{t(locale,'experience.settingsLink')}</button></article></div></section>;
   const views = [
     home,
     journeyView,
@@ -1058,14 +1072,14 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
         <nav>
           {navPages.map(item => (
             <button
-              key={item.key}
+              key={item.label}
               aria-current={page === item.view ? "page" : undefined}
               onClick={() => setPage(item.view)}
             >
               <span aria-hidden="true">
                 {item.icon}
               </span>
-              {t(locale,`control.${item.key}`)}
+              {t(locale,item.label)}
             </button>
           ))}
         </nav>
@@ -1087,13 +1101,14 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
             onChange={(e) => setPage(Number(e.target.value))}
           >
             {navPages.map(item => (
-              <option value={item.view} key={item.key}>
-                {t(locale,`control.${item.key}`)}
+              <option value={item.view} key={item.label}>
+                {t(locale,item.label)}
               </option>
             ))}
           </select>
         </div>
-        {page===8?attentionView:page===5?<><div className="surface" role="tablist" aria-label={t(locale,'control.analysis')}>{(['overall','channels','behavior'] as const).map(tab=><button key={tab} role="tab" aria-selected={analysisTab===tab} onClick={()=>setAnalysisTab(tab)}>{t(locale,`control.${tab}`)}</button>)}</div>{analysisTab==='overall'?<>{views[5]}{views[6]}{opportunityView}</>:analysisTab==='channels'?views[7]:<section className="surface"><h1>{t(locale,'control.behavior')}</h1>{data.community?.compare.available?<><p>{t(locale,'control.replyAlert')}: {wholePercent(data.community.compare.newcomers?.receivedReplyPercent??null)}</p><p>{t(locale,'control.voice')}: {wholePercent(data.community.compare.newcomers?.voicePercent??null)}</p><p>{t(locale,'control.goalEvent')}: {wholePercent(data.community.compare.newcomers?.eventPercent??null)}</p></>:<p>{t(locale,'control.noComparison')}</p>}{data.community?.transitions.length?<><h2>{t(locale,'control.moves')}</h2>{data.community.transitions.slice(0,5).map((move,index)=><p key={index}>{move.from==='voice'?t(locale,'control.voice'):data.options.channels.find(item=>item.id===move.from)?.label??`#${move.from}`} → {move.to==='voice'?t(locale,'control.voice'):data.options.channels.find(item=>item.id===move.to)?.label??`#${move.to}`}</p>)}</>:null}</section>}</>:views[page]}
+        <div className="dashboard-topbar"><div><span>{data.guilds?.find(guild=>guild.id===data.selectedGuildId)?.name??'NEXUS'}</span><small>{data.admin?.usage.plan??'Free'} · {data.runtime?.gatewayConnected?t(locale,'control.on'):t(locale,'common.needsAttention')}</small></div><a href="/servers">{t(locale,'web.server')} ▾</a></div>
+        {page===9?rulesView:page===8?attentionView:page===5?<><div className="surface" role="tablist" aria-label={t(locale,'control.analysis')}>{(['overall','channels','behavior'] as const).map(tab=><button key={tab} role="tab" aria-selected={analysisTab===tab} onClick={()=>setAnalysisTab(tab)}>{t(locale,`control.${tab}`)}</button>)}</div>{analysisTab==='overall'?<>{views[5]}{views[6]}{opportunityView}</>:analysisTab==='channels'?views[7]:<section className="surface"><h1>{t(locale,'control.behavior')}</h1>{data.community?.compare.available?<><p>{t(locale,'control.replyAlert')}: {wholePercent(data.community.compare.newcomers?.receivedReplyPercent??null)}</p><p>{t(locale,'control.voice')}: {wholePercent(data.community.compare.newcomers?.voicePercent??null)}</p><p>{t(locale,'control.goalEvent')}: {wholePercent(data.community.compare.newcomers?.eventPercent??null)}</p></>:<p>{t(locale,'control.noComparison')}</p>}{data.community?.transitions.length?<><h2>{t(locale,'control.moves')}</h2>{data.community.transitions.slice(0,5).map((move,index)=><p key={index}>{move.from==='voice'?t(locale,'control.voice'):data.options.channels.find(item=>item.id===move.from)?.label??`#${move.from}`} → {move.to==='voice'?t(locale,'control.voice'):data.options.channels.find(item=>item.id===move.to)?.label??`#${move.to}`}</p>)}</>:null}</section>}</>:views[page]}
         <p className="status" role="status">
           {status}
         </p>

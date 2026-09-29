@@ -12,7 +12,7 @@ afterEach(()=>vi.unstubAllGlobals());
 const manifest=(file:string)=>JSON.parse(readFileSync(file,'utf8')) as {version:string};
 it('uses one SemVer source for every workspace package',()=>{
  expect(VERSION).toMatch(/^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/);
- expect(VERSION).toBe('0.6.0-alpha.2');expect(RELEASE_CHANNEL).toBe('Alpha');
+ expect(VERSION).toBe('0.6.0-alpha.3');expect(RELEASE_CHANNEL).toBe('Alpha');
  for(const area of ['apps','packages'])for(const name of readdirSync(area)){const file=join(area,name,'package.json');try{expect(manifest(file).version).toBe(VERSION);}catch(error){if(error instanceof Error&&'code' in error&&error.code==='ENOENT')continue;throw error;}}
  expect(shortSha(undefined)).toBe('unknown');expect(shortSha('ABCDEF0123456789')).toBe('abcdef0');expect(buildLabel(undefined)).toBe(VERSION);expect(buildLabel('abcdef012345')).toBe(`${VERSION}+gabcdef0`);
 });

@@ -28,7 +28,7 @@ import {WeeklySummaryWorker} from '../apps/worker/src/weekly.js';
 import {HelperWorker} from '../apps/worker/src/helpers.js';
 import {scopeSchema,type Scope} from '../packages/shared/src/index.js';
 import {createHash} from 'node:crypto';
-import {buildNexusCommand} from './commands.js';
+import {buildNexusCommands} from './commands.js';
 import {releaseInfo} from '../packages/shared/src/runtime-info.js';
 import {recordProductEvent} from '../packages/shared/src/product-telemetry.js';
 import {CommandRetry} from './command-retry.js';
@@ -37,7 +37,7 @@ import {logFailure} from '../packages/shared/src/diagnostics.js';
 try{loadEnvFile();}catch{/* Config validation below reports missing fields. */}
 const cfg=readConfig();const db=connect(cfg.DATABASE_URL);await migrate(db);
 const interactionHealth=new InteractionHealth(cfg.NEXUS_INTERACTION_TRANSPORT);
-const command=buildNexusCommand().toJSON(),hash=createHash('sha256').update(JSON.stringify(command)).digest('hex');
+const commands=buildNexusCommands().map(command=>command.toJSON()),hash=createHash('sha256').update(JSON.stringify(commands)).digest('hex');
 const redis=new Redis(cfg.REDIS_URL,{maxRetriesPerRequest:1,enableOfflineQueue:false,lazyConnect:true});redis.on('error',()=>process.stderr.write('Redis unavailable\n'));await redis.connect();
 const vault=new IdentityVault(cfg.IDENTITY_KEY,cfg.LOOKUP_KEY);const tokens=new Components(cfg.COMPONENT_KEY);const discord=new DiscordRest(cfg.DISCORD_TOKEN,cfg.DISCORD_APPLICATION_ID);
 const settings=new SettingsService(db);const onboarding=new OnboardingService(db,settings,vault);const privacy=new PrivacyService(db,vault,settings,(s,hash)=>scrubStream(redis,vault,s,hash));
@@ -87,7 +87,7 @@ await Promise.all([...(cfg.NEXUS_INTERACTION_TRANSPORT==='webhook'?[http.listen(
 async function syncCommands(s:Scope){
  const old=(await sql<{definition_hash:string}>`SELECT definition_hash FROM guild_command_sync WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId}`.execute(db)).rows[0];
  if(old?.definition_hash===hash&&(commandVerifiedAt.get(s.guildId)??0)>Date.now()-1800000)return;
- if(old?.definition_hash!==hash||!await discord.commandsMatch(s.guildId,[command])){await discord.registerCommands(s.guildId,[command]);await sql`INSERT INTO guild_command_sync(organization_id,guild_id,definition_hash) VALUES(${s.organizationId}::uuid,${s.guildId},${hash}) ON CONFLICT(organization_id,guild_id) DO UPDATE SET definition_hash=EXCLUDED.definition_hash,registered_at=now()`.execute(db);}
+ if(old?.definition_hash!==hash||!await discord.commandsMatch(s.guildId,commands)){await discord.registerCommands(s.guildId,commands);await sql`INSERT INTO guild_command_sync(organization_id,guild_id,definition_hash) VALUES(${s.organizationId}::uuid,${s.guildId},${hash}) ON CONFLICT(organization_id,guild_id) DO UPDATE SET definition_hash=EXCLUDED.definition_hash,registered_at=now()`.execute(db);}
  commandVerifiedAt.set(s.guildId,Date.now());
 }
 for(const guild of gateway.client.guilds.cache.values()){const s=scopeForGuild(guild.id);await db.transaction().execute(tx=>ensureGuild(tx,s));await retryCommands(s);}

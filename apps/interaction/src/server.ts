@@ -12,9 +12,9 @@ import type {InteractionHealth} from './health.js';
 const snowflake=z.string().regex(/^\d{17,20}$/);
 const interaction=z.object({id:snowflake,application_id:snowflake,type:z.number(),token:z.string().min(1).max(2048),guild_id:snowflake,locale:z.string().max(20).optional(),guild_locale:z.string().max(20).optional(),
  channel_id:snowflake.optional(),member:z.object({user:z.object({id:snowflake}),permissions:z.string().regex(/^\d+$/),roles:z.array(snowflake)}),
- data:z.object({name:z.string().max(100).optional(),custom_id:z.string().max(100).optional(),values:z.array(z.string().max(100)).max(25).optional(),
+ data:z.object({name:z.string().max(100).optional(),type:z.number().optional(),target_id:snowflake.optional(),custom_id:z.string().max(100).optional(),values:z.array(z.string().max(100)).max(25).optional(),
  options:z.array(z.object({name:z.string().max(100)})).max(10).optional(),components:z.array(z.object({components:z.array(z.object({custom_id:z.string(),value:z.string().max(2000)}))})).max(5).optional()}),message:z.object({id:snowflake}).optional()});
-export type InteractionJob={id:string,applicationId:string,token:string,userId:string,channelId?:string,messageId?:string,command?:string,customId?:string,values?:string[],fields?:Record<string,string>,locale?:string,guildLocale?:string};
+export type InteractionJob={id:string,applicationId:string,token:string,userId:string,channelId?:string,messageId?:string,targetMessageId?:string,targetUserId?:string,command?:string,customId?:string,values?:string[],fields?:Record<string,string>,locale?:string,guildLocale?:string};
 type Diagnostic={id:string;kind:'command'|'component'|'modal';action:string;receivedAt:Date;acknowledgedAt:Date};
 async function saveDiagnostic(tx:Tx,s:Scope,vault:IdentityVault,diagnostic:Diagnostic){
  await sql`INSERT INTO interaction_diagnostics(organization_id,guild_id,interaction_hash,kind,action,received_at,acknowledged_at,result)
@@ -30,7 +30,7 @@ export async function saveThenWake<T>(save:()=>Promise<T>,wake?:()=>Promise<void
  const result=await save();void wake?.().catch(()=>{});return result;
 }
 export async function handleGatewayInteraction(input:Interaction,opts:{db:Database,vault:IdentityVault,components:Components,health?:InteractionHealth,wake?:(s:Scope,id:string)=>Promise<void>}){
- if(!input.inGuild()||!input.guildId||(!input.isChatInputCommand()&&!input.isMessageComponent()&&!input.isModalSubmit()))return;
+ if(!input.inGuild()||!input.guildId||(!input.isChatInputCommand()&&!input.isMessageContextMenuCommand?.()&&!input.isUserContextMenuCommand?.()&&!input.isMessageComponent()&&!input.isModalSubmit()))return;
  const receivedAt=new Date();opts.health?.received(receivedAt);
  const s=scopeForGuild(input.guildId),userId=input.user.id,customId=input.isMessageComponent()||input.isModalSubmit()?input.customId:undefined;
  if(input.isMessageComponent()&&customId&&Components.kind(customId)==='modal'){
@@ -52,9 +52,10 @@ export async function handleGatewayInteraction(input:Interaction,opts:{db:Databa
   }
  }
  try{if(input.isMessageComponent())await input.deferUpdate();else await input.deferReply({flags:64});opts.health?.acknowledged();}catch{opts.health?.failed('ack_failed');return;}
- const job:InteractionJob={id:input.id,applicationId:input.applicationId,token:input.token,userId,channelId:input.channelId??undefined,messageId:input.isMessageComponent()?input.message.id:undefined,command:input.isChatInputCommand()&&input.commandName==='nexus'?input.options.getSubcommand(false)??undefined:undefined,customId,values:input.isAnySelectMenu()?input.values:undefined,fields:input.isModalSubmit()?Object.fromEntries(input.fields.fields.map((field,id)=>[id,'value' in field?String(field.value):''])):undefined,locale:input.locale,guildLocale:input.guildLocale??undefined};
+ const contextAction={'NEXUS: Add to Attention':'contextAdd','NEXUS: Mark Resolved':'contextResolve','NEXUS: Explain Detection':'contextExplain','NEXUS: New Member Status':'contextMember'} as const;
+ const job:InteractionJob={id:input.id,applicationId:input.applicationId,token:input.token,userId,channelId:input.channelId??undefined,messageId:input.isMessageComponent()?input.message.id:undefined,targetMessageId:input.isMessageContextMenuCommand?.()?input.targetId:undefined,targetUserId:input.isUserContextMenuCommand?.()?input.targetId:undefined,command:input.isChatInputCommand()&&input.commandName==='nexus'?input.options.getSubcommand(false)??undefined:input.isContextMenuCommand?.()?contextAction[input.commandName as keyof typeof contextAction]:undefined,customId,values:input.isAnySelectMenu()?input.values:undefined,fields:input.isModalSubmit()?Object.fromEntries(input.fields.fields.map((field,id)=>[id,'value' in field?String(field.value):''])):undefined,locale:input.locale,guildLocale:input.guildLocale??undefined};
  const acknowledgedAt=new Date();
- try{await saveThenWake(()=>opts.db.transaction().execute(async tx=>{await ensureGuild(tx,s);await saveDiagnostic(tx,s,opts.vault,{id:input.id,kind:input.isChatInputCommand()?'command':input.isModalSubmit()?'modal':'component',action:job.command??'component',receivedAt,acknowledgedAt});await sql`INSERT INTO interaction_jobs(organization_id,guild_id,id,encrypted_payload) VALUES(${s.organizationId}::uuid,${s.guildId},${job.id},${opts.vault.seal(s,JSON.stringify(job))}) ON CONFLICT DO NOTHING`.execute(tx);}),()=>opts.wake?.(s,job.id)??Promise.resolve());}
+ try{await saveThenWake(()=>opts.db.transaction().execute(async tx=>{await ensureGuild(tx,s);await saveDiagnostic(tx,s,opts.vault,{id:input.id,kind:input.isChatInputCommand()||input.isContextMenuCommand?.()?'command':input.isModalSubmit()?'modal':'component',action:job.command??'component',receivedAt,acknowledgedAt});await sql`INSERT INTO interaction_jobs(organization_id,guild_id,id,encrypted_payload) VALUES(${s.organizationId}::uuid,${s.guildId},${job.id},${opts.vault.seal(s,JSON.stringify(job))}) ON CONFLICT DO NOTHING`.execute(tx);}),()=>opts.wake?.(s,job.id)??Promise.resolve());}
  catch{opts.health?.failed('queue_failed');const locale=resolveLocale('auto',{interactionLocale:input.locale,guildLocale:input.guildLocale??undefined});if(input.isMessageComponent())await input.followUp({content:t(locale,'interaction.saveFailed'),flags:64}).catch(()=>{});else await input.editReply({content:t(locale,'interaction.saveFailed')}).catch(()=>{});}
 }
 export function createInteractionServer(opts:{db:Database,vault:IdentityVault,publicKey:string,applicationId:string,components?:Components,discord?:DiscordPort,health?:InteractionHealth,wake?:(s:Scope,id:string)=>Promise<void>}){
@@ -87,8 +88,10 @@ export function createInteractionServer(opts:{db:Database,vault:IdentityVault,pu
     ]}};
    }),1200);opts.health?.acknowledged();return response;}catch{opts.health?.failed('ack_failed');return {type:4,data:{flags:64,content:t(immediateLocale,'modal.unavailable')}};}
   }
+  const contextAction={'NEXUS: Add to Attention':'contextAdd','NEXUS: Mark Resolved':'contextResolve','NEXUS: Explain Detection':'contextExplain','NEXUS: New Member Status':'contextMember'} as const;
+  const contextName=input.data.name as keyof typeof contextAction|undefined;
   const job:InteractionJob={id:input.id,applicationId:input.application_id,token:input.token,userId:input.member.user.id,
-   channelId:input.channel_id,messageId:input.message?.id,command:input.data.name==='nexus'?input.data.options?.[0]?.name:undefined,customId:input.data.custom_id,values:input.data.values,
+   channelId:input.channel_id,messageId:input.message?.id,targetMessageId:input.data.type===3?input.data.target_id:undefined,targetUserId:input.data.type===2?input.data.target_id:undefined,command:input.data.name==='nexus'?input.data.options?.[0]?.name:contextName?contextAction[contextName]:undefined,customId:input.data.custom_id,values:input.data.values,
    fields:input.type===5?Object.fromEntries(input.data.components?.flatMap(row=>row.components.map(c=>[c.custom_id,c.value]))??[]):undefined,locale:input.locale,guildLocale:input.guild_locale};
   // The response must finish before queueing can acquire a database connection.
   reply.raw.once('finish',()=>{

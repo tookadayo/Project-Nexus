@@ -14,7 +14,7 @@ export async function GET(req:NextRequest){
   if(!identified.ok)return new NextResponse('Discord identity unavailable',{status:401});
   const user=await identified.json() as {id:string};if(!/^\d{17,20}$/.test(user.id))return new NextResponse('Invalid Discord identity',{status:401});
   const next=req.cookies.get('nexus_oauth_next')?.value;
-  const response=NextResponse.redirect(new URL(next&&/^\/dashboard\/\d{17,20}$/.test(next)?next:'/',process.env.NEXUS_WEB_URL));
+  const response=NextResponse.redirect(new URL(next&&/^\/dashboard\/\d{17,20}$/.test(next)?next:'/servers',process.env.NEXUS_WEB_URL));
   response.cookies.set('nexus_session',sealSession({accessToken:token.access_token,userId:user.id,expiresAt:Date.now()+Math.min(token.expires_in,604800)*1000}),{httpOnly:true,secure:secureCookies(),sameSite:'lax',path:'/',maxAge:Math.min(token.expires_in,604800)});
   response.cookies.delete('nexus_oauth_state');response.cookies.delete('nexus_oauth_next');return response;
  }catch{return new NextResponse('Discord sign-in unavailable',{status:503});}

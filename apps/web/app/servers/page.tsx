@@ -1,12 +1,13 @@
 import {cookies} from 'next/headers';
 import {redirect} from 'next/navigation';
-import {authorizedGuilds,openSession,authMode,installUrl} from '../auth/session';
+import {authorizedGuilds,openSession,authMode} from '../auth/session';
+import {SiteHeader,copy,siteLocale} from '../public-ui';
+import {ServerCards} from './cards';
 
 export const dynamic='force-dynamic';
 export default async function Servers(){
- if(authMode()==='development')redirect('/');
- const session=openSession((await cookies()).get('nexus_session')?.value);if(!session)redirect('/auth/expired');
- let guilds;try{guilds=await authorizedGuilds(session.accessToken);}catch(error){if(error instanceof Error&&error.message==='SESSION_EXPIRED')redirect('/auth/expired');return <main className="legal-page"><h1>Servers unavailable / サーバー一覧を取得できません</h1><p>Please try again shortly. / 少し待ってから再試行してください。</p><a href="/servers">Retry / 再試行</a></main>;}
- const installed=guilds.filter(g=>g.installed),available=guilds.filter(g=>!g.installed);
- return <main className="legal-page"><h1>NEXUS servers / サーバー</h1><h2>NEXUSを使用中 / Using NEXUS</h2>{installed.length?installed.map(g=><p key={g.id}><a href={`/auth/select?guild=${encodeURIComponent(g.id)}`}>{g.name}</a></p>):<p>導入済みサーバーはありません。 / No installed servers yet.</p>}<h2>未導入 / Not installed</h2>{available.map(g=><p key={g.id}>{g.name} {g.installUrl&&<a href={g.installUrl}>NEXUSを追加 / Add NEXUS</a>}</p>)}{!guilds.length&&<p>管理可能なサーバーがありません。 / No manageable servers found.</p>}<p>{installUrl()&&<a href={installUrl()!}>Install URL / インストール URL</a>}</p><a href="/auth/logout">別のアカウントでログイン / Sign in with another account</a></main>;
+ if(authMode()==='development')redirect('/dashboard');
+ const locale=await siteLocale(),session=openSession((await cookies()).get('nexus_session')?.value);if(!session)redirect('/auth/login');
+ let guilds;try{guilds=await authorizedGuilds(session.accessToken);}catch(error){if(error instanceof Error&&error.message==='SESSION_EXPIRED')redirect('/auth/expired');return <div className="servers-page"><SiteHeader locale={locale}/><main className="servers-content"><h1>{copy(locale,'サーバー一覧を取得できません','Servers are unavailable')}</h1><p>{copy(locale,'少し待ってから再試行してください。','Please try again shortly.')}</p><a className="button button-primary" href="/servers">{copy(locale,'再試行','Retry')}</a></main></div>;}
+ return <div className="servers-page"><SiteHeader locale={locale}/><main className="servers-content"><p className="site-eyebrow">YOUR DISCORD SERVERS</p><h1>{copy(locale,'管理するサーバーを選ぶ','Choose a server to manage')}</h1><p>{copy(locale,'DiscordログインとBotの導入は別の操作です。導入済みのサーバーは管理画面を開けます。','Signing in and installing the bot are separate steps. Open a dashboard for an installed server.')}</p><ServerCards locale={locale} guilds={guilds}/><p><a href="/auth/logout">{copy(locale,'別のアカウントでログイン','Sign in with another account')}</a></p></main></div>;
 }

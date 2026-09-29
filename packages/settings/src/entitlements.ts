@@ -1,12 +1,8 @@
 import {sql,tenant,type Tx} from '../../db/src/index.js';
 import type {Scope} from '../../shared/src/index.js';
-export const features=['fallback_onboarding','hybrid_onboarding','custom_activation','connection_metrics','advanced_cohorts','diagnosis','interventions','automation_auto','experiments','ai_explanation','webhooks','api','multi_guild','rbac','audit_export'] as const;
-export type Feature=typeof features[number];
-export type Plan='FREE'|'STARTER'|'GROWTH'|'SCALE'|'ENTERPRISE';
-const free:Feature[]=['fallback_onboarding','hybrid_onboarding','interventions'];
-const starter:Feature[]=[...free,'custom_activation','connection_metrics','diagnosis'];
-const growth:Feature[]=[...starter,'advanced_cohorts','interventions','automation_auto','experiments','ai_explanation','webhooks'];
-export const planRegistry:Record<Plan,{price:number|null,included:number|null,guilds:number,features:readonly Feature[]}>={FREE:{price:0,included:250,guilds:1,features:free},STARTER:{price:15,included:1000,guilds:1,features:starter},GROWTH:{price:49,included:5000,guilds:1,features:growth},SCALE:{price:149,included:25000,guilds:5,features},ENTERPRISE:{price:null,included:null,guilds:100,features}};
+import {planRegistry,type Feature,type Plan} from './plan-registry.js';
+export {features,featureAvailability,planCurrency,planRegistry} from './plan-registry.js';
+export type {Feature,Plan} from './plan-registry.js';
 export class EntitlementService {
  constructor(private readonly db:Tx){}
  async plan(s:Scope):Promise<Plan>{const override=process.env.NODE_ENV==='development'?process.env.NEXUS_DEV_PLAN:undefined;if(override&&Object.hasOwn(planRegistry,override))return override as Plan;return (await sql<{plan_key:Plan}>`SELECT plan_key FROM guild_subscriptions WHERE ${tenant(s)} AND status='active' AND (valid_until IS NULL OR valid_until>now())`.execute(this.db)).rows[0]?.plan_key??'FREE';}

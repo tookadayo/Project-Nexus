@@ -194,7 +194,7 @@ it('completes setup with optional choices and confirms manager role grants',asyn
   await worker.dispatch(s,{...base,id:`65555555555555557${index+6}`,command:'',customId:token});
  }
  const upgraded=await settings.get(s);expect(upgraded.setupVersion).toBe(2);expect(upgraded.managerRoleIds).toEqual(old.managerRoleIds);
- const status=await worker.dispatch(s,{...base,id:'655555555555555580',command:'status'});expect(JSON.stringify(status)).toContain('0.6.0-alpha.2');expect(JSON.stringify(status)).not.toContain('PID');
+ const status=await worker.dispatch(s,{...base,id:'655555555555555580',command:'status'});expect(JSON.stringify(status)).toContain('0.6.0-alpha.3');expect(JSON.stringify(status)).not.toContain('PID');
 });
 it('distinguishes setup approval from safe skip during a legacy guild review',async()=>{
  const s=scopeForGuild('656666666666666666');await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
@@ -261,6 +261,37 @@ it('snoozes an attention item, shows it after expiry, and suppresses it when res
  expect(await helpers.tick(s)).toBe(false);
  expect((await sql<{status:string}>`SELECT status FROM attention_items WHERE guild_id=${s.guildId}`.execute(db)).rows[0]?.status).toBe('RESOLVED');
 });
+it('gates context commands and explains only observed newcomer messages',async()=>{
+ const s=scopeForGuild('688888888888888881');await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
+ const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32)),settings=new SettingsService(db),discord=new FakeDiscord(),tokens=new Components('test'),onboarding=new OnboardingService(db,settings,vault);
+ const adminId='688888888888888882',guestId='688888888888888883',targetId='688888888888888884',channelId='688888888888888885',messageId='688888888888888886';
+ discord.members.set(adminId,{roles:[],permissions:'8',joinedAt:'2026-09-01T00:00:00Z',bot:false});discord.members.set(guestId,{roles:[],permissions:'0',joinedAt:'2026-09-01T00:00:00Z',bot:false});
+ const identity=randomUUID(),episode=randomUUID();
+ await sql`INSERT INTO member_identity_map(organization_id,guild_id,id,lookup_hash,encrypted_id) VALUES(${s.organizationId}::uuid,${s.guildId},${identity}::uuid,${vault.hash(s,targetId)},${vault.seal(s,targetId)})`.execute(db);
+ await sql`INSERT INTO membership_episodes(organization_id,guild_id,id,identity_id,joined_at,context) VALUES(${s.organizationId}::uuid,${s.guildId},${episode}::uuid,${identity}::uuid,now()-interval '2 days','PRODUCTION')`.execute(db);
+ await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',now()-interval '1 hour','PRODUCTION',jsonb_build_object('channelId',${channelId}::text,'messageId',${messageId}::text))`.execute(db);
+ const worker=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,async()=>{}),base={applicationId:'688888888888888887',token:'test',channelId,command:'contextAdd',targetMessageId:messageId};
+ await expect(worker.dispatch(s,{...base,id:'688888888888888888',userId:guestId})).rejects.toThrow('ADMIN_REQUIRED');
+ expect((await sql`SELECT status FROM attention_items WHERE guild_id=${s.guildId}`.execute(db)).rows).toHaveLength(0);
+ expect(JSON.stringify(await worker.dispatch(s,{...base,id:'688888888888888889',userId:adminId}))).toContain('Added to Attention');
+ expect(JSON.stringify(await worker.dispatch(s,{...base,id:'688888888888888890',userId:adminId,command:'contextExplain'}))).toContain('Message detection');
+ expect(JSON.stringify(await worker.dispatch(s,{...base,id:'688888888888888891',userId:adminId,command:'contextMember',targetUserId:targetId}))).toContain('New member status');
+ await expect(worker.dispatch(s,{...base,id:'688888888888888892',userId:guestId,command:'contextMember',targetUserId:targetId})).rejects.toThrow('ADMIN_REQUIRED');
+ expect(JSON.stringify(await worker.dispatch(s,{...base,id:'688888888888888893',userId:adminId,command:'contextResolve'}))).toContain('Marked resolved');
+ expect((await sql<{status:string}>`SELECT status FROM attention_items WHERE guild_id=${s.guildId}`.execute(db)).rows[0]?.status).toBe('RESOLVED');
+});
+it('counts first connection only inside the first 72 hours',async()=>{
+ const s=scopeForGuild('699999999999999991');await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
+ const identity=randomUUID(),episode=randomUUID(),joined=new Date(Date.now()-16*86400000);
+ await sql`INSERT INTO member_identity_map(organization_id,guild_id,id,lookup_hash,encrypted_id) VALUES(${s.organizationId}::uuid,${s.guildId},${identity}::uuid,'window-test','cipher')`.execute(db);
+ await sql`INSERT INTO membership_episodes(organization_id,guild_id,id,identity_id,joined_at,context) VALUES(${s.organizationId}::uuid,${s.guildId},${episode}::uuid,${identity}::uuid,${joined},'PRODUCTION')`.execute(db);
+ await sql`INSERT INTO telemetry_cursor(organization_id,guild_id,first_seen,last_seen) VALUES(${s.organizationId}::uuid,${s.guildId},${new Date(joined.getTime()-60000)},now())`.execute(db);
+ await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',${new Date(joined.getTime()+3600000)},'PRODUCTION','{}'::jsonb)`.execute(db);
+ await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episode}::uuid,'voice.connected',${new Date(joined.getTime()+4*86400000)},'PRODUCTION','{}'::jsonb)`.execute(db);
+ const community=new CommunityService(db);expect((await community.overview(s)).stages.find(step=>step.key==='connected')?.count).toBe(0);
+ await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episode}::uuid,'reply.received',${new Date(joined.getTime()+2*86400000)},'PRODUCTION','{}'::jsonb)`.execute(db);
+ expect((await community.overview(s)).stages.find(step=>step.key==='connected')?.count).toBe(1);
+});
 it('serializes settings revisions, authorization and audit atomically',async()=>{
  const s=scopeForGuild('444444444444444444');await ensureGuild(db,s);
  await sql`DELETE FROM guild_settings WHERE guild_id=${s.guildId}`.execute(db);
@@ -297,4 +328,3 @@ it('HTTP ACK is signed, durable, deduplicated and drops all unsolicited fields',
  await expect(tokens.read(db,s,token+'x','owner')).rejects.toThrow('INVALID_COMPONENT');
  await app.close();
 });
-

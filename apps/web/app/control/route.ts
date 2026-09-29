@@ -17,6 +17,7 @@ export async function POST(req:NextRequest){
   if(action==='goals'){url=base+'/settings/goals';payload=JSON.stringify({preset:parsed.preset,goals:parsed.goals,channels:parsed.channels,revision:parsed.revision});}
   if(action==='analysis_scope'){url=base+'/settings/analysis-scope';payload=JSON.stringify({mode:parsed.mode,channelIds:parsed.channelIds,staffRoleIds:parsed.staffRoleIds,revision:parsed.revision});}
   if(action==='feedback_dismiss'){url=base+'/opportunities/dismiss';payload=JSON.stringify({suggestionType:parsed.suggestionType,reason:parsed.reason??null});}
+  if(action==='attention_action'){url=base+'/attention/action';payload=JSON.stringify({channelId:parsed.channelId,messageId:parsed.messageId,status:parsed.status,minutes:parsed.minutes,untilToday:parsed.untilToday});}
   if(action==='action_template'){url=base+'/actions/draft';const {action:_action,...input}=parsed;void _action;payload=JSON.stringify(input);}
   if(action==='action_preflight'||action==='action_test'){url=base+(action==='action_test'?'/actions/test':'/actions/preflight');const {action:_action,...input}=parsed;void _action;payload=JSON.stringify(input);}
   if(action==='onboarding_recommended'){url=base+'/setup/onboarding/recommended';payload='{}';}
