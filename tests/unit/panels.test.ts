@@ -52,13 +52,13 @@ describe('NEXUS Discord design system',()=>{
   const intents:Record<string,unknown>[]=[];const capture=async(data:Record<string,unknown>)=>{intents.push(data);return `opaque-${intents.length}`;};
   for(const page of controlPages)await controlPanel(capture,page,{},'en');
   expect(controlPages).toEqual(['overview','newMembers','attention','analysis','results','settings']);
-  expect(intents.filter(intent=>intent.action==='controlNavigate')).toHaveLength(controlPages.length);
+  expect(intents.filter(intent=>intent.action==='controlNavigate')).toHaveLength(controlPages.length+5);
   expect(intents.some(intent=>intent.action==='settings'||intent.action==='improve')).toBe(false);
  });
  it('keeps settings and setup progress in the control panel',async()=>{
   const settings={analysisScope:{mode:'all',channelIds:[]},managerRoleIds:[],helperRoleIds:[],weeklySummaryEnabled:false,weeklySummaryChannelId:null,weeklySummaryDay:1,weeklySummaryHour:9,timezone:'Asia/Tokyo',helperEnabled:false,helperChannelId:null,firstResponseMinutes:20,goalPreset:null,newMemberGoals:['reply'],importantChannels:[],uiLanguage:'ja',detailedRetentionDays:30,revision:2,setupSteps:{scope:true,team:false,notifications:true,goals:false}};
   const overview=json(await controlPanel(issue,'overview',{settings},'ja'));expect(overview).toContain('2 / 4 完了');
-  const panel=json(await controlPanel(issue,'settings',{settings},'ja','notifications'));for(const section of settingsSections)expect(panel).toContain(section);expect(panel).toContain('返信待ち通知');expect(panel).toContain('テスト通知');
+  const panel=json(await controlPanel(issue,'settings',{settings},'ja','notifications'));for(const section of settingsSections.filter(value=>value!=='main'))expect(panel).toContain(section);expect(panel).toContain('返信待ち通知');expect(panel).toContain('テスト通知');
   const summary=await controlPanel(issue,'settings',{settings},'en','summary',0,'timezone');expect(summary.components?.length).toBeLessThanOrEqual(5);expect(json(summary)).toContain('Asia/Tokyo');
  });
  it('pages channels without dropping later entries and preserves privacy counts',async()=>{

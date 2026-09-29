@@ -52,8 +52,10 @@ test('dashboard operational views remain readable at desktop and mobile widths',
 test('shows independent newcomer data before optional onboarding is configured',async({page})=>{
  await page.goto('/dashboard');
  await expect(page.getByRole('heading',{name:'Start measuring community growth'})).toBeVisible();
+ await expect(page.getByRole('radio',{name:'Sign up for an event',exact:true})).toBeVisible();
  await expect(page.getByText('Discord onboarding is not currently in use. You can add a welcome flow later.')).toBeVisible();
  await expect(page.locator('article').filter({has:page.getByRole('heading',{name:'New Members',exact:true})}).locator('.value')).toHaveText('26');
+ await expect(page.locator('.kpi-grid .value')).not.toContainText(['0.0%']);
  await expect(page.locator('article').filter({has:page.getByRole('heading',{name:'New Members',exact:true})}).locator('.comparison')).toContainText('Previous period: —');
  await expect(page.getByRole('button',{name:'New Members',exact:true})).toBeVisible();
  await page.screenshot({path:'test-results/v04-home-desktop.png',fullPage:true});
@@ -98,7 +100,7 @@ test('explains an unusable notification channel with a direct fix',async({page})
 
 test('chooses a goal, tests an improvement and sees a useful small-community comparison',async({page})=>{
  await page.goto('/dashboard');
- await page.getByRole('radio',{name:'Receive a reply'}).check();
+ await page.getByRole('radio',{name:'First reply to a post'}).check();
  await page.getByRole('button',{name:'Save success goal'}).click();
  await Promise.all([page.waitForEvent('load'),page.getByRole('button',{name:'Enable'}).first().click()]);
  await page.getByRole('button',{name:'Insights',exact:true}).click();

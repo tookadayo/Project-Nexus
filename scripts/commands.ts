@@ -1,4 +1,4 @@
-import {SlashCommandBuilder,ContextMenuCommandBuilder,ApplicationCommandType,PermissionFlagsBits} from 'discord.js';
+import {SlashCommandBuilder,ContextMenuCommandBuilder,ApplicationCommandType} from 'discord.js';
 const commands=[
  ['panel','Open the NEXUS control panel','パネル','コミュニティ管理パネルを開きます'],
  ['personalize','Choose what you want to see','自分の設定','参加時の設定を選びます'],
@@ -11,7 +11,7 @@ export function buildNexusCommand(){
  return command;
 }
 export function buildNexusCommands(){
- const context=(name:string,type:ApplicationCommandType.User|ApplicationCommandType.Message,ja:string)=>new ContextMenuCommandBuilder().setName(name).setNameLocalizations({ja}).setType(type).setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).setContexts(0).setIntegrationTypes(0);
+ const context=(name:string,type:ApplicationCommandType.User|ApplicationCommandType.Message,ja:string)=>new ContextMenuCommandBuilder().setName(name).setNameLocalizations({ja}).setType(type).setDefaultMemberPermissions(null).setContexts(0).setIntegrationTypes(0);
  return [buildNexusCommand(),
   context('NEXUS: Add to Attention',ApplicationCommandType.Message,'NEXUS: 対応対象に追加'),
   context('NEXUS: Mark Resolved',ApplicationCommandType.Message,'NEXUS: 対応済みにする'),

@@ -21,6 +21,7 @@ export const signalRegistry={
  'message.sent':def(message,'gateway','GuildMessages',true),
  'reply.received':def(z.object({latencySeconds:z.number().nonnegative(),channelId:z.string().regex(/^\d{17,20}$/).optional()}).strict(),'projector','GuildMessages'),
  'reply.established':def(empty,'projector','GuildMessages'),
+ 'reaction.received':def(z.object({messageId:id,channelId:id}).strict(),'projector','GuildMessageReactions'),
  'reaction.added':def(z.object({messageId:id,channelId:id}).strict(),'gateway','GuildMessageReactions',true),
  'voice.started':def(z.object({channelId:id}).strict(),'gateway','GuildVoiceStates'),
  'voice.ended':def(z.object({channelId:id.nullable()}).strict(),'gateway','GuildVoiceStates'),

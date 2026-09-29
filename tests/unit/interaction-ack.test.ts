@@ -58,3 +58,18 @@ it('uses a message update ACK for components and keeps save errors private',asyn
  await handleGatewayInteraction(input,{db,vault:{} as IdentityVault,components:new Components('test')});
  expect(order).toEqual(['update','database']);expect(followUp).toHaveBeenCalledWith(expect.objectContaining({flags:64}));
 });
+
+it('acknowledges private settings before database work and never updates the public message',async()=>{
+ const order:string[]=[],editReply=vi.fn(async()=>{}),deferUpdate=vi.fn(),followUp=vi.fn();
+ let rejectDatabase:(error:Error)=>void=()=>{};
+ const blocked=new Promise<never>((_resolve,reject)=>{rejectDatabase=reject;});
+ const db={transaction:()=>({execute:()=>{order.push('database');return blocked;}})} as unknown as Database;
+ const input={inGuild:()=>true,guildId:'111111111111111111',user:{id:'222222222222222222'},isChatInputCommand:()=>false,isMessageComponent:()=>true,isModalSubmit:()=>false,isAnySelectMenu:()=>false,
+  id:'333333333333333333',applicationId:'444444444444444444',token:'test-only',channelId:'555555555555555555',customId:'private:opaque',message:{id:'666666666666666666'},locale:'en-US',guildLocale:'en-US',
+  deferReply:vi.fn(async body=>{expect(body).toEqual({flags:64});order.push('private ack');}),deferUpdate,followUp,editReply} as unknown as Interaction;
+ const work=handleGatewayInteraction(input,{db,vault:{} as IdentityVault,components:new Components('test')});
+ await vi.waitFor(()=>expect(order).toEqual(['private ack','database']));
+ expect(deferUpdate).not.toHaveBeenCalled();
+ rejectDatabase(new Error('offline'));await work;
+ expect(editReply).toHaveBeenCalledTimes(1);expect(followUp).not.toHaveBeenCalled();
+});

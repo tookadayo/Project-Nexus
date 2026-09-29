@@ -40,7 +40,8 @@ it('checks OAuth state, authenticates encrypted sessions, and rejects tampering'
  expect(validOAuthState('state123','state124')).toBe(false);
  const value=sealSession({accessToken:'access',userId:'12345678901234567',expiresAt:Date.now()+10000});
  expect(openSession(value)?.userId).toBe('12345678901234567');
- expect(openSession(value.slice(0,-2)+'xx')).toBeNull();
+ const tampered=Buffer.from(value,'base64url');tampered[12]=tampered[12]!^1;
+ expect(openSession(tampered.toString('base64url'))).toBeNull();
 });
 it('authorizes only guilds with administrative permissions on each request',async()=>{
  vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_SESSION_SECRET','a'.repeat(64));vi.stubEnv('API_KEY','b'.repeat(64));vi.stubEnv('DISCORD_TOKEN','bot-test');vi.stubEnv('DISCORD_APPLICATION_ID','123456789012345678');
@@ -102,7 +103,7 @@ it('keeps forbidden product jargon out of Discord panel translations',()=>{
 });
 it('provides explicit Japanese text for every shared UI key',()=>{
  const source=readFileSync('packages/discord-panels/src/i18n/ja.ts','utf8');
- const explicit=new Set([...source.matchAll(/'([^']+)':'/g)].map(match=>match[1]));
+ const explicit=new Set([...source.matchAll(/["']([^"']+)["']:/g)].map(match=>match[1]));
  expect(Object.keys(en).filter(key=>!explicit.has(key)&&!Object.hasOwn(webJa,key))).toEqual([]);
  expect(Object.keys(webEn).sort()).toEqual(Object.keys(webJa).sort());
  for(const key of Object.keys(webEn) as Array<keyof typeof webEn>){

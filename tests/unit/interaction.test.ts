@@ -9,6 +9,6 @@ it('validates exact bytes, fresh timestamp and Ed25519 signature',()=>{
 });
 it('requires admin privilege and produces guild-specific scope',()=>{
  expect(canAdmin('0',[],null)).toBe(false);expect(canAdmin('32',[],null)).toBe(true);
- expect(canOperatePanel('32',[],null)).toBe(false);expect(canOperatePanel('8',[],null)).toBe(true);expect(canOperatePanel('0',['42'],['42'])).toBe(true);
+ expect(canOperatePanel('32',[],null)).toBe(true);expect(canOperatePanel('8',[],null)).toBe(true);expect(canOperatePanel('0',['42'],['42'])).toBe(true);
  expect(scopeForGuild('123456789012345678')).not.toEqual(scopeForGuild('123456789012345679'));
 });

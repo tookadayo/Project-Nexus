@@ -387,7 +387,7 @@ it('uses the guild calendar for Today and pages attention without changing its t
   await sql`INSERT INTO membership_episodes(organization_id,guild_id,id,identity_id,joined_at,left_at,context) VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${episode}::uuid,${identity}::uuid,${joined},NULL,'PRODUCTION')`.execute(db);
   await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data) VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',${new Date(joined.getTime()+i*60000)},'PRODUCTION',${json({channelId:channel,messageId})})`.execute(db);
  }
- await sql`INSERT INTO telemetry_cursor VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${new Date(joined.getTime()-1000)},${now})`.execute(db);
+ await sql`INSERT INTO telemetry_cursor VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${new Date(now.getTime()-86400000)},${now})`.execute(db);
  const community=new CommunityService(db),first=await community.overview(ctx.s,7,now,[],0),second=await community.overview(ctx.s,7,now,[],1);
  expect(first.daily.todayJoined).toBe(2);expect(first.daily.attentionCount).toBe(2);expect(first.attention).toHaveLength(1);expect(second.attention).toHaveLength(1);expect(first.attention[0]!.messageId).not.toBe(second.attention[0]!.messageId);
  await ctx.settings.update(ctx.s,actor,cfg.revision,{timezone:'UTC'});

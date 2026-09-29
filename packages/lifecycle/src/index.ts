@@ -88,7 +88,15 @@ export class LifecycleService {
    if(settings.flags.native_snapshot_v2&&event.kind==='member.joined')await scheduleNativeSnapshots(tx,s,episode.id,episode.joined_at);
    if(event.kind==='member.joined')return;
    const channelAllowed=(channelId:string|null|undefined)=>!channelId||settings.analysisScope.mode==='all'||(settings.analysisScope.mode==='include')===settings.analysisScope.channelIds.includes(channelId);
-   if(event.kind==='reaction.added'&&channelAllowed(event.channelId))await this.record(tx,s,episode.id,event.kind,at,{channelId:event.channelId,messageId:event.messageId});
+   if(event.kind==='reaction.added'&&channelAllowed(event.channelId)){
+    const target=(await sql<{episode_id:string;identity_id:string;occurred_at:Date;joined_at:Date}>`SELECT f.episode_id,e.identity_id,f.occurred_at,e.joined_at FROM lifecycle_events f JOIN membership_episodes e ON e.organization_id=f.organization_id AND e.guild_id=f.guild_id AND e.id=f.episode_id WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.context='PRODUCTION' AND e.context='PRODUCTION' AND f.kind='message.sent' AND f.data->>'messageId'=${event.messageId??''} AND f.data->>'channelId'=${event.channelId??''} LIMIT 1`.execute(tx)).rows[0];
+    // Received reactions are weak responses, never activity or a first connection.
+    // No emoji, content or cross-member identity is retained in the received fact.
+    if(!target||target.identity_id!==identityId){
+     await this.record(tx,s,episode.id,event.kind,at,{channelId:event.channelId,messageId:event.messageId});
+     if(target&&at>=target.occurred_at&&target.occurred_at>=target.joined_at&&at.getTime()<target.joined_at.getTime()+72*3600000)await this.record(tx,s,target.episode_id,'reaction.received',at,{channelId:event.channelId,messageId:event.messageId});
+    }
+   }
    if(event.kind==='scheduled_event.subscribed'||event.kind==='scheduled_event.unsubscribed')await this.record(tx,s,episode.id,event.kind,at,{eventId:event.eventId});
    if((event.kind==='voice.started'||event.kind==='voice.ended')&&channelAllowed(event.channelId)){
     const previous=(await sql<{voice_channel_id:string|null,voice_started_at:Date|null}>`SELECT voice_channel_id,voice_started_at FROM member_observable_state WHERE ${tenant(s)} AND episode_id=${episode.id}::uuid FOR UPDATE`.execute(tx)).rows[0];

@@ -8,7 +8,7 @@ const issue=async()=> 'control:unit';
 it('registers permission-gated message and user context actions',()=>{
  const commands=buildNexusCommands().map(command=>command.toJSON());
  expect(commands.map(command=>command.type)).toEqual([1,3,3,3,2]);
- expect(commands.slice(1).map(command=>command.default_member_permissions)).toEqual(['32','32','32','32']);
+ expect(commands.slice(1).map(command=>command.default_member_permissions)).toEqual([null,null,null,null]);
  expect(commands.map(command=>command.name)).toContain('NEXUS: Explain Detection');
 });
 it('renders plan prices and feature availability from one registry',()=>{
@@ -28,7 +28,7 @@ it('distinguishes zero live attention from unavailable observations',async()=>{
  const live=await controlPanel(issue,'overview',{community:{daily:{ready:true,todayJoined:0,todayConnected:0,attentionCount:0},attention:[],suggestion:null} as never},'en');
  const waiting=await controlPanel(issue,'overview',{community:{daily:{ready:false},attention:[],suggestion:null} as never},'en');
  expect(JSON.stringify(live)).toContain('No posts need a reply right now');
- expect(JSON.stringify(live)).toContain('**Joined**\\n0');
+ expect(JSON.stringify(live)).toContain('No new members today');
  expect(JSON.stringify(waiting)).toContain('Recent activity is unavailable');
  expect(JSON.stringify(waiting)).not.toContain('**Joined**\\n0');
 });

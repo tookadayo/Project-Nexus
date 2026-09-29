@@ -50,12 +50,14 @@ it('runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
  };
  const deliver=async(userId:string,data:Record<string,unknown>,type=3,messageId?:string)=>{
   if(type===3&&userId===admin&&!messageId)messageId=adminMessageId;
-  discord.replyTarget=messageId??null;
+  if(messageId==='reply')messageId='930000000000000999';
+  const privateResponse=Components.kind(String(data.custom_id??''))==='ephemeral';
+  discord.replyTarget=privateResponse?'reply':messageId??null;
   const id=String(BigInt('631111111111111111')+BigInt(++sequence));
   const body=JSON.stringify({id,application_id:'531111111111111119',type,token:`token-${id}`,guild_id:s.guildId,channel_id:channel,message:messageId?{id:messageId}:undefined,
    member:{user:{id:userId},permissions:userId===admin?'8':'0',roles:[]},data});
   const ts=String(Math.floor(Date.now()/1000));const res=await http.inject({method:'POST',url:'/interactions',payload:body,headers:{'content-type':'application/json','x-signature-timestamp':ts,'x-signature-ed25519':sign(null,Buffer.from(ts+body),keys.privateKey).toString('hex')}});
-  expect(res.statusCode).toBe(200);expect(res.json()).toEqual(type===3?{type:6}:{type:5,data:{flags:64}});
+  expect(res.statusCode).toBe(200);expect(res.json()).toEqual(type===3&&!privateResponse?{type:6}:{type:5,data:{flags:64}});
   await expect.poll(async()=>(await sql`SELECT id FROM interaction_jobs WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId} AND id=${id}`.execute(db)).rows.length,{timeout:10000}).toBe(1);
   const job=await queue.add('interaction',{});
   await expect.poll(async()=> (await queue.getJob(job.id!))?.getState(),{timeout:10000}).toBe('completed');
@@ -98,7 +100,7 @@ it('runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
   expect((await sql`SELECT role_id FROM nexus_role_grants WHERE guild_id=${s.guildId} AND revoked_at IS NOT NULL`.execute(db)).rows).toHaveLength(1);
   const fixed=(await sql<{message_id:string}>`SELECT message_id FROM settings_panels WHERE guild_id=${s.guildId}`.execute(db)).rows[0]!;
   adminMessageId=publicPanelId;
-  const pageControl=controls(discord.panels.get(fixed.message_id)).find(item=>item.placeholder==='Choose a page')!;
+  const pageControl=controls(discord.panels.get(fixed.message_id)).find(item=>item.label==='Analysis')!;
   expect(pageControl).toBeDefined();
   await deliver(admin,{custom_id:pageControl.custom_id,values:['analysis']},3,fixed.message_id);
   await deliver(admin,{custom_id:control('Analysis'),values:['channels']});
@@ -109,8 +111,8 @@ it('runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
   expect(JSON.stringify(discord.panels.get('reply'))).toContain('permission');
   expect(JSON.stringify(discord.panels.get(fixed.message_id))).toContain('Channels');
   const latest=await settings.get(s);await settings.update(s,{key:'admin',permissions:'8',roles:[],source:'DISCORD_PANEL',requestId:'test-alert'},latest.revision,{helperChannelId:channel});
-  await deliver(admin,{custom_id:pageControl.custom_id,values:['settings']});
-  await deliver(admin,{custom_id:control('Choose a setting'),values:['notifications']});
+  await deliver(admin,{custom_id:settingControl.custom_id,values:['settings']});
+  await deliver(admin,{custom_id:control('Notifications')});adminMessageId='reply';
   await deliver(admin,{custom_id:control('Send test alert')});
   expect(JSON.stringify(discord.panels.get('930000000000000002'))).toContain('NEXUS test alert');
   await deliver(admin,{custom_id:control('Choose a setting'),values:['advanced']});
