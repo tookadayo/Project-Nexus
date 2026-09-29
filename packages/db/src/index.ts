@@ -1,7 +1,7 @@
 import {Kysely,PostgresDialect,sql,type Transaction} from 'kysely';
 import pg from 'pg';
 import {readFile} from 'node:fs/promises';
-import {scopeSchema,type Scope} from '../../shared/src/index.js';
+import {scopeSchema,type Scope} from '../../shared/src/index';
 export type Database=Kysely<Record<string,never>>;
 export type Tx=Database|Transaction<Record<string,never>>;
 export {sql};
@@ -12,7 +12,7 @@ export async function migrate(db:Database){
  await db.transaction().execute(async tx=>{
   await sql`SELECT pg_advisory_xact_lock(763201)`.execute(tx);
   await sql`CREATE TABLE IF NOT EXISTS schema_migrations(version integer PRIMARY KEY)`.execute(tx);
-  for(const [index,name] of ['001_foundation','002_runtime','003_telemetry','004_lifecycle','005_native','006_activation','007_operations','008_measurement','009_optimization','010_durable_ingest','011_activation_backfill','012_retention','013_experiment_outcomes','014_weekly_summary','015_suggestion_feedback','016_member_journey','017_interaction_health','018_interaction_pairs','019_weekly_phases','020_audit_actor','021_helper_alerts','022_attention_items','023_product_telemetry','024_telemetry_sources'].entries()){
+  for(const [index,name] of ['001_foundation','002_runtime','003_telemetry','004_lifecycle','005_native','006_activation','007_operations','008_measurement','009_optimization','010_durable_ingest','011_activation_backfill','012_retention','013_experiment_outcomes','014_weekly_summary','015_suggestion_feedback','016_member_journey','017_interaction_health','018_interaction_pairs','019_weekly_phases','020_audit_actor','021_helper_alerts','022_attention_items','023_product_telemetry','024_telemetry_sources','025_server_verification'].entries()){
   const version=index+1;
   const done=await sql`SELECT version FROM schema_migrations WHERE version=${version}`.execute(tx);
   if(!done.rows.length){

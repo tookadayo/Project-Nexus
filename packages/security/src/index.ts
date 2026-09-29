@@ -1,8 +1,8 @@
 import {createHmac,createPublicKey,verify,timingSafeEqual,randomUUID} from 'node:crypto';
 import {PermissionFlagsBits} from 'discord-api-types/v10';
-import {sql,tenant,json,type Tx} from '../../db/src/index.js';
-import {assert,type Scope} from '../../shared/src/index.js';
-export {scopeForGuild,apiToken,validApiToken} from './scoping.js';
+import {sql,tenant,json,type Tx} from '../../db/src/index';
+import {assert,type Scope} from '../../shared/src/index';
+export {scopeForGuild,apiToken,validApiToken} from './scoping';
 export function verifyInteraction(publicKey:string,signature:string,timestamp:string,body:Buffer,now=Date.now()){
  if(!/^[a-f\d]{128}$/i.test(signature)||!/^\d{10}$/.test(timestamp)||Math.abs(now-Number(timestamp)*1000)>300000) return false;
  try{

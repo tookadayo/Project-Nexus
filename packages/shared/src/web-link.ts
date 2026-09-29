@@ -1,4 +1,4 @@
-export function discordDashboardLink(configured:string|undefined,guildId:string,development=false):string|undefined{
+export function discordDashboardLink(configured:string|undefined,guildId:string,development=false,verified=true):string|undefined{
  if(!configured||!/^\d{17,20}$/.test(guildId))return undefined;
  try{
   const url=new URL(configured);
@@ -7,6 +7,6 @@ export function discordDashboardLink(configured:string|undefined,guildId:string,
   if(url.username||url.password||url.search||url.hash||(!development&&url.protocol!=='https:'))return undefined;
   if(local&&!development)return undefined;
   if(!['https:','http:'].includes(url.protocol))return undefined;
-  return new URL(`/dashboard/${guildId}`,url).toString();
+  return new URL(verified?`/dashboard/${guildId}`:'/link',url).toString();
  }catch{return undefined;}
 }

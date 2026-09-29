@@ -18,7 +18,7 @@ export default async function Page({guildId}:{guildId?:string}={}){
  let context;try{context=await dashboardContext(sessionCookie,guildId??selectedCookie);}catch{context=null;}
  if(guildId&&context?.guildId!==guildId)redirect('/servers');
  if(!context){if(authMode()==='oauth'&&!sessionCookie)redirect('/auth/login');if(authMode()==='oauth'&&!openSession(sessionCookie))redirect('/auth/expired');redirect('/servers');}
- const data:ProductData={home:null,journey:null,community:null,opportunities:null,actions:null,results:null,weeklyStatus:null,audit:[],options:{channels:[],roles:[],events:[],available:false},admin:null,guilds:context.guilds,selectedGuildId:context.guildId};
+ const data:ProductData={home:null,journey:null,community:null,opportunities:null,actions:null,results:null,weeklyStatus:null,audit:[],options:{channels:[],roles:[],events:[],available:false},admin:null,guilds:context.guilds,selectedGuildId:context.guildId,developmentAuth:authMode()==='development'};
  {
   const headers={Authorization:`Bearer ${context.token}`},base=`${context.base}/v3/organizations/${context.organizationId}/guilds/${context.guildId}`;
   const read=async<T,>(path:string):Promise<T|null>=>{try{const response=await fetch(path,{headers,cache:'no-store',signal:AbortSignal.timeout(15000)});return response.ok?await response.json() as T:null;}catch{return null;}};

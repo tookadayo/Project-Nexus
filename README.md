@@ -27,11 +27,13 @@ CLI で起動する場合は `corepack pnpm install`、`corepack pnpm migrate`�
 
 ## Hosted Beta とインストール
 
-Hosted Beta は準備中です。外部テスターには Bot Token やローカル起動を求めず、運営側がホストする Bot を通常の Discord OAuth Install で追加するモデルです。管理可能なサーバーは Web の `/servers` で「NEXUSを使用中」と「未導入」に分かれ、未導入サーバーには追加リンクが表示されます。
+Hosted Beta は準備中です。外部テスターには Bot Token やローカル起動を求めず、運営側がホストする Bot を通常の Discord OAuth Install で追加するモデルです。Web の `/servers` は未導入・導入済み未検証・検証待ち・検証済みを区別します。Bot導入後に `/nexus link` を実行し、発行した本人が `/link` でコードを入力するとDashboardを開けます。現在のDiscord/NEXUS管理権限もアクセスごとに確認します。
 
 `DISCORD_APPLICATION_ID` を設定して `corepack pnpm install-url` を実行すると Install URL を生成できます。特定サーバー向けは `corepack pnpm install-url <guild-id>` です。基本スコープは `bot applications.commands`、権限は View Channel、Send Messages、Embed Links、Read Message History です。Administrator は要求しません。Role mapping など追加権限が必要な機能は利用時に案内します。Alpha のコマンド登録は Guild 単位です。`NEXUS_COMMAND_SCOPE=guild|global` は将来の切替用で、Alpha では `global` を指定しても Guild 登録を続けます。起動時と定期確認時に Discord 側のコマンド定義を確認し、不一致なら既存の指数 Backoff で再登録します。
 
 Hosted Web は `NODE_ENV=production`、`NEXUS_WEB_AUTH_MODE=oauth`、`DISCORD_CLIENT_SECRET`、HTTPS の `NEXUS_WEB_URL` を設定し、`${NEXUS_WEB_URL}/auth/callback` を Discord OAuth redirect URI に登録します。OAuth セッション期限切れは再ログイン画面へ進み、可能な場合は以前の Guild に戻ります。
+
+Webも既存のDB・Identity鍵・Bot設定を使用します。起動前に `corepack pnpm migrate` で025を適用してください。確認付きの `/nexus unlink` またはSettingsのサーバー接続解除でWeb接続だけを解除でき、設定・履歴・分析データは保持されます。構成・検証方法は [Server verification](docs/server-verification.md) を参照してください。
 
 ## Privacy とサポート
 

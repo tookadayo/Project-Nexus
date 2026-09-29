@@ -14,6 +14,8 @@ export class PrivacyService {
    assert((actor.source==='DISCORD_PANEL'?canOperatePanel:canAdmin)(actor.permissions,actor.roles,[current.adminRoleId,...current.managerRoleIds]),'ADMIN_REQUIRED',403);
    await this.settings.mutate(s,actor,current.revision,async(_before,tx)=>{
     await sql`SELECT pg_advisory_xact_lock(hashtextextended(${'privacy:'+s.organizationId+':'+s.guildId},0))`.execute(tx);
+    await sql`DELETE FROM server_verification_challenges WHERE ${tenant(s)}`.execute(tx);
+    await sql`DELETE FROM server_web_links WHERE ${tenant(s)}`.execute(tx);
     // Only an audit tombstone and disabled settings remain. Published flows can be deleted, never mutated.
     for(const table of ['suggestion_feedback','weekly_summary_deliveries','helper_alerts','attention_items','retention_tracking','retention_cohorts','gateway_ingest','usage_counters','guild_subscriptions','guild_capabilities','guild_config_heads','guild_config_revisions','data_coverage_snapshots','action_outbox','interaction_jobs','interaction_diagnostics','component_tokens','settings_panels','guild_command_sync','event_inbox','telemetry_health','telemetry_cursor','daily_guild_metrics','member_interaction_pairs','member_identity_map','flow_versions','audit_logs','deletion_requests'])
      await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)}`.execute(tx);
@@ -33,6 +35,9 @@ export class PrivacyService {
     WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND e.identity_id=ANY(${ids}::uuid[])`.execute(tx)).rows.map(r=>r.id);
    await sql`DELETE FROM action_outbox WHERE ${tenant(s)} AND payload->>'sessionId'=ANY(${sessions}::text[])`.execute(tx);
    await sql`DELETE FROM component_tokens WHERE ${tenant(s)} AND actor_hash=${hash}`.execute(tx);
+    await sql`DELETE FROM server_verification_challenges WHERE ${tenant(s)} AND issuer_hash=${hash}`.execute(tx);
+    await sql`UPDATE server_web_links SET verified_by_hash=NULL,verified_by_identity_ciphertext=NULL WHERE ${tenant(s)} AND verified_by_hash=${hash}`.execute(tx);
+    await sql`DELETE FROM server_verification_limits WHERE key_digest=${this.vault.digest('verification-attempt:v1',userId)}`.execute(tx);
    const jobs=(await sql<{id:string,encrypted_payload:string}>`SELECT id,encrypted_payload FROM interaction_jobs WHERE ${tenant(s)}`.execute(tx)).rows;
    for(const job of jobs){const data=JSON.parse(this.vault.open(s,job.encrypted_payload)) as {userId:string};if(data.userId===userId){await sql`DELETE FROM action_outbox WHERE ${tenant(s)} AND dedupe_key=${'reply:'+job.id}`.execute(tx);await sql`DELETE FROM interaction_jobs WHERE ${tenant(s)} AND id=${job.id}`.execute(tx);}}
    await sql`DELETE FROM member_identity_map WHERE ${tenant(s)} AND lookup_hash=${hash}`.execute(tx);
@@ -49,6 +54,8 @@ export class PrivacyService {
   await this.db.transaction().execute(async tx=>{
    await sql`SELECT pg_advisory_xact_lock(hashtextextended(${'privacy:'+s.organizationId+':'+s.guildId},0))`.execute(tx);
    await sql`DELETE FROM interaction_jobs WHERE ${tenant(s)} AND created_at<now()-interval '15 minutes'`.execute(tx);
+    await sql`DELETE FROM server_verification_challenges WHERE ${tenant(s)} AND expires_at<now()-interval '1 day'`.execute(tx);
+    await sql`DELETE FROM server_verification_limits WHERE updated_at<now()-interval '1 day'`.execute(tx);
    await sql`DELETE FROM interaction_diagnostics WHERE ${tenant(s)} AND received_at<${cutoff}`.execute(tx);
    await sql`DELETE FROM helper_alerts WHERE ${tenant(s)} AND created_at<${cutoff}`.execute(tx);
    await sql`DELETE FROM attention_items WHERE ${tenant(s)} AND detected_at<${cutoff}`.execute(tx);

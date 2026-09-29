@@ -1,9 +1,8 @@
 import {NextRequest,NextResponse} from 'next/server';
  import {dashboardContext,openSession} from '../auth/session';
+import {sameOrigin} from '../auth/origin';
 export async function POST(req:NextRequest){
- let sameOrigin=false;
- try{const origin=new URL(req.headers.get('origin')??'');sameOrigin=origin.host===req.headers.get('host')&&['http:','https:'].includes(origin.protocol)&&req.headers.get('sec-fetch-site')==='same-origin';}catch{/* Missing or invalid Origin is rejected. */}
- if(!sameOrigin)return NextResponse.json({error:'Origin rejected'},{status:403});
+ if(!sameOrigin(req))return NextResponse.json({error:'Origin rejected'},{status:403});
  if(!openSession(req.cookies.get('nexus_session')?.value)&&process.env.NEXUS_WEB_AUTH_MODE!=='development')return NextResponse.json({error:'SESSION_EXPIRED',message:'Sign in with Discord again.'},{status:401});
  let context;try{context=await dashboardContext(req.cookies.get('nexus_session')?.value,req.cookies.get('nexus_guild')?.value);}catch(error){if(error instanceof Error&&error.message==='SESSION_EXPIRED')return NextResponse.json({error:'SESSION_EXPIRED',message:'Sign in with Discord again.'},{status:401});return NextResponse.json({error:'Authorization unavailable'},{status:503});}
  if(!context)return NextResponse.json({error:'Unauthorized guild access'},{status:403});

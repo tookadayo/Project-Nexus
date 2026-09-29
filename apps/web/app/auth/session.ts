@@ -1,8 +1,10 @@
 import {createCipheriv,createDecipheriv,createHash,randomBytes,timingSafeEqual} from 'node:crypto';
 import {apiToken,scopeForGuild} from '../../../../packages/security/src/scoping';
 import {discordInstallUrl} from '../../../../packages/discord/src/install';
+import {manageableConnection} from './server-access';
+import type {VerificationState} from '../../../../packages/security/src/server-verification';
 
-export type AuthorizedGuild={id:string;name:string;installed:boolean;installUrl:string|null};
+export type AuthorizedGuild={id:string;name:string;installed:boolean;installUrl:string|null;state:VerificationState};
 type Session={accessToken:string;userId:string;expiresAt:number};
 export const authMode=()=>process.env.NEXUS_WEB_AUTH_MODE==='development'?'development':'oauth';
 export const oauthRedirectUri=()=>new URL('/auth/callback',process.env.NEXUS_WEB_URL).toString();
@@ -13,33 +15,49 @@ export function openSession(value:string|undefined):Session|null{if(!value)retur
 export function validOAuthState(expected:string|undefined,received:string|null){if(!expected||!received)return false;const a=Buffer.from(expected),b=Buffer.from(received);return a.length===b.length&&timingSafeEqual(a,b);}
 export function installUrl(guildId?:string){const id=process.env.DISCORD_APPLICATION_ID;return id?discordInstallUrl(id,guildId):null;}
 let installationCache:{expires:number;ids:Set<string>}|null=null;
+type DiscordGuild={id:string;name:string;owner?:boolean;permissions?:string};
+async function discordGuilds(authorization:string):Promise<DiscordGuild[]>{
+ const rows:DiscordGuild[]=[];let after='';
+ for(;;){
+  const url=new URL('https://discord.com/api/v10/users/@me/guilds');url.searchParams.set('limit','200');if(after)url.searchParams.set('after',after);
+  const response=await fetch(url,{headers:{Authorization:authorization},cache:'no-store',signal:AbortSignal.timeout(8000)});
+  if(response.status===401&&authorization.startsWith('Bearer '))throw new Error('SESSION_EXPIRED');
+  if(!response.ok)throw new Error('DISCORD_GUILDS_UNAVAILABLE');
+  const page=await response.json() as DiscordGuild[];if(!Array.isArray(page))throw new Error('DISCORD_GUILDS_UNAVAILABLE');rows.push(...page);
+  if(page.length<200)return rows;
+  const last=page.at(-1)?.id;if(!last||!/^\d{17,20}$/.test(last)||last===after)throw new Error('DISCORD_GUILDS_UNAVAILABLE');after=last;
+ }
+}
 export async function installedGuildIds(){
  if(installationCache&&installationCache.expires>Date.now())return installationCache.ids;
  const token=process.env.DISCORD_TOKEN;if(!token)throw new Error('DISCORD_TOKEN_REQUIRED');
- const response=await fetch('https://discord.com/api/v10/users/@me/guilds',{headers:{Authorization:`Bot ${token}`},cache:'no-store',signal:AbortSignal.timeout(8000)});
- if(!response.ok)throw new Error('BOT_GUILDS_UNAVAILABLE');
- const ids=new Set((await response.json() as {id:string}[]).map(row=>row.id));installationCache={ids,expires:Date.now()+60000};return ids;
+ const ids=new Set((await discordGuilds(`Bot ${token}`)).map(row=>row.id));installationCache={ids,expires:Date.now()+60000};return ids;
 }
-export async function authorizedGuilds(token:string):Promise<AuthorizedGuild[]>{
- const response=await fetch('https://discord.com/api/v10/users/@me/guilds',{headers:{Authorization:`Bearer ${token}`},cache:'no-store',signal:AbortSignal.timeout(8000)});
- if(response.status===401)throw new Error('SESSION_EXPIRED');
- if(!response.ok)throw new Error('DISCORD_GUILDS_UNAVAILABLE');
- const rows=await response.json() as {id:string;name:string;owner?:boolean;permissions?:string}[];
+export async function authorizedGuilds(token:string,userId:string):Promise<AuthorizedGuild[]>{
+ const rows=await discordGuilds(`Bearer ${token}`);
  const installed=await installedGuildIds();
- // Web administration requires Discord ownership, Manage Guild, or Administrator.
- // Configured managerRoleIds apply only to Discord controls and never grant Web access.
- return rows.filter(row=>row.owner===true||((BigInt(row.permissions??'0')&32n)!==0n)||((BigInt(row.permissions??'0')&8n)!==0n)).map(row=>({id:row.id,name:row.name,installed:installed.has(row.id),installUrl:installUrl(row.id)}));
+ const guilds:AuthorizedGuild[]=[];
+ for(let start=0;start<rows.length;start+=4){
+  const batch=await Promise.all(rows.slice(start,start+4).map(async row=>{
+   if(!/^\d{17,20}$/.test(row.id))return null;
+   if(installed.has(row.id)){const connection=await manageableConnection(row.id,userId);return connection?{id:row.id,name:row.name,installed:true,installUrl:installUrl(row.id),state:connection.state}:null;}
+   return row.owner===true||(BigInt(row.permissions??'0')&40n)!==0n?{id:row.id,name:row.name,installed:false,installUrl:installUrl(row.id),state:'NOT_INSTALLED' as const}:null;
+  }));
+  for(const guild of batch)if(guild)guilds.push(guild);
+ }
+ return guilds;
 }
 export async function dashboardContext(sessionCookie:string|undefined,guildCookie:string|undefined){
  const base=process.env.NEXUS_API_URL??'http://127.0.0.1:3001';
  if(authMode()==='development'){
   const {NEXUS_ORGANIZATION_ID,NEXUS_GUILD_ID,NEXUS_API_TOKEN}=process.env;
   if(!NEXUS_ORGANIZATION_ID||!NEXUS_GUILD_ID||!NEXUS_API_TOKEN)return null;
-  return {base,organizationId:NEXUS_ORGANIZATION_ID,guildId:NEXUS_GUILD_ID,token:NEXUS_API_TOKEN,guilds:[{id:NEXUS_GUILD_ID,name:'Development guild',installed:true,installUrl:null}],userId:'development'};
+  if(guildCookie&&guildCookie!==NEXUS_GUILD_ID)return null;
+  return {base,organizationId:NEXUS_ORGANIZATION_ID,guildId:NEXUS_GUILD_ID,token:NEXUS_API_TOKEN,guilds:[{id:NEXUS_GUILD_ID,name:'Development guild',installed:true,installUrl:null,state:'VERIFIED' as const}],userId:'development'};
  }
  const session=openSession(sessionCookie);if(!session)return null;
- const guilds=await authorizedGuilds(session.accessToken);
- const selected=guilds.find(guild=>guild.id===guildCookie&&guild.installed)??guilds.find(guild=>guild.installed);if(!selected)return null;
+ const guilds=await authorizedGuilds(session.accessToken,session.userId);
+ const selected=guildCookie?guilds.find(guild=>guild.id===guildCookie&&guild.installed&&guild.state==='VERIFIED'):guilds.find(guild=>guild.installed&&guild.state==='VERIFIED');if(!selected)return null;
  if(!process.env.API_KEY)throw new Error('API_KEY is required for OAuth dashboard access');
  const scope=scopeForGuild(selected.id);
  return {base,organizationId:scope.organizationId,guildId:scope.guildId,token:apiToken(process.env.API_KEY,scope),guilds,userId:session.userId};

@@ -1,4 +1,5 @@
 import {afterEach,expect,it,vi} from 'vitest';
+vi.mock('../../apps/web/app/auth/server-access',()=>({manageableConnection:vi.fn(async()=>({state:'VERIFIED',version:'2026-09-30T00:00:00.000Z'}))}));
 import {readFileSync} from 'node:fs';
 import {NextRequest} from '../../apps/web/node_modules/next/server.js';
 import {authorizedGuilds,dashboardContext,openSession,sealSession,validOAuthState} from '../../apps/web/app/auth/session';
@@ -52,11 +53,11 @@ it('authorizes only guilds with administrative permissions on each request',asyn
   {id:'555555555555555555',name:'Uninstalled',permissions:'32'},
   {id:'333333333333333333',name:'Member',permissions:'0'}
  ]})));
- const guilds=await authorizedGuilds('access');expect(guilds.map(guild=>guild.id)).toEqual(['111111111111111111','222222222222222222','555555555555555555']);expect(guilds[2]?.installed).toBe(false);expect(guilds[2]?.installUrl).toContain('guild_id=555555555555555555');
+ const guilds=await authorizedGuilds('access','444444444444444444');expect(guilds.map(guild=>guild.id)).toEqual(['111111111111111111','222222222222222222','555555555555555555']);expect(guilds[2]?.installed).toBe(false);expect(guilds[2]?.installUrl).toContain('guild_id=555555555555555555');
  const session=sealSession({accessToken:'access',userId:'444444444444444444',expiresAt:Date.now()+10000});
  const selected=await dashboardContext(session,'222222222222222222');expect(selected?.guildId).toBe('222222222222222222');
  const allowed=await selectGuild(new NextRequest('http://localhost:3100/auth/select?guild=222222222222222222',{headers:{cookie:`nexus_session=${session}`}}));expect(allowed.headers.get('location')).toContain('/dashboard/222222222222222222');
- const unauthorized=await dashboardContext(session,'333333333333333333');expect(unauthorized?.guildId).toBe('111111111111111111');
+ const unauthorized=await dashboardContext(session,'333333333333333333');expect(unauthorized).toBeNull();
  const response=await selectGuild(new NextRequest('http://localhost:3100/auth/select?guild=333333333333333333',{headers:{cookie:`nexus_session=${session}`}}));expect(response.status).toBe(307);expect(response.headers.get('location')).toContain('/servers');
  const uninstalled=await selectGuild(new NextRequest('http://localhost:3100/auth/select?guild=555555555555555555',{headers:{cookie:`nexus_session=${session}`}}));expect(uninstalled.status).toBe(307);expect(uninstalled.headers.get('location')).toContain('/servers');
 });
@@ -68,7 +69,7 @@ it('keeps OAuth return paths inside a validated guild dashboard route',async()=>
  expect(invalid.cookies.get('nexus_oauth_next')?.value).not.toBe('https://outside.example');
 });
 it('returns a clear re-login response for an expired OAuth session',async()=>{
- vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_SESSION_SECRET','a'.repeat(64));
+ vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_SESSION_SECRET','a'.repeat(64));vi.stubEnv('NEXUS_WEB_URL','http://localhost:3100');
  const expired=sealSession({accessToken:'access',userId:'111111111111111111',expiresAt:Date.now()-1000});
  const response=await webControl(new NextRequest('http://localhost:3100/control',{method:'POST',headers:{origin:'http://localhost:3100',host:'localhost:3100','sec-fetch-site':'same-origin',cookie:`nexus_session=${expired}`},body:'{}'}));
  expect(response.status).toBe(401);expect((await response.json()).error).toBe('SESSION_EXPIRED');

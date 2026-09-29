@@ -1,8 +1,8 @@
 import {z} from 'zod';
 import {randomUUID} from 'node:crypto';
-import {sql,tenant,json,type Database,type Tx} from '../../db/src/index.js';
-import {canAdmin,canOperatePanel} from '../../security/src/index.js';
-import {assert,type Scope} from '../../shared/src/index.js';
+import {sql,tenant,json,type Database,type Tx} from '../../db/src/index';
+import {canAdmin,canOperatePanel} from '../../security/src/index';
+import {assert,type Scope} from '../../shared/src/index';
 export const templates=['Gaming','Creator','Developer / OSS','Product / SaaS','Education','General Community'] as const;
 const id=z.string().regex(/^\d{17,20}$/);
 export const settingsSchema=z.object({enabled:z.boolean().default(true),onboardingEnabled:z.boolean().default(false),template:z.enum(templates).default('General Community'),

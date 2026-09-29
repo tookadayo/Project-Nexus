@@ -8,7 +8,7 @@ export async function GET(req:NextRequest){
  url.searchParams.set('response_type','code');url.searchParams.set('client_id',process.env.DISCORD_APPLICATION_ID);url.searchParams.set('redirect_uri',oauthRedirectUri());url.searchParams.set('scope','identify guilds');url.searchParams.set('state',state);
  const next=req.nextUrl.searchParams.get('next');
  const response=NextResponse.redirect(url);response.cookies.set('nexus_oauth_state',state,{httpOnly:true,secure:secureCookies(),sameSite:'lax',path:'/',maxAge:600});
- if(next&&/^\/dashboard\/\d{17,20}$/.test(next))response.cookies.set('nexus_oauth_next',next,{httpOnly:true,secure:secureCookies(),sameSite:'lax',path:'/',maxAge:600});
+ if(next&&(next==='/link'||/^\/dashboard\/\d{17,20}$/.test(next)))response.cookies.set('nexus_oauth_next',next,{httpOnly:true,secure:secureCookies(),sameSite:'lax',path:'/',maxAge:600});
  else response.cookies.delete('nexus_oauth_next');
  return response;
 }

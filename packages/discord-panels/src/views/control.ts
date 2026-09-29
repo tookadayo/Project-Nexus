@@ -18,6 +18,7 @@ export type ControlData={
  results?:{controlRate:number|null;treatmentRate:number|null;controlN:number;treatmentN:number;state:string}|null;
  diagnostics?:{version?:string;buildSha?:string;releaseChannel?:string;gatewayConnected:boolean;transport:'gateway'|'webhook';commandsRegistered:boolean;lastReceivedAt:string|null;lastAcknowledgedAt:string|null;lastCompletedAt:string|null;lastResult:string|null;lastActivityAt:string|null;databaseConnected:boolean;redisConnected:boolean};
  dashboardUrl?:string;
+ webVerified?:boolean;
  updatedAt?:Date;
 };
 const percent=(value:number|null|undefined)=>value===null||value===undefined?'—':`${value}%`;
@@ -97,7 +98,8 @@ export async function controlPanel(issue:Issue,page:ControlPage,data:ControlData
  const mainSettings=page==='settings'&&section==='main';
  const rows:ActionRow[]=page==='overview'||mainSettings?[]:[select];
  if(page==='overview'){const primary=await actionRow(issue,[{label:t(locale,'control.attention'),emoji:'📥',action:'controlNavigate',data:{page:'attention'},publicEntry:true,style:community?.daily.attentionCount?ButtonStyle.Primary:ButtonStyle.Secondary},{label:t(locale,'control.newMembers'),emoji:'👋',action:'controlNavigate',data:{page:'newMembers'},publicEntry:true},{label:t(locale,'control.analysis'),emoji:'📊',action:'controlNavigate',data:{page:'analysis'},publicEntry:true}]);
- try{if(data.dashboardUrl&&/^https?:$/.test(new URL(data.dashboardUrl).protocol))primary.components.push({type:ComponentType.Button,style:ButtonStyle.Link,label:'Web Dashboard',emoji:{name:'🌐'},url:data.dashboardUrl});}catch{/* Invalid link omitted. */}rows.push(primary);}
+ try{if(data.dashboardUrl&&/^https?:$/.test(new URL(data.dashboardUrl).protocol))primary.components.push({type:ComponentType.Button,style:ButtonStyle.Link,label:data.webVerified===false?(locale==='ja'?'Web Dashboardを接続':'Connect Web Dashboard'):'Web Dashboard',emoji:{name:'🌐'},url:data.dashboardUrl});}catch{/* Invalid link omitted. */}rows.push(primary);}
+ if(data.webVerified===false&&data.dashboardUrl)children.push(footer(locale==='ja'?'Web接続には、このサーバーで /nexus link を実行してください。':'Run /nexus link in this server to verify its Web connection.'));
  if(mainSettings){rows.push(await actionRow(issue,(['scope','notifications','team','goals'] as const).map((section,index)=>({label:section==='scope'?t(locale,'polish.measurement'):section==='team'?t(locale,'polish.team'):section==='goals'?t(locale,'polish.goals'):t(locale,'control.notifications'),emoji:['📏','🔔','👥','🎯'][index],action:'controlSettings',data:{section,privateSettings:true},publicEntry:true}))));}
  if(page==='overview'||mainSettings)rows.push({type:ComponentType.ActionRow,components:[{type:ComponentType.StringSelect,custom_id:await issue(mainSettings?{action:'controlSettings',privateSettings:true}:{action:'controlNavigate'},true),placeholder:t(locale,'polish.more'),options:(mainSettings?['summary','privacy','panel','diagnostics','advanced']:['results','settings']).map(value=>({label:t(locale,`control.${value}` as 'control.results'),value}))}]});
  if(page==='analysis')rows.push({type:ComponentType.ActionRow,components:[{type:ComponentType.StringSelect,custom_id:await issue({action:'controlAnalysis'},true),placeholder:t(locale,'control.analysis'),options:analysisViews.map(value=>({label:t(locale,`control.${value}`),value,default:analysisView===value}))} satisfies APIStringSelectComponent]});

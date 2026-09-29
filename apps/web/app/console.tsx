@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import {ServerConnection} from './link/connection';
 import type {CommunityService} from '../../../packages/presentation/src/community';
 import {t} from '../../../packages/discord-panels/src/i18n/index';
 import {VERSION,RELEASE_CHANNEL} from '../../../packages/shared/src/version';
@@ -54,6 +55,7 @@ export type ProductData = {
   options: DiscordOptions;
   admin: Admin | null;
   guilds?:{id:string;name:string;installed:boolean;installUrl:string|null}[];
+  developmentAuth?:boolean;
   selectedGuildId?:string;
   runtime?:{version:string;buildSha:string;releaseChannel:string;guildHash:string;gatewayConnected:boolean;commandsRegistered:boolean;interactionTransport:string;lastInteractionResult:string};
 };
@@ -975,6 +977,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
         </div>
       </div>
       <section className="settings-grid">
+        {data.selectedGuildId&&<ServerConnection guildId={data.selectedGuildId} locale={locale} development={data.developmentAuth===true}/>}
         <article className="surface"><h2>{t(locale,"web.channels_to_analyze")}</h2><p>{t(locale,"web.the_default_is_the_whole_server")}</p><button disabled={!suggestedExcludedChannels.length} onClick={()=>{setScopeMode('exclude');setScopeChannels(suggestedExcludedChannels)}}>{t(locale,"web.select_likely_staff_or_log_channels")}</button><select aria-label={t(locale,"web.channels_to_analyze")} value={scopeMode} onChange={e=>setScopeMode(e.target.value as typeof scopeMode)}><option value="all">{t(locale,"web.whole_server")}</option><option value="include">{t(locale,"web.selected_channels_only")}</option><option value="exclude">{t(locale,"web.exclude_selected_channels")}</option></select>{scopeMode!=='all'&&<div className="scope-list">{data.options.channels.map(option=><label key={option.id}><input type="checkbox" checked={scopeChannels.includes(option.id)} onChange={e=>setScopeChannels(e.target.checked?[...scopeChannels,option.id]:scopeChannels.filter(id=>id!==option.id))}/>{option.label}</label>)}</div>}<h3>{t(locale,"web.staff_roles_excluded_from_comparison")}</h3><div className="scope-list">{data.options.roles.map(option=><label key={option.id}><input type="checkbox" checked={staffRoles.includes(option.id)} onChange={e=>setStaffRoles(e.target.checked?[...staffRoles,option.id]:staffRoles.filter(id=>id!==option.id))}/>{option.label}</label>)}</div><button disabled={busy||scopeMode==='include'&&!scopeChannels.length} onClick={async()=>{const result=await request({action:'analysis_scope',mode:scopeMode,channelIds:scopeChannels,staffRoleIds:staffRoles,revision:notificationRevision});if(result){setNotificationRevision(result.revision);setSavedScopeMode(scopeMode);setStatus(t(locale,"web.analysis_scope_saved"));}}}>{t(locale,"web.save_changes")}</button></article>
         <article className="surface">
           <h2>{t(locale,"web.general")}</h2>
@@ -1113,6 +1116,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
             ))}
           </select>
         </div>
+        {data.developmentAuth&&<div className="development-auth" role="status">DEVELOPMENT AUTH MODE · {locale==='ja'?'ローカル開発用・サーバー未検証':'Local development · server verification bypassed'}</div>}
         <div className="dashboard-topbar"><div><span>{data.guilds?.find(guild=>guild.id===data.selectedGuildId)?.name??'NEXUS'}</span><small>{data.admin?.usage.plan??'Free'} · {data.runtime?.gatewayConnected?t(locale,'control.on'):t(locale,'common.needsAttention')}</small></div><a href="/servers">{t(locale,'web.server')} ▾</a></div>
         {page===9?rulesView:page===8?attentionView:page===5?<><div className="surface" role="tablist" aria-label={t(locale,'control.analysis')}>{(['overall','channels','behavior'] as const).map(tab=><button key={tab} role="tab" aria-selected={analysisTab===tab} onClick={()=>setAnalysisTab(tab)}>{t(locale,`control.${tab}`)}</button>)}</div>{analysisTab==='overall'?<>{views[5]}{views[6]}{opportunityView}</>:analysisTab==='channels'?views[7]:<section className="surface"><h1>{t(locale,'control.behavior')}</h1>{data.community?.compare.available?<><p>{t(locale,'control.replyAlert')}: {wholePercent(data.community.compare.newcomers?.receivedReplyPercent??null)}</p><p>{t(locale,'control.voice')}: {wholePercent(data.community.compare.newcomers?.voicePercent??null)}</p><p>{t(locale,'control.goalEvent')}: {wholePercent(data.community.compare.newcomers?.eventPercent??null)}</p></>:<p>{t(locale,'control.noComparison')}</p>}{data.community?.transitions.length?<><h2>{t(locale,'control.moves')}</h2>{data.community.transitions.slice(0,5).map((move,index)=><p key={index}>{move.from==='voice'?t(locale,'control.voice'):data.options.channels.find(item=>item.id===move.from)?.label??`#${move.from}`} → {move.to==='voice'?t(locale,'control.voice'):data.options.channels.find(item=>item.id===move.to)?.label??`#${move.to}`}</p>)}</>:null}</section>}</>:views[page]}
         <p className="status" role="status">

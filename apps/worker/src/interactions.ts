@@ -7,6 +7,8 @@ import {PermissionFlagsBits} from 'discord-api-types/v10';
 import {sql,tenant,type Database} from '../../../packages/db/src/index.js';
 import type {IdentityVault} from '../../../packages/identity/src/index.js';
 import {Components,canOperatePanel} from '../../../packages/security/src/index.js';
+import {ServerAuthorization} from '../../../packages/security/src/server-authorization.js';
+import {ServerVerification} from '../../../packages/security/src/server-verification.js';
 import {SettingsService,templates,type Actor,type SettingsView} from '../../../packages/settings/src/index.js';
 import {OnboardingService,type Session} from '../../../packages/onboarding/src/index.js';
 import {controlPanel,controlPages,settingsSections,analysisViews,panelPlacementWarning,settingsPanel,basicSettingsPanel,improvePanel,privacyPanel,questionPanel,confirmation,errorPanel,activationPanel,activationPreviewPanel,billingPanel,lifecyclePanel,diagnosticsPanel,interventionsPanel,interventionPreviewPanel,experimentsPanel,experimentMethodPanel,cohortsPanel,reportsPanel,overviewPanel,publishedPanel,successPanel,panelInstalledPanel,rolloutPreviewPanel,onboardingModePreviewPanel,onboardingNotConfiguredPanel,onboardingFlowPanel,editQuestionPanel,roleMappingPanel,sessionCompletePanel,activationReadinessPanel,guidedSetupPanel,resolveLocale,t,nexusPanel,callout,divider,actionRow,type Panel,type Issue,type ReadinessCheck,type UiLocale,type ControlPage,type SettingsSection,type AnalysisView} from '../../../packages/discord-panels/src/index.js';
@@ -28,6 +30,8 @@ import {releaseInfo} from '../../../packages/shared/src/runtime-info.js';
 import {recordProductEvent} from '../../../packages/shared/src/product-telemetry.js';
 type DeleteData=(s:Scope,userId:string,actor:Actor,guild:boolean)=>Promise<void>;
 export class InteractionWorker {
+ private get verification(){return new ServerVerification(this.db,this.vault,new ServerAuthorization(this.discord,this.settings,this.vault));}
+ private async webLink(s:Scope){const verified=(await this.verification.connection(s)).state==='VERIFIED';return {verified,url:discordDashboardLink(process.env.NEXUS_WEB_URL,s.guildId,process.env.NEXUS_WEB_AUTH_MODE==='development',verified)};}
  constructor(private readonly db:Database,private readonly vault:IdentityVault,private readonly tokens:Components,private readonly discord:DiscordPort,
  private readonly settings:SettingsService,private readonly onboarding:OnboardingService,private readonly deletion:DeleteData,
  private readonly runtime?:()=>{gatewayConnected:boolean;redisConnected:boolean;interaction:InteractionHealthSnapshot;commandHash:string}){}
@@ -40,9 +44,20 @@ export class InteractionWorker {
    return row;
   });if(!job)return false;
   const input=JSON.parse(this.vault.open(s,job.encrypted_payload)) as InteractionJob;
-  let body:Panel,privateError=false,stage='dispatch',action=input.command??'unknown';
+  let body:Panel,privateError=false,stage='dispatch',action=input.command??'unknown',challengeId:string|undefined;
   try{
-   body=await this.dispatch(s,input,value=>{if(value.startsWith('action:'))action=value.slice(7);else stage=value;});
+   body=await this.dispatch(s,input,value=>{if(value.startsWith('action:'))action=value.slice(7);else stage=value;},id=>{challengeId=id;});
+   if(challengeId){
+    stage='verification_reply';
+    // Verification codes live only in memory and the ephemeral Discord reply.
+    // Ordinary outbox bodies are plaintext, so this reply must bypass that queue.
+    try{await this.discord.editReply(input.applicationId,input.token,body);}
+    catch{await this.verification.revokeChallenge(s,challengeId);throw new DomainError('VERIFICATION_DELIVERY_FAILED');}
+    await this.db.transaction().execute(async tx=>{
+     await sql`UPDATE interaction_diagnostics SET result='completed',completed_at=now() WHERE ${tenant(s)} AND interaction_hash=${this.vault.hash(s,input.id)}`.execute(tx);
+     await sql`UPDATE interaction_jobs SET state='SUCCEEDED',lease_until=NULL WHERE ${tenant(s)} AND id=${input.id}`.execute(tx);
+    });return true;
+   }
    void recordProductEvent(this.db,s,'interaction_latency',Date.now()-started).catch(()=>{});
    if(input.messageId&&input.customId){
     const installed=(await sql<{message_id:string}>`SELECT message_id FROM settings_panels WHERE ${tenant(s)}`.execute(this.db)).rows[0];
@@ -67,7 +82,7 @@ export class InteractionWorker {
    await sql`UPDATE interaction_jobs SET state='SUCCEEDED',lease_until=NULL WHERE ${tenant(s)} AND id=${input.id}`.execute(tx);
   });return true;
  }
- async dispatch(s:Scope,input:InteractionJob,onStage:(stage:string)=>void=()=>{}):Promise<Panel>{
+ async dispatch(s:Scope,input:InteractionJob,onStage:(stage:string)=>void=()=>{},onSensitiveReply:(challengeId:string)=>void=()=>{}):Promise<Panel>{
   onStage('member_lookup');
   const member=await this.discord.member(s.guildId,input.userId);const actorHash=this.vault.hash(s,input.userId);
   const actor:Actor={key:actorHash,permissions:member.permissions,roles:member.roles,source:'DISCORD_PANEL',requestId:input.id,encryptedUserId:this.vault.seal(s,input.userId)};
@@ -90,7 +105,19 @@ export class InteractionWorker {
 
   const issue:Issue=(data,publicEntry=false)=>this.tokens.issue(this.db,s,privateSettings?{...data,privateSettings:true,panelMessageId}:setupFlow?{...data,setupFlow:true}:data,publicEntry&&!setupFlow&&!privateSettings?null:actorHash,publicEntry&&!setupFlow&&!privateSettings?31536000:900);
   const adminActions=['controlRules','controlNotificationSave','contextAdd','contextResolve','contextExplain','contextMember','panel','panelConfirm','panelChoose','panelRefresh','panelMoveConfirm','controlNavigate','controlRefresh','controlAnalysis','controlChannelPage','controlAttentionPage','controlSettings','controlSummaryField','controlGoalPurpose','controlScope','controlScopeChannels','controlManagers','controlManagersConfirm','controlCancelManagers','controlClearManagers','controlClearHelpers','controlSkipTeam','controlSkipNotifications','controlSkipGoals','controlScopeDefault','controlKeepSettings','controlReviewSetup','controlMovePanel','controlOpenAttention','controlOpenDiagnostics','controlResolve','controlAcknowledge','controlSnoozeMenu','controlSnooze','controlApplyImprove','controlCancelImprove','controlHelpers','controlHelperChannel','controlAlertDelay','controlHelperToggle','controlGoal','controlGoalPreset','controlGoalChannel','controlWeeklyChannel','controlWeeklyDay','controlWeeklyHour','controlTimezone','controlWeeklyToggle','controlTryImprove','controlTestAlert','controlTestSummary','setup','setupNext','setupHome','recommendedSetup','rolloutPreview','rolloutConfirm','modePreview','modeConfirm','lifecycle','activation','activationDraft','activationPublish','cohorts','diagnose','improve','interventions','interventionDraft','interventionApprove','experiments','experimentMethod','experimentDraft','configPublish','reports','billing','advanced','settings','status','flows','template','startChannel','adminNotificationChannel','helperChannel','helperEnabled','uiLanguage','enabled','onboardingEnabled','mapOption','mapRole','editNode','editNodeOpen','editNodeSave','rollback','preview','deleteGuildConfirm','deleteGuild','overview','dashboard'];
-  onStage('authorization');if(adminActions.includes(action))assert(admin,'ADMIN_REQUIRED',403);
+  onStage('authorization');if(adminActions.includes(action)||['link','unlink','unlinkConfirm','unlinkCancel'].includes(action))assert(admin,'ADMIN_REQUIRED',403);
+  if(action==='link'){
+   assert(input.command==='link'&&!input.customId&&!input.messageId,'VERIFICATION_PRIVATE_REQUIRED');
+   const url=discordDashboardLink(process.env.NEXUS_WEB_URL,s.guildId,process.env.NEXUS_WEB_AUTH_MODE==='development',false);assert(url,'WEB_CONNECTION_UNAVAILABLE');
+   const challenge=await this.verification.issue(s,input.userId);onSensitiveReply(challenge.id);
+   return nexusPanel({title:locale==='ja'?'Web Dashboardを接続':'Connect Web Dashboard',children:[divider(),callout(locale==='ja'?'検証コード':'Verification code',`\`${challenge.code}\`\n${locale==='ja'?'有効期限':'Expires'}: <t:${Math.floor(challenge.expiresAt.getTime()/1000)}:R>\n${locale==='ja'?'発行したDiscordアカウントでログインしてください。コードは1回だけ使用できます。':'Sign in with the Discord account that issued this code. It can only be used once.'}`),callout('Web Dashboard',url)]});
+  }
+  if(action==='unlink'){
+   const connection=await this.verification.connection(s);
+   return nexusPanel({title:locale==='ja'?'Web接続を解除しますか？':'Disconnect Web Dashboard?',children:[divider(),callout(locale==='ja'?'データは保持されます':'Your data is preserved',locale==='ja'?'未使用コードも無効になります。Bot、分析データ、履歴、設定は保持され、再接続には /nexus link が必要です。':'Unused codes will also be revoked. The bot, analytics, history, and settings are preserved. Run /nexus link to reconnect.')],rows:[await actionRow(issue,[{label:locale==='ja'?'接続解除を確定':'Confirm disconnect',action:'unlinkConfirm',data:{version:connection.version},style:4},{label:locale==='ja'?'キャンセル':'Cancel',action:'unlinkCancel'}])]});
+  }
+  if(action==='unlinkConfirm'){assert(input.customId,'CONFIRMATION_REQUIRED');assert(intent.version===null||typeof intent.version==='string','INVALID_COMPONENT');await this.verification.disconnect(s,input.userId,intent.version,'DISCORD_PANEL');return nexusPanel({title:locale==='ja'?'Web接続を解除しました':'Web Dashboard disconnected',children:[callout('NEXUS',locale==='ja'?'データは保持されています。再接続には /nexus link を実行してください。':'Your data is preserved. Run /nexus link to reconnect.')]});}
+  if(action==='unlinkCancel')return nexusPanel({title:locale==='ja'?'キャンセルしました':'Cancelled',children:[]});
   if(action==='contextMember'){
    const target=z.string().regex(/^\d{17,20}$/).parse(input.targetUserId),hash=this.vault.hash(s,target);
    const episode=(await sql<{id:string;joined_at:Date}>`SELECT e.id,e.joined_at FROM membership_episodes e JOIN member_identity_map m ON m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.identity_id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND m.lookup_hash=${hash} AND e.context='PRODUCTION' ORDER BY e.joined_at DESC LIMIT 1`.execute(this.db)).rows[0];
@@ -98,7 +125,7 @@ export class InteractionWorker {
    const scopeFilter=sql`(data->>'channelId' IS NULL OR ${current.analysisScope.mode}='all' OR (${current.analysisScope.mode}='include')=(data->>'channelId'=ANY(${current.analysisScope.channelIds}::text[])))`;
    const facts=(await sql<{kind:string}>`SELECT DISTINCT kind FROM lifecycle_events WHERE ${tenant(s)} AND episode_id=${episode.id}::uuid AND context='PRODUCTION' AND ${scopeFilter} AND occurred_at>=${episode.joined_at} AND occurred_at<${new Date(episode.joined_at.getTime()+72*3600000)} AND kind IN ('message.sent','reaction.received','reaction.added','reply.received','reply.established','voice.connected','voice.started','scheduled_event.subscribed')`.execute(this.db)).rows.map(row=>row.kind);
    const reactionCount=(await sql<{count:number}>`SELECT count(*)::integer AS count FROM lifecycle_events WHERE ${tenant(s)} AND episode_id=${episode.id}::uuid AND context='PRODUCTION' AND ${scopeFilter} AND kind='reaction.received' AND occurred_at>=${episode.joined_at} AND occurred_at<${new Date(episode.joined_at.getTime()+72*3600000)}`.execute(this.db)).rows[0]?.count??0;
-   const connected=facts.includes('reply.received')||facts.includes('reply.established')||facts.includes('voice.connected'),link=discordDashboardLink(process.env.NEXUS_WEB_URL,s.guildId,process.env.NEXUS_WEB_AUTH_MODE==='development');
+   const connected=facts.includes('reply.received')||facts.includes('reply.established')||facts.includes('voice.connected'),link=(await this.webLink(s)).url;
    return nexusPanel({title:locale==='ja'?'👋 新規メンバー状態':'👋 New member status',children:[divider(),callout(`<@${target}>`,`${locale==='ja'?'参加':'Joined'}: <t:${Math.floor(episode.joined_at.getTime()/1000)}:R>\n${connected?locale==='ja'?'✅ 最初の交流を確認':'✅ First connection observed':locale==='ja'?'🟡 最初の交流を確認中':'🟡 Waiting for first connection'}`),callout(t(locale,'experience.rules'),`${facts.includes('message.sent')?'✓':'–'} ${locale==='ja'?'投稿':'Post'}\n${reactionCount?'✓':'–'} ${t(locale,'polish.received',{count:reactionCount})}\n${facts.includes('reply.received')?'✓':'–'} ${locale==='ja'?'直接返信を受けた':'Received a direct reply'}\n${facts.includes('voice.connected')?'✓':'–'} ${locale==='ja'?'ボイスで他の人と交流':'Voice connection'}`),callout(t(locale,'polish.receivedTotal'),t(locale,'experience.reactionWeak')),...(link?[callout('Web Dashboard',link)]:[])]});
   }
   if(action==='contextAdd'||action==='contextResolve'||action==='contextExplain'){
@@ -416,7 +443,8 @@ export class InteractionWorker {
   return this.communityPanel(issue,s,locale,'settings',progress.next);
  }
  private async communityPanel(issue:Issue,s:Scope,locale:UiLocale,page:ControlPage='overview',section:SettingsSection='main',channelPage=0,summaryField:'none'|'channel'|'day'|'hour'|'timezone'='none',goalPurpose:'none'|'lfg'|'feedback'|'bug'|'playtest'='none',analysisView:AnalysisView='overall',attentionIndex=0){
-  const data:Parameters<typeof controlPanel>[2]={dashboardUrl:discordDashboardLink(process.env.NEXUS_WEB_URL,s.guildId,process.env.NEXUS_WEB_AUTH_MODE==='development'),updatedAt:new Date()};
+  const web=await this.webLink(s);
+  const data:Parameters<typeof controlPanel>[2]={dashboardUrl:web.url,webVerified:web.verified,updatedAt:new Date()};
   if(['overview','newMembers','attention','analysis','community','channels','improve'].includes(page)){
    const community=new CommunityService(this.db,this.settings);data.community=await community.overview(s,30,new Date(),[],page==='attention'?attentionIndex:0);
    if(page==='attention'&&attentionIndex>0&&data.community.attention.length===0){attentionIndex=0;data.community=await community.overview(s,30);}

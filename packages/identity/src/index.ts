@@ -1,11 +1,12 @@
 import {createCipheriv,createDecipheriv,createHmac,randomBytes,randomUUID} from 'node:crypto';
-import {sql,tenant,type Tx} from '../../db/src/index.js';
-import {scopeSchema,assert,type Scope} from '../../shared/src/index.js';
+import {sql,tenant,type Tx} from '../../db/src/index';
+import {scopeSchema,assert,type Scope} from '../../shared/src/index';
 export class IdentityVault {
  constructor(private readonly encryptionKey:string,private readonly lookupKey:string){
   for(const key of [encryptionKey,lookupKey]) if(!/^[a-f\d]{64}$/i.test(key)) throw new Error('Invalid vault key');
  }
  hash(s:Scope,userId:string){scopeSchema.parse(s);return createHmac('sha256',Buffer.from(this.lookupKey,'hex')).update(`${s.organizationId}:${s.guildId}:${userId}`).digest('hex');}
+ digest(purpose:string,value:string){return createHmac('sha256',Buffer.from(this.lookupKey,'hex')).update(`nexus:${purpose}:`).update(value).digest('hex');}
  seal(s:Scope,value:string){
   const iv=randomBytes(12);const cipher=createCipheriv('aes-256-gcm',Buffer.from(this.encryptionKey,'hex'),iv);
   cipher.setAAD(Buffer.from(`${s.organizationId}:${s.guildId}`));

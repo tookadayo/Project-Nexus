@@ -1,6 +1,6 @@
 import {PermissionFlagsBits,type RESTPostAPIChannelMessageJSONBody} from 'discord-api-types/v10';
 import {createHash} from 'node:crypto';
-import {assert} from '../../shared/src/index.js';
+import {assert} from '../../shared/src/index';
 import {z} from 'zod';
 export type Member={roles:string[],permissions:string,joinedAt:string,bot:boolean,flags?:string,pending?:boolean|null};
 export const nativeOnboardingSchema=z.object({guild_id:z.string(),enabled:z.boolean(),mode:z.number().int(),default_channel_ids:z.array(z.string()),prompts:z.array(z.object({id:z.string(),title:z.string(),type:z.number().int(),options:z.array(z.object({id:z.string(),title:z.string(),role_ids:z.array(z.string()),channel_ids:z.array(z.string())})),single_select:z.boolean(),required:z.boolean(),in_onboarding:z.boolean()}))});
