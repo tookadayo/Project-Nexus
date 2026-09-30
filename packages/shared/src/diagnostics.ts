@@ -1,5 +1,5 @@
 import {randomBytes} from 'node:crypto';
-import {DiscordFailure} from '../../discord/src/rest';
+import {isDiscordFailure} from '../../discord/src/rest';
 
 export function errorReference(){return `NXS-${randomBytes(6).toString('hex').toUpperCase()}`;}
 
@@ -15,7 +15,7 @@ export function redactSecrets(value:string,extra:string[]=[]){
 }
 
 export function failureSummary(error:unknown){
- if(error instanceof DiscordFailure)return {class:error.kind==='http'?`DiscordHTTP${error.status}`:`Discord${error.kind}`,message:error.message,httpStatus:error.status||null,routeCategory:error.routeCategory,rateLimitScope:error.rateLimitScope,bucket:error.bucket,retryAfter:error.retryAfter,isGlobal:error.isGlobal};
+ if(isDiscordFailure(error))return {class:error.kind==='http'?`DiscordHTTP${error.status}`:`Discord${error.kind}`,message:error.message,httpStatus:error.status||null,routeCategory:error.routeCategory,rateLimitScope:error.rateLimitScope,bucket:error.bucket,retryAfter:error.retryAfter,isGlobal:error.isGlobal};
  return {class:error instanceof Error?error.name:'UnknownError',message:error instanceof Error?error.message:'Unknown error'};
 }
 

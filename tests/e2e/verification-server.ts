@@ -29,6 +29,7 @@ const verified=await verification.issue(scopeForGuild(ids[0]!),user);await verif
 await writeFile('.local/verification-e2e.json',JSON.stringify({databaseUrl}),'utf8');
 const api=createApi(new AnalyticsService(db,settings),'verification-api-key',db,discord);await api.listen({host:'127.0.0.1',port:port+2});
 const fixture=Fastify({logger:false});fixture.get('/health',async()=>({ok:true}));
+fixture.get('/fixture/discord/users/@me',async request=>({id:request.headers.authorization?.split('-').at(-1)??user}));
 fixture.get('/fixture/discord/users/@me/guilds',async request=>request.headers.authorization?.startsWith('Bot ')?ids.filter(id=>installed.has(id)).map(id=>({id})):ids.map((id,index)=>({id,name:names[index],permissions:id===ids[3]?'32':'0'})));
 fixture.get('/fixture/discord/guilds/:guildId',async(request,reply)=>{const {guildId}=request.params as {guildId:string};return installed.has(guildId)?{id:guildId,owner_id:'999111111111111111'}:reply.code(404).send({});});
 fixture.get('/fixture/discord/guilds/:guildId/roles',async request=>{const {guildId}=request.params as {guildId:string};return [{id:guildId,permissions:'0',position:0,managed:false},{id:manager,permissions:'0',position:1,managed:false},{id:admin,permissions:'32',position:2,managed:false}];});

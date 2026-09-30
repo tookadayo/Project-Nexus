@@ -1,7 +1,7 @@
 import 'server-only';
 import {connect} from '../../../../packages/db/src/index';
 import {IdentityVault} from '../../../../packages/identity/src/index';
-import {DiscordRest,DiscordFailure} from '../../../../packages/discord/src/rest';
+import {DiscordRest,isDiscordFailure} from '../../../../packages/discord/src/rest';
 import {SettingsService} from '../../../../packages/settings/src/index';
 import {Components} from '../../../../packages/security/src/index';
 import {ServerAuthorization} from '../../../../packages/security/src/server-authorization';
@@ -23,6 +23,6 @@ export async function manageableConnection(guildId:string,userId:string){
  const s=scopeForGuild(guildId),services=serverServices();
  let snapshot;
  try{snapshot=await services.authority.snapshot(s,userId,'WEB_DASHBOARD','access-check');services.authority.require(snapshot);}
- catch(error){if(error instanceof DiscordFailure&&[403,404].includes(error.status)||error instanceof Error&&error.message==='ADMIN_REQUIRED')return null;throw error;}
+ catch(error){if(isDiscordFailure(error)&&[403,404].includes(error.status)||error instanceof Error&&error.message==='ADMIN_REQUIRED')return null;throw error;}
  return {...await services.verification.connection(s,userId),name:snapshot.member.guildName??guildId};
 }

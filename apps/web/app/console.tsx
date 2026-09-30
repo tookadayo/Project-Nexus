@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState,useEffect } from "react";
 import {Measurements,AnalysisSummary} from './measurements';
 import {ServerConnection} from './link/connection';
 import {FailureNotice} from './failure-ui';
@@ -84,9 +84,9 @@ const signed = (n: number | null, rate = true) =>
     ? "—"
     : `${n > 0 ? "+" : n < 0 ? "−" : ""}${rate ? `${(Math.abs(n) * 100).toFixed(1)} pt` : Math.abs(n).toLocaleString()}`;
 
-export default function Console({ data, initialLocale = "en" }: { data: ProductData; initialLocale?: Locale }) {
+export default function Console({ data, initialLocale = "en",initialView=0 }: { data: ProductData; initialLocale?: Locale;initialView?:number }) {
   const [locale, setLocale] = useState<Locale>(initialLocale),
-    [page, setPage] = useState(0),
+    [page, setPage] = useState(initialView),
     [analysisTab,setAnalysisTab]=useState<'overall'|'channels'|'behavior'>('overall'),
     [journey, setJourney] = useState(data.journey),
     [range, setRange] = useState<7 | 30 | 90>(data.journey?.range ?? 30),
@@ -137,6 +137,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
     [attentionRemoved,setAttentionRemoved]=useState(0),
     [attentionSnooze,setAttentionSnooze]=useState<Record<string,'30'|'60'|'today'>>({});
   const c = messages[locale];
+  useEffect(()=>{const url=new URL(window.location.href);if(page===0)url.searchParams.delete('view');else url.searchParams.set('view',String(page));window.history.replaceState(null,'',url);},[page]);
   const suggestedExcludedChannels=data.options.channels.filter(option=>/^#?(?:bot|logs?|staff|mod(?:erator)?)(?:[-_]|$)/i.test(option.label)).map(option=>option.id);
   const openImprovement=(key:ActionTemplateKey)=>{setTemplate(key);setPreflightState(null);setTestSent(false);setShowImprovementSetup(true);setPage(2);requestAnimationFrame(()=>document.querySelector('.builder-v3')?.scrollIntoView({behavior:'smooth',block:'start'}));};
   const selected = actions?.templates.find((t) => t.key === template),

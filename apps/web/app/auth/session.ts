@@ -10,6 +10,10 @@ import {DiscordFailure} from '../../../../packages/discord/src/rest';
 
 export type AuthorizedGuild={id:string;name:string;installed:boolean;installUrl:string|null;state:VerificationState;availability?:'AVAILABLE'|'UNAVAILABLE';failure?:UserFailure};
 type Session={accessToken:string;userId:string;expiresAt:number};
+export async function validateOAuthSession(session:Session){
+ const identified=await oauthDiscord('https://discord.com/api/v10/users/@me',`Bearer ${session.accessToken}`);
+ const identity=await identified.json() as {id?:string};if(identity.id!==session.userId)throw new Error('SESSION_EXPIRED');
+}
 export const authMode=()=>webAuthMode();
 export const oauthRedirectUri=()=>new URL('/auth/callback',process.env.NEXUS_WEB_URL).toString();
 export const secureCookies=()=>process.env.NEXUS_WEB_URL?.startsWith('https://')??false;
@@ -71,8 +75,7 @@ export async function dashboardContext(sessionCookie:string|undefined,guildCooki
  const session=openSession(sessionCookie);if(!session)return null;
  if(!guildCookie||!/^\d{17,20}$/.test(guildCookie))return null;
  // One identity request checks that the OAuth grant has not been revoked.
- const identified=await oauthDiscord('https://discord.com/api/v10/users/@me',`Bearer ${session.accessToken}`);
- const identity=await identified.json() as {id?:string};if(identity.id!==session.userId)throw new Error('SESSION_EXPIRED');
+ await validateOAuthSession(session);
  // The Bot's live guild/member lookup proves installation and current authority.
  // OAuth's entire guild list is needed only on /servers.
  const connection=await manageableConnection(guildCookie,session.userId);if(!connection||connection.state!=='VERIFIED')return null;

@@ -1,6 +1,6 @@
 import Dashboard from '../../dashboard-data';
 export const dynamic='force-dynamic';
-export default async function GuildDashboard({params}:{params:Promise<{guildId:string}>}){
+export default async function GuildDashboard({params,searchParams}:{params:Promise<{guildId:string}>;searchParams:Promise<{view?:string}>}){
  const {guildId}=await params;
- return Dashboard({guildId});
+ const {view}=await searchParams;return Dashboard({guildId,view});
 }

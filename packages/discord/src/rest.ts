@@ -8,7 +8,9 @@ export type NativeOnboarding=z.infer<typeof nativeOnboardingSchema>;
 export type GuildNativeState={features:string[],onboarding:NativeOnboarding|null,bot:Member,roles:Role[],onboardingStatus:'available'|'unavailable'};
 export type Role={id:string,position:number,managed:boolean,permissions:string,name?:string};
 export type DiscordEntityOptions={channels:{id:string;label:string}[];roles:{id:string;label:string}[];events:{id:string;label:string}[]};
+const discordFailureBrand=Symbol.for('nexus.discord-failure');
 export class DiscordFailure extends Error {
+ readonly [discordFailureBrand]=true;
  constructor(public readonly status:number,public readonly retryAfter=0,public readonly details:{kind?:'http'|'timeout'|'network';rateLimitScope?:string|null;bucket?:string|null;routeCategory?:string;isGlobal?:boolean}={}){super(details.kind==='timeout'?'Discord REST timeout':details.kind==='network'?'Discord REST network failure':`Discord HTTP ${status}`);this.name='DiscordFailure';}
  get kind(){return this.details.kind??'http';}
  get rateLimitScope(){return this.details.rateLimitScope??null;}
@@ -16,6 +18,7 @@ export class DiscordFailure extends Error {
  get routeCategory(){return this.details.routeCategory??'unknown';}
  get isGlobal(){return this.details.isGlobal??false;}
 }
+export function isDiscordFailure(error:unknown):error is DiscordFailure{return error instanceof DiscordFailure||Boolean(error&&typeof error==='object'&&(error as Record<symbol,unknown>)[discordFailureBrand]===true);}
 export interface DiscordPort {
  sendDirectMessage?(userId:string,text:string,nonce:string):Promise<string>;
  nativeState?(guildId:string):Promise<GuildNativeState>;

@@ -73,7 +73,7 @@ export class InteractionWorker {
    let language:'auto'|'ja'|'en'|'bilingual'='auto';try{language=(await this.settings.get(s)).uiLanguage;}catch{/* Error response still has interaction locale. */}
    const locale=resolveLocale(language,{interactionLocale:input.locale,guildLocale:input.guildLocale});
    const readOnly=['controlNavigate','controlRefresh','controlAnalysis','controlChannelPage','controlAttentionPage','controlSettings','controlRules','contextExplain','contextMember','overview','lifecycle','diagnose','experiments','status','settings','billing','cohorts','reports'].includes(action);
-   const failure=userFailure(error,readOnly||['dispatch','member_lookup','settings_load','intent_read','authorization'].includes(stage)?'NOT_STARTED':'UNKNOWN',{action,stage,secrets:[input.token]});
+   const failure=userFailure(error,readOnly||['dispatch','member_lookup','settings_load','intent_read','authorization'].includes(stage)?'NOT_STARTED':'UNKNOWN',{action,command:input.command,stage,secrets:[input.token]});
    privateError=Boolean(input.messageId)&&!input.privateResponse;body=await errorPanel(issue,failure,locale,undefined,error instanceof DomainError?error.code:undefined,{page:returnPage,retryRead:readOnly});
   }
   await this.db.transaction().execute(async tx=>{

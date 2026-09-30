@@ -10,7 +10,7 @@ for(const locale of ['en','ja'] as const){
   await expect(menu.getByRole('link',{name:locale==='ja'?'ログイン':'Log in',exact:true})).toBeVisible();
   await expect(menu.getByRole('link',{name:locale==='ja'?'Discordに追加':'Add NEXUS to Discord',exact:true})).toHaveAttribute('href',/client_id=321111111111111119/);
   await expect(menu.getByRole('button',{name:'English',exact:true})).toBeVisible();
-  await page.screenshot({path:`test-results/polish-${locale}-mobile-menu.png`,fullPage:false});
+  await page.screenshot({caret:'initial',path:`test-results/polish-${locale}-mobile-menu.png`,fullPage:false});
   await menu.getByRole('link',{name:locale==='ja'?'料金':'Pricing',exact:true}).click();
   await expect(page).toHaveURL(/\/pricing$/);
   for(const plan of ['Scale','Enterprise']){
@@ -25,27 +25,30 @@ for(const locale of ['en','ja'] as const){
   }
   const overflow=await page.evaluate(()=>Array.from(document.querySelectorAll('body *')).filter(element=>element.getBoundingClientRect().right>innerWidth+1&&getComputedStyle(element).display!=='none'&&!element.closest('.comparison-scroll')).map(element=>({tag:element.tagName,className:element.className,right:element.getBoundingClientRect().right})).slice(0,10));
   expect(overflow).toEqual([]);
-  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
-  await page.screenshot({path:`test-results/polish-${locale}-pricing-mobile.png`,fullPage:true});
-  await page.setViewportSize({width:1440,height:1000});await page.screenshot({path:`test-results/polish-${locale}-pricing-desktop.png`,fullPage:true});
-  await page.goto('/');await page.screenshot({path:`test-results/polish-${locale}-landing-desktop.png`,fullPage:true});
-  await page.setViewportSize({width:375,height:812});await page.screenshot({path:`test-results/polish-${locale}-landing-mobile.png`,fullPage:true});
+  await page.evaluate(()=>document.fonts.ready);
+  await expect(page.locator('body')).toHaveCSS('margin','0px');
+  const width=await page.evaluate(()=>({document:document.documentElement.scrollWidth,viewport:innerWidth,overflow:Array.from(document.querySelectorAll('body *')).filter(e=>e.scrollWidth>e.clientWidth+1&&!e.closest('.comparison-scroll')).map(e=>({tag:e.tagName,className:e.className,width:e.clientWidth,scroll:e.scrollWidth})).slice(0,20)}));
+  expect(width.document,JSON.stringify(width)).toBeLessThanOrEqual(width.viewport+1);
+  await page.screenshot({caret:'initial',path:`test-results/polish-${locale}-pricing-mobile.png`,fullPage:true});
+  await page.setViewportSize({width:1440,height:1000});await page.screenshot({caret:'initial',path:`test-results/polish-${locale}-pricing-desktop.png`,fullPage:true});
+  await page.goto('/');await page.screenshot({caret:'initial',path:`test-results/polish-${locale}-landing-desktop.png`,fullPage:true});
+  await page.setViewportSize({width:375,height:812});await page.screenshot({caret:'initial',path:`test-results/polish-${locale}-landing-mobile.png`,fullPage:true});
   await page.locator('.mobile-site-menu summary').click();await page.locator('.mobile-site-menu').getByRole('link',{name:locale==='ja'?'ログイン':'Log in',exact:true}).click();
   await expect(page).toHaveURL(/\/(dashboard|servers)/);
  });
  test(`polish: rules explain observed activity and dashboard adapts to mobile (${locale})`,async({page,context})=>{
   await context.addCookies([{name:'nexus_locale',value:locale,url:process.env.NEXUS_E2E_WEB_PORT?`http://127.0.0.1:${process.env.NEXUS_E2E_WEB_PORT}`:'http://127.0.0.1:3100'}]);
   await page.setViewportSize({width:1280,height:900});await page.goto('/dashboard');
-  await page.screenshot({path:`test-results/polish-${locale}-dashboard-desktop.png`,fullPage:true});
+  await page.screenshot({caret:'initial',path:`test-results/polish-${locale}-dashboard-desktop.png`,fullPage:true});
   await page.getByRole('button',{name:locale==='ja'?'目標と判定ルール':'Goals & Rules',exact:true}).click();
   const intro=page.locator('.rules-view .orientation');
-  await expect(intro).toContainText(locale==='ja'?'どう判断':'how NEXUS identifies');
+  await expect(intro).toContainText(locale==='ja'?'期間と条件':'periods and conditions');
   await expect(intro).not.toContainText(locale==='ja'?'観測中です':'Still collecting');
   await expect(page.locator('.rules-view')).toContainText(locale==='ja'?'参加登録':'Event signup');
   await page.setViewportSize({width:375,height:812});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
-  await page.screenshot({path:`test-results/polish-${locale}-rules-mobile.png`,fullPage:true});
+  await page.screenshot({caret:'initial',path:`test-results/polish-${locale}-rules-mobile.png`,fullPage:true});
   await page.locator('.mobile-head select').selectOption('0');
-  await page.screenshot({path:`test-results/polish-${locale}-dashboard-mobile.png`,fullPage:true});
+  await page.screenshot({caret:'initial',path:`test-results/polish-${locale}-dashboard-mobile.png`,fullPage:true});
  });
 }

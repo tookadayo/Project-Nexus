@@ -15,7 +15,7 @@ import {GET as callback} from '../../apps/web/app/auth/callback/route';
 import {proxy} from '../../apps/web/proxy';
 const user='811111111111111111',guild='821111111111111111';
 afterEach(()=>{vi.unstubAllGlobals();vi.unstubAllEnvs();vi.resetAllMocks();});
-function session(){vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_WEB_URL','https://nexus.example');vi.stubEnv('NEXUS_SESSION_SECRET','s'.repeat(64));return sealSession({userId:user,accessToken:'oauth-identity',expiresAt:Date.now()+600000});}
+function session(){vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,json:async()=>({id:user})})));vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_WEB_URL','https://nexus.example');vi.stubEnv('NEXUS_SESSION_SECRET','s'.repeat(64));return sealSession({userId:user,accessToken:'oauth-identity',expiresAt:Date.now()+600000});}
 function request(path:string,body:unknown,cookie?:string,origin='https://nexus.example'){return new NextRequest(`https://nexus.example${path}`,{method:'POST',headers:{origin,host:'nexus.example','sec-fetch-site':'same-origin',...(cookie?{cookie:`nexus_session=${cookie}`}:{})},body:JSON.stringify(body)});}
 it('generates long random readable codes with unambiguous characters and strict normalization',()=>{
  const codes=Array.from({length:1000},verificationCode);expect(new Set(codes).size).toBe(1000);
@@ -36,6 +36,11 @@ it('trusts only the encrypted session identity and returns no supplied code in i
  const cookie=session(),code=verificationCode();mocks.redeem.mockResolvedValue({guildId:guild});
  const response=await redeem(request('/link/redeem',{code,userId:'forged-user',guildId:'forged-guild'},cookie));
  expect(mocks.redeem).toHaveBeenCalledExactlyOnceWith(user,code);expect(await response.text()).not.toContain(code);expect(response.headers.get('cache-control')).toBe('no-store');
+});
+it('rejects revoked OAuth grants before redeeming or disconnecting',async()=>{
+ const cookie=session();vi.stubGlobal('fetch',vi.fn(async()=>({ok:false,status:401})));
+ const rejected=await redeem(request('/link/redeem',{code:'guess'},cookie));expect(rejected.status).toBe(401);expect((await rejected.json()).failure.category).toBe('AUTH_SESSION');expect(mocks.redeem).not.toHaveBeenCalled();
+ const unlinked=await disconnect(request('/link/disconnect',{guildId:guild},cookie));expect(unlinked.status).toBe(401);expect(mocks.actor).not.toHaveBeenCalled();expect(mocks.disconnect).not.toHaveBeenCalled();
 });
 it('keeps unknown, expired, used and revoked failures generic without echoing input',async()=>{
  const cookie=session(),code=verificationCode();mocks.redeem.mockRejectedValue(new DomainError('VERIFICATION_INVALID'));

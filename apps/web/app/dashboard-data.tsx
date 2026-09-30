@@ -10,7 +10,7 @@ import {userFailure} from '../../../packages/shared/src/errors';
 import {FailureNotice} from './failure-ui';
 import {siteLocale} from './public-ui';
 export const dynamic='force-dynamic';
-export default async function Page({guildId}:{guildId?:string}={}){
+export default async function Page({guildId,view}:{guildId?:string;view?:string}={}){
  const started=Date.now();
  const cookieStore=await cookies();
  const selectedCookie=cookieStore.get('nexus_guild')?.value;
@@ -35,5 +35,5 @@ export default async function Page({guildId}:{guildId?:string}={}){
  await Promise.allSettled(['web_dashboard_opened','page_render_latency'].map(event=>fetch(eventUrl,{method:'POST',headers:eventHeaders,body:JSON.stringify({event,...(event==='page_render_latency'?{durationMs:Date.now()-started}:{})}),cache:'no-store',signal:AbortSignal.timeout(3000)})));
  const saved=cookieStore.get('nexus_locale')?.value,preferred=String(data.admin?.settings.uiLanguage??''),accept=(await headers()).get('accept-language')??'';
  const initialLocale=saved==='ja'||saved==='en'?saved:preferred==='ja'||preferred==='en'?preferred:accept.toLowerCase().startsWith('ja')?'ja':'en';
- return <Console data={data} initialLocale={initialLocale}/>;
+ return <Console data={data} initialLocale={initialLocale} initialView={typeof view==='string'&&/^[0-9]$/.test(view)?Number(view):0}/>;
 }

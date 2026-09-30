@@ -1,6 +1,6 @@
 import {z} from 'zod';
-import {DomainError} from './index';
-import {DiscordFailure} from '../../discord/src/rest';
+import {isDomainError} from './index';
+import {isDiscordFailure} from '../../discord/src/rest';
 import {errorReference,logFailure} from './diagnostics';
 import type {ErrorCategory,FailureEffect,UserFailure} from './error-types';
 const codes:Record<string,ErrorCategory>={
@@ -9,18 +9,18 @@ const codes:Record<string,ErrorCategory>={
  REVISION_CONFLICT:'REVISION_CONFLICT',COMPONENT_EXPIRED:'COMPONENT_EXPIRED',INVALID_COMPONENT:'COMPONENT_EXPIRED',PANEL_NOT_CONFIGURED:'COMPONENT_EXPIRED',STALE_FLOW_NODE:'COMPONENT_EXPIRED',SESSION_SUPERSEDED:'COMPONENT_EXPIRED',
  ENTITLEMENT_REQUIRED:'ENTITLEMENT',BILLING_PROVIDER_NOT_CONFIGURED:'ENTITLEMENT',
  WEB_CONNECTION_UNAVAILABLE:'WEB_CONNECTION',CONNECTION_REJECTED:'WEB_CONNECTION',VERIFICATION_PRIVATE_REQUIRED:'WEB_CONNECTION',VERIFICATION_DELIVERY_FAILED:'WEB_CONNECTION',
- SESSION_EXPIRED:'AUTH_SESSION',VERIFICATION_INVALID:'VERIFICATION',VERIFICATION_RATE_LIMIT:'VERIFICATION',DISCORD_GUILDS_UNAVAILABLE:'DISCORD_UNAVAILABLE',DISCORD_UNAVAILABLE:'DISCORD_UNAVAILABLE',
+ SESSION_EXPIRED:'AUTH_SESSION',VERIFICATION_INVALID:'VERIFICATION',VERIFICATION_RATE_LIMIT:'VERIFICATION',DISCORD_GUILDS_UNAVAILABLE:'DISCORD_UNAVAILABLE',DISCORD_UNAVAILABLE:'DISCORD_UNAVAILABLE',MORE_ACTIVITY_NEEDED:'VALIDATION',
 };
 export function errorCategory(error:unknown):ErrorCategory{
- if(error instanceof DiscordFailure)return error.kind==='timeout'?'DISCORD_TIMEOUT':error.status===429?'DISCORD_RATE_LIMIT':error.status===403?'PERMISSION':'DISCORD_UNAVAILABLE';
+ if(isDiscordFailure(error))return error.kind==='timeout'?'DISCORD_TIMEOUT':error.status===429?'DISCORD_RATE_LIMIT':error.status===403?'PERMISSION':'DISCORD_UNAVAILABLE';
  if(error instanceof z.ZodError||error instanceof SyntaxError)return 'VALIDATION';
- if(error instanceof DomainError){if(codes[error.code])return codes[error.code]!;if(/^(?:(?:INVALID_|DUPLICATE_|SETUP_).+|UNKNOWN_SIGNAL|CONFIRMATION_REQUIRED|PREVIEW_REQUIRED|.*_NOT_CONFIGURED|.*_REQUIRED|.*_NOT_ACTIVE|.*_NOT_FOUND|.*_NOT_RUNNING|.*_DISABLED)$/.test(error.code))return 'VALIDATION';return 'INTERNAL';}
+ if(isDomainError(error)){if(codes[error.code])return codes[error.code]!;if(/^(?:(?:INVALID_|DUPLICATE_|SETUP_).+|UNKNOWN_SIGNAL|CONFIRMATION_REQUIRED|PREVIEW_REQUIRED|.*_NOT_CONFIGURED|.*_REQUIRED|.*_NOT_ACTIVE|.*_NOT_FOUND|.*_NOT_RUNNING|.*_DISABLED)$/.test(error.code))return 'VALIDATION';return 'INTERNAL';}
  if(error instanceof Error&&codes[error.message])return codes[error.message]!;
  if(error&&typeof error==='object'&&'code' in error&&/^[0-9]{2}[0-9A-Z]{3}$/.test(String(error.code)))return 'DATABASE_FAILURE';
  return 'INTERNAL';
 }
-export function userFailure(error:unknown,effect:FailureEffect='UNKNOWN',context:{action:string;stage:string;secrets?:string[]}={action:'request',stage:'request'}):UserFailure{
- const category=errorCategory(error),reference=['INTERNAL','DATABASE_FAILURE','DISCORD_TIMEOUT','DISCORD_RATE_LIMIT','DISCORD_UNAVAILABLE','WEB_CONNECTION'].includes(category)?errorReference():undefined;
+export function userFailure(error:unknown,effect:FailureEffect='UNKNOWN',context:{action:string;command?:string;stage:string;secrets?:string[]}={action:'request',stage:'request'}):UserFailure{
+ const category=errorCategory(error),reference=isDiscordFailure(error)||['INTERNAL','DATABASE_FAILURE','DISCORD_TIMEOUT','DISCORD_RATE_LIMIT','DISCORD_UNAVAILABLE','WEB_CONNECTION'].includes(category)?errorReference():undefined;
  if(reference)logFailure({...context,error,reference});
  return {category,effect,...(reference?{reference}:{})};
 }

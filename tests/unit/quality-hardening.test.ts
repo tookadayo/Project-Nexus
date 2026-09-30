@@ -1,7 +1,9 @@
 import {expect,it,vi} from 'vitest';
 import {readFileSync} from 'node:fs';
 import {DomainError} from '../../packages/shared/src/index';
+import {isDomainError} from '../../packages/shared/src/index';
 import {DiscordFailure} from '../../packages/discord/src/rest';
+import {isDiscordFailure} from '../../packages/discord/src/rest';
 import {errorCategory,userFailure} from '../../packages/shared/src/errors';
 import {redactSecrets} from '../../packages/shared/src/diagnostics';
 import {errorPanel} from '../../packages/discord-panels/src/views/errors';
@@ -14,6 +16,12 @@ it('classifies known facts and gives opaque failures a safe reference',()=>{
   [new SyntaxError('invalid'),'VALIDATION'],[new DomainError('ENTITLEMENT_REQUIRED'),'ENTITLEMENT'],[new DomainError('WEB_CONNECTION_UNAVAILABLE'),'WEB_CONNECTION'],[new DomainError('SESSION_EXPIRED'),'AUTH_SESSION'],[new DomainError('VERIFICATION_INVALID'),'VERIFICATION'],[new DomainError('UNKNOWN_ACTION'),'INTERNAL'],
  ];for(const [error,category] of cases)expect(errorCategory(error)).toBe(category);
  const log=vi.spyOn(process.stderr,'write').mockReturnValue(true);try{expect(userFailure(new DomainError('UNKNOWN_ACTION'))).toMatchObject({category:'INTERNAL',reference:expect.stringMatching(/^NXS-[A-F0-9]{12}$/),effect:'UNKNOWN'});}finally{log.mockRestore();}
+});
+it('recognizes branded exceptions across production bundle module identities',()=>{
+ const domain=Object.assign(new Error('VERIFICATION_INVALID'),{code:'VERIFICATION_INVALID',status:400,[Symbol.for('nexus.domain-error')]:true});
+ const discord=Object.assign(new Error('Discord HTTP 404'),{status:404,kind:'http',[Symbol.for('nexus.discord-failure')]:true});
+ expect(isDomainError(domain)).toBe(true);expect(isDiscordFailure(discord)).toBe(true);expect(errorCategory(domain)).toBe('VERIFICATION');expect(errorCategory(discord)).toBe('DISCORD_UNAVAILABLE');
+ expect(isDomainError({code:'VERIFICATION_INVALID',status:400})).toBe(false);
 });
 it('returns to the originating page and never repeats an uncertain save',async()=>{
  const intents:Record<string,unknown>[]=[];
