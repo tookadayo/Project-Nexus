@@ -658,7 +658,7 @@ export const webJa={
  "web.what_should_a_successful_newcomer_do":"新規メンバーのどの活動を確認しますか？",
  "web.receive_a_reply":"投稿に初めて返信がつく",
  "web.send_a_first_message":"最初のメッセージを送る",
- "web.join_an_event":"イベントに参加登録する",
+ "web.join_an_event":"イベントへの参加を登録する",
  "web.save_success_goal":"活動の設定を保存",
  "web.discord_onboarding_is_already_in_use":"Discord のオンボーディングを使用中です。NEXUS は変更せずに観測します。",
  "web.discord_onboarding_is_not_currently_in":"Discord のオンボーディングは現在使われていません。歓迎フローは後で追加できます。",

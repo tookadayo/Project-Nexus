@@ -26,6 +26,7 @@ The initial inspection covered the repository inventory, shared dictionaries, ha
 - Public copy describes replies, interactions and activity. Pricing describes the intended server/team, with availability and planned features still sourced from Plan Registry. Paid checkout remains unconfigured. Existing illustrative previews stay explicitly labeled as examples; production data was not fabricated.
 - Shared dictionaries, `i18n/terminology.ts` and `i18n/errors.ts` supply common measurement, connection and error language. Production link/unlink panel factories are also used for screenshot approximations. No wholesale i18n or backend redesign was performed.
 - Production OAuth E2E exposed exception identity differences across generated bundles. Shared Symbol brands now identify DomainError and DiscordFailure consistently, keeping unknown-guild denial and all invalid-code outcomes generic. Web view state is a validated numeric URL parameter, so current-state checks reload the originating page without repeating a write.
+- The final screenshot review caught a malformed Japanese observation-window sentence and an isolated character wrapping in the Landing headline. The sentence and event-registration verbs were corrected, Setup was shortened, and the Japanese headline sizing was adjusted. The affected copy and screenshot checks were rerun.
 
 ## Authentication and Discord REST
 
