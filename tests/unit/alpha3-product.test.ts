@@ -19,7 +19,7 @@ it('renders plan prices and feature availability from one registry',()=>{
  expect(featureAvailability.ai_explanation).toBe('planned');
 });
 it('keeps visible goal names aligned to observed activity',()=>{
- expect(t('ja','control.goalEvent')).toContain('参加登録');
+ expect(t('ja','control.goalEvent')).toMatch(/イベント.*参加.*登録/);
  expect(t('en','experience.eventRule')).toContain('Actual attendance is not measured');
  expect(t('ja','control.goalPlaytest')).toContain('募集に反応');
  expect(t('en','experience.reactionWeak')).toContain('does not count as a first connection');

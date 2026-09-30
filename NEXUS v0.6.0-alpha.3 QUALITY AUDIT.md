@@ -74,7 +74,7 @@ The delivery report includes the final pushed head's GitHub Actions result. This
 | Windows runtime | Manager tests passed |
 | Visual artifacts | `test-results/quality-*.png`, `polish-*.png`, `verification-*.png`; fixture/approximation limitations described above |
 
-The initial full run exposed a lost command field in diagnostic logs and production bundle exception identity issues. Those were fixed and their affected suites rerun successfully; tests were not weakened to accept the incorrect behavior. Existing copy expectations were updated to match the new definitions and labels. The final view-context check verifies that checking an uncertain save returns to Settings and does not repeat the write.
+The initial full run exposed a lost command field in diagnostic logs and production bundle exception identity issues. Those were fixed and their affected suites rerun successfully; tests were not weakened to accept the incorrect behavior. Existing copy expectations were updated to match the new definitions and labels. Final CI also caught an old event-signup wording assertion after the screenshot follow-up; it now checks the event/participation/registration meaning across natural Japanese wording. The final view-context check verifies that checking an uncertain save returns to Settings and does not repeat the write.
 
 ## Product decisions and Beta blockers
 
