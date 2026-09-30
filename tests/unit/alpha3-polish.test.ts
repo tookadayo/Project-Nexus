@@ -9,7 +9,7 @@ import {notificationModal} from '../../apps/interaction/src/settings-modal.js';
 import {pricingMetadata} from '../../packages/settings/src/plan-registry.js';
 
 const now=new Date('2026-09-30T09:00:00Z'),day=86400000;
-const measured=(value:number|null,previous:number|null=null,state:Measurement['state']='READY'):Measurement=>({state,value,previous,sample:10,needed:0,from:'2026-09-20T09:00:00Z',through:'2026-09-27T09:00:00Z',observationDays:3});
+const measured=(value:number|null,previous:number|null=null,state:Measurement['state']='READY'):Measurement=>({state,value,previous,sample:10,numerator:7,eligible:12,responded:10,activityFromDay:7,needed:0,from:'2026-09-20T09:00:00Z',through:'2026-09-27T09:00:00Z',observationDays:3});
 const community=(overrides:Record<string,unknown>={})=>({daily:{ready:true,todayJoined:0,todayConnected:0,attentionCount:0,timezone:'Asia/Tokyo'},attention:[],suggestion:null,...overrides}) as unknown as ControlData['community'];
 const settings={analysisScope:{mode:'all',channelIds:[]},managerRoleIds:[],helperRoleIds:[],weeklySummaryEnabled:true,weeklySummaryChannelId:'111111111111111111',weeklySummaryDay:1,weeklySummaryHour:9,timezone:'Asia/Tokyo',helperEnabled:true,helperChannelId:'111111111111111111',firstResponseMinutes:20,goalPreset:null,newMemberGoals:['reply'],importantChannels:[],uiLanguage:'ja',detailedRetentionDays:30,revision:2,setupVersion:2,setupSteps:{scope:true,team:true,notifications:true,goals:true}} satisfies NonNullable<ControlData['settings']>;
 async function render(page:'overview'|'settings',data:ControlData,locale:'ja'|'en',section:'main'|'notifications'|'team'|'goals'='main'){
@@ -21,14 +21,14 @@ async function render(page:'overview'|'settings',data:ControlData,locale:'ja'|'e
 }
 it.each(['ja','en'] as const)('keeps missing, no members and true zero distinct on Home (%s)',async locale=>{
  const noMembers=await render('overview',{community:community()},locale);
- expect(noMembers.json).toContain(locale==='ja'?'まだいません':'No new members today');
+ expect(noMembers.json).toContain(locale==='ja'?'今日参加したメンバーはいません':'No new members today');
  expect(noMembers.json).toContain(locale==='ja'?'対象メンバーはいません':'No eligible new members');
  expect(noMembers.json).toContain(locale==='ja'?'0件':'0 posts');
  expect(noMembers.json).toContain(locale==='ja'?'NEXUSが確認していること':'What NEXUS is watching');
  const zero=await render('overview',{community:community({daily:{ready:true,todayJoined:4,todayConnected:0,attentionCount:0}})},locale);
  expect(zero.json).toContain(locale==='ja'?'0人':'0 people');
  const unavailable=await render('overview',{community:community({daily:{ready:false,todayJoined:null,todayConnected:null,attentionCount:null}})},locale);
- expect(unavailable.json).toContain(locale==='ja'?'データ取得を確認できません':'Observation coverage is unavailable');
+ expect(unavailable.json).toContain(locale==='ja'?'データを取得できませんでした':'Observation coverage is unavailable');
  expect(unavailable.json).not.toContain(locale==='ja'?'0件':'0 posts');
 });
 it.each(['ja','en'] as const)('puts Attention first and offers a direct action before Today (%s)',async locale=>{
@@ -50,12 +50,12 @@ it('offers three direct destinations, one dashboard link, More and a quiet refre
 it.each(['ja','en'] as const)('only shows supported weekly comparisons and suggestions (%s)',async locale=>{
  const weekly={reply:measured(18,24),connection:measured(72,64),retention:measured(48,null)};
  const home=await render('overview',{community:community({weekly})},locale);
- expect(home.json).toContain(locale==='ja'?'先週より6分早い':'6 minutes faster than last week');
+ expect(home.json).toContain(locale==='ja'?'前の比較期間より6分早い':'6 minutes faster than the previous comparison period');
  expect(home.json).toContain('+8pt');
- expect(home.json).not.toContain(locale==='ja'?'NEXUSが気づいたこと':'What NEXUS noticed');
+ expect(home.json).not.toContain(locale==='ja'?'分析結果':'What NEXUS noticed');
  const suggested=await render('overview',{community:community({weekly,suggestion:{key:'reply_rescue',basis:{newcomerMinutes:32,continuingMinutes:18}},compare:{newcomers:{members:10},continuing:{members:10}}})},locale);
  expect(suggested.intents.some(item=>item.action==='controlTryImprove')).toBe(true);
- expect(suggested.json).toContain(locale==='ja'?'根拠を見る':'View evidence');
+ expect(suggested.json).toContain(locale==='ja'?'比較の詳細を見る':'View evidence');
  const collecting=await render('overview',{community:community({weekly:{reply:measured(null,null,'COLLECTING'),connection:measured(null,null,'NO_ELIGIBLE_MEMBERS'),retention:measured(null,null,'UNAVAILABLE')}})},locale);
  expect(collecting.json).not.toContain('+8pt');
  expect(collecting.json).toContain(locale==='ja'?'まだ比較できる':'Not enough data to compare');

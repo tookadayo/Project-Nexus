@@ -1,5 +1,6 @@
+import {connectionCodePanel,disconnectPanel} from '../../../packages/discord-panels/src/views/connection.js';
 import {z} from 'zod';
-import {errorReference,logFailure} from '../../../packages/shared/src/diagnostics.js';
+import {userFailure} from '../../../packages/shared/src/errors.js';
 import {nextZonedDayStart} from '../../../packages/shared/src/timezones.js';
 import {discordDashboardLink} from '../../../packages/shared/src/web-link.js';
 import {advanceSetup} from '../../../packages/shared/src/setup-flow.js';
@@ -44,9 +45,9 @@ export class InteractionWorker {
    return row;
   });if(!job)return false;
   const input=JSON.parse(this.vault.open(s,job.encrypted_payload)) as InteractionJob;
-  let body:Panel,privateError=false,stage='dispatch',action=input.command??'unknown',challengeId:string|undefined;
+  let body:Panel,privateError=false,stage='dispatch',action=input.command??'unknown',challengeId:string|undefined,returnPage:'overview'|'newMembers'|'attention'|'analysis'|'settings'|'improve'|'results'='overview';
   try{
-   body=await this.dispatch(s,input,value=>{if(value.startsWith('action:'))action=value.slice(7);else stage=value;},id=>{challengeId=id;});
+   body=await this.dispatch(s,input,value=>{if(value.startsWith('action:'))action=value.slice(7);else if(value.startsWith('return:'))returnPage=value.slice(7) as typeof returnPage;else stage=value;},id=>{challengeId=id;});
    if(challengeId){
     stage='verification_reply';
     // Verification codes live only in memory and the ephemeral Discord reply.
@@ -68,12 +69,12 @@ export class InteractionWorker {
    }
   }catch(error){
    void recordProductEvent(this.db,s,'interaction_failed').catch(()=>{});
-   const kind=error instanceof DomainError?error.code==='REVISION_CONFLICT'?'revision':error.code==='ADMIN_REQUIRED'?'permission':error.code==='ENTITLEMENT_REQUIRED'?'entitlement':'generic':'generic';
    const actorHash=this.vault.hash(s,input.userId),issue:Issue=(data,publicEntry=false)=>this.tokens.issue(this.db,s,data,publicEntry?null:actorHash,publicEntry?31536000:900);
    let language:'auto'|'ja'|'en'|'bilingual'='auto';try{language=(await this.settings.get(s)).uiLanguage;}catch{/* Error response still has interaction locale. */}
-   const locale=resolveLocale(language,{interactionLocale:input.locale,guildLocale:input.guildLocale}),internal=!(error instanceof DomainError||error instanceof z.ZodError),reference=internal?errorReference():undefined;
-   logFailure({reference,action,command:input.command,stage,error,secrets:[input.token]});
-   privateError=Boolean(input.messageId)&&!input.privateResponse;body=await errorPanel(issue,kind,locale,reference,error instanceof DomainError?error.code:undefined);
+   const locale=resolveLocale(language,{interactionLocale:input.locale,guildLocale:input.guildLocale});
+   const readOnly=['controlNavigate','controlRefresh','controlAnalysis','controlChannelPage','controlAttentionPage','controlSettings','controlRules','contextExplain','contextMember','overview','lifecycle','diagnose','experiments','status','settings','billing','cohorts','reports'].includes(action);
+   const failure=userFailure(error,readOnly||['dispatch','member_lookup','settings_load','intent_read','authorization'].includes(stage)?'NOT_STARTED':'UNKNOWN',{action,stage,secrets:[input.token]});
+   privateError=Boolean(input.messageId)&&!input.privateResponse;body=await errorPanel(issue,failure,locale,undefined,error instanceof DomainError?error.code:undefined,{page:returnPage,retryRead:readOnly});
   }
   await this.db.transaction().execute(async tx=>{
    const interactionHash=this.vault.hash(s,input.id);
@@ -93,6 +94,9 @@ export class InteractionWorker {
   onStage('intent_read');const intent=input.customId?await this.tokens.read(this.db,s,input.customId,actorHash):{action:input.command};
   const action=String(intent.action??'');
   onStage(`action:${action}`);
+  const requested=String(intent.page??input.values?.[0]??'');
+  const returnPage=['overview','newMembers','attention','analysis','settings','improve','results'].includes(requested)?requested:action.startsWith('context')||/Attention|Acknowledge|Snooze|Resolve/.test(action)?'attention':/Analysis|ChannelPage/.test(action)||action==='diagnose'?'analysis':/Improve|intervention/.test(action)||action==='improve'?'improve':/experiment/.test(action)?'results':action.startsWith('control')||action==='settings'?'settings':'overview';
+  onStage(`return:${returnPage}`);
   if(action==='panel'||action==='controlNavigate'){
    const page=action==='panel'?'overview':String(input.values?.[0]??'');
    const event=page==='attention'?'attention_opened':page==='analysis'?'analysis_opened':page==='settings'?'settings_opened':'discord_panel_opened';
@@ -106,15 +110,16 @@ export class InteractionWorker {
   const issue:Issue=(data,publicEntry=false)=>this.tokens.issue(this.db,s,privateSettings?{...data,privateSettings:true,panelMessageId}:setupFlow?{...data,setupFlow:true}:data,publicEntry&&!setupFlow&&!privateSettings?null:actorHash,publicEntry&&!setupFlow&&!privateSettings?31536000:900);
   const adminActions=['controlRules','controlNotificationSave','contextAdd','contextResolve','contextExplain','contextMember','panel','panelConfirm','panelChoose','panelRefresh','panelMoveConfirm','controlNavigate','controlRefresh','controlAnalysis','controlChannelPage','controlAttentionPage','controlSettings','controlSummaryField','controlGoalPurpose','controlScope','controlScopeChannels','controlManagers','controlManagersConfirm','controlCancelManagers','controlClearManagers','controlClearHelpers','controlSkipTeam','controlSkipNotifications','controlSkipGoals','controlScopeDefault','controlKeepSettings','controlReviewSetup','controlMovePanel','controlOpenAttention','controlOpenDiagnostics','controlResolve','controlAcknowledge','controlSnoozeMenu','controlSnooze','controlApplyImprove','controlCancelImprove','controlHelpers','controlHelperChannel','controlAlertDelay','controlHelperToggle','controlGoal','controlGoalPreset','controlGoalChannel','controlWeeklyChannel','controlWeeklyDay','controlWeeklyHour','controlTimezone','controlWeeklyToggle','controlTryImprove','controlTestAlert','controlTestSummary','setup','setupNext','setupHome','recommendedSetup','rolloutPreview','rolloutConfirm','modePreview','modeConfirm','lifecycle','activation','activationDraft','activationPublish','cohorts','diagnose','improve','interventions','interventionDraft','interventionApprove','experiments','experimentMethod','experimentDraft','configPublish','reports','billing','advanced','settings','status','flows','template','startChannel','adminNotificationChannel','helperChannel','helperEnabled','uiLanguage','enabled','onboardingEnabled','mapOption','mapRole','editNode','editNodeOpen','editNodeSave','rollback','preview','deleteGuildConfirm','deleteGuild','overview','dashboard'];
   onStage('authorization');if(adminActions.includes(action)||['link','unlink','unlinkConfirm','unlinkCancel'].includes(action))assert(admin,'ADMIN_REQUIRED',403);
+  onStage('operation');
   if(action==='link'){
    assert(input.command==='link'&&!input.customId&&!input.messageId,'VERIFICATION_PRIVATE_REQUIRED');
    const url=discordDashboardLink(process.env.NEXUS_WEB_URL,s.guildId,process.env.NEXUS_WEB_AUTH_MODE==='development',false);assert(url,'WEB_CONNECTION_UNAVAILABLE');
    const challenge=await this.verification.issue(s,input.userId,'DISCORD_PANEL',authorization);onSensitiveReply(challenge.id);
-   return nexusPanel({title:locale==='ja'?'Web Dashboardを接続':'Connect Web Dashboard',children:[divider(),callout(locale==='ja'?'検証コード':'Verification code',`\`${challenge.code}\`\n${locale==='ja'?'有効期限':'Expires'}: <t:${Math.floor(challenge.expiresAt.getTime()/1000)}:R>\n${locale==='ja'?'発行したDiscordアカウントでログインしてください。コードは1回だけ使用できます。':'Sign in with the Discord account that issued this code. It can only be used once.'}`),callout('Web Dashboard',url)]});
+   return connectionCodePanel(challenge.code,challenge.expiresAt,url,locale);
   }
   if(action==='unlink'){
    const connection=await this.verification.connection(s);
-   return nexusPanel({title:locale==='ja'?'Web接続を解除しますか？':'Disconnect Web Dashboard?',children:[divider(),callout(locale==='ja'?'データは保持されます':'Your data is preserved',locale==='ja'?'未使用コードも無効になります。Bot、分析データ、履歴、設定は保持され、再接続には /nexus link が必要です。':'Unused codes will also be revoked. The bot, analytics, history, and settings are preserved. Run /nexus link to reconnect.')],rows:[await actionRow(issue,[{label:locale==='ja'?'接続解除を確定':'Confirm disconnect',action:'unlinkConfirm',data:{version:connection.version},style:4},{label:locale==='ja'?'キャンセル':'Cancel',action:'unlinkCancel'}])]});
+   return disconnectPanel(issue,connection.version,locale);
   }
   if(action==='unlinkConfirm'){assert(input.customId,'CONFIRMATION_REQUIRED');assert(intent.version===null||typeof intent.version==='string','INVALID_COMPONENT');await this.verification.disconnect(s,input.userId,intent.version,'DISCORD_PANEL',authorization);return nexusPanel({title:locale==='ja'?'Web接続を解除しました':'Web Dashboard disconnected',children:[callout('NEXUS',locale==='ja'?'データは保持されています。再接続には /nexus link を実行してください。':'Your data is preserved. Run /nexus link to reconnect.')]});}
   if(action==='unlinkCancel')return nexusPanel({title:locale==='ja'?'キャンセルしました':'Cancelled',children:[]});

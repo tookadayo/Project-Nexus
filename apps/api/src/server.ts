@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
-import {scopeSchema} from '../../../packages/shared/src/index.js';
+import {scopeSchema,DomainError} from '../../../packages/shared/src/index.js';
+import {userFailure} from '../../../packages/shared/src/errors.js';
 import {validApiToken} from '../../../packages/security/src/index.js';
 import type {AnalyticsService} from '../../../packages/analytics/src/index.js';
 import type {Database} from '../../../packages/db/src/index.js';
@@ -10,7 +11,13 @@ import type {IdentityVault} from '../../../packages/identity/src/index.js';
 import type {InteractionHealthSnapshot} from '../../interaction/src/health.js';
 import {runtimeInfo} from '../../../packages/shared/src/runtime-info.js';
 export function createApi(analytics:AnalyticsService,key:string,db?:Database,discord?:DiscordPort,runtime?:()=>{discordConnected:boolean;redisConnected?:boolean;interaction?:InteractionHealthSnapshot;commandHash?:string},vault?:IdentityVault){
- const app=Fastify({logger:false});app.get('/health',async()=>{
+ const app=Fastify({logger:false});
+ app.setErrorHandler((error,req,reply)=>{
+  const failure=userFailure(error,req.method==='GET'?'NOT_STARTED':'UNKNOWN',{action:'api',stage:req.routeOptions.url??'route'});
+  const status=error instanceof DomainError?error.status:failure.category==='VALIDATION'?400:failure.category==='PERMISSION'?403:failure.category==='DISCORD_RATE_LIMIT'?429:failure.category.startsWith('DISCORD_')?503:500;
+  return reply.code(status).header('Cache-Control','no-store').send({error:error instanceof DomainError?error.code:failure.category,failure});
+ });
+ app.get('/health',async()=>{
   if(!runtime)return {status:'ok'};
   const state=runtime();let recent:Date|null=null,scope='all',registeredHash:string|null=null,registeredAt:string|null=null,community:{timezone:string|null;setupSteps:unknown;panelChannelId:string|null}|null=null;
   let databaseConnected=true;let lastInteraction:{kind:string;action:string;receivedAt:string;acknowledgedAt:string|null;completedAt:string|null;result:string;errorCode:string|null}|null=null;

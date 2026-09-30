@@ -1,3 +1,4 @@
+import {DomainError} from '../../packages/shared/src/index';
 import {afterEach,it,expect,vi} from 'vitest';
 import {NextRequest} from '../../apps/web/node_modules/next/server.js';
 import {verificationCode,normalizeVerificationCode} from '../../packages/security/src/server-verification.js';
@@ -37,7 +38,7 @@ it('trusts only the encrypted session identity and returns no supplied code in i
  expect(mocks.redeem).toHaveBeenCalledExactlyOnceWith(user,code);expect(await response.text()).not.toContain(code);expect(response.headers.get('cache-control')).toBe('no-store');
 });
 it('keeps unknown, expired, used and revoked failures generic without echoing input',async()=>{
- const cookie=session(),code=verificationCode();mocks.redeem.mockRejectedValue(new Error(`untrusted ${code}`));
+ const cookie=session(),code=verificationCode();mocks.redeem.mockRejectedValue(new DomainError('VERIFICATION_INVALID'));
  const response=await redeem(request('/link/redeem',{code},cookie));expect(response.status).toBe(400);expect(await response.json()).toEqual({error:'VERIFICATION_INVALID'});
  const module=await import('../../apps/web/app/link/redeem/route');expect('GET' in module).toBe(false);
 });
@@ -52,7 +53,7 @@ it('returns logged-out verification pages through OAuth without copying query co
 });
 it('gates dashboard access on backend verification and current authority on every request',async()=>{
  const cookie=session();vi.stubEnv('API_KEY','a'.repeat(64));vi.stubEnv('DISCORD_TOKEN','bot');
- vi.stubGlobal('fetch',vi.fn(async(_url:string,init?:RequestInit)=>({ok:true,json:async()=>JSON.stringify(init?.headers).includes('Bot ')?[{id:guild}]:[{id:guild,name:'Server',permissions:'0'}]})));
+ vi.stubGlobal('fetch',vi.fn(async(_url:string,init?:RequestInit)=>({ok:true,json:async()=>String(_url).endsWith('/users/@me')?{id:user}:JSON.stringify(init?.headers).includes('Bot ')?[{id:guild}]:[{id:guild,name:'Server',permissions:'0'}]})));
  mocks.manageable.mockResolvedValue({state:'INSTALLED_NOT_VERIFIED',version:null});expect(await dashboardContext(cookie,guild)).toBeNull();
  mocks.manageable.mockResolvedValue({state:'VERIFICATION_PENDING',version:null});expect(await dashboardContext(cookie,guild)).toBeNull();
  mocks.manageable.mockImplementation(async(id:string)=>id===guild?{state:'VERIFIED',version:'v1',name:'Server'}:null);expect((await dashboardContext(cookie,guild))?.guildId).toBe(guild);expect(await dashboardContext(cookie,'831111111111111111')).toBeNull();
@@ -72,7 +73,7 @@ it('requires signed actor-bound disconnect confirmation and rejects stale or los
  const cookie=session();mocks.actor.mockResolvedValue({key:'actor'});mocks.connection.mockResolvedValue({state:'VERIFIED',version:'v1'});mocks.issue.mockResolvedValue('signed-confirmation');
  const prepared=await disconnect(request('/link/disconnect',{guildId:guild},cookie));expect(await prepared.json()).toEqual({confirmation:'signed-confirmation'});expect(mocks.disconnect).not.toHaveBeenCalled();
  mocks.read.mockResolvedValue({action:'webDisconnect',version:'v1'});expect((await disconnect(request('/link/disconnect',{guildId:guild,confirmation:'signed-confirmation'},cookie))).status).toBe(200);expect(mocks.disconnect).toHaveBeenCalledWith(expect.objectContaining({guildId:guild}),user,'v1','WEB_DASHBOARD',{key:'actor'});
- mocks.actor.mockRejectedValue(new Error('permission lost'));expect((await disconnect(request('/link/disconnect',{guildId:guild,confirmation:'signed-confirmation'},cookie))).status).toBe(403);
+ mocks.actor.mockRejectedValue(new DomainError('ADMIN_REQUIRED',403));expect((await disconnect(request('/link/disconnect',{guildId:guild,confirmation:'signed-confirmation'},cookie))).status).toBe(403);
  const module=await import('../../apps/web/app/link/disconnect/route');expect('GET' in module).toBe(false);
 });
 it('keeps production Discord links HTTPS and free of codes, tokens and unsafe base URLs',()=>{

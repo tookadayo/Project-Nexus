@@ -5,6 +5,7 @@ import {audit,type Actor} from '../../settings/src/index';
 import {assert,type Scope} from '../../shared/src/index';
 import {scopeForGuild} from './scoping';
 import type {ServerAuthorization,GuildAuthorizationSnapshot} from './server-authorization';
+import {errorCategory} from '../../shared/src/errors';
 
 const alphabet='23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 export function verificationCode(){const value=Array.from({length:12},()=>alphabet[randomInt(alphabet.length)]).join('');return `NX-${value.slice(0,4)}-${value.slice(4,8)}-${value.slice(8)}`;}
@@ -55,7 +56,7 @@ export class ServerVerification {
   const s=scopeForGuild(candidate.guild_id);
   assert(s.organizationId===candidate.organization_id&&this.vault.hash(s,userId)===candidate.issuer_hash&&!candidate.used_at&&!candidate.revoked_at&&candidate.expires_at>new Date(this.clock()),'VERIFICATION_INVALID');
   let snapshot:GuildAuthorizationSnapshot|undefined;
-  try{snapshot=await this.authority.snapshot(s,userId,'WEB_DASHBOARD',randomUUID());this.authority.require(snapshot);}catch{snapshot=undefined;}
+  try{snapshot=await this.authority.snapshot(s,userId,'WEB_DASHBOARD',randomUUID());this.authority.require(snapshot);}catch(error){if(errorCategory(error)!=='PERMISSION'&&!(error&&typeof error==='object'&&'status' in error&&error.status===404))throw error;snapshot=undefined;}
   const result=await this.db.transaction().execute(async tx=>{
    await this.lock(tx,s);
    const challenge=(await sql<Challenge>`SELECT * FROM server_verification_challenges WHERE ${tenant(s)} AND id=${candidate.id}::uuid FOR UPDATE`.execute(tx)).rows[0];
@@ -63,7 +64,8 @@ export class ServerVerification {
    await sql`UPDATE server_verification_challenges SET attempt_count=attempt_count+1,last_attempt_at=${now} WHERE ${tenant(s)} AND id=${challenge.id}::uuid`.execute(tx);
    let actor:Actor;
    try{assert(snapshot,'VERIFICATION_INVALID');actor=await this.authority.revalidate(s,userId,snapshot,tx);}
-   catch{
+   catch(error){
+    if(!['PERMISSION','REVISION_CONFLICT','VERIFICATION'].includes(errorCategory(error)))throw error;
     if(challenge.attempt_count+1>=8)await sql`UPDATE server_verification_challenges SET revoked_at=${now} WHERE ${tenant(s)} AND id=${challenge.id}::uuid`.execute(tx);
     // One event for the blocked challenge, without recording individual guesses.
     if(challenge.attempt_count===0)await audit(tx,s,{key:challenge.issuer_hash,permissions:'0',roles:[],source:'WEB_DASHBOARD',requestId:randomUUID()},'server_verification.failed',null,{challengeId:challenge.id,state:'REJECTED'});

@@ -11,9 +11,10 @@ export class ServerAuthorization {
  constructor(private readonly discord:DiscordPort,private readonly settings:SettingsService,private readonly vault:IdentityVault){}
  async snapshot(s:Scope,userId:string,source:Actor['source'],requestId:string):Promise<GuildAuthorizationSnapshot>{
   assert(/^\d{17,20}$/.test(userId),'ADMIN_REQUIRED',403);
-  const [member,current]=await Promise.all([this.discord.member(s.guildId,userId),this.settings.get(s)]);
+  let checkedAt=0;
+  const [member,current]=await Promise.all([this.discord.member(s.guildId,userId).then(member=>{checkedAt=Date.now();return member;}),this.settings.get(s)]);
   const actor={key:this.vault.hash(s,userId),encryptedUserId:this.vault.seal(s,userId),permissions:member.permissions,roles:member.roles,source,requestId};
-  return {scope:s,userId,member,settings:current,actor,checkedAt:Date.now()};
+  return {scope:s,userId,member,settings:current,actor,checkedAt};
  }
  require(snapshot:GuildAuthorizationSnapshot){
   assert(Date.now()-snapshot.checkedAt>=0&&Date.now()-snapshot.checkedAt<=10000,'AUTHORIZATION_EXPIRED',403);

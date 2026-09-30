@@ -1,7 +1,7 @@
 import type {FastifyInstance} from 'fastify';
 import {z} from 'zod';
 import {sql,tenant,type Database} from '../../../packages/db/src/index.js';
-import {scopeSchema,assert,DomainError} from '../../../packages/shared/src/index.js';
+import {scopeSchema,assert} from '../../../packages/shared/src/index.js';
 import {validApiToken} from '../../../packages/security/src/index.js';
 import {AnalyticsService} from '../../../packages/analytics/src/index.js';
 import {diagnose} from '../../../packages/analytics/src/diagnoses.js';
@@ -28,8 +28,8 @@ export function registerV02(app:FastifyInstance,db:Database,key:string,discord?:
   const results=[];for(const e of experiments)results.push({id:e.id,...await new ExperimentService(db).result(s,e.id)});
   return {metrics,diagnoses:diagnose(current,baseline),capability,revisions,interventions,experiments:results,usage:await new EntitlementService(db).usage(s),settings:await new SettingsService(db).get(s)};
  });
- app.post(base+'/configuration',async(req,reply)=>{
-  try{
+ app.post(base+'/configuration',async(req)=>{
+  {
    const s=auth(req.params,req.headers.authorization);
    const input=z.object({action:z.enum(['draft','preview','publish','rollback','approve','experiment_control']),domain:z.enum(['activation','intervention','experiment','onboarding','privacy']).optional(),definition:z.unknown().optional(),id:z.uuid().optional(),expectedHead:z.uuid().nullable().optional(),confirmationHash:z.string().optional(),state:z.enum(['running','paused','stopped']).optional()}).strict().parse(req.body);
    // The scoped bearer token is a server-held administration credential; never sent to browsers.
@@ -62,6 +62,6 @@ export function registerV02(app:FastifyInstance,db:Database,key:string,discord?:
    }
    const published=await schemas.publish(s,actor,input.id,input.expectedHead,input.confirmationHash);
    return published;
-  }catch(error){return reply.code(error instanceof DomainError?error.status:400).send({error:error instanceof DomainError?error.code:'INVALID_CONFIGURATION'});}
+  }
  });
 }

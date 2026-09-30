@@ -1,13 +1,21 @@
 import {ButtonStyle} from 'discord-api-types/v10';
-import {discordLabel,t,type MessageKey,type UiLocale} from '../i18n/index.js';
-import {actionRow,callout,divider,footer,nexusPanel,type Panel} from '../primitives.js';
+import {t,type UiLocale} from '../i18n/index.js';
+import {failureCopy} from '../i18n/errors.js';
+import {actionRow,callout,divider,nexusPanel,type Panel} from '../primitives.js';
 import type {Issue} from '../types.js';
+import type {UserFailure} from '../../../shared/src/error-types.js';
 export type ErrorKind='revision'|'permission'|'entitlement'|'generic';
-export async function errorPanel(issue:Issue,kind:ErrorKind='generic',locale:UiLocale='en',reference?:string,code?:string):Promise<Panel>{
- if(code==='CHANNEL_PERMISSION_MISSING'||code==='INVALID_START_CHANNEL')return nexusPanel({title:locale==='ja'?'この改善策を有効にできません':'Cannot enable this improvement',subtitle:locale==='ja'?'通知先を確認してください':'Check the notification destination',accent:'critical',children:[divider(),callout(locale==='ja'?'何が起きたか':'What happened',locale==='ja'?'NEXUS は選択したチャンネルに送信できません。別のチャンネルを選ぶか、表示・送信権限を確認してください。':'NEXUS cannot send messages in the selected channel. Choose another channel or grant View and Send permissions.'),...(reference?[callout(t(locale,'error.ref'),`**${reference}**`)]:[])],rows:[await actionRow(issue,[{label:locale==='ja'?'別のチャンネルを選ぶ':'Choose another channel',action:'interventions',style:ButtonStyle.Primary},{label:locale==='ja'?'権限を確認':'Check permissions',action:'status'}])]});
- if(code==='EVENT_NOT_AVAILABLE')return nexusPanel({title:locale==='ja'?'イベントが見つかりません':'Event no longer available',subtitle:locale==='ja'?'利用できるイベントを選び直してください':'Choose an available event',accent:'critical',children:[divider(),...(reference?[callout(t(locale,'error.ref'),`**${reference}**`)]:[])],rows:[await actionRow(issue,[{label:locale==='ja'?'改善に戻る':'Back to Improve',action:'improve',style:ButtonStyle.Primary}])]});
- if(code==='HELPER_CHANNEL_REQUIRED')return nexusPanel({title:t(locale,'helper.title'),subtitle:t(locale,'helper.needChannel'),accent:'critical',children:[divider()],rows:[await actionRow(issue,[{label:t(locale,'control.openSettings'),action:'settings',style:ButtonStyle.Primary}])]});
- if(code==='COMPONENT_EXPIRED'||code==='PANEL_NOT_CONFIGURED')return nexusPanel({title:locale==='ja'?'このパネルは古くなりました':'This panel is out of date',subtitle:locale==='ja'?'現在のパネルを開いて操作してください':'Open the current panel and try again',accent:'critical',children:[divider()],rows:[await actionRow(issue,[{label:discordLabel(locale,'error.openPanel'),action:'panel',style:ButtonStyle.Primary}])]});
- const keys:Record<ErrorKind,[MessageKey,MessageKey]>={revision:['error.revisionTitle','error.revisionDetail'],permission:['error.permissionTitle','error.permissionDetail'],entitlement:['error.entitlementTitle','error.entitlementDetail'],generic:['error.genericTitle','error.genericSubtitle']},[title,subtitle]=keys[kind];
- return nexusPanel({title:t(locale,title),subtitle:t(locale,subtitle),accent:'critical',children:[divider(),...(kind==='generic'?[callout(t(locale,'error.possible'),t(locale,'error.causes'))]:[]),callout(t(locale,'error.safe'),kind==='generic'?t(locale,'error.unknownState'):t(locale,'error.notCommitted')),...(reference?[callout(t(locale,'error.ref'),`**${reference}**`)]:[]),footer(t(locale,'error.footer'))],rows:[await actionRow(issue,[{label:discordLabel(locale,'error.openPanel'),action:'panel',style:ButtonStyle.Primary},{label:discordLabel(locale,'error.runDiagnostics'),action:'status'},{label:discordLabel(locale,'common.back'),action:'settings'}])]});
+export type ErrorReturn={page?:'overview'|'newMembers'|'attention'|'analysis'|'settings'|'improve'|'results';retryRead?:boolean};
+export async function errorPanel(issue:Issue,kind:ErrorKind|UserFailure='generic',locale:UiLocale='en',reference?:string,code?:string,context:ErrorReturn={}):Promise<Panel>{
+ const legacy={revision:'REVISION_CONFLICT',permission:'PERMISSION',entitlement:'ENTITLEMENT',generic:'INTERNAL'} as const;
+ const category=code==='CHANNEL_PERMISSION_MISSING'?'CHANNEL_PERMISSION':code==='COMPONENT_EXPIRED'||code==='PANEL_NOT_CONFIGURED'?'COMPONENT_EXPIRED':code==='EVENT_NOT_AVAILABLE'||code==='HELPER_CHANNEL_REQUIRED'||code==='INVALID_START_CHANNEL'?'VALIDATION':typeof kind==='string'?legacy[kind]:kind.category;
+ const failure:UserFailure=typeof kind==='string'?{category,effect:'UNKNOWN',reference}:kind;
+ const ja=locale!=='en',copy=failureCopy(ja?'ja':'en',failure),page=context.page??'overview',expired=category==='COMPONENT_EXPIRED';
+ const read={action:'controlNavigate',data:{page}},back=expired?{action:'panel'}:read;
+ const fix=category==='CHANNEL_PERMISSION'?{action:'controlSettings',data:{section:'notifications'}}:category==='ENTITLEMENT'?{action:'billing'}:back;
+ return nexusPanel({title:copy.title,subtitle:copy.detail,accent:'critical',children:[divider(),callout(ja?'操作結果':'Operation result',copy.effect),...(failure.reference?[callout(t(locale,'error.ref'),`**${failure.reference}**`)]:[])],rows:[await actionRow(issue,[
+  {label:expired||category==='CHANNEL_PERMISSION'||category==='ENTITLEMENT'?copy.action:context.retryRead?(ja?'再試行':'Retry'):(ja?'最新状態を確認':'Check current state'),...fix,style:ButtonStyle.Primary},
+  {label:ja?'状態を確認':'Check status',action:'status'},
+  {label:`${t(locale,`control.${page}`)}${ja?'に戻る':' · Back'}`,...back}
+ ])]});
 }

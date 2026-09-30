@@ -46,7 +46,7 @@ it('checks OAuth state, authenticates encrypted sessions, and rejects tampering'
 });
 it('authorizes only guilds with administrative permissions on each request',async()=>{
  vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_SESSION_SECRET','a'.repeat(64));vi.stubEnv('API_KEY','b'.repeat(64));vi.stubEnv('DISCORD_TOKEN','bot-test');vi.stubEnv('DISCORD_APPLICATION_ID','123456789012345678');
- vi.stubGlobal('fetch',vi.fn(async(_url:string,init?:RequestInit)=>({ok:true,json:async()=>init?.headers&&JSON.stringify(init.headers).includes('Bot ')?[
+ vi.stubGlobal('fetch',vi.fn(async(_url:string,init?:RequestInit)=>({ok:true,json:async()=>String(_url).endsWith('/users/@me')?{id:'444444444444444444'}:init?.headers&&JSON.stringify(init.headers).includes('Bot ')?[
   {id:'111111111111111111'},{id:'222222222222222222'}]:[
   {id:'111111111111111111',name:'Admin',permissions:'32'},
   {id:'222222222222222222',name:'Owner',permissions:'0',owner:true},
@@ -79,7 +79,7 @@ it('accepts a matching OAuth code exchange with identify and guilds scopes',asyn
  const fetcher=vi.fn().mockResolvedValueOnce({ok:true,json:async()=>({access_token:'access',expires_in:3600,scope:'identify guilds'})}).mockResolvedValueOnce({ok:true,json:async()=>({id:'444444444444444444'})});vi.stubGlobal('fetch',fetcher);
  const response=await oauthCallback(new NextRequest('http://localhost:3100/auth/callback?state=matching&code=grant',{headers:{cookie:'nexus_oauth_state=matching'}}));
  expect(response.status).toBe(307);expect(openSession(response.cookies.get('nexus_session')?.value)?.userId).toBe('444444444444444444');expect(response.cookies.get('nexus_session')?.httpOnly).toBe(true);expect(fetcher).toHaveBeenCalledTimes(2);
- const rejected=await oauthCallback(new NextRequest('http://localhost:3100/auth/callback?state=other&code=grant',{headers:{cookie:'nexus_oauth_state=matching'}}));expect(rejected.status).toBe(403);expect(fetcher).toHaveBeenCalledTimes(2);
+ const rejected=await oauthCallback(new NextRequest('http://localhost:3100/auth/callback?state=other&code=grant',{headers:{cookie:'nexus_oauth_state=matching'}}));expect(rejected.status).toBe(307);expect(rejected.headers.get('location')).toContain('/auth/problem');expect(fetcher).toHaveBeenCalledTimes(2);
 });
 it('uses the last complete UTC week for the optional summary',()=>{
  const week=previousCompleteWeek(new Date('2026-09-24T09:00:00.000Z'));

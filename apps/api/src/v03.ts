@@ -1,7 +1,8 @@
 import type {FastifyInstance} from 'fastify';
 import {z} from 'zod';
 import {sql,tenant,type Database} from '../../../packages/db/src/index.js';
-import {assert,scopeSchema} from '../../../packages/shared/src/index.js';
+import {assert,scopeSchema,DomainError} from '../../../packages/shared/src/index.js';
+import {userFailure} from '../../../packages/shared/src/errors.js';
 import {validApiToken} from '../../../packages/security/src/index.js';
 import {PresentationService,compileActionTemplate,type ActionTemplateKey} from '../../../packages/presentation/src/index.js';
 import {domainRevisions} from '../../../packages/settings/src/domain-config.js';
@@ -34,7 +35,7 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
     assert(discord.options,'DISCORD_UNAVAILABLE',503);
     const options=await discord.options(guildId);assert(options.events.some(event=>event.id===action.eventId),'EVENT_NOT_AVAILABLE');
    }
-  }}catch(error){const code=error instanceof Error?error.message:'';return code.includes('EVENT_NOT_AVAILABLE')?{status:'unavailable' as const,fix:'Choose a scheduled event that still exists.'}:{status:'permission_needed' as const,fix:'Give NEXUS View Channel and Send Messages in each selected channel, then retry.'};}
+  }}catch(error){const failure=userFailure(error,'NOT_STARTED',{action:'preflight',stage:'discord-check'});return {status:failure.category==='CHANNEL_PERMISSION'?'permission_needed' as const:'unavailable' as const,fix:null,failure,code:error instanceof DomainError?error.code:'DISCORD_UNAVAILABLE'};}
   return {status:'ready' as const,fix:null};
  };
  app.get(base+'/home',async(req,reply)=>presentation.home(getScope(req,reply)));
@@ -116,14 +117,14 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
   assert(await new EntitlementService(db).can(s,'interventions'),'ENTITLEMENT_REQUIRED',403);
   if(input.safetyMode==='auto')assert(await new EntitlementService(db).can(s,'automation_auto'),'ENTITLEMENT_REQUIRED',403);
   const definition=compileActionTemplate(input.templateKey as ActionTemplateKey,input);
-  const check=await preflight(s.guildId,input);assert(check.status==='ready',check.status==='permission_needed'?'CHANNEL_PERMISSION_MISSING':'EVENT_NOT_AVAILABLE');
+  const check=await preflight(s.guildId,input);assert(check.status==='ready','code' in check?String(check.code):'INVALID_CONFIGURATION');
   const revisions=domainRevisions(db),id=await revisions.draft(s,actor,'intervention',definition);return revisions.preview(s,id);
  });
  app.post(base+'/actions/preflight',async(req,reply)=>{const s=getScope(req,reply);return preflight(s.guildId,actionInput.parse(req.body));});
  app.post(base+'/actions/test',async(req,reply)=>{
   const s=getScope(req,reply),input=actionInput.parse(req.body);
   assert(input.templateKey!=='inactive_follow_up','TEST_UNAVAILABLE');
-  const check=await preflight(s.guildId,input);assert(check.status==='ready',check.status==='permission_needed'?'CHANNEL_PERMISSION_MISSING':'EVENT_NOT_AVAILABLE');
+  const check=await preflight(s.guildId,input);assert(check.status==='ready','code' in check?String(check.code):'INVALID_CONFIGURATION');
   assert(discord&&input.channelId,'CHANNEL_REQUIRED');
   // This direct bot message is explicitly a TEST. It creates no member episode,
   // intervention run, outbox entry, assignment, exposure, or metric record.

@@ -6,7 +6,8 @@ import {coverageLabel} from '../status.js';
 import type {Issue,MetricLike,Metrics} from '../types.js';
 const unavailable:Record<string,MessageKey>={d1_active_retention:'lifecycle.d1Pending',d7_active_retention:'lifecycle.d7Pending',d30_active_retention:'lifecycle.d30Pending',onboarding_completion:'lifecycle.onboardingPending',home_actions_completion:'lifecycle.homePending'};
 const show=(metric:MetricLike|undefined,kind:'rate'|'duration'|'number',locale:UiLocale)=>{
- if(!metric||metric.value===null)return t(locale,unavailable[metric?.metricKey??'']??'common.notAvailableYet');
+ if(!metric||metric.dataCoverage.status==='unavailable'||metric.dataCoverage.status==='incomplete')return t(locale,'polish.unavailable');
+ if(metric.value===null){if(metric.provisional)return t(locale,'experience.pending');if(metric.denominator===0)return t(locale,'polish.noMembers');return t(locale,unavailable[metric.metricKey]??'common.notAvailableYet');}
  const value=kind==='rate'?formatPercentage(metric.value,0,locale):kind==='duration'?formatDuration(metric.value,locale):formatNumber(metric.value,locale);
  return `**${value}**\n-# ${t(locale,'lifecycle.mature',{count:metric.sampleSize})} · ${coverageLabel(metric.dataCoverage.status,metric.dataCoverage.expected?Number(metric.dataCoverage.observed)/metric.dataCoverage.expected:undefined,locale)}${metric.provisional?` · ${t(locale,'lifecycle.provisional')}`:''}`;
 };

@@ -1,3 +1,5 @@
+import {DomainError} from '../../../../../packages/shared/src/index';
+import {failureResponse} from '../../auth/failure-response';
 import { NextResponse } from "next/server";
 import {cookies} from 'next/headers';
 import {dashboardContext} from '../../auth/session';
@@ -5,7 +7,7 @@ import {dashboardContext} from '../../auth/session';
 export async function GET() {
   try {
     const jar=await cookies(),context=await dashboardContext(jar.get('nexus_session')?.value,jar.get('nexus_guild')?.value);
-    if(!context)return NextResponse.json({error:'Unauthorized guild access'},{status:403});
+    if(!context)return failureResponse(new DomainError('ADMIN_REQUIRED',403),'NOT_STARTED');
     const response = await fetch(
       `${context.base}/v3/organizations/${context.organizationId}/guilds/${context.guildId}/results`,
       {
@@ -21,7 +23,5 @@ export async function GET() {
         "Cache-Control": "no-store",
       },
     });
-  } catch {
-    return NextResponse.json({ error: "API unavailable" }, { status: 503 });
-  }
+  } catch(error){return failureResponse(error,'NOT_STARTED');}
 }

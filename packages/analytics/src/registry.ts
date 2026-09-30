@@ -33,7 +33,7 @@ export function canonicalMetrics(episodes:MetricEpisode[],events:MetricEvent[],f
  const messages=cohort.flatMap(e=>{const first=facts(e).filter(f=>f.kind==='message.sent'&&f.at<=e.joinedAt+activationSeconds*1000).sort((a,b)=>a.at-b.at)[0];return first&&first.at+86400000<=asOf?[first]:[];});
  const latencies=messages.flatMap(f=>typeof f.data.firstReplyLatencySeconds==='number'&&f.data.firstReplyLatencySeconds<=86400?[f.data.firstReplyLatencySeconds]:[]);
  put('direct_reply_connection_rate',messages.length?latencies.length/messages.length:null,messages.length,messages.length<cohort.length,latencies.length,messages.length);
- put('median_first_reply_latency',percentile(latencies,.5),latencies.length);
+ put('median_first_reply_latency',percentile(latencies,.5),latencies.length,false,latencies.length,messages.length);
  for(const d of [1,7,30] as const)rate(`d${d}_active_retention`,mature((d+1)*86400),e=>facts(e).some(f=>{const key=canonicalSignal(f.kind);return key&&signalRegistry[key].active&&f.at>=e.joinedAt+d*86400000&&f.at<e.joinedAt+(d+1)*86400000;}));
  rate('leave_rate',mature(activationSeconds),e=>has(e,'member.left',activationSeconds));return results;
 }

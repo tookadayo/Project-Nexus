@@ -4,8 +4,11 @@ import {discordInstallUrl} from '../../../../packages/discord/src/install';
 import {manageableConnection} from './server-access';
 import type {VerificationState} from '../../../../packages/security/src/server-verification';
 import {webAuthMode} from '../../../../packages/config/src/web-auth';
+import type {UserFailure} from '../../../../packages/shared/src/error-types';
+import {userFailure} from '../../../../packages/shared/src/errors';
+import {DiscordFailure} from '../../../../packages/discord/src/rest';
 
-export type AuthorizedGuild={id:string;name:string;installed:boolean;installUrl:string|null;state:VerificationState;availability?:'AVAILABLE'|'UNAVAILABLE'};
+export type AuthorizedGuild={id:string;name:string;installed:boolean;installUrl:string|null;state:VerificationState;availability?:'AVAILABLE'|'UNAVAILABLE';failure?:UserFailure};
 type Session={accessToken:string;userId:string;expiresAt:number};
 export const authMode=()=>webAuthMode();
 export const oauthRedirectUri=()=>new URL('/auth/callback',process.env.NEXUS_WEB_URL).toString();
@@ -17,13 +20,19 @@ export function validOAuthState(expected:string|undefined,received:string|null){
 export function installUrl(guildId?:string){const id=process.env.DISCORD_APPLICATION_ID;return id?discordInstallUrl(id,guildId):null;}
 let installationCache:{expires:number;ids:Set<string>}|null=null;
 type DiscordGuild={id:string;name:string;owner?:boolean;permissions?:string};
+async function oauthDiscord(url:string|URL,authorization:string){
+ let response:Response;
+ try{response=await fetch(url,{headers:{Authorization:authorization},cache:'no-store',signal:AbortSignal.timeout(8000)});}
+ catch(error){throw new DiscordFailure(0,0,{kind:error instanceof Error&&/abort|timeout/i.test(error.name)?'timeout':'network',routeCategory:'oauth-identity'});}
+ if(response.status===401&&authorization.startsWith('Bearer '))throw new Error('SESSION_EXPIRED');
+ if(!response.ok)throw new DiscordFailure(response.status,Number(response.headers.get('retry-after'))||0,{routeCategory:'oauth-identity'});
+ return response;
+}
 async function discordGuilds(authorization:string):Promise<DiscordGuild[]>{
  const rows:DiscordGuild[]=[];let after='';
  for(;;){
   const url=new URL('https://discord.com/api/v10/users/@me/guilds');url.searchParams.set('limit','200');if(after)url.searchParams.set('after',after);
-  const response=await fetch(url,{headers:{Authorization:authorization},cache:'no-store',signal:AbortSignal.timeout(8000)});
-  if(response.status===401&&authorization.startsWith('Bearer '))throw new Error('SESSION_EXPIRED');
-  if(!response.ok)throw new Error('DISCORD_GUILDS_UNAVAILABLE');
+  const response=await oauthDiscord(url,authorization);
   const page=await response.json() as DiscordGuild[];if(!Array.isArray(page))throw new Error('DISCORD_GUILDS_UNAVAILABLE');rows.push(...page);
   if(page.length<200)return rows;
   const last=page.at(-1)?.id;if(!last||!/^\d{17,20}$/.test(last)||last===after)throw new Error('DISCORD_GUILDS_UNAVAILABLE');after=last;
@@ -43,7 +52,7 @@ export async function authorizedGuilds(token:string,userId:string):Promise<Autho
    if(!/^\d{17,20}$/.test(row.id))return null;
    if(installed.has(row.id)){
     try{const connection=await manageableConnection(row.id,userId);return connection?{id:row.id,name:row.name,installed:true,installUrl:installUrl(row.id),state:connection.state}:null;}
-    catch{return {id:row.id,name:row.name,installed:true,installUrl:null,state:'INSTALLED_NOT_VERIFIED' as const,availability:'UNAVAILABLE' as const};}
+    catch(error){return {id:row.id,name:row.name,installed:true,installUrl:null,state:'INSTALLED_NOT_VERIFIED' as const,availability:'UNAVAILABLE' as const,failure:userFailure(error,'NOT_STARTED',{action:'servers',stage:'guild-check'})};}
    }
    return row.owner===true||(BigInt(row.permissions??'0')&40n)!==0n?{id:row.id,name:row.name,installed:false,installUrl:installUrl(row.id),state:'NOT_INSTALLED' as const}:null;
   }));
@@ -61,6 +70,9 @@ export async function dashboardContext(sessionCookie:string|undefined,guildCooki
  }
  const session=openSession(sessionCookie);if(!session)return null;
  if(!guildCookie||!/^\d{17,20}$/.test(guildCookie))return null;
+ // One identity request checks that the OAuth grant has not been revoked.
+ const identified=await oauthDiscord('https://discord.com/api/v10/users/@me',`Bearer ${session.accessToken}`);
+ const identity=await identified.json() as {id?:string};if(identity.id!==session.userId)throw new Error('SESSION_EXPIRED');
  // The Bot's live guild/member lookup proves installation and current authority.
  // OAuth's entire guild list is needed only on /servers.
  const connection=await manageableConnection(guildCookie,session.userId);if(!connection||connection.state!=='VERIFIED')return null;

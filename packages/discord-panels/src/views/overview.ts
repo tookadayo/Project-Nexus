@@ -9,9 +9,9 @@ export type OverviewContext={diagnosis?:{type:string;severity:'warning'|'critica
 const metricNote=(metric:MetricLike|undefined,locale:UiLocale)=>metric?`${t(locale,'overview.matureMembers',{count:metric.sampleSize})} · ${coverageLabel(metric.dataCoverage.status,metric.dataCoverage.expected?Number(metric.dataCoverage.observed)/metric.dataCoverage.expected:undefined,locale)}`:t(locale,'overview.observationPending');
 
 export async function overviewPanel(issue:Issue,metrics:Metrics,locale:UiLocale='en',context:OverviewContext={}):Promise<Panel>{
- const newcomers=metrics.new_members;
+ const newcomers=metrics.new_members,unavailable=!newcomers||['unavailable','incomplete'].includes(newcomers.dataCoverage.status)||newcomers.value===null;
  if(!newcomers||newcomers.value===null||newcomers.value===0)return nexusPanel({title:t(locale,'overview.title'),subtitle:t(locale,'overview.subtitle'),accent:'collecting',children:[
-  divider(),statusBanner(t(locale,'overview.collecting'),t(locale,'overview.connected')),emptyState(t(locale,'overview.milestone'),t(locale,'overview.trackFirst')),footer(t(locale,'overview.missingZero'))
+  divider(),statusBanner(t(locale,'overview.collecting'),t(locale,unavailable?'polish.unavailable':'overview.connected')),emptyState(t(locale,'overview.milestone'),t(locale,unavailable?'polish.unavailable':'overview.trackFirst')),footer(t(locale,'overview.missingZero'))
  ],rows:[await actionRow(issue,[{label:discordLabel(locale,'common.refresh'),action:'overview',style:ButtonStyle.Primary},{label:discordLabel(locale,'common.lifecycle'),action:'lifecycle'},{label:discordLabel(locale,'common.setup'),action:'setup'}])]});
  const activation=metrics.activation_rate,reply=metrics.direct_reply_connection_rate,d7=metrics.d7_active_retention;
  const primary=[activation,reply,d7,newcomers].filter(Boolean) as MetricLike[],healthy=primary.length===4&&primary.every(m=>m.dataCoverage.status==='healthy');

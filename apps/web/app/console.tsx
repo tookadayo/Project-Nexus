@@ -1,6 +1,11 @@
 "use client";
 import { useState } from "react";
+import {Measurements,AnalysisSummary} from './measurements';
 import {ServerConnection} from './link/connection';
+import {FailureNotice} from './failure-ui';
+import type {UserFailure} from '../../../packages/shared/src/error-types';
+import {failureCopy} from '../../../packages/discord-panels/src/i18n/errors';
+import {activityWindow} from '../../../packages/discord-panels/src/i18n/terminology';
 import type {CommunityService} from '../../../packages/presentation/src/community';
 import {t} from '../../../packages/discord-panels/src/i18n/index';
 import {VERSION,RELEASE_CHANNEL} from '../../../packages/shared/src/version';
@@ -19,7 +24,6 @@ import {
   DeliveryFunnelChart,
   ExperimentComparison,
   JourneyFunnel,
-  MetricCard,
   ResponseDistributionChart,
   TrendChart,
 } from "./charts";
@@ -44,6 +48,7 @@ type Admin = {
   capability: Record<string, unknown> | null;
 };
 export type ProductData = {
+  failures?:Record<string,UserFailure>;
   home: HomePresentation | null;
   journey: JourneyPresentation | null;
   community: Awaited<ReturnType<CommunityService['overview']>> | null;
@@ -120,6 +125,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
       "activation" | "onboarding" | "action" | "test" | null
     >(null),
     [status, setStatus] = useState(""),
+    [operationFailure,setOperationFailure]=useState<UserFailure|null>(null),
     [busy, setBusy] = useState(false),
     [dismissed, setDismissed] = useState<string[]>([]),
     [dismissReasons, setDismissReasons] = useState<Record<string,"not_relevant"|"already_handled"|"later"|"">>({}),
@@ -136,7 +142,8 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
   const selected = actions?.templates.find((t) => t.key === template),
     selectedAction = actions?.items.find((a) => a.id === testActionId);
   async function request(body: unknown) {
-    setBusy(true);
+    setBusy(true);setOperationFailure(null);
+    let knownFailure:UserFailure|undefined;
     try {
       const response = await fetch("/control", {
           method: "POST",
@@ -146,23 +153,22 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
         result = await response.json();
       if (!response.ok) {
         if(response.status===401&&result.error==='SESSION_EXPIRED'){window.location.href='/auth/expired';throw new Error(locale==='ja'?'Discordでもう一度ログインしてください':'Sign in with Discord again.');}
-        const code = String(result.message ?? result.error ?? "");
-        const channel = data.options.channels.find(item => item.id === channelId)?.label ?? (t(locale,"web.the_selected_channel"));
-        const explanation = code.includes("CHANNEL_PERMISSION_MISSING") || code.includes("INVALID_START_CHANNEL") || code.includes("Discord HTTP 403") || code.includes("Discord HTTP 404")
-          ? t(locale,"web.nexus_cannot_send_messages_in_value",{a:String(channel)})
-          : code.includes("EVENT_NOT_AVAILABLE") ? t(locale,"web.that_event_is_no_longer_available")
-          : code.includes("ENTITLEMENT_REQUIRED") ? t(locale,"web.this_improvement_is_not_available_on")
-          : code.includes("REVISION_CONFLICT") ? t(locale,"web.settings_changed_refresh_the_page_and")
-          : t(locale,"web.the_change_could_not_be_saved");
-        throw new Error(explanation);
+        const failure:UserFailure=result.failure??{category:'INTERNAL',effect:'UNKNOWN'},copy=failureCopy(locale,failure);knownFailure=failure;
+        throw new Error(`${copy.title} ${copy.detail} ${copy.effect}${failure.reference?` (${failure.reference})`:''}`);
       }
       return result;
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Request failed");
+      void error;setOperationFailure(knownFailure??{category:'INTERNAL',effect:'UNKNOWN',reference:'NXS-'+crypto.randomUUID().replaceAll('-','').slice(0,12).toUpperCase()});setStatus('');
       return null;
     } finally {
       setBusy(false);
     }
+  }
+  async function readData<T>(url:string):Promise<T|null>{
+    try{const response=await fetch(url,{cache:'no-store'}),body=await response.json();
+      if(!response.ok){setOperationFailure(body.failure??{category:'INTERNAL',effect:'NOT_STARTED',reference:'NXS-'+crypto.randomUUID().replaceAll('-','').slice(0,12).toUpperCase()});return null;}
+      return body as T;
+    }catch{setOperationFailure({category:'INTERNAL',effect:'NOT_STARTED',reference:'NXS-'+crypto.randomUUID().replaceAll('-','').slice(0,12).toUpperCase()});return null;}
   }
   async function changeAttention(item:{channelId:string;messageId:string},status:'ACKNOWLEDGED'|'SNOOZED'|'RESOLVED'){
     const choice=attentionSnooze[item.messageId]??'30';
@@ -194,13 +200,9 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
       setPreviewKind(null);
       setStatus(c.published);
       if (kind === "action") {
-        const response = await fetch("/data/actions", { cache: "no-store" });
-        if (response.ok)
-          setActions((await response.json()) as ActionsPresentation);
+        const current=await readData<ActionsPresentation>('/data/actions');if(current)setActions(current);
       } else if (kind === "test") {
-        const response = await fetch("/data/results", { cache: "no-store" });
-        if (response.ok)
-          setResults((await response.json()) as ResultsPresentation);
+        const current=await readData<ResultsPresentation>('/data/results');if(current)setResults(current);
       } else if (kind === "activation" || kind === "onboarding") {
         window.location.reload();
       }
@@ -212,8 +214,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
     if (!draft) return;
     const saved = await request({action:"publish",id:draft.after.id,expectedHead:draft.before?.id??null,confirmationHash:draft.confirmationHash});
     if (!saved) return;
-    const response = await fetch("/data/actions", {cache:"no-store"});
-    if (response.ok) setActions(await response.json() as ActionsPresentation);
+    const current=await readData<ActionsPresentation>('/data/actions');if(current)setActions(current);
     const resultResponse=await fetch('/data/results',{cache:'no-store'});
     if(resultResponse.ok)setResults(await resultResponse.json() as ResultsPresentation);
     setStatus(t(locale,"web.improvement_enabled"));
@@ -221,7 +222,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
   async function checkImprovement(){
     const result=await request({action:"action_preflight",templateKey:template,channelId:channelId||undefined,eventId:eventId||undefined,recommendedChannelIds:channels,safetyMode:runMode});
     if(!result)return null;
-    setPreflightState(result.status);setPreflightFix(result.fix);return result.status as typeof preflightState;
+    setPreflightState(result.status);setPreflightFix(result.fix);if(result.failure)setOperationFailure(result.failure);return result.status as typeof preflightState;
   }
   async function sendTestNotification(){
     const check=await checkImprovement();if(check!=="ready")return;
@@ -269,8 +270,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
     if (!draft) return;
     const saved = await request({action:"publish",id:draft.after.id,expectedHead:draft.before?.id??null,confirmationHash:draft.confirmationHash});
     if (!saved) return;
-    const response = await fetch("/data/results", {cache:"no-store"});
-    if (response.ok) setResults(await response.json() as ResultsPresentation);
+    const current=await readData<ResultsPresentation>('/data/results');if(current)setResults(current);
     setTestActionId(null);
     setStatus(t(locale,"web.result_check_started"));
   }
@@ -318,12 +318,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
     setRange(value);
     setJourneyLoading(true);
     try {
-      const response = await fetch(`/data/journey?range=${value}`, {
-        cache: "no-store",
-      });
-      if (response.ok)
-        setJourney((await response.json()) as JourneyPresentation);
-      else setStatus(c.unavailable);
+      const current=await readData<JourneyPresentation>(`/data/journey?range=${value}`);if(current)setJourney(current);
     } finally {
       setJourneyLoading(false);
     }
@@ -334,12 +329,6 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
       : label === "partial"
         ? t(locale,"web.some_data_could_not_be_collected")
         : t(locale,"web.not_enough_verified_data_is_available");
-  const healthBadgeText = (label: string) =>
-    label === "healthy"
-      ? t(locale,"web.collecting")
-      : label === "partial"
-        ? t(locale,"web.data_limited")
-        : t(locale,"web.no_data_yet");
   const go = (index: number) => () => setPage(index);
   const breadcrumb = (...parts: string[]) => (
     <p className="breadcrumb">{[c.home, ...parts].join(" / ")}</p>
@@ -388,37 +377,7 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
           )}
           {data.community && <p className="inline-note"><button onClick={()=>setPage(9)}>{t(locale,'experience.howMeasured')} →</button></p>}
           {data.community && <section className="surface"><h2>{t(locale,"web.how_new_members_are_participating")}</h2>{data.community.dataReady?<><div className="journey-steps">{data.community.stages.map(step=><p key={step.key}><strong>{step.count.toLocaleString()}</strong> {t(locale,`control.${step.key as 'joined'}`)}</p>)}</div>{data.community.largestDrop&&<p>{t(locale,"web.the_largest_observed_drop_is_between",{a:String(t(locale,`control.${data.community.largestDrop.fromKey as 'joined'}`)),b:String(t(locale,`control.${data.community.largestDrop.toKey as 'joined'}`))})}</p>}</>:<p>{t(locale,"web.there_is_not_enough_observed_data")}</p>}<button onClick={go(1)}>{t(locale,"web.see_details")} →</button></section>}
-          <section className="kpi-grid">
-            {data.home.kpis.filter(k=>k.key!=='activation_rate').map((k) => (
-              <MetricCard
-                key={k.key}
-                label={c[k.key]}
-                value={
-                  k.maturity === "provisional"
-                    ? c.provisional
-                    : k.maturity === "unavailable"
-                      ? c.unavailable
-                      : k.key === "new_members"
-                    ? k.current === null
-                      ? "—"
-                      : k.current.toLocaleString()
-                    : percent(k.current)
-                }
-                previous={`${c.previous}: ${k.key === "new_members" ? (k.previous === null ? "—" : k.previous.toLocaleString()) : percent(k.previous)}`}
-                delta={k.maturity === "mature" ? signed(k.delta, k.key !== "new_members") : "—"}
-                sample={k.sampleSize}
-                maturity={
-                  k.maturity === "mature"
-                    ? c.mature
-                    : k.maturity === "provisional"
-                      ? c.provisional
-                      : c.unavailable
-                }
-                coverageStatus={k.coverage.label}
-                coverageLabel={healthBadgeText(k.coverage.label)}
-              />
-            ))}
-          </section>
+          {data.community&&<><section className="surface"><h2>{t(locale,'polish.today')}</h2><div className="kpi-grid"><article className="metric-card"><h3>{t(locale,'control.joined')}</h3><strong className={data.community.daily.todayJoined===null||data.community.daily.todayJoined===0?"measurement-state":""}>{data.community.daily.todayJoined===null?t(locale,'polish.unavailable'):data.community.daily.todayJoined===0?t(locale,'polish.noneJoined'):t(locale,'polish.people',{count:data.community.daily.todayJoined})}</strong></article><article className="metric-card"><h3>{t(locale,'control.connected')}</h3><strong className={data.community.daily.todayConnected===null||data.community.daily.todayJoined===0?"measurement-state":""}>{data.community.daily.todayConnected===null?t(locale,'polish.unavailable'):data.community.daily.todayJoined===0?t(locale,'polish.noneEligible'):t(locale,'polish.people',{count:data.community.daily.todayConnected})}</strong></article><article className="metric-card"><h3>{t(locale,'polish.waiting')}</h3><strong>{data.community.daily.attentionCount===null?t(locale,'polish.unavailable'):t(locale,'polish.count',{count:Math.max(0,data.community.daily.attentionCount-attentionRemoved)})}</strong></article></div></section><Measurements community={data.community} locale={locale}/></>}
           <section className="surface opportunity-spotlight">
               <p className="eyebrow">{c.communityOpportunity}</p>
               {data.home.communityOpportunity ? (
@@ -1059,16 +1018,16 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
 
   const attentionView=<section className="surface attention-view"><div className="page-head"><div><p className="eyebrow">ATTENTION</p><h1>{t(locale,'control.attention')}</h1></div><button onClick={()=>window.location.reload()}>{t(locale,'control.refresh')}</button></div>{!data.community?.daily.ready?<div className="empty-state"><h2>{t(locale,'control.queueUnavailable')}</h2><p>{t(locale,'experience.noData')}</p></div>:attentionItems.length?<><p>{t(locale,'experience.queueRule',{count:savedResponseMinutes})}</p><div className="attention-list">{attentionItems.map(item=><article className="attention-card" key={item.messageId}><div><span className="badge badge-amber">{item.status==='ACKNOWLEDGED'?t(locale,'experience.staffAcknowledged'):t(locale,'experience.needsAttention')}</span><h2>{data.options.channels.find(channel=>channel.id===item.channelId)?.label??`#${item.channelId}`}</h2><p>{t(locale,'experience.waitReason')}</p><small>{t(locale,'experience.waiting')}: {t(locale,'control.minutes',{count:item.waitingMinutes})}</small></div><div className="attention-actions"><a className="button button-secondary" href={item.url} target="_blank" rel="noopener noreferrer">{t(locale,'experience.openPost')} ↗</a><button disabled={busy||item.status==='ACKNOWLEDGED'} onClick={()=>void changeAttention(item,'ACKNOWLEDGED')}>{t(locale,'experience.ack')}</button><label>{t(locale,'experience.snooze')}<select value={attentionSnooze[item.messageId]??'30'} onChange={event=>setAttentionSnooze(current=>({...current,[item.messageId]:event.target.value as '30'|'60'|'today'}))}><option value="30">30 min</option><option value="60">1 hour</option><option value="today">{locale==='ja'?'今日いっぱい':'Today'}</option></select></label><button disabled={busy} onClick={()=>void changeAttention(item,'SNOOZED')}>{t(locale,'experience.snooze')}</button><button disabled={busy} onClick={()=>void changeAttention(item,'RESOLVED')}>{t(locale,'experience.resolve')}</button></div></article>)}</div></>:<div className="empty-state"><h2>✅ {t(locale,'experience.allClear')}</h2><p>{t(locale,'experience.queueRule',{count:savedResponseMinutes})}</p><button onClick={()=>setPage(9)}>{t(locale,'experience.howMeasured')}</button></div>}</section>;
   const ruleValue=(value:number,total:number,pending:number,unavailable=false)=>!data.community||unavailable?t(locale,'polish.unavailable'):total>=5?`${value} / ${total}`:total>0?t(locale,'polish.moreSample',{count:5-total}):pending>0?t(locale,'experience.pending'):t(locale,'polish.noMembers');
-  const rulesView=<section className="rules-view"><div className="page-head"><div><p className="eyebrow">MEASUREMENT</p><h1>{t(locale,'experience.goalsRules')}</h1><p className="orientation">{t(locale,'polish.rulesIntro')}</p></div></div><div className="rules-grid"><article className="surface"><h2>{t(locale,'control.connected')}</h2><p>{t(locale,'experience.connectionRule')}</p><dl><div><dt>{t(locale,'experience.observed',{count:data.community?.eligibleMembers??0})}</dt><dd>{ruleValue(data.community?.stages[2]?.count??0,data.community?.eligibleMembers??0,data.community?.arrivalCount??0,data.community?.weekly?.connection.state==='UNAVAILABLE')}</dd></div><div><dt>{t(locale,'control.scope')}</dt><dd>{savedScopeMode==='all'?t(locale,'control.scopeAll'):savedScopeMode==='include'?t(locale,'control.scopeInclude'):t(locale,'control.scopeExclude')}</dd></div></dl><details><summary>{t(locale,'experience.howMeasured')}</summary><p>{t(locale,'experience.replyRule')}</p><p>{t(locale,'experience.voiceRule')}</p><p>{t(locale,'experience.reactionWeak')}</p></details></article><article className="surface"><h2>{t(locale,'control.retained')}</h2><p>{t(locale,'experience.retentionRule')}</p><p>{ruleValue(data.community?.outcomes.retained??0,(data.community?.outcomes.retained??0)+(data.community?.outcomes.notRetained??0),data.community?.outcomes.pending??0,Boolean(data.community?.outcomes.insufficient)&&!data.community?.outcomes.pending&&!((data.community?.outcomes.retained??0)+(data.community?.outcomes.notRetained??0)))}</p><details><summary>{t(locale,'experience.howMeasured')}</summary><p>{t(locale,'control.observation')}</p></details></article><article className="surface"><h2>{t(locale,'control.replyAlert')}</h2><p>{t(locale,'experience.queueRule',{count:savedResponseMinutes})}</p><p>{helperEnabled?t(locale,'control.on'):t(locale,'control.off')}</p><button onClick={()=>setPage(4)}>{t(locale,'experience.settingsLink')}</button></article><article className="surface"><h2>{t(locale,'control.goals')}</h2><p>{t(locale,'experience.goalFocus')}</p><ul>{goalChoices.filter(goal=>newMemberGoals.includes(goal)).map(goal=><li key={goal}>{t(locale,`control.goal${goal[0]!.toUpperCase()+goal.slice(1)}` as 'control.goalReply')}</li>)}</ul><details><summary>{t(locale,'experience.howMeasured')}</summary><p>{t(locale,'experience.eventRule')}</p><p>{t(locale,'experience.channelRule')}</p></details><button onClick={()=>setPage(4)}>{t(locale,'experience.settingsLink')}</button></article></div></section>;
+  const rulesView=<section className="rules-view"><div className="page-head"><div><p className="eyebrow">MEASUREMENT</p><h1>{t(locale,'experience.goalsRules')}</h1><p className="orientation">{t(locale,'polish.rulesIntro')}</p></div></div><div className="rules-grid"><article className="surface"><h2>{t(locale,'control.connected')}</h2><p>{t(locale,'experience.connectionRule')}</p><dl><div><dt>{t(locale,'experience.observed',{count:data.community?.eligibleMembers??0})}</dt><dd>{ruleValue(data.community?.stages[2]?.count??0,data.community?.eligibleMembers??0,data.community?.arrivalCount??0,!data.community||data.community?.weekly?.connection.state==='UNAVAILABLE')}</dd></div><div><dt>{t(locale,'control.scope')}</dt><dd>{savedScopeMode==='all'?t(locale,'control.scopeAll'):savedScopeMode==='include'?t(locale,'control.scopeInclude'):t(locale,'control.scopeExclude')}</dd></div></dl><details><summary>{t(locale,'experience.howMeasured')}</summary><p>{t(locale,'experience.replyRule')}</p><p>{t(locale,'experience.voiceRule')}</p><p>{t(locale,'experience.reactionWeak')}</p></details></article><article className="surface"><h2>{activityWindow(locale,data.community?.analysis?.rules.retainedFromDay,data.community?.analysis?.rules.retainedThroughDay)}</h2><p>{t(locale,'experience.retentionRule')}</p><p>{ruleValue(data.community?.outcomes.retained??0,(data.community?.outcomes.retained??0)+(data.community?.outcomes.notRetained??0),data.community?.outcomes.pending??0,!data.community||Boolean(data.community?.outcomes.insufficient)&&!data.community?.outcomes.pending&&!((data.community?.outcomes.retained??0)+(data.community?.outcomes.notRetained??0)))}</p><details><summary>{t(locale,'experience.howMeasured')}</summary><p>{t(locale,'control.observation')}</p></details></article><article className="surface"><h2>{t(locale,'control.replyAlert')}</h2><p>{t(locale,'experience.queueRule',{count:savedResponseMinutes})}</p><p>{helperEnabled?t(locale,'control.on'):t(locale,'control.off')}</p><button onClick={()=>setPage(4)}>{t(locale,'experience.settingsLink')}</button></article><article className="surface"><h2>{t(locale,'control.goals')}</h2><p>{t(locale,'experience.goalFocus')}</p><ul>{goalChoices.filter(goal=>newMemberGoals.includes(goal)).map(goal=><li key={goal}>{t(locale,`control.goal${goal[0]!.toUpperCase()+goal.slice(1)}` as 'control.goalReply')}</li>)}</ul><details><summary>{t(locale,'experience.howMeasured')}</summary><p>{t(locale,'experience.eventRule')}</p><p>{t(locale,'experience.channelRule')}</p></details><button onClick={()=>setPage(4)}>{t(locale,'experience.settingsLink')}</button></article></div></section>;
   const views = [
     home,
     journeyView,
     <section key="improve">{opportunityView}{actionView}</section>,
     resultView,
     settingsView,
-    <section key="community" className="surface"><h1>{t(locale,"web.community_activity")}</h1>{data.community?<><p>{t(locale,"web.continuing_members")}: {data.community.classification.continuing}</p><p>{t(locale,"web.no_recent_observed_activity")}: {data.community.classification.inactive}</p><p>{t(locale,"web.staff_excluded_from_comparison")}: {data.community.classification.staffExcluded}</p><p>{t(locale,'control.observation')}</p></>:<p>{c.emptyDetail}</p>}</section>,
-    <section key="compare" className="surface"><h1>{t(locale,"web.compare_participation")}</h1>{data.community?.compare.available?<><p>{t(locale,"web.new_members_waited_value_minutes_on",{a:String(data.community.compare.newcomers?.replyMinutes??'—'),b:String(data.community.compare.continuing?.replyMinutes??'—')})}</p><p>{t(locale,"web.received_a_reply_new_value_continuing",{a:String(data.community.compare.newcomers?.receivedReplyPercent),b:String(data.community.compare.continuing?.receivedReplyPercent)})}</p><p>{t(locale,"web.active_days_new_value_continuing_value",{a:String(data.community.compare.newcomers?.activeDays),b:String(data.community.compare.continuing?.activeDays)})}</p></>:<p>{t(locale,"web.there_is_not_enough_data_to")}</p>}<h2>{t(locale,"web.what_happened_after_joining")}</h2>{data.community?.outcomes.patterns&&<p>{t(locale,"web.distinct_people_interacted_with_in_the",{a:String(data.community.outcomes.patterns.retained.interactionPartners),b:String(data.community.outcomes.patterns.notRetained.interactionPartners)})}</p>}{data.community?<p>{t(locale,"web.observed_a_week_later_value_not",{a:String(data.community.outcomes.retained),b:String(data.community.outcomes.notRetained),c:String(data.community.outcomes.pending),d:String(data.community.outcomes.insufficient)})}</p>:null}{data.community?.outcomes.patterns&&<p>{t(locale,"web.value_of_continuing_newcomers_received_a",{a:String(data.community.outcomes.patterns.retained.receivedReplyPercent),b:String(data.community.outcomes.patterns.notRetained.receivedReplyPercent)})}</p>}{data.community?.suggestion&&<p>{t(locale,'control.replySuggestion')}</p>}{data.community?.compare.available&&<p>{t(locale,"web.channels_used_new_value_continuing_value",{a:String(data.community.compare.newcomers?.channelCount),b:String(data.community.compare.continuing?.channelCount),c:String(wholePercent(data.community.compare.newcomers?.voicePercent??null)),d:String(wholePercent(data.community.compare.continuing?.voicePercent??null)),e:String(wholePercent(data.community.compare.newcomers?.eventPercent??null)),f:String(wholePercent(data.community.compare.continuing?.eventPercent??null))})}</p>}{data.community?.outcomes.patterns&&<p>{t(locale,"web.first_three_days_those_observed_later",{a:String(wholePercent(data.community.outcomes.patterns.retained.voicePercent)),b:String(wholePercent(data.community.outcomes.patterns.retained.eventPercent)),c:String(wholePercent(data.community.outcomes.patterns.notRetained.voicePercent)),d:String(wholePercent(data.community.outcomes.patterns.notRetained.eventPercent))})}</p>}</section>,
-    <section key="channels" className="surface"><h1>{t(locale,"web.channels_used_by_new_members")}</h1>{data.community?.channels.length?data.community.channels.map(row=><article key={row.channelId}><h2>{data.options.channels.find(option=>option.id===row.channelId)?.label??`#${row.channelId}`}</h2><p>{t(locale,"web.value_new_members_value_received_a",{a:String(row.newcomers),b:String(wholePercent(row.receivedReplyPercent)),c:String(wholePercent(row.laterElsewherePercent)),d:String(wholePercent(row.weekLaterPercent))})}</p></article>):<p>{t(locale,"web.no_channels_can_be_shown_yet")}</p>}</section>,
+    data.community?<AnalysisSummary key="community" community={data.community} locale={locale}/>:<section key="community" className="surface"><h1>{t(locale,'control.analysis')}</h1><p>{t(locale,'polish.unavailable')}</p></section>,
+    <section key="compare" className="surface"><h1>{t(locale,"web.compare_participation")}</h1>{data.community?.compare.available?<><p>{t(locale,"web.new_members_waited_value_minutes_on",{a:String(data.community.compare.newcomers?.replyMinutes??'—'),b:String(data.community.compare.continuing?.replyMinutes??'—')})}</p><p>{t(locale,"web.received_a_reply_new_value_continuing",{a:String(data.community.compare.newcomers?.receivedReplyPercent),b:String(data.community.compare.continuing?.receivedReplyPercent)})}</p><p>{t(locale,"web.active_days_new_value_continuing_value",{a:String(data.community.compare.newcomers?.activeDays),b:String(data.community.compare.continuing?.activeDays)})}</p></>:<p>{t(locale,"web.there_is_not_enough_data_to")}</p>}<h2>{data.community?activityWindow(locale,data.community.analysis.rules.retainedFromDay,data.community.analysis.rules.retainedThroughDay):t(locale,"web.what_happened_after_joining")}</h2>{data.community?.outcomes.patterns&&<p>{t(locale,"web.distinct_people_interacted_with_in_the",{a:String(data.community.outcomes.patterns.retained.interactionPartners),b:String(data.community.outcomes.patterns.notRetained.interactionPartners)})}</p>}{data.community?<p>{t(locale,"web.observed_a_week_later_value_not",{a:String(data.community.outcomes.retained),b:String(data.community.outcomes.notRetained),c:String(data.community.outcomes.pending),d:String(data.community.outcomes.insufficient)})}</p>:null}{data.community?.outcomes.patterns&&<p>{t(locale,"web.value_of_continuing_newcomers_received_a",{a:String(data.community.outcomes.patterns.retained.receivedReplyPercent),b:String(data.community.outcomes.patterns.notRetained.receivedReplyPercent)})}</p>}{data.community?.suggestion&&<p>{t(locale,'control.replySuggestion')}</p>}{data.community?.compare.available&&<p>{t(locale,"web.channels_used_new_value_continuing_value",{a:String(data.community.compare.newcomers?.channelCount),b:String(data.community.compare.continuing?.channelCount),c:String(wholePercent(data.community.compare.newcomers?.voicePercent??null)),d:String(wholePercent(data.community.compare.continuing?.voicePercent??null)),e:String(wholePercent(data.community.compare.newcomers?.eventPercent??null)),f:String(wholePercent(data.community.compare.continuing?.eventPercent??null))})}</p>}{data.community?.outcomes.patterns&&<p>{t(locale,"web.first_three_days_those_observed_later",{a:String(wholePercent(data.community.outcomes.patterns.retained.voicePercent)),b:String(wholePercent(data.community.outcomes.patterns.retained.eventPercent)),c:String(wholePercent(data.community.outcomes.patterns.notRetained.voicePercent)),d:String(wholePercent(data.community.outcomes.patterns.notRetained.eventPercent))})}</p>}</section>,
+    <section key="channels" className="surface"><h1>{t(locale,"web.channels_used_by_new_members")}</h1>{data.community&&<p>{activityWindow(locale,data.community.analysis.rules.retainedFromDay,data.community.analysis.rules.retainedThroughDay)}</p>}{data.community?.channels.length?data.community.channels.map(row=><article key={row.channelId}><h2>{data.options.channels.find(option=>option.id===row.channelId)?.label??`#${row.channelId}`}</h2><p>{t(locale,"web.value_new_members_value_received_a",{a:String(row.newcomers),b:String(wholePercent(row.receivedReplyPercent)),c:String(wholePercent(row.laterElsewherePercent)),d:String(wholePercent(row.weekLaterPercent))})}</p></article>):<p>{t(locale,"web.no_channels_can_be_shown_yet")}</p>}</section>,
   ];
   return (
     <div className="product">
@@ -1118,7 +1077,8 @@ export default function Console({ data, initialLocale = "en" }: { data: ProductD
         </div>
         {data.developmentAuth&&<div className="development-auth" role="status">DEVELOPMENT AUTH MODE · {locale==='ja'?'ローカル開発用・サーバー未検証':'Local development · server verification bypassed'}</div>}
         <div className="dashboard-topbar"><div><span>{data.guilds?.find(guild=>guild.id===data.selectedGuildId)?.name??'NEXUS'}</span><small>{data.admin?.usage.plan??'Free'} · {data.runtime?.gatewayConnected?t(locale,'control.on'):t(locale,'common.needsAttention')}</small></div><a href="/servers">{t(locale,'web.server')} ▾</a></div>
-        {page===9?rulesView:page===8?attentionView:page===5?<><div className="surface" role="tablist" aria-label={t(locale,'control.analysis')}>{(['overall','channels','behavior'] as const).map(tab=><button key={tab} role="tab" aria-selected={analysisTab===tab} onClick={()=>setAnalysisTab(tab)}>{t(locale,`control.${tab}`)}</button>)}</div>{analysisTab==='overall'?<>{views[5]}{views[6]}{opportunityView}</>:analysisTab==='channels'?views[7]:<section className="surface"><h1>{t(locale,'control.behavior')}</h1>{data.community?.compare.available?<><p>{t(locale,'control.replyAlert')}: {wholePercent(data.community.compare.newcomers?.receivedReplyPercent??null)}</p><p>{t(locale,'control.voice')}: {wholePercent(data.community.compare.newcomers?.voicePercent??null)}</p><p>{t(locale,'control.goalEvent')}: {wholePercent(data.community.compare.newcomers?.eventPercent??null)}</p></>:<p>{t(locale,'control.noComparison')}</p>}{data.community?.transitions.length?<><h2>{t(locale,'control.moves')}</h2>{data.community.transitions.slice(0,5).map((move,index)=><p key={index}>{move.from==='voice'?t(locale,'control.voice'):data.options.channels.find(item=>item.id===move.from)?.label??`#${move.from}`} → {move.to==='voice'?t(locale,'control.voice'):data.options.channels.find(item=>item.id===move.to)?.label??`#${move.to}`}</p>)}</>:null}</section>}</>:views[page]}
+        {data.failures?.[page===0?'home':page===1?'journey':page===5||page===8||page===9?'community':page===2?'actions':page===3?'results':'dashboard']?<FailureNotice locale={locale} failure={data.failures[page===0?'home':page===1?'journey':page===5||page===8||page===9?'community':page===2?'actions':page===3?'results':'dashboard']!} onCheck={()=>window.location.reload()}/>:page===9?rulesView:page===8?attentionView:page===5?<><div className="surface" role="tablist" aria-label={t(locale,'control.analysis')}>{(['overall','channels','behavior'] as const).map(tab=><button key={tab} role="tab" aria-selected={analysisTab===tab} onClick={()=>setAnalysisTab(tab)}>{t(locale,`control.${tab}`)}</button>)}</div>{analysisTab==='overall'?<>{views[5]}{views[6]}{opportunityView}</>:analysisTab==='channels'?views[7]:<section className="surface"><h1>{t(locale,'control.behavior')}</h1>{data.community?.compare.available?<><p>{t(locale,'control.replyAlert')}: {wholePercent(data.community.compare.newcomers?.receivedReplyPercent??null)}</p><p>{t(locale,'control.voice')}: {wholePercent(data.community.compare.newcomers?.voicePercent??null)}</p><p>{t(locale,'control.goalEvent')}: {wholePercent(data.community.compare.newcomers?.eventPercent??null)}</p></>:<p>{t(locale,'control.noComparison')}</p>}{data.community?.transitions.length?<><h2>{t(locale,'control.moves')}</h2>{data.community.transitions.slice(0,5).map((move,index)=><p key={index}>{move.from==='voice'?t(locale,'control.voice'):data.options.channels.find(item=>item.id===move.from)?.label??`#${move.from}`} → {move.to==='voice'?t(locale,'control.voice'):data.options.channels.find(item=>item.id===move.to)?.label??`#${move.to}`}</p>)}</>:null}</section>}</>:views[page]}
+        {operationFailure&&<FailureNotice failure={operationFailure} locale={locale} onCheck={()=>window.location.reload()}/>}
         <p className="status" role="status">
           {status}
         </p>

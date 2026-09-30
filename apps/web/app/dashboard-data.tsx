@@ -6,6 +6,9 @@ import {dashboardContext,openSession,authMode} from './auth/session';
 import type {CommunityService} from '../../../packages/presentation/src/community';
 import {releaseInfo} from '../../../packages/shared/src/runtime-info';
 import {createHmac} from 'node:crypto';
+import {userFailure} from '../../../packages/shared/src/errors';
+import {FailureNotice} from './failure-ui';
+import {siteLocale} from './public-ui';
 export const dynamic='force-dynamic';
 export default async function Page({guildId}:{guildId?:string}={}){
  const started=Date.now();
@@ -15,13 +18,13 @@ export default async function Page({guildId}:{guildId?:string}={}){
  const sessionCookie=cookieStore.get('nexus_session')?.value;
  if(guildId&&authMode()==='oauth'&&!openSession(sessionCookie))redirect(`/auth/login?next=/dashboard/${guildId}`);
  if(guildId&&selectedCookie!==guildId)redirect(`/auth/select?guild=${guildId}`);
- let context;try{context=await dashboardContext(sessionCookie,guildId??selectedCookie);}catch{context=null;}
+ let context;try{context=await dashboardContext(sessionCookie,guildId??selectedCookie);}catch(error){return <main className="servers-content"><FailureNotice locale={await siteLocale()} failure={userFailure(error,'NOT_STARTED',{action:'dashboard',stage:'authorization'})}/></main>;}
  if(guildId&&context?.guildId!==guildId)redirect('/servers');
  if(!context){if(authMode()==='oauth'&&!sessionCookie)redirect('/auth/login');if(authMode()==='oauth'&&!openSession(sessionCookie))redirect('/auth/expired');redirect('/servers');}
- const data:ProductData={home:null,journey:null,community:null,opportunities:null,actions:null,results:null,weeklyStatus:null,audit:[],options:{channels:[],roles:[],events:[],available:false},admin:null,guilds:context.guilds,selectedGuildId:context.guildId,developmentAuth:authMode()==='development'};
+ const data:ProductData={failures:{},home:null,journey:null,community:null,opportunities:null,actions:null,results:null,weeklyStatus:null,audit:[],options:{channels:[],roles:[],events:[],available:false},admin:null,guilds:context.guilds,selectedGuildId:context.guildId,developmentAuth:authMode()==='development'};
  {
   const headers={Authorization:`Bearer ${context.token}`},base=`${context.base}/v3/organizations/${context.organizationId}/guilds/${context.guildId}`;
-  const read=async<T,>(path:string):Promise<T|null>=>{try{const response=await fetch(path,{headers,cache:'no-store',signal:AbortSignal.timeout(15000)});return response.ok?await response.json() as T:null;}catch{return null;}};
+  const read=async<T,>(path:string):Promise<T|null>=>{const section=new URL(path).pathname.split('/').at(-1)!;try{const response=await fetch(path,{headers,cache:'no-store',signal:AbortSignal.timeout(15000)});const body=await response.json();if(response.ok)return body as T;data.failures![section]=body.failure??userFailure(new Error('API_READ_FAILED'),'NOT_STARTED',{action:section,stage:'read'});return null;}catch(error){data.failures![section]=userFailure(error,'NOT_STARTED',{action:section,stage:'read'});return null;}};
   const [home,journey,community,opportunities,actions,results,weeklyStatus,audit,options,admin]=await Promise.all([read<HomePresentation>(base+'/home'),read<JourneyPresentation>(base+'/journey?range=30'),read<Awaited<ReturnType<CommunityService['overview']>>>(base+'/community?range=30&limit=50'),read<OpportunitiesPresentation>(base+'/opportunities'),read<ActionsPresentation>(base+'/actions'),read<ResultsPresentation>(base+'/results'),read<ProductData['weeklyStatus']>(base+'/weekly-summary/status'),read<ProductData['audit']>(base+'/audit'),read<DiscordOptions>(base+'/options'),read<ProductData['admin']>(`${context.base}/v2/organizations/${context.organizationId}/guilds/${context.guildId}/dashboard`)]);
   Object.assign(data,{home,journey,community,opportunities,actions,results,weeklyStatus,audit:audit??[],options:options??data.options,admin});
  }

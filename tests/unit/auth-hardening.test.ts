@@ -12,10 +12,10 @@ it('rejects development auth in production and accepts only explicit nonproducti
 });
 it('checks only the selected guild, without an OAuth or Bot guild-list fetch',async()=>{
  vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_SESSION_SECRET','s'.repeat(64));vi.stubEnv('API_KEY','a'.repeat(64));
- const fetcher=vi.fn(()=>{throw new Error('Other guild unavailable');});vi.stubGlobal('fetch',fetcher);
+ const fetcher=vi.fn(async(url:string)=>{expect(url).toBe('https://discord.com/api/v10/users/@me');return {ok:true,json:async()=>({id:'811111111111111111'})};});vi.stubGlobal('fetch',fetcher);
  const cookie=sealSession({accessToken:'test',userId:'811111111111111111',expiresAt:Date.now()+60000});
  manageable.mockResolvedValue({state:'VERIFIED',name:'A'});
- expect((await dashboardContext(cookie,'821111111111111111'))?.guildId).toBe('821111111111111111');expect(fetcher).not.toHaveBeenCalled();expect(manageable).toHaveBeenCalledTimes(1);
+ expect((await dashboardContext(cookie,'821111111111111111'))?.guildId).toBe('821111111111111111');expect(fetcher).toHaveBeenCalledTimes(1);expect(manageable).toHaveBeenCalledTimes(1);
  manageable.mockResolvedValue(null);expect(await dashboardContext(cookie,'821111111111111111')).toBeNull();
  manageable.mockRejectedValue(new Error('Timeout'));await expect(dashboardContext(cookie,'821111111111111111')).rejects.toThrow();
 });
@@ -24,4 +24,10 @@ it('isolates an installed guild failure from other server cards',async()=>{
  vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,json:async()=>ids.map(id=>({id,name:id,permissions:'32'}))})));
  manageable.mockImplementation(async(id:string)=>{if(id===ids[1])throw new Error('Timeout');return {state:'VERIFIED'};});
  const rows=await authorizedGuilds('test','811111111111111111');expect(rows[0]?.state).toBe('VERIFIED');expect(rows[1]?.availability).toBe('UNAVAILABLE');
+});
+it('rejects a revoked OAuth grant before accessing the selected guild',async()=>{
+ vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_SESSION_SECRET','s'.repeat(64));
+ vi.stubGlobal('fetch',vi.fn(async()=>({ok:false,status:401})));
+ const cookie=sealSession({accessToken:'revoked',userId:'811111111111111111',expiresAt:Date.now()+60000});
+ await expect(dashboardContext(cookie,'821111111111111111')).rejects.toThrow('SESSION_EXPIRED');expect(manageable).not.toHaveBeenCalled();
 });

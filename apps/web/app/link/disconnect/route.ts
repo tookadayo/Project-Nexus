@@ -3,6 +3,7 @@ import {openSession,authMode} from '../../auth/session';
 import {sameOrigin} from '../../auth/origin';
 import {serverServices} from '../../auth/server-access';
 import {scopeForGuild} from '../../../../../packages/security/src/scoping';
+import {failureResponse} from '../../auth/failure-response';
 export async function POST(req:NextRequest){
  const reply=(data:unknown,status=200)=>NextResponse.json(data,{status,headers:{'Cache-Control':'no-store'}});
  if(!sameOrigin(req))return reply({error:'ORIGIN_REJECTED'},403);
@@ -15,5 +16,5 @@ export async function POST(req:NextRequest){
   if(!body.confirmation){const connection=await services.verification.connection(s);if(connection.state!=='VERIFIED')return reply({error:'CONNECTION_REJECTED'},403);return reply({confirmation:await services.tokens.issue(services.db,s,{action:'webDisconnect',version:connection.version},actor.key,120)});}
   const intent=await services.tokens.read(services.db,s,body.confirmation,actor.key);if(intent.action!=='webDisconnect'||typeof intent.version!=='string')return reply({error:'CONNECTION_REJECTED'},400);
   await services.verification.disconnect(s,session.userId,intent.version,'WEB_DASHBOARD',authorization);return reply({disconnected:true});
- }catch{return reply({error:'CONNECTION_REJECTED'},403);}
+ }catch(error){return failureResponse(error);}
 }
