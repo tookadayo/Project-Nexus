@@ -91,6 +91,23 @@ it('issues concurrently without exhausting the authorization connection pool',as
  const results=await Promise.all(users.map(user=>f.service.issue(f.s,user)));expect(results).toHaveLength(10);
  expect(new Set(results.map(result=>result.code)).size).toBe(10);
 });
+it('does not hold verification or settings locks while Discord authorization waits',async()=>{
+ const f=await fixture(),original=f.discord.member.bind(f.discord);let release!:()=>void,entered!:()=>void;
+ const waiting=new Promise<void>(resolve=>{entered=resolve;}),gate=new Promise<void>(resolve=>{release=resolve;});
+ f.discord.member=async(guild,user)=>{entered();await gate;return original(guild,user);};
+ const issuing=f.service.issue(f.s,f.user);await waiting;
+ try{
+  // A settings mutation can finish while Discord is blocked; the snapshot then
+  // observes the new revision rather than keeping a lock through network I/O.
+  await f.settings.update(f.s,f.actor,0,{managerRoleIds:[f.role]});
+ }finally{release();}
+ await expect(issuing).rejects.toMatchObject({code:'REVISION_CONFLICT'});
+ const snapshot=await f.authority.snapshot(f.s,f.user,'DISCORD_PANEL','snapshot');
+ await f.settings.update(f.s,f.actor,1,{managerRoleIds:[]});f.advance(31000);
+ await expect(f.service.issue(f.s,f.user,'DISCORD_PANEL',snapshot)).rejects.toMatchObject({code:'REVISION_CONFLICT'});
+ snapshot.checkedAt=Date.now()-10001;
+ await expect(f.service.issue(f.s,f.user,'DISCORD_PANEL',snapshot)).rejects.toMatchObject({code:'AUTHORIZATION_EXPIRED'});
+});
 it('denies lost authority at redemption and disconnect, and bounds challenge failures',async()=>{
  const f=await fixture(),challenge=await f.service.issue(f.s,f.user),member=f.discord.members.get(f.user)!;
  member.permissions='0';for(let i=0;i<8;i++)await expect(f.service.redeem(f.user,challenge.code)).rejects.toMatchObject({code:'VERIFICATION_INVALID'});

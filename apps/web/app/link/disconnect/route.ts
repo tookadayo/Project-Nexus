@@ -11,9 +11,9 @@ export async function POST(req:NextRequest){
  try{
   const text=await req.text();if(text.length>1024)return reply({error:'CONNECTION_REJECTED'},400);
   const body=JSON.parse(text) as {guildId?:string;confirmation?:string};if(!body.guildId||!/^\d{17,20}$/.test(body.guildId))return reply({error:'CONNECTION_REJECTED'},400);
-  const s=scopeForGuild(body.guildId),services=serverServices(),actor=await services.authority.actor(s,session.userId,'WEB_DASHBOARD','disconnect');
+  const s=scopeForGuild(body.guildId),services=serverServices(),authorization=await services.authority.snapshot(s,session.userId,'WEB_DASHBOARD','disconnect'),actor=services.authority.require(authorization);
   if(!body.confirmation){const connection=await services.verification.connection(s);if(connection.state!=='VERIFIED')return reply({error:'CONNECTION_REJECTED'},403);return reply({confirmation:await services.tokens.issue(services.db,s,{action:'webDisconnect',version:connection.version},actor.key,120)});}
   const intent=await services.tokens.read(services.db,s,body.confirmation,actor.key);if(intent.action!=='webDisconnect'||typeof intent.version!=='string')return reply({error:'CONNECTION_REJECTED'},400);
-  await services.verification.disconnect(s,session.userId,intent.version);return reply({disconnected:true});
+  await services.verification.disconnect(s,session.userId,intent.version,'WEB_DASHBOARD',authorization);return reply({disconnected:true});
  }catch{return reply({error:'CONNECTION_REJECTED'},403);}
 }

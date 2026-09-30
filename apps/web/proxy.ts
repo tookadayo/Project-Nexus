@@ -1,8 +1,10 @@
 import {NextResponse,type NextRequest} from 'next/server';
 import {timingSafeEqual} from 'node:crypto';
+import {webAuthMode} from '../../packages/config/src/web-auth';
 export function proxy(req:NextRequest){
+ const mode=webAuthMode();
  if(req.nextUrl.pathname.startsWith('/auth/')||['/','/product','/pricing','/support','/privacy','/terms','/locale'].includes(req.nextUrl.pathname))return NextResponse.next();
- if(process.env.NEXUS_WEB_AUTH_MODE!=='development'){
+ if(mode!=='development'){
   if(req.nextUrl.pathname.startsWith('/link/')&&req.method!=='GET')return NextResponse.next();
   if(!req.cookies.get('nexus_session')?.value){const login=new URL('/auth/login',req.url);if(req.nextUrl.pathname==='/link'||/^\/dashboard\/\d{17,20}$/.test(req.nextUrl.pathname))login.searchParams.set('next',req.nextUrl.pathname);return NextResponse.redirect(login);}
   return NextResponse.next();

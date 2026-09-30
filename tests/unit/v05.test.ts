@@ -1,5 +1,5 @@
 import {afterEach,expect,it,vi} from 'vitest';
-vi.mock('../../apps/web/app/auth/server-access',()=>({manageableConnection:vi.fn(async()=>({state:'VERIFIED',version:'2026-09-30T00:00:00.000Z'}))}));
+vi.mock('../../apps/web/app/auth/server-access',()=>({manageableConnection:vi.fn(async(id:string)=>['111111111111111111','222222222222222222'].includes(id)?{state:'VERIFIED',version:'2026-09-30T00:00:00.000Z',name:'Server'}:null)}));
 import {readFileSync} from 'node:fs';
 import {NextRequest} from '../../apps/web/node_modules/next/server.js';
 import {authorizedGuilds,dashboardContext,openSession,sealSession,validOAuthState} from '../../apps/web/app/auth/session';

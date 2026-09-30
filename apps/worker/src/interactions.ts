@@ -84,10 +84,10 @@ export class InteractionWorker {
  }
  async dispatch(s:Scope,input:InteractionJob,onStage:(stage:string)=>void=()=>{},onSensitiveReply:(challengeId:string)=>void=()=>{}):Promise<Panel>{
   onStage('member_lookup');
-  const member=await this.discord.member(s.guildId,input.userId);const actorHash=this.vault.hash(s,input.userId);
-  const actor:Actor={key:actorHash,permissions:member.permissions,roles:member.roles,source:'DISCORD_PANEL',requestId:input.id,encryptedUserId:this.vault.seal(s,input.userId)};
+  const authority=new ServerAuthorization(this.discord,this.settings,this.vault),authorization=await authority.snapshot(s,input.userId,'DISCORD_PANEL',input.id);
+  const member=authorization.member,actorHash=this.vault.hash(s,input.userId),actor=authorization.actor;
   onStage('settings_load');
-  const current=await this.settings.get(s);const admin=canOperatePanel(member.permissions,member.roles,[current.adminRoleId,...current.managerRoleIds]);
+  const current=authorization.settings;const admin=canOperatePanel(member.permissions,member.roles,[current.adminRoleId,...current.managerRoleIds]);
   const locale=resolveLocale(current.uiLanguage,{interactionLocale:input.locale,guildLocale:input.guildLocale});
   const publicLocale=resolveLocale(current.uiLanguage,{interactionLocale:input.locale,guildLocale:input.guildLocale,publicPanel:true});
   onStage('intent_read');const intent=input.customId?await this.tokens.read(this.db,s,input.customId,actorHash):{action:input.command};
@@ -109,14 +109,14 @@ export class InteractionWorker {
   if(action==='link'){
    assert(input.command==='link'&&!input.customId&&!input.messageId,'VERIFICATION_PRIVATE_REQUIRED');
    const url=discordDashboardLink(process.env.NEXUS_WEB_URL,s.guildId,process.env.NEXUS_WEB_AUTH_MODE==='development',false);assert(url,'WEB_CONNECTION_UNAVAILABLE');
-   const challenge=await this.verification.issue(s,input.userId);onSensitiveReply(challenge.id);
+   const challenge=await this.verification.issue(s,input.userId,'DISCORD_PANEL',authorization);onSensitiveReply(challenge.id);
    return nexusPanel({title:locale==='ja'?'Web Dashboardを接続':'Connect Web Dashboard',children:[divider(),callout(locale==='ja'?'検証コード':'Verification code',`\`${challenge.code}\`\n${locale==='ja'?'有効期限':'Expires'}: <t:${Math.floor(challenge.expiresAt.getTime()/1000)}:R>\n${locale==='ja'?'発行したDiscordアカウントでログインしてください。コードは1回だけ使用できます。':'Sign in with the Discord account that issued this code. It can only be used once.'}`),callout('Web Dashboard',url)]});
   }
   if(action==='unlink'){
    const connection=await this.verification.connection(s);
    return nexusPanel({title:locale==='ja'?'Web接続を解除しますか？':'Disconnect Web Dashboard?',children:[divider(),callout(locale==='ja'?'データは保持されます':'Your data is preserved',locale==='ja'?'未使用コードも無効になります。Bot、分析データ、履歴、設定は保持され、再接続には /nexus link が必要です。':'Unused codes will also be revoked. The bot, analytics, history, and settings are preserved. Run /nexus link to reconnect.')],rows:[await actionRow(issue,[{label:locale==='ja'?'接続解除を確定':'Confirm disconnect',action:'unlinkConfirm',data:{version:connection.version},style:4},{label:locale==='ja'?'キャンセル':'Cancel',action:'unlinkCancel'}])]});
   }
-  if(action==='unlinkConfirm'){assert(input.customId,'CONFIRMATION_REQUIRED');assert(intent.version===null||typeof intent.version==='string','INVALID_COMPONENT');await this.verification.disconnect(s,input.userId,intent.version,'DISCORD_PANEL');return nexusPanel({title:locale==='ja'?'Web接続を解除しました':'Web Dashboard disconnected',children:[callout('NEXUS',locale==='ja'?'データは保持されています。再接続には /nexus link を実行してください。':'Your data is preserved. Run /nexus link to reconnect.')]});}
+  if(action==='unlinkConfirm'){assert(input.customId,'CONFIRMATION_REQUIRED');assert(intent.version===null||typeof intent.version==='string','INVALID_COMPONENT');await this.verification.disconnect(s,input.userId,intent.version,'DISCORD_PANEL',authorization);return nexusPanel({title:locale==='ja'?'Web接続を解除しました':'Web Dashboard disconnected',children:[callout('NEXUS',locale==='ja'?'データは保持されています。再接続には /nexus link を実行してください。':'Your data is preserved. Run /nexus link to reconnect.')]});}
   if(action==='unlinkCancel')return nexusPanel({title:locale==='ja'?'キャンセルしました':'Cancelled',children:[]});
   if(action==='contextMember'){
    const target=z.string().regex(/^\d{17,20}$/).parse(input.targetUserId),hash=this.vault.hash(s,target);

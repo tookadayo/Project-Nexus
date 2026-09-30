@@ -4,7 +4,7 @@ import type {IdentityVault} from '../../identity/src/index';
 import {audit,type Actor} from '../../settings/src/index';
 import {assert,type Scope} from '../../shared/src/index';
 import {scopeForGuild} from './scoping';
-import type {ServerAuthorization} from './server-authorization';
+import type {ServerAuthorization,GuildAuthorizationSnapshot} from './server-authorization';
 
 const alphabet='23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 export function verificationCode(){const value=Array.from({length:12},()=>alphabet[randomInt(alphabet.length)]).join('');return `NX-${value.slice(0,4)}-${value.slice(4,8)}-${value.slice(8)}`;}
@@ -16,7 +16,7 @@ export function normalizeVerificationCode(value:unknown):string|null{
 export type VerificationState='VERIFIED'|'INSTALLED_NOT_VERIFIED'|'NOT_INSTALLED'|'VERIFICATION_PENDING';
 type Link={verified_at:Date;revoked_at:Date|null;updated_at:Date;revision:string};
 type Challenge={id:string;organization_id:string;guild_id:string;issuer_hash:string;expires_at:Date;used_at:Date|null;revoked_at:Date|null;attempt_count:number};
-type Authority=Pick<ServerAuthorization,'actor'>;
+type Authority=Pick<ServerAuthorization,'snapshot'|'require'|'revalidate'>;
 export class ServerVerification {
  constructor(private readonly db:Database,private readonly vault:IdentityVault,private readonly authority:Authority,private readonly clock:()=>number=Date.now){}
  private async lock(tx:Tx,s:Scope){await privacyReadLock(tx,s);await sql`SELECT pg_advisory_xact_lock(hashtextextended(${'verification:'+s.organizationId+':'+s.guildId},0))`.execute(tx);}
@@ -25,12 +25,13 @@ export class ServerVerification {
   const pending=userId?(await sql`SELECT id FROM server_verification_challenges WHERE ${tenant(s)} AND issuer_hash=${this.vault.hash(s,userId)} AND expires_at>${new Date(this.clock())} AND used_at IS NULL AND revoked_at IS NULL LIMIT 1`.execute(this.db)).rows.length>0:false;
   return {state:(!link?.revoked_at&&link?'VERIFIED':pending?'VERIFICATION_PENDING':'INSTALLED_NOT_VERIFIED') as VerificationState,version:link?.revision??null};
  }
- async issue(s:Scope,userId:string,source:Actor['source']='DISCORD_PANEL'){
+ async issue(s:Scope,userId:string,source:Actor['source']='DISCORD_PANEL',authorization?:GuildAuthorizationSnapshot){
+  const snapshot=authorization??await this.authority.snapshot(s,userId,source,randomUUID());this.authority.require(snapshot);
   const now=new Date(this.clock()),expiresAt=new Date(now.getTime()+600000);
   const issuerKey=this.vault.digest('verification-issuer:v1',userId),code=verificationCode(),id=randomUUID();
   await this.db.transaction().execute(async tx=>{
    await sql`SELECT pg_advisory_xact_lock(hashtextextended(${issuerKey},0))`.execute(tx);
-   await this.lock(tx,s);const actor=await this.authority.actor(s,userId,source,randomUUID(),tx);await ensureGuild(tx,s);
+   await this.lock(tx,s);const actor=await this.authority.revalidate(s,userId,snapshot,tx);await ensureGuild(tx,s);
    const window=new Date(now.getTime()-600000);
    const userRows=(await sql<{created_at:Date;guild_id:string}>`SELECT created_at,guild_id FROM server_verification_challenges WHERE issuer_rate_key=${issuerKey} AND created_at>${window}`.execute(tx)).rows;
    const guildCount=(await sql<{count:number}>`SELECT count(*)::integer AS count FROM server_verification_challenges WHERE ${tenant(s)} AND created_at>${window}`.execute(tx)).rows[0]!.count;
@@ -44,20 +45,24 @@ export class ServerVerification {
  async redeem(userId:string,input:unknown){
   assert(/^\d{17,20}$/.test(userId),'VERIFICATION_INVALID',400);
   const now=new Date(this.clock()),rateKey=this.vault.digest('verification-attempt:v1',userId),normalized=normalizeVerificationCode(input);
-  const result=await this.db.transaction().execute(async tx=>{
+  const attempt=await this.db.transaction().execute(async tx=>{
    const limit=(await sql<{attempt_count:number}>`INSERT INTO server_verification_limits(key_digest,window_started_at,attempt_count,updated_at) VALUES(${rateKey},${now},1,${now}) ON CONFLICT(key_digest) DO UPDATE SET attempt_count=CASE WHEN server_verification_limits.window_started_at<=${new Date(now.getTime()-600000)} THEN 1 ELSE server_verification_limits.attempt_count+1 END,window_started_at=CASE WHEN server_verification_limits.window_started_at<=${new Date(now.getTime()-600000)} THEN ${now} ELSE server_verification_limits.window_started_at END,updated_at=${now} RETURNING attempt_count`.execute(tx)).rows[0]!;
-   if(limit.attempt_count>10)return {error:'VERIFICATION_RATE_LIMIT'} as const;
-   if(!normalized)return {error:'VERIFICATION_INVALID'} as const;
-   const candidate=(await sql<Challenge>`SELECT * FROM server_verification_challenges WHERE code_digest=${this.vault.digest('verification-code:v1',normalized)}`.execute(tx)).rows[0];
-   if(!candidate)return {error:'VERIFICATION_INVALID'} as const;
-   const s=scopeForGuild(candidate.guild_id);
-   if(s.organizationId!==candidate.organization_id||this.vault.hash(s,userId)!==candidate.issuer_hash)return {error:'VERIFICATION_INVALID'} as const;
+   return limit.attempt_count;
+  });
+  assert(attempt<=10,'VERIFICATION_RATE_LIMIT',429);assert(normalized,'VERIFICATION_INVALID');
+  const candidate=(await sql<Challenge>`SELECT * FROM server_verification_challenges WHERE code_digest=${this.vault.digest('verification-code:v1',normalized)}`.execute(this.db)).rows[0];
+  assert(candidate,'VERIFICATION_INVALID');
+  const s=scopeForGuild(candidate.guild_id);
+  assert(s.organizationId===candidate.organization_id&&this.vault.hash(s,userId)===candidate.issuer_hash&&!candidate.used_at&&!candidate.revoked_at&&candidate.expires_at>new Date(this.clock()),'VERIFICATION_INVALID');
+  let snapshot:GuildAuthorizationSnapshot|undefined;
+  try{snapshot=await this.authority.snapshot(s,userId,'WEB_DASHBOARD',randomUUID());this.authority.require(snapshot);}catch{snapshot=undefined;}
+  const result=await this.db.transaction().execute(async tx=>{
    await this.lock(tx,s);
    const challenge=(await sql<Challenge>`SELECT * FROM server_verification_challenges WHERE ${tenant(s)} AND id=${candidate.id}::uuid FOR UPDATE`.execute(tx)).rows[0];
    if(!challenge||challenge.used_at||challenge.revoked_at||challenge.expires_at<=new Date(this.clock()))return {error:'VERIFICATION_INVALID'} as const;
    await sql`UPDATE server_verification_challenges SET attempt_count=attempt_count+1,last_attempt_at=${now} WHERE ${tenant(s)} AND id=${challenge.id}::uuid`.execute(tx);
    let actor:Actor;
-   try{actor=await this.authority.actor(s,userId,'WEB_DASHBOARD',randomUUID(),tx);}
+   try{assert(snapshot,'VERIFICATION_INVALID');actor=await this.authority.revalidate(s,userId,snapshot,tx);}
    catch{
     if(challenge.attempt_count+1>=8)await sql`UPDATE server_verification_challenges SET revoked_at=${now} WHERE ${tenant(s)} AND id=${challenge.id}::uuid`.execute(tx);
     // One event for the blocked challenge, without recording individual guesses.
@@ -70,15 +75,16 @@ export class ServerVerification {
    await audit(tx,s,actor,'server_verification.completed',null,{challengeId:challenge.id,state:'VERIFIED'});
    return {guildId:s.guildId} as const;
   });
-  assert(!('error' in result),('error' in result?result.error??'VERIFICATION_INVALID':'VERIFICATION_INVALID'), 'error' in result&&result.error==='VERIFICATION_RATE_LIMIT'?429:400);
+  assert(!('error' in result),'VERIFICATION_INVALID',400);
   return result as {guildId:string};
  }
  async revokeChallenge(s:Scope,id:string){await sql`UPDATE server_verification_challenges SET revoked_at=${new Date(this.clock())} WHERE ${tenant(s)} AND id=${id}::uuid AND used_at IS NULL`.execute(this.db);}
- async disconnect(s:Scope,userId:string,version:string|null,source:Actor['source']='WEB_DASHBOARD'){
+ async disconnect(s:Scope,userId:string,version:string|null,source:Actor['source']='WEB_DASHBOARD',authorization?:GuildAuthorizationSnapshot){
+  const snapshot=authorization??await this.authority.snapshot(s,userId,source,randomUUID());this.authority.require(snapshot);
   const now=new Date(this.clock());
   await this.db.transaction().execute(async tx=>{
    await this.lock(tx,s);
-   const actor=await this.authority.actor(s,userId,source,randomUUID(),tx);
+   const actor=await this.authority.revalidate(s,userId,snapshot,tx);
    const link=(await sql<Link>`SELECT verified_at,revoked_at,updated_at,revision FROM server_web_links WHERE ${tenant(s)} FOR UPDATE`.execute(tx)).rows[0];
    assert((link?.revision??null)===version,'REVISION_CONFLICT',409);
    await sql`UPDATE server_web_links SET revoked_at=${now},updated_at=${now},revision=${randomUUID()}::uuid WHERE ${tenant(s)}`.execute(tx);

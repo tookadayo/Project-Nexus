@@ -3,15 +3,16 @@ import {apiToken,scopeForGuild} from '../../../../packages/security/src/scoping'
 import {discordInstallUrl} from '../../../../packages/discord/src/install';
 import {manageableConnection} from './server-access';
 import type {VerificationState} from '../../../../packages/security/src/server-verification';
+import {webAuthMode} from '../../../../packages/config/src/web-auth';
 
-export type AuthorizedGuild={id:string;name:string;installed:boolean;installUrl:string|null;state:VerificationState};
+export type AuthorizedGuild={id:string;name:string;installed:boolean;installUrl:string|null;state:VerificationState;availability?:'AVAILABLE'|'UNAVAILABLE'};
 type Session={accessToken:string;userId:string;expiresAt:number};
-export const authMode=()=>process.env.NEXUS_WEB_AUTH_MODE==='development'?'development':'oauth';
+export const authMode=()=>webAuthMode();
 export const oauthRedirectUri=()=>new URL('/auth/callback',process.env.NEXUS_WEB_URL).toString();
 export const secureCookies=()=>process.env.NEXUS_WEB_URL?.startsWith('https://')??false;
 const key=()=>{const secret=process.env.NEXUS_SESSION_SECRET;if(!secret||secret.length<32)throw new Error('NEXUS_SESSION_SECRET must be at least 32 characters');return createHash('sha256').update(secret).digest();};
 export function sealSession(session:Session){const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',key(),iv),data=Buffer.concat([cipher.update(JSON.stringify(session),'utf8'),cipher.final()]);return Buffer.concat([iv,cipher.getAuthTag(),data]).toString('base64url');}
-export function openSession(value:string|undefined):Session|null{if(!value)return null;try{const bytes=Buffer.from(value,'base64url');if(bytes.length<30)return null;const decipher=createDecipheriv('aes-256-gcm',key(),bytes.subarray(0,12));decipher.setAuthTag(bytes.subarray(12,28));const session=JSON.parse(Buffer.concat([decipher.update(bytes.subarray(28)),decipher.final()]).toString()) as Session;if(!session.accessToken||!session.userId||!Number.isFinite(session.expiresAt)||session.expiresAt<Date.now())return null;return session;}catch{return null;}}
+export function openSession(value:string|undefined):Session|null{if(!value||value.length>8192)return null;try{const bytes=Buffer.from(value,'base64url');if(bytes.length<30)return null;const decipher=createDecipheriv('aes-256-gcm',key(),bytes.subarray(0,12));decipher.setAuthTag(bytes.subarray(12,28));const session=JSON.parse(Buffer.concat([decipher.update(bytes.subarray(28)),decipher.final()]).toString()) as Session;if(typeof session.accessToken!=='string'||!session.accessToken||!/^\d{17,20}$/.test(session.userId)||!Number.isFinite(session.expiresAt)||session.expiresAt<=Date.now())return null;return session;}catch{return null;}}
 export function validOAuthState(expected:string|undefined,received:string|null){if(!expected||!received)return false;const a=Buffer.from(expected),b=Buffer.from(received);return a.length===b.length&&timingSafeEqual(a,b);}
 export function installUrl(guildId?:string){const id=process.env.DISCORD_APPLICATION_ID;return id?discordInstallUrl(id,guildId):null;}
 let installationCache:{expires:number;ids:Set<string>}|null=null;
@@ -40,7 +41,10 @@ export async function authorizedGuilds(token:string,userId:string):Promise<Autho
  for(let start=0;start<rows.length;start+=4){
   const batch=await Promise.all(rows.slice(start,start+4).map(async row=>{
    if(!/^\d{17,20}$/.test(row.id))return null;
-   if(installed.has(row.id)){const connection=await manageableConnection(row.id,userId);return connection?{id:row.id,name:row.name,installed:true,installUrl:installUrl(row.id),state:connection.state}:null;}
+   if(installed.has(row.id)){
+    try{const connection=await manageableConnection(row.id,userId);return connection?{id:row.id,name:row.name,installed:true,installUrl:installUrl(row.id),state:connection.state}:null;}
+    catch{return {id:row.id,name:row.name,installed:true,installUrl:null,state:'INSTALLED_NOT_VERIFIED' as const,availability:'UNAVAILABLE' as const};}
+   }
    return row.owner===true||(BigInt(row.permissions??'0')&40n)!==0n?{id:row.id,name:row.name,installed:false,installUrl:installUrl(row.id),state:'NOT_INSTALLED' as const}:null;
   }));
   for(const guild of batch)if(guild)guilds.push(guild);
@@ -56,9 +60,12 @@ export async function dashboardContext(sessionCookie:string|undefined,guildCooki
   return {base,organizationId:NEXUS_ORGANIZATION_ID,guildId:NEXUS_GUILD_ID,token:NEXUS_API_TOKEN,guilds:[{id:NEXUS_GUILD_ID,name:'Development guild',installed:true,installUrl:null,state:'VERIFIED' as const}],userId:'development'};
  }
  const session=openSession(sessionCookie);if(!session)return null;
- const guilds=await authorizedGuilds(session.accessToken,session.userId);
- const selected=guildCookie?guilds.find(guild=>guild.id===guildCookie&&guild.installed&&guild.state==='VERIFIED'):guilds.find(guild=>guild.installed&&guild.state==='VERIFIED');if(!selected)return null;
+ if(!guildCookie||!/^\d{17,20}$/.test(guildCookie))return null;
+ // The Bot's live guild/member lookup proves installation and current authority.
+ // OAuth's entire guild list is needed only on /servers.
+ const connection=await manageableConnection(guildCookie,session.userId);if(!connection||connection.state!=='VERIFIED')return null;
+ const selected:AuthorizedGuild={id:guildCookie,name:connection.name,installed:true,installUrl:null,state:'VERIFIED'};
  if(!process.env.API_KEY)throw new Error('API_KEY is required for OAuth dashboard access');
  const scope=scopeForGuild(selected.id);
- return {base,organizationId:scope.organizationId,guildId:scope.guildId,token:apiToken(process.env.API_KEY,scope),guilds,userId:session.userId};
+ return {base,organizationId:scope.organizationId,guildId:scope.guildId,token:apiToken(process.env.API_KEY,scope),guilds:[selected],userId:session.userId};
 }

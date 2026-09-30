@@ -5,7 +5,7 @@ import {canOperatePanel} from '../../packages/security/src/index.js';
 import {discordDashboardLink} from '../../packages/shared/src/web-link.js';
 import {IdentityVault} from '../../packages/identity/src/index.js';
 const mocks=vi.hoisted(()=>({redeem:vi.fn(),connection:vi.fn(),actor:vi.fn(),issue:vi.fn(),read:vi.fn(),disconnect:vi.fn(),manageable:vi.fn()}));
-vi.mock('../../apps/web/app/auth/server-access',()=>({manageableConnection:mocks.manageable,serverServices:()=>({verification:{redeem:mocks.redeem,connection:mocks.connection,disconnect:mocks.disconnect},authority:{actor:mocks.actor},tokens:{issue:mocks.issue,read:mocks.read},db:{}})}));
+vi.mock('../../apps/web/app/auth/server-access',()=>({manageableConnection:mocks.manageable,serverServices:()=>({verification:{redeem:mocks.redeem,connection:mocks.connection,disconnect:mocks.disconnect},authority:{snapshot:mocks.actor,require:(snapshot:unknown)=>snapshot},tokens:{issue:mocks.issue,read:mocks.read},db:{}})}));
 import {POST as redeem} from '../../apps/web/app/link/redeem/route';
 import {POST as disconnect} from '../../apps/web/app/link/disconnect/route';
 import {sealSession,dashboardContext,authorizedGuilds} from '../../apps/web/app/auth/session';
@@ -55,7 +55,7 @@ it('gates dashboard access on backend verification and current authority on ever
  vi.stubGlobal('fetch',vi.fn(async(_url:string,init?:RequestInit)=>({ok:true,json:async()=>JSON.stringify(init?.headers).includes('Bot ')?[{id:guild}]:[{id:guild,name:'Server',permissions:'0'}]})));
  mocks.manageable.mockResolvedValue({state:'INSTALLED_NOT_VERIFIED',version:null});expect(await dashboardContext(cookie,guild)).toBeNull();
  mocks.manageable.mockResolvedValue({state:'VERIFICATION_PENDING',version:null});expect(await dashboardContext(cookie,guild)).toBeNull();
- mocks.manageable.mockResolvedValue({state:'VERIFIED',version:'v1'});expect((await dashboardContext(cookie,guild))?.guildId).toBe(guild);expect(await dashboardContext(cookie,'831111111111111111')).toBeNull();
+ mocks.manageable.mockImplementation(async(id:string)=>id===guild?{state:'VERIFIED',version:'v1',name:'Server'}:null);expect((await dashboardContext(cookie,guild))?.guildId).toBe(guild);expect(await dashboardContext(cookie,'831111111111111111')).toBeNull();
  mocks.manageable.mockResolvedValue(null);expect(await dashboardContext(cookie,guild)).toBeNull();
  expect(mocks.manageable).toHaveBeenCalledWith(guild,user);
 });
@@ -71,7 +71,7 @@ it('exposes the four real server states and includes configured managers without
 it('requires signed actor-bound disconnect confirmation and rejects stale or lost-authority confirmation',async()=>{
  const cookie=session();mocks.actor.mockResolvedValue({key:'actor'});mocks.connection.mockResolvedValue({state:'VERIFIED',version:'v1'});mocks.issue.mockResolvedValue('signed-confirmation');
  const prepared=await disconnect(request('/link/disconnect',{guildId:guild},cookie));expect(await prepared.json()).toEqual({confirmation:'signed-confirmation'});expect(mocks.disconnect).not.toHaveBeenCalled();
- mocks.read.mockResolvedValue({action:'webDisconnect',version:'v1'});expect((await disconnect(request('/link/disconnect',{guildId:guild,confirmation:'signed-confirmation'},cookie))).status).toBe(200);expect(mocks.disconnect).toHaveBeenCalledWith(expect.objectContaining({guildId:guild}),user,'v1');
+ mocks.read.mockResolvedValue({action:'webDisconnect',version:'v1'});expect((await disconnect(request('/link/disconnect',{guildId:guild,confirmation:'signed-confirmation'},cookie))).status).toBe(200);expect(mocks.disconnect).toHaveBeenCalledWith(expect.objectContaining({guildId:guild}),user,'v1','WEB_DASHBOARD',{key:'actor'});
  mocks.actor.mockRejectedValue(new Error('permission lost'));expect((await disconnect(request('/link/disconnect',{guildId:guild,confirmation:'signed-confirmation'},cookie))).status).toBe(403);
  const module=await import('../../apps/web/app/link/disconnect/route');expect('GET' in module).toBe(false);
 });

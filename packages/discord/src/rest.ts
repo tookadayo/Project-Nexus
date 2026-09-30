@@ -2,7 +2,7 @@ import {PermissionFlagsBits,type RESTPostAPIChannelMessageJSONBody} from 'discor
 import {createHash} from 'node:crypto';
 import {assert} from '../../shared/src/index';
 import {z} from 'zod';
-export type Member={roles:string[],permissions:string,joinedAt:string,bot:boolean,flags?:string,pending?:boolean|null};
+export type Member={roles:string[],permissions:string,joinedAt:string,bot:boolean,flags?:string,pending?:boolean|null,guildName?:string,ownerId?:string};
 export const nativeOnboardingSchema=z.object({guild_id:z.string(),enabled:z.boolean(),mode:z.number().int(),default_channel_ids:z.array(z.string()),prompts:z.array(z.object({id:z.string(),title:z.string(),type:z.number().int(),options:z.array(z.object({id:z.string(),title:z.string(),role_ids:z.array(z.string()),channel_ids:z.array(z.string())})),single_select:z.boolean(),required:z.boolean(),in_onboarding:z.boolean()}))});
 export type NativeOnboarding=z.infer<typeof nativeOnboardingSchema>;
 export type GuildNativeState={features:string[],onboarding:NativeOnboarding|null,bot:Member,roles:Role[],onboardingStatus:'available'|'unavailable'};
@@ -126,10 +126,10 @@ export class DiscordRest implements DiscordPort {
   return {features:guild.features,onboarding,bot,roles,onboardingStatus:onboarding?'available':'unavailable'};
  }
  async member(guildId:string,userId:string):Promise<Member>{
-  const [raw,roles,guild]=await Promise.all([this.request<{roles:string[],joined_at:string,user:{bot?:boolean}}>(`/guilds/${guildId}/members/${userId}`),this.roles(guildId),this.request<{owner_id:string}>(`/guilds/${guildId}`)]);
+  const [raw,roles,guild]=await Promise.all([this.request<{roles:string[],joined_at:string,user:{bot?:boolean}}>(`/guilds/${guildId}/members/${userId}`),this.roles(guildId),this.request<{owner_id:string;name?:string}>(`/guilds/${guildId}`)]);
   let permissions=0n;for(const role of roles)if(role.id===guildId||raw.roles.includes(role.id))permissions|=BigInt(role.permissions);
   if(userId===guild.owner_id)permissions|=PermissionFlagsBits.Administrator;
-  return {roles:raw.roles,permissions:permissions.toString(),joinedAt:raw.joined_at,bot:raw.user.bot??false};
+  return {roles:raw.roles,permissions:permissions.toString(),joinedAt:raw.joined_at,bot:raw.user.bot??false,guildName:guild.name,ownerId:guild.owner_id};
  }
  async checkChannel(guildId:string,channelId:string){
   let channel:{guild_id:string,type:number,permission_overwrites:{id:string,type:number,allow:string,deny:string}[]};

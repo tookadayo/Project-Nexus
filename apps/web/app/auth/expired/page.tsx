@@ -1,1 +1,3 @@
-export default function Expired(){return <main className="legal-page"><h1>ログインの有効期限が切れました / Session expired</h1><p>Discordでもう一度ログインしてください。ログイン後、前のサーバーへ戻ります。 / Sign in with Discord again. We will return to your previous server when possible.</p><a href="/auth/login">Discordでログイン / Sign in with Discord</a></main>;}
+import {cookies} from 'next/headers';
+import {copy,siteLocale,SiteShell} from '../../public-ui';
+export default async function Expired(){const locale=await siteLocale(),guild=(await cookies()).get('nexus_guild')?.value,next=guild&&/^\d{17,20}$/.test(guild)?`?next=/dashboard/${guild}`:'';return <SiteShell locale={locale}><div className="legal-page"><h1>{copy(locale,'ログインの有効期限が切れました','Session expired')}</h1><p>{copy(locale,'Discordでもう一度ログインしてください。','Sign in with Discord again.')}</p><a className="button button-primary" href={`/auth/login${next}`}>{copy(locale,'Discordでログイン','Sign in with Discord')}</a></div></SiteShell>;}
