@@ -103,6 +103,12 @@ const metrics: Record<string, readonly [string, string, string, string]> = {
     "管理者が「解決」と対応付けたタグ付きの現在の投稿。アーカイブやロックは含みません。",
     "Current posts with an admin-mapped resolved tag; archive/lock excluded.",
   ],
+  voiceParticipants: [
+    "ボイスへの参加",
+    "Voice participants",
+    "通常のボイスに参加した人数。入場だけでは同席や会話を証明しません。",
+    "Observed ordinary human Voice participants; entry does not prove co-presence or conversation.",
+  ],
   voiceCopresence: [
     "一定時間のボイス同席",
     "Sustained voice co-presence",

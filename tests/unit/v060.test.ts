@@ -51,7 +51,7 @@ it('keeps product telemetry to a fixed event vocabulary and pseudonymous guild k
 });
 it('uses six top pages and offers explicit setup skips and role confirmation',async()=>{
  expect(controlPages).toEqual(['overview','newMembers','attention','analysis','results','settings']);
- expect(settingsSections).toEqual(['main','scope','team','notifications','goals','summary','privacy','panel','diagnostics','advanced']);
+ expect(settingsSections).toEqual(['main','model','scope','team','notifications','goals','summary','privacy','panel','diagnostics','advanced']);
  const intents:Record<string,unknown>[]=[];const issue=async(value:Record<string,unknown>)=>{intents.push(value);return 'token';};
  const settings={analysisScope:{mode:'all',channelIds:[]},managerRoleIds:[],helperRoleIds:[],weeklySummaryEnabled:false,weeklySummaryChannelId:null,weeklySummaryDay:1,weeklySummaryHour:9,timezone:'UTC',helperEnabled:false,helperChannelId:null,firstResponseMinutes:20,goalPreset:null,newMemberGoals:[],importantChannels:[],uiLanguage:'en',detailedRetentionDays:30,revision:0,setupVersion:2,setupSteps:{scope:false,team:false,notifications:false,goals:false}} satisfies NonNullable<ControlData['settings']>;
  for(const section of ['scope','team','notifications','goals'] as const)await controlPanel(issue,'settings',{settings},'en',section);

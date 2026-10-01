@@ -2,7 +2,7 @@ import {z} from 'zod';
 const id=z.string().regex(/^\d{17,20}$/);
 const empty=z.object({}).strict();
 const flow=z.object({flowVersionId:z.uuid(),nodeId:z.string().optional(),optionId:z.string().optional()}).strict();
-const message=z.object({messageId:id,channelId:id,messageType:z.number().int(),receivedExplicitReply:z.boolean().optional(),firstReplyLatencySeconds:z.number().nonnegative().optional()}).strict();
+const message=z.object({messageId:id,channelId:id,messageType:z.number().int(),receivedExplicitReply:z.boolean().optional(),receivedHumanParticipant:z.boolean().optional(),firstReplyLatencySeconds:z.number().nonnegative().optional()}).strict();
 type Definition={schema:z.ZodType,source:'gateway'|'rest'|'interaction'|'projector',requiredIntent:string|null,retentionCategory:'detailed',metricEligible:boolean,active:boolean};
 const def=(schema:z.ZodType,source:Definition['source'],requiredIntent:string|null,active=false):Definition=>({schema,source,requiredIntent,retentionCategory:'detailed',metricEligible:true,active});
 export const signalRegistry={
@@ -27,6 +27,7 @@ export const signalRegistry={
  'scheduled_event.attended':def(z.object({eventId:id,channelId:id,entityType:z.number().int()}).strict(),'projector','GuildVoiceStates',true),
  'reaction.received':def(z.object({messageId:id,channelId:id}).strict(),'projector','GuildMessageReactions'),
  'reaction.added':def(z.object({messageId:id,channelId:id}).strict(),'gateway','GuildMessageReactions',true),
+ 'stage.participated':def(z.object({channelId:id,suppress:z.boolean().optional()}).strict(),'projector','GuildVoiceStates',true),
  'voice.started':def(z.object({channelId:id}).strict(),'gateway','GuildVoiceStates'),
  'voice.ended':def(z.object({channelId:id.nullable()}).strict(),'gateway','GuildVoiceStates'),
  'voice.duration':def(z.object({channelId:id,seconds:z.number().nonnegative()}).strict(),'projector','GuildVoiceStates',true),

@@ -1,4 +1,5 @@
 import EmbeddedPostgres from "embedded-postgres";
+import {buildCapabilitySnapshot} from '../../packages/discord/src/discovery';
 import { mkdtemp, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -43,6 +44,7 @@ const db = connect(`postgresql://nexus:nexus@127.0.0.1:${pgPort}/postgres`);
 await migrate(db);
 const s = scopeForGuild("321111111111111111");
 await ensureGuild(db, s);
+await sql`INSERT INTO guild_capability_snapshots VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${json(buildCapabilitySnapshot({features:[],memberCount:80,afkChannelId:null,incidents:{},channels:[{id:'621111111111111111',type:0,parentId:null,observable:true,tagIds:[]},{id:'621111111111111112',type:0,parentId:null,observable:true,tagIds:[]}],threads:[],onboarding:null,endpointStatus:{channels:'AVAILABLE',threads:'AVAILABLE',onboarding:'UNAVAILABLE',autoMod:'PERMISSION_MISSING',events:'AVAILABLE'},ruleCount:null,welcomeCount:null,scheduledEvents:[]}))},now())`.execute(db);
 const settings=new SettingsService(db);
 await settings.update(s,{key:'e2e-admin',permissions:'32',roles:[],source:'SYSTEM',requestId:randomUUID()},0,{enabled:true,flags:{native_capability_v2:true,native_snapshot_v2:true,activation_dsl_v2:true,interventions_v2:true,experiments_v2:true,billing_v1:true}});
 const vault = new IdentityVault("aa".repeat(32), "bb".repeat(32));

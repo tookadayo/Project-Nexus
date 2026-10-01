@@ -462,7 +462,7 @@ export async function projectAdaptiveMember(
       at,
       target ? String(target) : null,
     );
-    if (active && !prior?.data.active) {
+    if (active && !prior?.data.active && target) {
       const previouslyReceived = target
         ? (
             await sql`SELECT id FROM adaptive_facts WHERE ${tenant(s)} AND kind='reaction.added' AND subject_hash=${hash} AND target_hash=${String(target)} AND data->>'messageId'=${e.messageId ?? ""} LIMIT 1`.execute(
@@ -561,6 +561,15 @@ export async function projectAdaptiveMember(
       hash,
       episodeId,
     );
+    if (
+      e.kind === "thread.member_added" &&
+      purpose === "LFG" &&
+      surface?.ownerHash &&
+      surface.ownerHash !== hash
+    )
+      await sql`UPDATE lifecycle_events f SET data=jsonb_set(data,'{receivedHumanParticipant}','true'::jsonb) FROM membership_episodes ep JOIN member_identity_map m ON m.organization_id=ep.organization_id AND m.guild_id=ep.guild_id AND m.id=ep.identity_id WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.episode_id=ep.id AND f.organization_id=ep.organization_id AND f.guild_id=ep.guild_id AND m.lookup_hash=${surface.ownerHash} AND f.kind='message.sent' AND f.data->>'channelId'=${channelId}`.execute(
+        tx,
+      );
     if (episodeId && e.kind === "thread.member_added")
       await lifecycleFact(tx, s, episodeId, e.kind, at, { channelId });
     return true;
@@ -898,10 +907,20 @@ async function projectVoice(
         ? "voice.moved"
         : "voice.joined",
     at,
-    { channelId, suppress: e.suppress, guest },
+    {
+      channelId,
+      suppress: e.suppress,
+      guest,
+      surface: surface?.surface ?? "UNKNOWN",
+    },
     hash,
     episodeId,
   );
+  if (episodeId && !guest && stage)
+    await lifecycleFact(tx, s, episodeId, "stage.participated", at, {
+      channelId,
+      suppress: e.suppress,
+    });
   if (episodeId && !guest && voiceKnown)
     await lifecycleFact(tx, s, episodeId, "voice.started", at, { channelId });
   if (episodeId && !guest) {

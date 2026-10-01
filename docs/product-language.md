@@ -18,7 +18,7 @@
 | Concept | JA | EN | Definition |
 |---|---|---|---|
 | Home | サーバー概要 | Server overview | 今日の人数と対応、完了した観測期間の比較 |
-| First connection | 最初の交流 | First connection | 参加後3日以内の他者からの直接返信、または他者と同じボイスチャンネルでの参加。リアクションだけでは成立しない |
+| First connection | 最初の交流 | First connection | 参加後3日以内の他者からの直接返信、目的が合う投稿への最初の応答、または設定時間以上のボイス同席。リアクションだけでは成立しない |
 | First activity goal | 最初に確認する活動 | First activity to observe | 保存した定義で選択した投稿・直接返信・イベント参加登録。イベントへの実参加ではない |
 | Reply waiting | 返信待ち | Waiting for reply | 設定された時間を超え、観測した直接返信がない対象投稿 |
 | Reply average | 初回返信の平均時間 | Average time to first reply | 返信を受けた対象者だけの平均。返信あり人数 / 観測完了対象者数を併記 |
@@ -69,3 +69,11 @@ Staff exclusion は計測方法に載せ、主要KPIにしない。分析の参�
 ## Regression checks
 
 `tests/unit/quality-hardening.test.ts` で禁止表現・内部用語・エラー分類・分母と測定状態を検査する。`quality.spec.ts` と `discord-panels.spec.ts` でJA/ENとdesktop/mobileを確認する。新しい文言は辞書だけでなく、表示するbackend条件と一緒にレビューする。技術者向けCLIと開発文書では必要な技術用語を使用してよい。
+
+## Adaptive community language
+
+複数の運営目的と明示したチャンネル用途に合う指標だけを表示する。構造の検出結果は候補で、名前から用途・タグの意味を決めない。数値には観測対象、件数と人数の区別、期間、分母、権限による範囲を付ける。応答時間は中央値・p75・p90を正しく表示する。Screening待ちとGuestは通常の活動から分け、Onboarding完了を活動の必須条件にしない。
+
+「ボイスで会話した」「参加登録したから出席した」「リアクションで交流が成立した」「アーカイブされたから解決した」「投票が特定の意見を示した」とは表現しない。公開APIで観測できた同席、登録、応答、対応付け済みタグ、投票参加をそれぞれ説明する。Server Guideの設定、外部イベント出席、private/archived Thread全体、過去の投票・リアクション履歴は未確認であることを明示する。
+
+共通辞書は `packages/shared/src/community-copy.ts`。7つの代表ProfileとJA/ENのWeb・Discord表示をテストする。Discord画像はComponents V2のレイアウト近似であり、実クライアント受け入れの証明ではない。

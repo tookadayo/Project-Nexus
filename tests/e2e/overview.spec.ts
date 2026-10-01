@@ -54,9 +54,10 @@ test('shows independent newcomer data before optional onboarding is configured',
  await expect(page.getByRole('heading',{name:'Set up newcomer measurement'})).toBeVisible();
  await expect(page.getByRole('radio',{name:'Sign up for an event',exact:true})).toBeVisible();
  await expect(page.getByText('Discord onboarding is not currently in use. You can add a welcome flow later.')).toBeVisible();
- await expect(page.locator('.metric-card').filter({has:page.getByRole('heading',{name:'👋 Newly joined',exact:true})}).first()).toContainText('2');
+ await expect(page.getByTestId('adaptive-community').locator('article').filter({has:page.getByRole('heading',{name:'Eligible members',exact:true})})).toContainText('26');
  await expect(page.locator('.kpi-grid .value')).not.toContainText(['0.0%']);
- await expect(page.locator('.measurement-grid')).toContainText('Replied 0 / 24 members');
+ await expect(page.getByTestId('adaptive-community')).toContainText('Observed sample');
+ await expect(page.getByTestId('adaptive-community')).toContainText('Partial observation');
  await expect(page.getByRole('button',{name:'New Members',exact:true})).toBeVisible();
  await page.screenshot({caret:'initial',path:'test-results/v04-home-desktop.png',fullPage:true});
  await page.setViewportSize({width:390,height:844});
@@ -69,7 +70,7 @@ test('rejects unauthenticated dashboard requests',async()=>{const response=await
 test('uses independent newcomer milestones and labels for Discord choices',async({page})=>{
  await page.goto('/dashboard');
  await page.getByRole('button',{name:'New Members',exact:true}).click();
- await expect(page.getByText('Overview / New Members')).toBeVisible();
+ await expect(page.getByRole('heading',{name:'New member progress',exact:true})).toBeVisible();
  const response=page.waitForResponse(value=>value.url().includes('/data/journey?range=7'));
  await page.getByRole('button',{name:'7D'}).click();expect((await response).ok()).toBe(true);
  await expect(page.locator('body')).not.toContainText(/step conversion/i);
@@ -141,8 +142,8 @@ test('saves a multi-channel analysis scope and shows the community comparison pa
  await page.getByRole('button',{name:'Settings',exact:true}).click();
  await expect(page.getByRole('combobox',{name:'Channels to analyze'})).toHaveValue('include');
  await page.getByRole('button',{name:'Insights',exact:true}).click();
- await expect(page.getByRole('heading',{name:'New Members'})).toBeVisible();
- await expect(page.getByRole('heading',{name:'Compare participation'})).toBeVisible();
+ await expect(page.getByRole('heading',{name:'Analysis for your community'})).toBeVisible();
+ await expect(page.getByTestId('adaptive-community')).toContainText('Channel coverage: 2 / 2');
 });
 
 test('acknowledges, snoozes, and resolves observed attention posts',async({page})=>{

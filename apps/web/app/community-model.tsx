@@ -576,6 +576,37 @@ export function CommunityModelEditor({
               </li>
             ))}
           </ul>
+          <p>
+            {ja ? "最終確認" : "Last checked"}:{" "}
+            {snapshot.checkedAt.slice(0, 16).replace("T", " ")} UTC
+          </p>
+          <p>
+            {ja ? "チャンネル構成" : "Channel counts"}:{" "}
+            {Object.entries(snapshot.channelTypeCounts)
+              .map(
+                ([type, count]) =>
+                  `${({ 0: ja ? "テキスト" : "Text", 2: "Voice", 5: "Announcement", 13: "Stage", 15: "Forum", 16: "Media" } as Record<string, string>)[type] ?? type} ${count}`,
+              )
+              .join(" · ")}
+          </p>
+          {snapshot.threadCounts && (
+            <p>
+              {ja ? "閲覧できる活動中のThread" : "Accessible active threads"}:{" "}
+              {snapshot.threadCounts.active ?? (ja ? "未確認" : "Unknown")}
+            </p>
+          )}
+          {snapshot.onboarding && (
+            <p>
+              Discord Onboarding ·{" "}
+              {ja ? "既定のチャンネル" : "Default channels"}{" "}
+              {snapshot.onboarding.defaultChannelIds.length} ·{" "}
+              {ja ? "必須の質問" : "Required questions"}{" "}
+              {snapshot.onboarding.prompts.filter((p) => p.required).length}.{" "}
+              {ja
+                ? "同じ質問をNEXUSで作り直す必要はありません。"
+                : "You do not need to recreate these questions in NEXUS."}
+            </p>
+          )}
           {snapshot.coverage.blindSpots.length > 0 && (
             <p>
               {ja

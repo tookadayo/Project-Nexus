@@ -100,7 +100,7 @@ it('runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
   expect((await sql`SELECT role_id FROM nexus_role_grants WHERE guild_id=${s.guildId} AND revoked_at IS NOT NULL`.execute(db)).rows).toHaveLength(1);
   const fixed=(await sql<{message_id:string}>`SELECT message_id FROM settings_panels WHERE guild_id=${s.guildId}`.execute(db)).rows[0]!;
   adminMessageId=publicPanelId;
-  const pageControl=controls(discord.panels.get(fixed.message_id)).find(item=>item.label==='Analysis')!;
+  const pageControl=controls(discord.panels.get(fixed.message_id)).find(item=>item.placeholder==='Choose a page')!;
   expect(pageControl).toBeDefined();
   await deliver(admin,{custom_id:pageControl.custom_id,values:['analysis']},3,fixed.message_id);
   await deliver(admin,{custom_id:control('Analysis'),values:['channels']});

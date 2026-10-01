@@ -41,10 +41,11 @@ for(const locale of ['en','ja'] as const){
   await page.setViewportSize({width:1280,height:900});await page.goto('/dashboard');
   await page.screenshot({caret:'initial',path:`test-results/polish-${locale}-dashboard-desktop.png`,fullPage:true});
   await page.getByRole('button',{name:locale==='ja'?'目標と判定ルール':'Goals & Rules',exact:true}).click();
-  const intro=page.locator('.rules-view .orientation');
-  await expect(intro).toContainText(locale==='ja'?'期間と条件':'periods and conditions');
+  const intro=page.getByTestId('adaptive-community');
+  await expect(intro).toContainText(locale==='ja'?'観測人数・件数':'Observed sample');
   await expect(intro).not.toContainText(locale==='ja'?'観測中です':'Still collecting');
-  await expect(page.locator('.rules-view')).toContainText(locale==='ja'?'参加登録':'Event signup');
+  await expect(intro).toContainText(locale==='ja'?'他の人からの明示的な返信':'Explicit replies from another human');
+  await expect(intro).not.toContainText(locale==='ja'?'観測できた出席':'Observed attendance');
   await page.setViewportSize({width:375,height:812});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await page.screenshot({caret:'initial',path:`test-results/polish-${locale}-rules-mobile.png`,fullPage:true});

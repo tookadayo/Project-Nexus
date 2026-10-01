@@ -123,6 +123,7 @@ it.each([
       type: 11,
       parent_id: channel,
       owner_id: user,
+      newly_created: true,
       name: "secret",
       applied_tags: [message],
       thread_metadata: { archived: false, locked: false },

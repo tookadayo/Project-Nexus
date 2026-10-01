@@ -119,8 +119,18 @@ export type CapabilitySnapshot = {
   memberCount: number | null;
   afkChannelId: string | null;
   channelTypeCounts: Record<string, number>;
-  threadCounts?:{active:number|null;public:number|null;private:number|null;announcement:number|null};
-  botPermissions?:{manageGuild:boolean;manageRoles:boolean;sendMessages:boolean;highestRolePosition:number|null}|null;
+  threadCounts?: {
+    active: number | null;
+    public: number | null;
+    private: number | null;
+    announcement: number | null;
+  };
+  botPermissions?: {
+    manageGuild: boolean;
+    manageRoles: boolean;
+    sendMessages: boolean;
+    highestRolePosition: number | null;
+  } | null;
   capabilities: Record<string, CapabilityEntry>;
   channels: ChannelMetadata[];
   coverage: {
@@ -215,12 +225,48 @@ export function quantiles(values: number[]) {
     p90: at(0.9),
   };
 }
-export function meaningfulActivityKinds(model:CommunityModel):Set<string>{
- const kinds=new Set(['interaction.used','activation.completed']);
- if(!model.confirmed)return new Set([...kinds,'message.sent','reaction.added','voice.started','voice.duration','scheduled_event.subscribed','fallback.answer']);
- if(model.modes.some(m=>['SOCIAL','LFG_PLAY','SUPPORT_QA','DEVELOPMENT_FEEDBACK','CONTENT_SHOWCASE','CREATOR_FAN'].includes(m))){kinds.add('message.sent');kinds.add('thread.member_added');}
- if(model.modes.includes('VOICE')||model.modes.includes('LFG_PLAY')){kinds.add('voice.started');kinds.add('voice.duration');}
- if(model.modes.includes('EVENTS')){kinds.add('scheduled_event.subscribed');kinds.add('scheduled_event.attended');}
- if(model.modes.includes('CREATOR_FAN')||model.modes.includes('CONTENT_SHOWCASE')){kinds.add('reaction.added');kinds.add('poll.participated');}
- return kinds;
+export function meaningfulActivityKinds(model: CommunityModel): Set<string> {
+  const kinds = new Set(["interaction.used", "activation.completed"]);
+  if (!model.confirmed)
+    return new Set([
+      ...kinds,
+      "message.sent",
+      "reaction.added",
+      "voice.started",
+      "voice.duration",
+      "scheduled_event.subscribed",
+      "fallback.answer",
+    ]);
+  if (
+    model.modes.some((m) =>
+      [
+        "SOCIAL",
+        "LFG_PLAY",
+        "SUPPORT_QA",
+        "DEVELOPMENT_FEEDBACK",
+        "CONTENT_SHOWCASE",
+        "CREATOR_FAN",
+      ].includes(m),
+    )
+  ) {
+    kinds.add("message.sent");
+    kinds.add("thread.member_added");
+  }
+  if (model.modes.includes("VOICE") || model.modes.includes("LFG_PLAY")) {
+    kinds.add("voice.started");
+    kinds.add("voice.duration");
+  }
+  if (model.modes.includes("EVENTS")) {
+    kinds.add("scheduled_event.subscribed");
+    kinds.add("scheduled_event.attended");
+    kinds.add("stage.participated");
+  }
+  if (
+    model.modes.includes("CREATOR_FAN") ||
+    model.modes.includes("CONTENT_SHOWCASE")
+  ) {
+    kinds.add("reaction.added");
+    kinds.add("poll.participated");
+  }
+  return kinds;
 }

@@ -21,6 +21,12 @@ import {
   requestCapabilityRefresh,
 } from "../../packages/lifecycle/src/discovery";
 import { CommunityService } from "../../packages/presentation/src/community";
+import {
+  representativeProfiles,
+  representativeSource,
+} from "../fixtures/community-profiles";
+import { buildCapabilitySnapshot } from "../../packages/discord/src/discovery";
+import { json } from "../../packages/db/src/index";
 import { PrivacyService } from "../../packages/security/src/privacy";
 let infra: Awaited<ReturnType<typeof infrastructure>>,
   db: Database,
@@ -112,6 +118,16 @@ async function fixture() {
       pending: false,
     });
   return {
+    health: async (at: Date) =>
+      service.process({
+        ...s,
+        shardId: 0,
+        gatewaySessionId: "adaptive-health",
+        sequence: ++sequence,
+        context: "PRODUCTION",
+        kind: "telemetry.connected",
+        at: at.toISOString(),
+      }),
     s,
     settings,
     discord,
@@ -123,6 +139,81 @@ async function fixture() {
     cfg: await settings.get(s),
   };
 }
+it.each(["SUPPORT", "LFG"] as const)(
+  "uses %s post purpose for attention while keeping medium participation separate from connection",
+  async (purpose) => {
+    const f = await fixture(),
+      now = new Date(f.now.getTime() + 31 * 60000);
+    await f.settings.update(f.s, actor, (await f.settings.get(f.s)).revision, {
+      communityModel: {
+        ...f.cfg.communityModel,
+        channels: [{ channelId: channel, purpose }],
+      },
+    });
+    await sql`UPDATE membership_episodes SET joined_at=${new Date(f.now.getTime() - 30 * 86400000)} WHERE ${tenant(f.s)}`.execute(
+      db,
+    );
+    await f.send("THREAD_CREATE", {
+      id: thread,
+      parent_id: channel,
+      type: 11,
+      owner_id: user,
+      newly_created: true,
+    });
+    await f.send("MESSAGE_CREATE", {
+      id: message,
+      channel_id: thread,
+      author: { id: user },
+      type: 0,
+      timestamp: f.now.toISOString(),
+    });
+    await f.health(now);
+    const waiting = await new CommunityService(db, f.settings).overview(
+      f.s,
+      30,
+      now,
+    );
+    expect(waiting.attention).toHaveLength(1);
+    expect(waiting.attention[0]).toMatchObject({
+      surface: "FORUM_POST",
+      purpose,
+    });
+    if (purpose === "LFG") {
+      await f.send(
+        "THREAD_MEMBERS_UPDATE",
+        {
+          id: thread,
+          added_members: [
+            { user_id: other, member: { user: { id: other, bot: false } } },
+          ],
+        },
+        now,
+      );
+      expect(
+        (
+          await sql`SELECT id FROM lifecycle_events WHERE ${tenant(f.s)} AND kind IN ('reply.received','thread.response_received')`.execute(
+            db,
+          )
+        ).rows,
+      ).toHaveLength(0);
+    } else
+      await f.send(
+        "MESSAGE_CREATE",
+        {
+          id: "444444444444444449",
+          channel_id: thread,
+          author: { id: other },
+          type: 0,
+          timestamp: now.toISOString(),
+        },
+        now,
+      );
+    expect(
+      (await new CommunityService(db, f.settings).overview(f.s, 30, now))
+        .attention,
+    ).toHaveLength(0);
+  },
+);
 const messageData = (author = user, id = message, channelId = channel) => ({
   id,
   channel_id: channelId,
@@ -187,6 +278,29 @@ it("tracks active reaction edges, unique humans, self/bot exclusion and all remo
   ).toHaveLength(0);
   expect(dedupeKey(e!)).not.toContain("hidden");
 });
+it("keeps unknown-author reactions out of verified other-human activity without fetching messages", async () => {
+  const f = await fixture();
+  await f.send("MESSAGE_REACTION_ADD", {
+    user_id: user,
+    message_id: message,
+    channel_id: channel,
+    emoji: { id: null, name: "hidden" },
+  });
+  expect(
+    (
+      await sql`SELECT state_key FROM adaptive_states WHERE ${tenant(f.s)} AND domain='reaction' AND target_hash IS NULL`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(1);
+  expect(
+    (
+      await sql`SELECT id FROM lifecycle_events WHERE ${tenant(f.s)} AND kind IN ('reaction.added','reaction.received')`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(0);
+});
 it("keeps one poll participation after multiple answers, removal and re-add", async () => {
   const f = await fixture(),
     data = { user_id: user, message_id: message, channel_id: channel };
@@ -215,6 +329,7 @@ it("keeps one poll participation after multiple answers, removal and re-add", as
 it("restores parent/surface mapping, measures a first human forum response and requires mapped resolution", async () => {
   const f = await fixture();
   await f.send("THREAD_CREATE", {
+    newly_created: true,
     id: thread,
     type: 11,
     parent_id: channel,
@@ -418,6 +533,13 @@ it("qualifies sustained human voice co-presence without pairs, excludes AFK/gues
   ).toHaveLength(1);
   expect(
     (
+      await sql`SELECT id FROM lifecycle_events WHERE ${tenant(f.s)} AND kind='stage.participated'`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(1);
+  expect(
+    (
       await sql`SELECT * FROM membership_episodes WHERE ${tenant(f.s)}`.execute(
         db,
       )
@@ -567,3 +689,224 @@ it("removes new member hashes, target edges, durable payloads, guild snapshots a
       ).rows,
     ).toHaveLength(0);
 });
+
+it("inherits parent analysis scope, counts poll activity once, and omits excluded or staff observations", async () => {
+  const f = await fixture();
+  await f.settings.update(f.s, actor, (await f.settings.get(f.s)).revision, {
+    analysisScope: { mode: "include", channelIds: [channel] },
+    staffRoleIds: ["888888888888888888"],
+  });
+  await f.send("THREAD_CREATE", {
+    id: thread,
+    type: 11,
+    parent_id: channel,
+    owner_id: user,
+    newly_created: true,
+  });
+  await f.send("MESSAGE_CREATE", {
+    ...messageData(user, message, thread),
+    timestamp: f.now.toISOString(),
+  });
+  const vote = {
+    user_id: user,
+    message_id: message,
+    channel_id: thread,
+    answer_id: 1,
+  };
+  await f.send("MESSAGE_POLL_VOTE_ADD", vote);
+  await f.send("MESSAGE_POLL_VOTE_REMOVE", vote);
+  await f.send("MESSAGE_POLL_VOTE_ADD", vote);
+  expect(
+    (
+      await sql`SELECT id FROM lifecycle_events WHERE ${tenant(f.s)} AND kind='poll.participated'`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(1);
+  expect(
+    (
+      await sql`SELECT id FROM lifecycle_events WHERE ${tenant(f.s)} AND kind='message.sent'`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(1);
+  await sql`INSERT INTO guild_capability_snapshots VALUES(${f.s.organizationId}::uuid,${f.s.guildId},gen_random_uuid(),${json(buildCapabilitySnapshot(representativeSource(4), f.now, null, { poll: 1 }))},${f.now})`.execute(
+    db,
+  );
+  const view = await new CommunityService(db, f.settings).overview(
+    f.s,
+    30,
+    new Date(f.now.getTime() + 1000),
+  );
+  expect(
+    view.adaptive?.metrics.find((m) => m.key === "pollParticipants")?.count,
+  ).toBe(1);
+  await f.send("GUILD_MEMBER_UPDATE", {
+    user: { id: user },
+    roles: ["888888888888888888"],
+    pending: false,
+    flags: 0,
+  });
+  const excluded = await new CommunityService(db, f.settings).overview(
+    f.s,
+    30,
+    new Date(f.now.getTime() + 1000),
+  );
+  expect(
+    excluded.adaptive?.metrics.some((m) => m.key === "pollParticipants"),
+  ).toBe(false);
+  expect(excluded.adaptive?.eligible).toBe(1);
+});
+
+it("does not invent first responses for newly visible older threads", async () => {
+  const f = await fixture();
+  await f.send("THREAD_CREATE", {
+    id: thread,
+    type: 11,
+    parent_id: channel,
+    owner_id: user,
+    thread_metadata: {
+      archived: false,
+      locked: false,
+      create_timestamp: new Date(f.now.getTime() - 86400000).toISOString(),
+    },
+  });
+  await f.send("MESSAGE_CREATE", {
+    ...messageData(other, message, thread),
+    timestamp: f.now.toISOString(),
+  });
+  expect(
+    (
+      await sql`SELECT id FROM adaptive_facts WHERE ${tenant(f.s)} AND kind IN ('thread.created','thread.response_received')`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(0);
+  expect(
+    (
+      await sql`SELECT channel_id FROM discord_surface_state WHERE ${tenant(f.s)} AND channel_id=${thread}`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(1);
+});
+
+it("treats unknown voice type and disconnected observation as insufficient evidence", async () => {
+  const f = await fixture(),
+    unknown = "333333333333333339";
+  for (const id of [user, other])
+    await f.send("VOICE_STATE_UPDATE", { user_id: id, channel_id: unknown });
+  await db
+    .transaction()
+    .execute((tx) =>
+      tickVoice(tx, f.s, f.cfg, new Date(f.now.getTime() + 600000)),
+    );
+  expect(
+    (
+      await sql`SELECT id FROM adaptive_facts WHERE ${tenant(f.s)} AND kind='voice.copresence'`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(0);
+  for (const id of [user, other])
+    await f.send(
+      "VOICE_STATE_UPDATE",
+      { user_id: id, channel_id: voice },
+      new Date(f.now.getTime() + 600000),
+    );
+  await f.send(
+    "GUILD_MEMBER_REMOVE",
+    { user: { id: other } },
+    new Date(f.now.getTime() + 610000),
+  );
+  await db
+    .transaction()
+    .execute((tx) =>
+      tickVoice(tx, f.s, f.cfg, new Date(f.now.getTime() + 1200000)),
+    );
+  expect(
+    (
+      await sql`SELECT id FROM adaptive_facts WHERE ${tenant(f.s)} AND kind='voice.copresence'`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(0);
+});
+
+it("expires new facts and active edges while preserving a useful latest capability snapshot", async () => {
+  const f = await fixture();
+  await f.send("MESSAGE_POLL_VOTE_ADD", {
+    user_id: user,
+    message_id: message,
+    channel_id: channel,
+    answer_id: 1,
+  });
+  await sql`UPDATE adaptive_facts SET occurred_at=now()-interval '31 days' WHERE ${tenant(f.s)}`.execute(
+    db,
+  );
+  await sql`UPDATE adaptive_states SET observed_at=now()-interval '31 days' WHERE ${tenant(f.s)}`.execute(
+    db,
+  );
+  for (const days of [35, 34])
+    await sql`INSERT INTO guild_capability_snapshots VALUES(${f.s.organizationId}::uuid,${f.s.guildId},gen_random_uuid(),${json(buildCapabilitySnapshot(representativeSource(0)))},now()-${days}*interval '1 day')`.execute(
+      db,
+    );
+  await new PrivacyService(db, vault, f.settings).purge(f.s);
+  expect(
+    (await sql`SELECT id FROM adaptive_facts WHERE ${tenant(f.s)}`.execute(db))
+      .rows,
+  ).toHaveLength(0);
+  expect(
+    (
+      await sql`SELECT state_key FROM adaptive_states WHERE ${tenant(f.s)}`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(0);
+  expect(
+    (
+      await sql`SELECT id FROM guild_capability_snapshots WHERE ${tenant(f.s)}`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(1);
+});
+
+it.each(representativeProfiles.map((profile, index) => ({ profile, index })))(
+  "uses actual stored capabilities for $profile.name without unrelated metrics",
+  async ({ profile, index }) => {
+    const f = await fixture();
+    await f.settings.update(f.s, actor, (await f.settings.get(f.s)).revision, {
+      communityModel: {
+        ...f.cfg.communityModel,
+        modes: [...profile.modes],
+        channels: [],
+        forumTags: [],
+      },
+    });
+    await sql`INSERT INTO guild_capability_snapshots VALUES(${f.s.organizationId}::uuid,${f.s.guildId},gen_random_uuid(),${json(buildCapabilitySnapshot(representativeSource(index), f.now))},${f.now})`.execute(
+      db,
+    );
+    const model = (
+      await new CommunityService(db, f.settings).overview(
+        f.s,
+        30,
+        new Date(f.now.getTime() + 1000),
+      )
+    ).adaptive!;
+    expect(model.profile.modes).toEqual(profile.modes);
+    expect(model.metrics.some((m) => m.key === "voiceCopresence")).toBe(
+      profile.modes.some((m) => m === "VOICE" || m === "LFG_PLAY"),
+    );
+    expect(model.metrics.some((m) => m.key === "eventSubscriptions")).toBe(
+      profile.modes.some((m) => m === "EVENTS"),
+    );
+    expect(model.metrics.every((m) => m.definition.length > 10)).toBe(true);
+    if (profile.name === "large-mixed")
+      expect(model.volume).toBe("HIGH_VOLUME");
+    if (profile.name === "non-community")
+      expect(model.capabilities?.capabilities.onboarding?.status).toBe(
+        "UNAVAILABLE",
+      );
+  },
+);
