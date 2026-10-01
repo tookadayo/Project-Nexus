@@ -1,5 +1,6 @@
 import {DiscordFailure,type DiscordPort,type Member,type Role} from '../../packages/discord/src/rest.js';
 export class FakeDiscord implements DiscordPort {
+ capabilityState?:DiscordPort['capabilityState'];
  async registerCommands(_guildId:string,_commands:unknown[]){this.calls.push('registerCommands');}
  members=new Map<string,Member>();panels=new Map<string,unknown>();private panelNonces=new Map<string,string>();calls:string[]=[];failure:DiscordFailure|Error|null=null;mutationFailure:DiscordFailure|Error|null=null;replyTarget:string|null=null;
  async member(_guildId:string,userId:string){const member=this.members.get(userId);if(!member)throw new DiscordFailure(404);return structuredClone(member);}

@@ -6,7 +6,7 @@ import type {IdentityVault} from '../../../packages/identity/src/index.js';
 import type {Scope} from '../../../packages/shared/src/index.js';
 export async function scrubStream(redis:Redis,vault:IdentityVault,s:Scope,hash:string|null){
  let cursor='-';for(;;){const rows=await redis.xrange(STREAM,cursor,'+','COUNT',200);if(!rows.length)break;
-  for(const [id,fields] of rows){let matches=false;try{const e=eventSchema.parse(JSON.parse(fields[fields.indexOf('event')+1]??''));matches=e.organizationId===s.organizationId&&e.guildId===s.guildId&&(hash===null||Boolean(e.encryptedUserId&&vault.hash(s,vault.open(s,e.encryptedUserId))===hash));}catch{/* Invalid envelopes are never projected. */}if(matches)await redis.xdel(STREAM,id);}
+  for(const [id,fields] of rows){let matches=false;try{const e=eventSchema.parse(JSON.parse(fields[fields.indexOf('event')+1]??''));matches=e.organizationId===s.organizationId&&e.guildId===s.guildId&&(hash===null||e.targetHash===hash||e.ownerHash===hash||e.mentionHashes?.includes(hash)===true||Boolean(e.encryptedUserId&&vault.hash(s,vault.open(s,e.encryptedUserId))===hash));}catch{/* Invalid envelopes are never projected. */}if(matches)await redis.xdel(STREAM,id);}
   cursor=`(${rows[rows.length-1]![0]}`;
  }
 }

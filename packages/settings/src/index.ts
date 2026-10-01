@@ -3,9 +3,11 @@ import {randomUUID} from 'node:crypto';
 import {sql,tenant,json,type Database,type Tx} from '../../db/src/index';
 import {canAdmin,canOperatePanel} from '../../security/src/index';
 import {assert,type Scope} from '../../shared/src/index';
+import {communityModelSchema} from '../../shared/src/community-model';
+import type {CapabilitySnapshot} from '../../shared/src/community-model';
 export const templates=['Gaming','Creator','Developer / OSS','Product / SaaS','Education','General Community'] as const;
 const id=z.string().regex(/^\d{17,20}$/);
-export const settingsSchema=z.object({enabled:z.boolean().default(true),onboardingEnabled:z.boolean().default(false),template:z.enum(templates).default('General Community'),
+export const settingsSchema=z.object({communityModel:communityModelSchema,enabled:z.boolean().default(true),onboardingEnabled:z.boolean().default(false),template:z.enum(templates).default('General Community'),
  uiLanguage:z.enum(['auto','ja','en','bilingual']).default('auto'),
  startChannelId:id.nullable().default(null),adminNotificationChannelId:id.nullable().default(null),adminRoleId:id.nullable().default(null),managerRoleIds:z.array(id).max(20).default([]),helperRoleIds:z.array(id).max(20).default([]),flowVersionId:z.uuid().nullable().default(null),
  weeklySummaryEnabled:z.boolean().default(false),weeklySummaryChannelId:id.nullable().default(null),weeklySummaryDay:z.number().int().min(0).max(6).default(1),weeklySummaryHour:z.number().int().min(0).max(23).default(9),timezone:z.string().max(64).refine(value=>{try{new Intl.DateTimeFormat('en',{timeZone:value});return true;}catch{return false;}}).default('UTC'),
@@ -47,6 +49,11 @@ export class SettingsService {
    assert(current.revision===revision,'REVISION_CONFLICT',409);
    const {revision:_revision,...before}=current;void _revision;
    const next=settingsSchema.parse(await change(before,tx));
+   if(JSON.stringify(next.communityModel)!==JSON.stringify(before.communityModel)){
+    assert(!next.communityModel.confirmed||next.communityModel.modes.length>0,'COMMUNITY_MODE_REQUIRED');
+    const snapshot=(await sql<{snapshot:CapabilitySnapshot}>`SELECT snapshot FROM guild_capability_snapshots WHERE ${tenant(s)} ORDER BY checked_at DESC LIMIT 1`.execute(tx)).rows[0]?.snapshot;
+    if(snapshot){assert(next.communityModel.channels.every(c=>snapshot.channels.some(known=>known.id===c.channelId)),'CHANNEL_NOT_FOUND');assert(next.communityModel.forumTags.every(t=>snapshot.channels.some(c=>c.id===t.channelId&&[15,16].includes(c.type)&&c.tagIds.includes(t.tagId))),'FORUM_TAG_NOT_FOUND');}
+   }
    if(next.enabled&&!before.enabled)await sql`DELETE FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash IS NULL`.execute(tx);
    assert(!next.onboardingEnabled||next.startChannelId&&next.flowVersionId,'ONBOARDING_NOT_CONFIGURED');
    await sql`INSERT INTO guild_settings(organization_id,guild_id,revision,settings) VALUES(${s.organizationId}::uuid,${s.guildId},${revision+1},${json(next)})

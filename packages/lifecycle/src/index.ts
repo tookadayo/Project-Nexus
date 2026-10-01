@@ -9,6 +9,7 @@ import {scheduleNativeSnapshots,requestNativeRefresh} from './native.js';
 import {validateSignal} from '../../events/src/registry.js';
 import {projectActivation} from './activation.js';
 import {recordUsage} from '../../settings/src/entitlements.js';
+import {projectStructure,projectMemberFlags,projectAdaptiveMember} from './adaptive-projector.js';
 export class AwaitingReference extends Error{}
 export class LifecycleService {
  constructor(private readonly db:Database,private readonly vault:IdentityVault,private readonly settings:SettingsService,private readonly discord:DiscordPort){}
@@ -26,12 +27,11 @@ export class LifecycleService {
  async process(input:Envelope){
   const event=eventSchema.parse(input);const s:Scope={organizationId:event.organizationId,guildId:event.guildId};const at=new Date(event.at);
   let observedMember:Awaited<ReturnType<DiscordPort['member']>>|undefined;
-  const requiresBotCheck=['reaction.added','voice.started','voice.ended','scheduled_event.subscribed','scheduled_event.unsubscribed'].includes(event.kind);
   if(event.encryptedUserId&&event.kind!=='member.left'&&(await this.settings.get(s)).enabled){
    const userId=this.vault.open(s,event.encryptedUserId),hash=this.vault.hash(s,userId);
    const suppressed=(await sql`SELECT id FROM deletion_requests WHERE ${tenant(s)} AND (lookup_hash IS NULL OR lookup_hash=${hash})`.execute(this.db)).rows.length;
    if(!suppressed){const existing=event.joinedAt?true:(await sql`SELECT e.id FROM membership_episodes e JOIN member_identity_map m ON m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.identity_id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND m.lookup_hash=${hash} AND e.joined_at<=${at} AND (e.left_at IS NULL OR e.left_at>${at}) AND e.context='PRODUCTION' LIMIT 1`.execute(this.db)).rows.length>0;
-    if(requiresBotCheck||!existing)observedMember=await this.discord.member(s.guildId,userId);
+    if(!existing&&!event.joinedAt&&!((event.memberFlags??0)&16))observedMember=await (this.discord.memberSnapshot?.(s.guildId,userId)??this.discord.member(s.guildId,userId));
    }
   }
   return this.db.transaction().execute(async tx=>{
@@ -40,11 +40,16 @@ export class LifecycleService {
    if((await sql`SELECT id FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash IS NULL AND completed_at IS NOT NULL`.execute(tx)).rows.length)return;
    await sql`UPDATE gateway_ingest SET projected_at=now() WHERE ${tenant(s)} AND dedupe_key=${dedupeKey(event)}`.execute(tx);
    const inserted=await sql`INSERT INTO event_inbox(organization_id,guild_id,dedupe_key) VALUES(${s.organizationId}::uuid,${s.guildId},${dedupeKey(event)}) ON CONFLICT DO NOTHING RETURNING dedupe_key`.execute(tx);if(!inserted.rows.length)return;
-   if(event.kind.startsWith('telemetry.')){await this.health(tx,s,event);return;}
-   const settings=await this.settings.get(s,tx);if(!settings.enabled||!event.encryptedUserId)return;
+   const settings=await this.settings.get(s,tx);if(!settings.enabled)return;
+   if(event.kind.startsWith('telemetry.')){await projectStructure(tx,s,event,settings);await this.health(tx,s,event);return;}
+   if(await projectStructure(tx,s,event,settings)||!event.encryptedUserId)return;
    const userId=this.vault.open(s,event.encryptedUserId);const hash=this.vault.hash(s,userId);
-   if(requiresBotCheck&&observedMember?.bot)return;
+   if(observedMember?.bot)return;
    if((await sql`SELECT id FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash=${hash}`.execute(tx)).rows.length)return;
+   const previousGuest=(await sql`SELECT state_key FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(tx)).rows.length>0;
+   const guest=Boolean((event.memberFlags??Number(observedMember?.flags??(previousGuest?16:0)))&16);
+   if(guest){if(event.kind==='member.left'){await projectAdaptiveMember(tx,s,{...event,kind:'voice.state',channelId:null},settings,hash,null,true);await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(tx);}else{await sql`INSERT INTO adaptive_states VALUES(${s.organizationId}::uuid,${s.guildId},'guest','membership',${hash},NULL,'{}'::jsonb,${at}) ON CONFLICT(organization_id,guild_id,domain,state_key,subject_hash) DO UPDATE SET observed_at=EXCLUDED.observed_at`.execute(tx);await projectAdaptiveMember(tx,s,event,settings,hash,null,true);}return;}
+   if(previousGuest)await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(tx);
    const identityId=await this.vault.resolve(tx,s,userId);
    await recordUsage(tx,s,hash,at);
    await sql`SELECT pg_advisory_xact_lock(hashtextextended(${s.guildId+identityId+'PRODUCTION'},0))`.execute(tx);
@@ -80,6 +85,10 @@ export class LifecycleService {
    if(!event.roles&&observedMember?.roles?.length){
     await sql`INSERT INTO member_observable_state(organization_id,guild_id,episode_id,roles,roles_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episode.id}::uuid,${observedMember.roles}::text[],${at}) ON CONFLICT DO NOTHING`.execute(tx);
    }
+   await projectMemberFlags(tx,s,{...event,memberFlags:event.memberFlags??(observedMember?.flags===undefined?undefined:Number(observedMember.flags)),pending:event.pending??observedMember?.pending??undefined},episode.id,hash);
+   const eligibility=(await sql<{screening_pending:boolean;is_guest:boolean}>`SELECT screening_pending,is_guest FROM membership_episodes WHERE ${tenant(s)} AND id=${episode.id}::uuid`.execute(tx)).rows[0]!;
+   if(eligibility.screening_pending||eligibility.is_guest)return;
+   if(await projectAdaptiveMember(tx,s,event,settings,hash,episode.id))return;
    if(settings.flags.activation_dsl_v2)await projectActivation(tx,s,episode.id,at);
    if(settings.flags.native_snapshot_v2&&event.kind!=='member.joined')await requestNativeRefresh(tx,s,episode.id,at);
    if(event.kind==='member.roles_updated'&&event.roles){

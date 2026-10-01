@@ -23,7 +23,6 @@ import {ActionWorker} from '../apps/worker/src/actions.js';
 import {InteractionWorker} from '../apps/worker/src/interactions.js';
 import {NativeMemberSnapshotWorker} from '../packages/lifecycle/src/native.js';
 import {OptimizationWorker} from '../apps/worker/src/optimization.js';
-import {CapabilityService} from '../packages/lifecycle/src/capabilities.js';
 import {WeeklySummaryWorker} from '../apps/worker/src/weekly.js';
 import {HelperWorker} from '../apps/worker/src/helpers.js';
 import {scopeSchema,type Scope} from '../packages/shared/src/index.js';
@@ -34,6 +33,8 @@ import {recordProductEvent} from '../packages/shared/src/product-telemetry.js';
 import {CommandRetry} from './command-retry.js';
 import {scopeForGuild} from '../packages/security/src/index.js';
 import {logFailure} from '../packages/shared/src/diagnostics.js';
+import {DiscoveryWorker,requestCapabilityRefresh} from '../packages/lifecycle/src/discovery.js';
+import {tickVoice} from '../packages/lifecycle/src/adaptive-projector.js';
 try{loadEnvFile();}catch{/* Config validation below reports missing fields. */}
 const cfg=readConfig();const db=connect(cfg.DATABASE_URL);await migrate(db);
 const interactionHealth=new InteractionHealth(cfg.NEXUS_INTERACTION_TRANSPORT);
@@ -50,7 +51,7 @@ const actions=new ActionWorker(db,vault,discord,onboarding,interactionHealth);co
 const wake=async(s:Scope,id:string)=>{await queue.add('guild',s,{jobId:`interaction-${id}`,removeOnComplete:true,removeOnFail:true,attempts:3,backoff:{type:'exponential',delay:1000}});};
 const http=createInteractionServer({db,vault,publicKey:cfg.DISCORD_PUBLIC_KEY,applicationId:cfg.DISCORD_APPLICATION_ID,components:tokens,discord,health:interactionHealth,wake});
 const gateway=createGateway(redis,vault,()=>process.stderr.write('Gateway operation failed\n'),db,cfg.NEXUS_INTERACTION_TRANSPORT==='gateway'?interaction=>handleGatewayInteraction(interaction,{db,vault,components:tokens,health:interactionHealth,wake}):undefined);const api=createApi(analytics,cfg.API_KEY,db,discord,()=>({discordConnected:gateway.client.isReady(),redisConnected:redis.status==='ready',interaction:interactionHealth.snapshot(),commandHash:hash}),vault);
-const capabilities=new CapabilityService(db,discord,()=>{const ready=gateway.client.isReady()?true:null;return {members:ready,messages:ready,reactions:ready,voice:ready,scheduledEvents:ready};});
+const discovery=new DiscoveryWorker(db,discord,vault);
 // Tenant registry discovery is scheduler-only; every domain operation receives the explicit scope.
 async function scopes(){return (await sql<{organization_id:string,guild_id:string}>`SELECT organization_id,guild_id FROM guilds`.execute(db)).rows.map(row=>({organizationId:row.organization_id,guildId:row.guild_id}));}
 const consumer=new StreamConsumer(redis,lifecycle,`${hostname()}-${process.pid}`,60000,async()=>{for(const s of await scopes())await lifecycle.streamReset(s);});await consumer.init();
@@ -74,10 +75,11 @@ const loop=async()=>{while(!stopped){try{
  await consumer.tick();
  await gateway.publisher.recover();
  if(Date.now()-lastMaintenance>10000){
-  if(Date.now()-lastCapabilities>1800000){for(const s of await scopes()){const configuration=await settings.get(s);if(configuration.enabled)await capabilities.refresh(s,configuration.onboardingMode).catch(error=>logFailure({action:'capability_refresh',stage:'discord_rest',error}));}lastCapabilities=Date.now();}
+  await discovery.tick();
+  if(Date.now()-lastCapabilities>1800000){for(const s of await scopes()){const configuration=await settings.get(s);if(configuration.enabled)await requestCapabilityRefresh(db,s,'periodic');}lastCapabilities=Date.now();}
   if(Date.now()-lastAggregate>3600000){for(const s of await scopes())await analytics.materialize(s);lastAggregate=Date.now();}
   if(Date.now()-lastWeekly>3600000){for(const s of await scopes())await weekly.tick(s);lastWeekly=Date.now();}
-  for(const s of await scopes()){await retryCommands(s);await queue.add('guild',s,{jobId:s.guildId,removeOnComplete:true,removeOnFail:true,attempts:3,backoff:{type:'exponential',delay:1000}});await helpers.tick(s);await privacy.purge(s);}
+  for(const s of await scopes()){await retryCommands(s);const voiceConfiguration=await settings.get(s);await db.transaction().execute(tx=>tickVoice(tx,s,voiceConfiguration));await queue.add('guild',s,{jobId:s.guildId,removeOnComplete:true,removeOnFail:true,attempts:3,backoff:{type:'exponential',delay:1000}});await helpers.tick(s);await privacy.purge(s);}
   await redis.xtrim(STREAM,'MINID',`${Date.now()-86400000}-0`);lastMaintenance=Date.now();
  }
  }catch{process.stderr.write('Worker recovery pending\n');}
@@ -90,7 +92,7 @@ async function syncCommands(s:Scope){
  if(old?.definition_hash!==hash||!await discord.commandsMatch(s.guildId,commands)){await discord.registerCommands(s.guildId,commands);await sql`INSERT INTO guild_command_sync(organization_id,guild_id,definition_hash) VALUES(${s.organizationId}::uuid,${s.guildId},${hash}) ON CONFLICT(organization_id,guild_id) DO UPDATE SET definition_hash=EXCLUDED.definition_hash,registered_at=now()`.execute(db);}
  commandVerifiedAt.set(s.guildId,Date.now());
 }
-for(const guild of gateway.client.guilds.cache.values()){const s=scopeForGuild(guild.id);await db.transaction().execute(tx=>ensureGuild(tx,s));await retryCommands(s);}
+for(const guild of gateway.client.guilds.cache.values()){const s=scopeForGuild(guild.id);await db.transaction().execute(tx=>ensureGuild(tx,s));await requestCapabilityRefresh(db,s,'startup');await retryCommands(s);}
 gateway.client.on('guildCreate',guild=>{const s=scopeForGuild(guild.id);void db.transaction().execute(tx=>ensureGuild(tx,s)).then(async()=>{await recordProductEvent(db,s,'guild_installed');await retryCommands(s);}).catch(error=>logFailure({action:'guild_create',stage:'command_registration',error}));});
 process.stdout.write(`NEXUS ${releaseInfo().version} build ${releaseInfo().buildSha} (${releaseInfo().releaseChannel}); Interaction ${cfg.NEXUS_INTERACTION_TRANSPORT}; API :${cfg.API_PORT}\n`);const running=loop();
 async function stop(){if(stopped)return;stopped=true;await running;await gateway.stop();await worker.close();await queue.close();if(cfg.NEXUS_INTERACTION_TRANSPORT==='webhook')await http.close();await api.close();await redis.quit();await db.destroy();await sdk?.shutdown();}

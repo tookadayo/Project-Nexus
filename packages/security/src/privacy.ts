@@ -16,6 +16,7 @@ export class PrivacyService {
     await sql`SELECT pg_advisory_xact_lock(hashtextextended(${'privacy:'+s.organizationId+':'+s.guildId},0))`.execute(tx);
     await sql`DELETE FROM server_verification_challenges WHERE ${tenant(s)}`.execute(tx);
     await sql`DELETE FROM server_web_links WHERE ${tenant(s)}`.execute(tx);
+    for(const table of ['adaptive_states','adaptive_facts','discord_surface_state','guild_capability_snapshots','capability_refresh_jobs'])await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)}`.execute(tx);
     // Only an audit tombstone and disabled settings remain. Published flows can be deleted, never mutated.
     for(const table of ['suggestion_feedback','weekly_summary_deliveries','helper_alerts','attention_items','retention_tracking','retention_cohorts','gateway_ingest','usage_counters','guild_subscriptions','guild_capabilities','guild_config_heads','guild_config_revisions','data_coverage_snapshots','action_outbox','interaction_jobs','interaction_diagnostics','component_tokens','settings_panels','guild_command_sync','event_inbox','telemetry_health','telemetry_cursor','daily_guild_metrics','member_interaction_pairs','member_identity_map','flow_versions','audit_logs','deletion_requests'])
      await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)}`.execute(tx);
@@ -29,6 +30,11 @@ export class PrivacyService {
    await sql`SELECT pg_advisory_xact_lock(hashtextextended(${'privacy:'+s.organizationId+':'+s.guildId},0))`.execute(tx);
    await sql`SELECT pg_advisory_xact_lock(hashtextextended(${s.guildId+hash},0))`.execute(tx);
    const ids=(await sql<{id:string}>`SELECT id FROM member_identity_map WHERE ${tenant(s)} AND lookup_hash=${hash}`.execute(tx)).rows.map(r=>r.id);
+   for(const table of ['adaptive_states','adaptive_facts'])await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)} AND (subject_hash=${hash} OR target_hash=${hash})`.execute(tx);
+   // Removing a participant invalidates the aggregate co-presence clock; restart observation conservatively.
+   await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND domain IN ('voice','voice-channel')`.execute(tx);
+   await sql`UPDATE discord_surface_state SET owner_hash=NULL WHERE ${tenant(s)} AND owner_hash=${hash}`.execute(tx);
+   await sql`DELETE FROM gateway_ingest WHERE ${tenant(s)} AND (payload->>'targetHash'=${hash} OR payload->>'ownerHash'=${hash} OR payload->'mentionHashes' ? ${hash})`.execute(tx);
    await sql`DELETE FROM attention_items a USING lifecycle_events f JOIN membership_episodes e ON e.organization_id=f.organization_id AND e.guild_id=f.guild_id AND e.id=f.episode_id WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND a.organization_id=f.organization_id AND a.guild_id=f.guild_id AND a.message_id=f.data->>'messageId' AND e.identity_id=ANY(${ids}::uuid[])`.execute(tx);
    await sql`DELETE FROM helper_alerts a USING lifecycle_events f JOIN membership_episodes e ON e.organization_id=f.organization_id AND e.guild_id=f.guild_id AND e.id=f.episode_id WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND a.organization_id=f.organization_id AND a.guild_id=f.guild_id AND a.message_id=f.data->>'messageId' AND e.identity_id=ANY(${ids}::uuid[])`.execute(tx);
    const sessions=(await sql<{id:string}>`SELECT f.id FROM flow_sessions f JOIN membership_episodes e ON f.organization_id=e.organization_id AND f.guild_id=e.guild_id AND f.episode_id=e.id
@@ -85,6 +91,9 @@ export class PrivacyService {
    await sql`DELETE FROM action_outbox WHERE ${tenant(s)} AND created_at<${cutoff}`.execute(tx);
    await sql`DELETE FROM usage_counters WHERE ${tenant(s)} AND month<date_trunc('month',now())::date`.execute(tx);
    await sql`DELETE FROM guild_capabilities WHERE ${tenant(s)} AND checked_at<${cutoff}`.execute(tx);
+   for(const table of ['adaptive_states','adaptive_facts'])await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)} AND ${sql.ref(table==='adaptive_states'?'observed_at':'occurred_at')}<${cutoff}`.execute(tx);
+   await sql`DELETE FROM discord_surface_state WHERE ${tenant(s)} AND archived AND observed_at<${cutoff}`.execute(tx);
+   await sql`DELETE FROM guild_capability_snapshots WHERE ${tenant(s)} AND checked_at<${cutoff} AND id<>(SELECT id FROM guild_capability_snapshots WHERE ${tenant(s)} ORDER BY checked_at DESC LIMIT 1)`.execute(tx);
    await sql`DELETE FROM data_coverage_snapshots WHERE ${tenant(s)} AND observed_at<${cutoff}`.execute(tx);
    await sql`DELETE FROM daily_guild_metrics WHERE ${tenant(s)} AND day<(now()-make_interval(months=>${cfg.aggregateRetentionMonths}))::date`.execute(tx);
    await sql`DELETE FROM suggestion_feedback WHERE ${tenant(s)} AND dismissed_at<now()-make_interval(months=>${cfg.aggregateRetentionMonths})`.execute(tx);

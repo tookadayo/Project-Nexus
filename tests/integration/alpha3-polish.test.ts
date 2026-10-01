@@ -13,6 +13,7 @@ import {CommunityService} from '../../packages/presentation/src/community.js';
 import {PrivacyService} from '../../packages/security/src/privacy.js';
 import {InteractionWorker} from '../../apps/worker/src/interactions.js';
 import {createInteractionServer} from '../../apps/interaction/src/server.js';
+import {tickVoice} from '../../packages/lifecycle/src/adaptive-projector.js';
 
 let infra:Awaited<ReturnType<typeof infrastructure>>,db:Database,counter=0;
 const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32)),channel='733333333333333333',newcomer='722222222222222222',helper='722222222222222223',bot='722222222222222224',messageId='744444444444444444',managerRole='755555555555555555',root='766666666666666666';
@@ -41,13 +42,13 @@ it('counts received human reactions, excludes self and bots, deduplicates retrie
  const first=reaction(ctx,helper,2);await ctx.lifecycle.process(first);await ctx.lifecycle.process(first);
  await ctx.lifecycle.process(reaction(ctx,helper,3));await ctx.lifecycle.process(reaction(ctx,newcomer,4));await ctx.lifecycle.process(reaction(ctx,bot,5));await ctx.lifecycle.process(reaction(ctx,helper,6));
  const rows=(await sql<{data:Record<string,unknown>}>`SELECT data FROM lifecycle_events WHERE ${tenant(ctx.s)} AND kind='reaction.received'`.execute(db)).rows;
- expect(rows).toHaveLength(3);expect(rows[0]?.data).toEqual({channelId:channel,messageId});
+ expect(rows).toHaveLength(1);expect(rows[0]?.data).toEqual({channelId:channel,messageId});
  expect(JSON.stringify(rows)).not.toMatch(/must not|never retain|emoji|722222222222222223/);
  const view=await new CommunityService(db,ctx.settings).overview(ctx.s,30,ctx.now);
- expect(view.reactionsReceived).toBe(3);expect(view.daily.todayConnected).toBe(0);expect(view.attention).toHaveLength(1);
+ expect(view.reactionsReceived).toBe(1);expect(view.daily.todayConnected).toBe(0);expect(view.attention).toHaveLength(1);
  expect((await sql`SELECT id FROM lifecycle_events WHERE ${tenant(ctx.s)} AND kind IN ('reply.received','reply.established','voice.connected')`.execute(db)).rows).toHaveLength(0);
  const status=await ctx.worker.dispatch(ctx.s,{...job(),command:'contextMember',targetUserId:newcomer});
- expect(JSON.stringify(status)).toContain('Received light responses (3)');expect(JSON.stringify(status)).toContain('Waiting for first connection');
+ expect(JSON.stringify(status)).toContain('Received light responses (1)');expect(JSON.stringify(status)).toContain('Waiting for first connection');
  await ctx.settings.update(ctx.s,actor,(await ctx.settings.get(ctx.s)).revision,{analysisScope:{mode:'exclude',channelIds:[channel]}});
  expect((await new CommunityService(db,ctx.settings).overview(ctx.s,30,ctx.now)).reactionsReceived).toBe(0);
  expect(JSON.stringify(await ctx.worker.dispatch(ctx.s,{...job(),command:'contextMember',targetUserId:newcomer}))).toContain('Received light responses (0)');
@@ -63,7 +64,7 @@ it('purges received reaction observations using the existing detailed retention 
 it.each(['reply','voice'] as const)('recognizes a strong %s connection while reactions remain weak',async kind=>{
  const ctx=await setup();await ctx.lifecycle.process(reaction(ctx,helper,2));
  if(kind==='reply')await ctx.lifecycle.process(normalize({t:'MESSAGE_CREATE',s:3,d:{guild_id:ctx.s.guildId,id:'744444444444444445',channel_id:channel,author:{id:helper},timestamp:ctx.now.toISOString(),type:19,message_reference:{message_id:messageId}}},0,'polish',vault)!);
- else for(const [i,user_id] of [newcomer,helper].entries())await ctx.lifecycle.process(normalize({t:'VOICE_STATE_UPDATE',s:3+i,d:{guild_id:ctx.s.guildId,user_id,channel_id:channel}},0,'polish',vault,ctx.now)!);
+ else{await ctx.settings.update(ctx.s,actor,(await ctx.settings.get(ctx.s)).revision,{communityModel:{modes:['VOICE'],confirmed:true,channels:[],forumTags:[],voiceThresholdSeconds:300}});for(const [i,user_id] of [newcomer,helper].entries())await ctx.lifecycle.process(normalize({t:'VOICE_STATE_UPDATE',s:3+i,d:{guild_id:ctx.s.guildId,user_id,channel_id:channel}},0,'polish',vault,ctx.now)!);ctx.now=new Date(ctx.now.getTime()+301000);await db.transaction().execute(async tx=>tickVoice(tx,ctx.s,await ctx.settings.get(ctx.s),ctx.now));}
  const view=await new CommunityService(db,ctx.settings).overview(ctx.s,30,ctx.now);
  expect(view.daily.todayConnected).toBe(1);expect(view.reactionsReceived).toBe(1);
 });

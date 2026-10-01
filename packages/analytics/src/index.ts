@@ -46,7 +46,7 @@ export class AnalyticsService {
  async canonical(s:Scope,from?:Date,to=new Date(),asOf=new Date()){
   const defaultWindow=from===undefined;from??=new Date(asOf.getTime()-30*day);
   const cfg=await this.settings.get(s);
-  const episodes=(await sql<{id:string,joined_at:Date,context:string}>`SELECT id,joined_at,context FROM membership_episodes WHERE ${tenant(s)} AND context='PRODUCTION' AND joined_at>=${from} AND joined_at<${to}`.execute(this.db)).rows;
+  const episodes=(await sql<{id:string,joined_at:Date,context:string}>`SELECT id,COALESCE(engagement_started_at,joined_at) AS joined_at,context FROM membership_episodes WHERE ${tenant(s)} AND context='PRODUCTION' AND NOT screening_pending AND NOT is_guest AND COALESCE(engagement_started_at,joined_at)>=${from} AND COALESCE(engagement_started_at,joined_at)<${to}`.execute(this.db)).rows;
   const events=(await sql<{episode_id:string,kind:string,occurred_at:Date,context:string,data:Record<string,unknown>}>`SELECT episode_id,kind,occurred_at,context,data FROM lifecycle_events WHERE ${tenant(s)} AND context='PRODUCTION' AND occurred_at>=${from} AND occurred_at<=${asOf}`.execute(this.db)).rows;
   const activationState=(await sql<{episode_id:string,activated_at:Date}>`SELECT episode_id,activated_at FROM activation_members WHERE ${tenant(s)} AND activated_at IS NOT NULL UNION ALL SELECT episode_id,activated_at FROM member_lifecycle_state WHERE ${tenant(s)} AND activated_at IS NOT NULL`.execute(this.db)).rows;
   for(const state of activationState)if(!events.some(e=>e.episode_id===state.episode_id&&e.kind==='activation.completed'))events.push({episode_id:state.episode_id,kind:'activation.completed',occurred_at:state.activated_at,context:'PRODUCTION',data:{}});

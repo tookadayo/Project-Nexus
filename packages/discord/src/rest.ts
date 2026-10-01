@@ -2,6 +2,8 @@ import {PermissionFlagsBits,type RESTPostAPIChannelMessageJSONBody} from 'discor
 import {createHash} from 'node:crypto';
 import {assert} from '../../shared/src/index';
 import {z} from 'zod';
+import {observableChannel,type DiscoverySource,type RawChannel} from './discovery';
+import type {CapabilityStatus} from '../../shared/src/community-model';
 export type Member={roles:string[],permissions:string,joinedAt:string,bot:boolean,flags?:string,pending?:boolean|null,guildName?:string,ownerId?:string};
 export const nativeOnboardingSchema=z.object({guild_id:z.string(),enabled:z.boolean(),mode:z.number().int(),default_channel_ids:z.array(z.string()),prompts:z.array(z.object({id:z.string(),title:z.string(),type:z.number().int(),options:z.array(z.object({id:z.string(),title:z.string(),role_ids:z.array(z.string()),channel_ids:z.array(z.string())})),single_select:z.boolean(),required:z.boolean(),in_onboarding:z.boolean()}))});
 export type NativeOnboarding=z.infer<typeof nativeOnboardingSchema>;
@@ -20,6 +22,7 @@ export class DiscordFailure extends Error {
 }
 export function isDiscordFailure(error:unknown):error is DiscordFailure{return error instanceof DiscordFailure||Boolean(error&&typeof error==='object'&&(error as Record<symbol,unknown>)[discordFailureBrand]===true);}
 export interface DiscordPort {
+ capabilityState?(guildId:string,hashOwner:(id:string)=>string):Promise<DiscoverySource>;
  sendDirectMessage?(userId:string,text:string,nonce:string):Promise<string>;
  nativeState?(guildId:string):Promise<GuildNativeState>;
  options?(guildId:string):Promise<DiscordEntityOptions>;
@@ -46,6 +49,16 @@ export class DiscordRest implements DiscordPort {
  private readonly bucketUntil=new Map<string,number>();
  private readonly locks=new Map<string,Promise<void>>();
  constructor(private readonly token:string,private readonly botId:string){}
+ async capabilityState(guildId:string,hashOwner:(id:string)=>string):Promise<DiscoverySource>{
+  const endpointStatus:Record<string,CapabilityStatus>={};
+  const read=async<T>(key:string,path:string):Promise<T|null>=>{try{const value=await this.request<T>(path);endpointStatus[key]='AVAILABLE';return value;}catch(error){endpointStatus[key]=isDiscordFailure(error)&&error.status===403?'PERMISSION_MISSING':isDiscordFailure(error)&&error.status===404?'UNAVAILABLE':'UNKNOWN';return null;}};
+  const [guild,channels,member,roles,threads,onboarding,rules,welcome,events]=await Promise.all([
+   read<{features:string[];approximate_member_count?:number;afk_channel_id:string|null;incidents_data?:Record<string,string|null>}>('guild',`/guilds/${guildId}?with_counts=true`),read<RawChannel[]>('channels',`/guilds/${guildId}/channels`),read<{roles:string[]}>('member',`/guilds/${guildId}/members/${this.botId}`),read<Role[]>('roles',`/guilds/${guildId}/roles`),read<{threads:RawChannel[]}>('threads',`/guilds/${guildId}/threads/active`),read<NativeOnboarding>('onboarding',`/guilds/${guildId}/onboarding`),read<{id:string}[]>('autoMod',`/guilds/${guildId}/auto-moderation/rules`),read<{welcome_channels:{channel_id:string}[]}>('welcome',`/guilds/${guildId}/welcome-screen`),read<{id:string;channel_id:string|null;entity_type:number;status:number}[]>('events',`/guilds/${guildId}/scheduled-events`)]);
+  if(endpointStatus.guild!=='AVAILABLE')throw new DiscordFailure(endpointStatus.guild==='PERMISSION_MISSING'?403:503);
+  if(!roles||!member)endpointStatus.channels='UNKNOWN';
+  const incidents:Record<string,string|null>={};for(const key of ['invites_disabled_until','dms_disabled_until','dm_spam_detected_at','raid_detected_at'])incidents[key]=guild?.incidents_data?.[key]??null;
+  return {features:guild?.features??[],memberCount:guild?.approximate_member_count??null,afkChannelId:guild?.afk_channel_id??null,incidents,endpointStatus,ruleCount:rules?.length??null,welcomeCount:welcome?.welcome_channels.length??null,channels:(channels??[]).map(c=>({id:c.id,type:c.type,parentId:c.parent_id??null,observable:roles&&member?observableChannel(c,guildId,this.botId,roles,member.roles):false,tagIds:(c.available_tags??[]).map(t=>t.id)})),threads:(threads?.threads??[]).filter(t=>t.parent_id).map(t=>({id:t.id,parentId:t.parent_id!,type:t.type,ownerHash:t.owner_id?hashOwner(t.owner_id):null,archived:t.thread_metadata?.archived??false,locked:t.thread_metadata?.locked??false,createdAt:t.thread_metadata?.create_timestamp??null,tagIds:t.applied_tags??[]})),onboarding:onboarding?{enabled:onboarding.enabled,mode:onboarding.mode,defaultChannelIds:onboarding.default_channel_ids,prompts:onboarding.prompts.map(p=>({id:p.id,required:p.required,inOnboarding:p.in_onboarding,options:p.options.map(o=>({id:o.id,channelIds:o.channel_ids,roleIds:o.role_ids}))}))}:null,scheduledEvents:(events??[]).map(e=>({id:e.id,channelId:e.channel_id,entityType:e.entity_type,status:e.status}))};
+ }
  async registerCommands(guildId:string,commands:unknown[]){await this.request(`/applications/${this.botId}/guilds/${guildId}/commands`,'PUT',commands);}
  async commandsMatch(guildId:string,commands:unknown[]){
   const actual=await this.request<Record<string,unknown>[]>(`/applications/${this.botId}/guilds/${guildId}/commands?with_localizations=true`);
@@ -117,8 +130,8 @@ export class DiscordRest implements DiscordPort {
   return {channels:channels.filter(c=>c.type===0||c.type===5).map(c=>({id:c.id,label:`#${c.name}`})),roles:roles.filter(r=>r.id!==guildId&&!r.managed).map(r=>({id:r.id,label:`@${r.name??'role'}`})),events:events.filter(e=>e.status===1||e.status===2).map(e=>({id:e.id,label:e.name}))};
  }
  async memberSnapshot(guildId:string,userId:string):Promise<Member>{
-  const raw=z.object({roles:z.array(z.string()),joined_at:z.string(),flags:z.number().int().nonnegative().optional(),pending:z.boolean().optional(),user:z.object({bot:z.boolean().optional()}).optional()}).parse(await this.request(`/guilds/${guildId}/members/${userId}`));
-  return {roles:raw.roles,joinedAt:raw.joined_at,permissions:'0',bot:raw.user?.bot??false,flags:raw.flags===undefined?undefined:String(raw.flags),pending:raw.pending??null};
+  const raw=z.object({roles:z.array(z.string()),joined_at:z.string().nullable(),flags:z.number().int().nonnegative().optional(),pending:z.boolean().optional(),user:z.object({bot:z.boolean().optional()}).optional()}).parse(await this.request(`/guilds/${guildId}/members/${userId}`));
+  return {roles:raw.roles,joinedAt:raw.joined_at??'',permissions:'0',bot:raw.user?.bot??false,flags:raw.flags===undefined?undefined:String(raw.flags),pending:raw.pending??null};
  }
  async nativeState(guildId:string):Promise<GuildNativeState>{
   const guild=z.object({features:z.array(z.string())}).parse(await this.request(`/guilds/${guildId}`));
@@ -129,10 +142,10 @@ export class DiscordRest implements DiscordPort {
   return {features:guild.features,onboarding,bot,roles,onboardingStatus:onboarding?'available':'unavailable'};
  }
  async member(guildId:string,userId:string):Promise<Member>{
-  const [raw,roles,guild]=await Promise.all([this.request<{roles:string[],joined_at:string,user:{bot?:boolean}}>(`/guilds/${guildId}/members/${userId}`),this.roles(guildId),this.request<{owner_id:string;name?:string}>(`/guilds/${guildId}`)]);
+  const [raw,roles,guild]=await Promise.all([this.request<{roles:string[],joined_at:string|null,flags?:number,pending?:boolean,user:{bot?:boolean}}>(`/guilds/${guildId}/members/${userId}`),this.roles(guildId),this.request<{owner_id:string;name?:string}>(`/guilds/${guildId}`)]);
   let permissions=0n;for(const role of roles)if(role.id===guildId||raw.roles.includes(role.id))permissions|=BigInt(role.permissions);
   if(userId===guild.owner_id)permissions|=PermissionFlagsBits.Administrator;
-  return {roles:raw.roles,permissions:permissions.toString(),joinedAt:raw.joined_at,bot:raw.user.bot??false,guildName:guild.name,ownerId:guild.owner_id};
+  return {roles:raw.roles,permissions:permissions.toString(),joinedAt:raw.joined_at??'',flags:raw.flags===undefined?undefined:String(raw.flags),pending:raw.pending,bot:raw.user.bot??false,guildName:guild.name,ownerId:guild.owner_id};
  }
  async checkChannel(guildId:string,channelId:string){
   let channel:{guild_id:string,type:number,permission_overwrites:{id:string,type:number,allow:string,deny:string}[]};

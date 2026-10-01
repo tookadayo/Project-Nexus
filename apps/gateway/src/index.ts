@@ -1,11 +1,11 @@
 import {Client,GatewayIntentBits,Events,type Interaction} from 'discord.js';
 import {Redis} from 'ioredis';
 import {randomUUID} from 'node:crypto';
-import {normalize,eventSchema,dedupeKey,type Envelope,type Dispatch} from '../../../packages/events/src/index.js';
+import {normalizeMany,eventSchema,dedupeKey,type Envelope,type Dispatch} from '../../../packages/events/src/index.js';
 import {scopeForGuild} from '../../../packages/security/src/index.js';
 import type {IdentityVault} from '../../../packages/identity/src/index.js';
 import {sql,tenant,json,ensureGuild,type Database} from '../../../packages/db/src/index.js';
-export const gatewayIntents=[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMembers,GatewayIntentBits.GuildMessages,GatewayIntentBits.GuildMessageReactions,GatewayIntentBits.GuildVoiceStates,GatewayIntentBits.GuildScheduledEvents];
+export const gatewayIntents=[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMembers,GatewayIntentBits.GuildMessages,GatewayIntentBits.GuildMessageReactions,GatewayIntentBits.GuildVoiceStates,GatewayIntentBits.GuildScheduledEvents,GatewayIntentBits.GuildMessagePolls,GatewayIntentBits.AutoModerationExecution];
 export const STREAM='nexus:events';
 export class GatewayPublisher {
  private lost=new Map<string,Envelope>();
@@ -23,6 +23,8 @@ export class GatewayPublisher {
   const s={organizationId:event.organizationId,guildId:event.guildId};
   if(db){
    const hash=event.encryptedUserId&&this.vault?this.vault.hash(s,this.vault.open(s,event.encryptedUserId)):null;
+   const related=[hash,event.targetHash,event.ownerHash,...event.mentionHashes??[]].filter((value):value is string=>Boolean(value));
+   if((await sql`SELECT id FROM deletion_requests WHERE ${tenant(s)} AND completed_at IS NOT NULL AND (lookup_hash IS NULL OR lookup_hash=ANY(${related}::text[]))`.execute(db)).rows.length)return;
    await sql`INSERT INTO gateway_ingest(organization_id,guild_id,dedupe_key,subject_hash,payload) SELECT ${event.organizationId}::uuid,${event.guildId},${dedupeKey(event)},${hash},${json(event)} WHERE EXISTS(SELECT 1 FROM guilds WHERE ${tenant(s)}) AND NOT EXISTS(SELECT 1 FROM deletion_requests WHERE ${tenant(s)} AND completed_at IS NOT NULL AND (lookup_hash IS NULL OR lookup_hash=${hash})) ON CONFLICT DO NOTHING`.execute(db);
    if(!(await sql`SELECT dedupe_key FROM gateway_ingest WHERE ${tenant(s)} AND dedupe_key=${dedupeKey(event)}`.execute(db)).rows.length)return;
   }
@@ -39,7 +41,7 @@ export class GatewayPublisher {
  }
 }
 export function createGateway(redis:Redis,vault:IdentityVault,onError:()=>void=()=>{},db?:Database,onInteraction?:(interaction:Interaction)=>Promise<void>){
- const client=new Client({intents:gatewayIntents});const publisher=new GatewayPublisher(redis,db,vault);const sessions=new Map<number,string>();let healthSequence=0;
+ const client=new Client({intents:gatewayIntents});const publisher=new GatewayPublisher(redis,db,vault);const sessions=new Map<number,string>(),pending=new Map<string,Promise<void>>();let healthSequence=0;
  const healthSession=randomUUID();const disconnected=new Set<number>();
  const registerGuild=async(guildId:string)=>{if(!db)return;const scope=scopeForGuild(guildId);await db.transaction().execute(tx=>ensureGuild(tx,scope));};
  const health=async(kind:Envelope['kind'],shardId?:number)=>{
@@ -53,7 +55,7 @@ export function createGateway(redis:Redis,vault:IdentityVault,onError:()=>void=(
  client.on('raw',(packet:Dispatch,shardId:number)=>{
   if(packet.t==='READY'){const data=packet.d as {session_id:string};sessions.set(shardId,data.session_id);}
   const session=sessions.get(shardId);if(!session)return;
-  try{const event=normalize(packet,shardId,session,vault);if(event)void registerGuild(event.guildId).then(()=>publisher.publish(event)).catch(onError);}catch{onError();}
+  try{const events=normalizeMany(packet,shardId,session,vault);if(events.length){const guildId=events[0]!.guildId,next=(pending.get(guildId)??Promise.resolve()).then(()=>registerGuild(guildId)).then(async()=>{for(const event of events)await publisher.publish(event);}).catch(onError);pending.set(guildId,next);void next.finally(()=>{if(pending.get(guildId)===next)pending.delete(guildId);});}}catch{onError();}
  });
  client.on(Events.GuildCreate,guild=>{void registerGuild(guild.id).then(()=>health('telemetry.connected',guild.shardId)).catch(onError);});
  client.on(Events.ClientReady,()=>{void health('telemetry.connected');});
