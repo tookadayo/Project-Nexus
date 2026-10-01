@@ -910,3 +910,36 @@ it.each(representativeProfiles.map((profile, index) => ({ profile, index })))(
       );
   },
 );
+it("does not turn structural posts from an unknown or bot owner into human support activity", async () => {
+  const f = await fixture(),
+    bot = "222222222222222229";
+  await f.send("GUILD_MEMBER_ADD", {
+    user: { id: bot, bot: true },
+    joined_at: f.now.toISOString(),
+  });
+  await f.send("THREAD_CREATE", {
+    id: thread,
+    parent_id: channel,
+    type: 11,
+    owner_id: bot,
+    newly_created: true,
+  });
+  await sql`INSERT INTO guild_capability_snapshots VALUES(${f.s.organizationId}::uuid,${f.s.guildId},gen_random_uuid(),${json(buildCapabilitySnapshot(representativeSource(4), f.now))},${f.now})`.execute(
+    db,
+  );
+  const view = (
+    await new CommunityService(db, f.settings).overview(
+      f.s,
+      30,
+      new Date(f.now.getTime() + 1000),
+    )
+  ).adaptive!;
+  expect(view.metrics.some((m) => m.key === "supportPosts")).toBe(false);
+  expect(
+    (
+      await sql`SELECT channel_id FROM discord_surface_state WHERE ${tenant(f.s)} AND channel_id=${thread}`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(1);
+});

@@ -1,5 +1,5 @@
 import {beforeAll,afterAll,expect,it,vi} from 'vitest';
-import EmbeddedPostgres from 'embedded-postgres';
+import {infrastructure} from '../fixtures/infrastructure.js';
 import {migrate,ensureGuild,sql} from '../../packages/db/src/index.js';
 import {Kysely,PostgresDialect} from 'kysely';
 import pg from 'pg';
@@ -7,8 +7,6 @@ import {randomUUID,generateKeyPairSync,sign} from 'node:crypto';
 import {createInteractionServer} from '../../apps/interaction/src/server.js';
 import {IdentityVault} from '../../packages/identity/src/index.js';
 import {Components,scopeForGuild} from '../../packages/security/src/index.js';
-import {resolve} from 'node:path';
-import {existsSync} from 'node:fs';
 import {SettingsService} from '../../packages/settings/src/index.js';
 import {OnboardingService} from '../../packages/onboarding/src/index.js';
 import {templateFlow} from '../../packages/onboarding/src/flow.js';
@@ -19,19 +17,13 @@ import {DiscordFailure} from '../../packages/discord/src/rest.js';
 import {PrivacyService} from '../../packages/security/src/privacy.js';
 import {CommunityService} from '../../packages/presentation/src/community.js';
 import {HelperWorker} from '../../apps/worker/src/helpers.js';
-const server=new EmbeddedPostgres({databaseDir:resolve('.local/test-pg-v060b'),user:'nexus',password:'nexus',port:55435,persistent:true,onLog:()=>{},onError:()=>{}});
-const pool=new pg.Pool({connectionString:'postgresql://nexus:nexus@127.0.0.1:55435/postgres',max:10,connectionTimeoutMillis:500});
+let infra:Awaited<ReturnType<typeof infrastructure>>,db:Kysely<Record<string,never>>;
 const closingClients=new Set<Promise<void>>();
-pool.on('connect',client=>{
- const closed=new Promise<void>(done=>client.once('end',()=>{closingClients.delete(closed);done();}));
- closingClients.add(closed);
-});
-const db=new Kysely<Record<string,never>>({dialect:new PostgresDialect({pool})});
-beforeAll(async()=>{if(!existsSync('.local/test-pg-v060b/PG_VERSION'))await server.initialise();await server.start();await migrate(db);});
+beforeAll(async()=>{infra=await infrastructure();const pool=new pg.Pool({connectionString:infra.databaseUrl,max:10,connectionTimeoutMillis:500});pool.on('connect',client=>{const closed=new Promise<void>(done=>client.once('end',()=>{closingClients.delete(closed);done();}));closingClients.add(closed);});db=new Kysely<Record<string,never>>({dialect:new PostgresDialect({pool})});await migrate(db);});
 // pg-pool resolves end() before every socket has finished closing. Keep the
 // fixture alive until the clients emit end, so shutdown cannot send a FATAL
 // administrator-termination error to a still-closing idle connection.
-afterAll(async()=>{await db.destroy();await Promise.all(closingClients);await server.stop();});
+afterAll(async()=>{await db?.destroy();await Promise.all(closingClients);await infra?.stop();});
 it('runs migrations idempotently and enforces guild ownership',async()=>{
  await migrate(db);
  const scope={organizationId:randomUUID(),guildId:'123456789012345678'};
@@ -205,7 +197,7 @@ it('completes setup with optional choices and confirms manager role grants',asyn
   await worker.dispatch(s,{...base,id:`65555555555555557${index+6}`,command:'',customId:token});
  }
  const upgraded=await settings.get(s);expect(upgraded.setupVersion).toBe(2);expect(upgraded.managerRoleIds).toEqual(old.managerRoleIds);
- const status=await worker.dispatch(s,{...base,id:'655555555555555580',command:'status'});expect(JSON.stringify(status)).toContain('0.6.0-alpha.3');expect(JSON.stringify(status)).not.toContain('PID');
+ const status=await worker.dispatch(s,{...base,id:'655555555555555580',command:'status'});expect(JSON.stringify(status)).toContain('0.6.0-alpha.4');expect(JSON.stringify(status)).not.toContain('PID');
 });
 it('distinguishes setup approval from safe skip during a legacy guild review',async()=>{
  const s=scopeForGuild('656666666666666666');await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);

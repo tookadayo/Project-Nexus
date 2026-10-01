@@ -2,7 +2,7 @@
 
 NEXUS は、雑談・募集・質問・フィードバック・イベント・作品紹介・ボイスなどの運営目的に合わせ、新しいメンバーの活動と応答をDiscordで観測できるメタデータから集計します。管理者は対応が必要な投稿を確認し、改善策をプレビューしてから有効化し、結果を見られます。比較から原因を断定せず、少人数の詳細は表示しません。
 
-現在のリリースは **0.6.0-alpha.3** です。バージョンはルートの `package.json` を唯一のリリース版ソースとし、`MAJOR.MINOR.PATCH-prerelease` の SemVer に従います。例: `0.6.0-alpha.2`、`0.6.0-beta.1`、`0.6.0-rc.1`、`0.6.0`。Build は Git の短縮 SHA です。パッケージ環境では `NEXUS_BUILD_SHA` を指定できます。
+現在のリリースは **0.6.0-alpha.4** です。バージョンはルートの `package.json` を唯一のリリース版ソースとし、`MAJOR.MINOR.PATCH-prerelease` の SemVer に従います。例: `0.6.0-alpha.2`、`0.6.0-beta.1`、`0.6.0-rc.1`、`0.6.0`。Build は Git の短縮 SHA です。パッケージ環境では `NEXUS_BUILD_SHA` を指定できます。
 
 ## Development self-host
 
@@ -41,9 +41,9 @@ Hosted Web は `NODE_ENV=production`、`NEXUS_WEB_AUTH_MODE=oauth`、`DISCORD_CL
 
 `NODE_ENV=production` と `NEXUS_WEB_AUTH_MODE=development` の組合せは起動時に拒否します。Basic認証は、production以外でdevelopmentを明示し、16文字以上の `NEXUS_WEB_PASSWORD` を設定した場合だけ使用できます。Dashboardは選択したサーバーの現在の権限とWeb接続を確認し、サーバー一覧全体の取得は `/servers` で行います。OAuthの自動更新は未実装で、有効期限後は再ログインが必要です。LogoutはローカルCookieを消し、Discordのトークン失効を試みます。
 
-表示用語と計測の定義は [Product language](docs/product-language.md)、監査範囲・残課題・検証結果は [Quality audit](NEXUS%20v0.6.0-alpha.3%20QUALITY%20AUDIT.md) を参照してください。Homeの比較期間はカレンダー週ではなく、観測を完了した参加期間です。
+表示用語と計測の定義は [Product language](docs/product-language.md)、対応範囲・残課題・検証結果は [alpha.4 implementation report](NEXUS%20v0.6.0-alpha.4%20IMPLEMENTATION%20REPORT.md) を参照してください。Homeの比較期間はカレンダー週ではなく、観測を完了した参加期間です。
 
-Webも既存のDB・Identity鍵・Bot設定を使用します。起動前に `corepack pnpm migrate` で025を適用してください。確認付きの `/nexus unlink` またはSettingsのサーバー接続解除でWeb接続だけを解除でき、設定・履歴・分析データは保持されます。構成・検証方法は [Server verification](docs/server-verification.md) を参照してください。
+Webも既存のDB・Identity鍵・Bot設定を使用します。起動前に `corepack pnpm migrate` で026までのmigrationを適用してください。確認付きの `/nexus unlink` またはSettingsのサーバー接続解除でWeb接続だけを解除でき、設定・履歴・分析データは保持されます。構成・検証方法は [Server verification](docs/server-verification.md) を参照してください。
 
 ## Privacy とサポート
 
