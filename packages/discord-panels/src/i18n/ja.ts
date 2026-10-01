@@ -1,6 +1,7 @@
 import {en,type MessageKey} from './en';
 import {webJa} from './web';
 export const ja={...en,...webJa,
+ 'control.model':'コミュニティモデル',
  'polish.team':'チーム','polish.goals':'目標','polish.measurementScope':'計測範囲','polish.weekIntro':'観測期間を完了したメンバーの結果です。',
  'control.main':'設定一覧',
 "polish.today":"今日",

@@ -16,6 +16,8 @@ export async function POST(req:NextRequest){
   if(action==='weekly_summary'){url=base+'/settings/weekly-summary';payload=JSON.stringify({enabled:parsed.enabled,channelId:parsed.channelId,day:parsed.day,hour:parsed.hour,timezone:parsed.timezone,revision:parsed.revision});}
   if(action==='helper'){url=base+'/settings/helper';payload=JSON.stringify({enabled:parsed.enabled,channelId:parsed.channelId,roleId:parsed.roleId,responseMinutes:parsed.responseMinutes,cooldownMinutes:parsed.cooldownMinutes,revision:parsed.revision});}
   if(action==='goals'){url=base+'/settings/goals';payload=JSON.stringify({preset:parsed.preset,goals:parsed.goals,channels:parsed.channels,revision:parsed.revision});}
+  if(action==='community_model'){url=base+'/settings/community-model';payload=JSON.stringify({profile:parsed.profile,revision:parsed.revision});}
+  if(action==='capability_refresh'){url=base+'/community-model/refresh';payload='{}';}
   if(action==='analysis_scope'){url=base+'/settings/analysis-scope';payload=JSON.stringify({mode:parsed.mode,channelIds:parsed.channelIds,staffRoleIds:parsed.staffRoleIds,revision:parsed.revision});}
   if(action==='feedback_dismiss'){url=base+'/opportunities/dismiss';payload=JSON.stringify({suggestionType:parsed.suggestionType,reason:parsed.reason??null});}
   if(action==='attention_action'){url=base+'/attention/action';payload=JSON.stringify({channelId:parsed.channelId,messageId:parsed.messageId,status:parsed.status,minutes:parsed.minutes,untilToday:parsed.untilToday});}

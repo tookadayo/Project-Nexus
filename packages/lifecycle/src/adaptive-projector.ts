@@ -92,6 +92,7 @@ export async function resolveSurface(tx: Tx, s: Scope, channelId: string) {
       created_at: Date | null;
       tag_ids: string[];
       parent_type: number | null;
+      creation_observed: boolean;
     }>`SELECT c.*,p.channel_type AS parent_type FROM discord_surface_state c LEFT JOIN discord_surface_state p ON p.organization_id=c.organization_id AND p.guild_id=c.guild_id AND p.channel_id=c.parent_id WHERE c.organization_id=${s.organizationId}::uuid AND c.guild_id=${s.guildId} AND c.channel_id=${channelId}`.execute(
       tx,
     )
@@ -102,6 +103,7 @@ export async function resolveSurface(tx: Tx, s: Scope, channelId: string) {
     ownerHash: c?.owner_hash ?? null,
     createdAt: c?.created_at ?? null,
     tagIds: c?.tag_ids ?? [],
+    creationObserved: c?.creation_observed ?? false,
   };
 }
 export async function projectStructure(
@@ -152,7 +154,7 @@ export async function projectStructure(
         tx,
       );
     else
-      await sql`INSERT INTO discord_surface_state VALUES(${s.organizationId}::uuid,${s.guildId},${e.channelId},${e.parentId ?? null},${e.channelType ?? -1},${e.ownerHash ?? null},${e.archived ?? false},${e.locked ?? false},${e.createdAt ? new Date(e.createdAt) : e.kind === "thread.created" ? at : null},${e.tagIds ?? []}::text[],${at}) ON CONFLICT(organization_id,guild_id,channel_id) DO UPDATE SET channel_type=EXCLUDED.channel_type,parent_id=EXCLUDED.parent_id,owner_hash=COALESCE(EXCLUDED.owner_hash,discord_surface_state.owner_hash),archived=EXCLUDED.archived,locked=EXCLUDED.locked,created_at=COALESCE(discord_surface_state.created_at,EXCLUDED.created_at),tag_ids=EXCLUDED.tag_ids,observed_at=EXCLUDED.observed_at WHERE discord_surface_state.observed_at<=EXCLUDED.observed_at`.execute(
+      await sql`INSERT INTO discord_surface_state VALUES(${s.organizationId}::uuid,${s.guildId},${e.channelId},${e.parentId ?? null},${e.channelType ?? -1},${e.ownerHash ?? null},${e.archived ?? false},${e.locked ?? false},${e.createdAt ? new Date(e.createdAt) : e.kind === "thread.created" ? at : null},${e.tagIds ?? []}::text[],${at},${e.kind === "thread.created"}) ON CONFLICT(organization_id,guild_id,channel_id) DO UPDATE SET creation_observed=discord_surface_state.creation_observed OR EXCLUDED.creation_observed,channel_type=EXCLUDED.channel_type,parent_id=EXCLUDED.parent_id,owner_hash=COALESCE(EXCLUDED.owner_hash,discord_surface_state.owner_hash),archived=EXCLUDED.archived,locked=EXCLUDED.locked,created_at=COALESCE(discord_surface_state.created_at,EXCLUDED.created_at),tag_ids=EXCLUDED.tag_ids,observed_at=EXCLUDED.observed_at WHERE discord_surface_state.observed_at<=EXCLUDED.observed_at`.execute(
         tx,
       );
     const parent = e.parentId ?? e.channelId,
@@ -272,8 +274,13 @@ export async function projectStructure(
           tx,
         )
       ).rows;
-      for (const session of sessions)
-        if (!session.data.guest)
+      for (const session of sessions) {
+        if (
+          !session.data.guest &&
+          session.data.episodeId &&
+          ((e.entityType === 1 && session.data.stage === true) ||
+            (e.entityType === 2 && session.data.voiceKnown === true))
+        ) {
           await adaptiveFact(
             tx,
             s,
@@ -287,6 +294,20 @@ export async function projectStructure(
             session.subject_hash,
             String(session.data.episodeId),
           );
+          await lifecycleFact(
+            tx,
+            s,
+            String(session.data.episodeId),
+            "scheduled_event.attended",
+            at,
+            {
+              eventId: e.eventId,
+              channelId: e.channelId,
+              entityType: e.entityType,
+            },
+          );
+        }
+      }
     }
     await requestCapabilityRefresh(tx, s, "event", at);
     return true;
@@ -314,7 +335,7 @@ async function lifecycleFact(
   at: Date,
   data: Record<string, unknown>,
 ) {
-  await sql`INSERT INTO lifecycle_events VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episodeId}::uuid,${kind},${at},'PRODUCTION',${json(data)})`.execute(
+  await sql`INSERT INTO lifecycle_events VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episodeId}::uuid,${kind},${at},'PRODUCTION',${json(data)}) ON CONFLICT DO NOTHING`.execute(
     tx,
   );
 }
@@ -330,12 +351,14 @@ export async function projectMemberFlags(
     await sql<{
       member_flags: number;
       screening_pending: boolean;
-    }>`SELECT member_flags,screening_pending FROM membership_episodes WHERE ${tenant(s)} AND id=${episodeId}::uuid FOR UPDATE`.execute(
+      flags_observed_at: Date | null;
+    }>`SELECT member_flags,screening_pending,flags_observed_at FROM membership_episodes WHERE ${tenant(s)} AND id=${episodeId}::uuid FOR UPDATE`.execute(
       tx,
     )
   ).rows[0]!;
-  const at = new Date(e.at),
-    flags = e.memberFlags ?? prior.member_flags,
+  const at = new Date(e.observedAt ?? e.at);
+  if (prior.flags_observed_at && prior.flags_observed_at > at) return;
+  const flags = e.memberFlags ?? prior.member_flags,
     pending = e.pending ?? prior.screening_pending;
   if (prior.member_flags !== flags || prior.screening_pending !== pending)
     await projectNativeSnapshot(tx, s, episodeId, BigInt(flags), pending, at);
@@ -350,7 +373,7 @@ export async function projectMemberFlags(
       await adaptiveFact(tx, s, kind, at, {}, hash, episodeId);
   if (prior.screening_pending && !pending)
     await adaptiveFact(tx, s, "screening.passed", at, {}, hash, episodeId);
-  await sql`UPDATE membership_episodes SET member_flags=${flags},screening_pending=${pending},is_guest=${Boolean(flags & 16)},engagement_started_at=CASE WHEN ${prior.screening_pending && !pending} THEN ${at} WHEN ${pending} THEN NULL ELSE engagement_started_at END WHERE ${tenant(s)} AND id=${episodeId}::uuid`.execute(
+  await sql`UPDATE membership_episodes SET flags_observed_at=${at},member_flags=${flags},screening_pending=${pending},is_guest=${Boolean(flags & 16)},engagement_started_at=CASE WHEN ${prior.screening_pending && !pending} THEN ${at} WHEN ${pending} THEN NULL ELSE engagement_started_at END WHERE ${tenant(s)} AND id=${episodeId}::uuid`.execute(
     tx,
   );
 }
@@ -505,7 +528,7 @@ export async function projectAdaptiveMember(
       },
       at,
     );
-    if (answers.size)
+    if (answers.size) {
       await adaptiveFact(
         tx,
         s,
@@ -515,6 +538,12 @@ export async function projectAdaptiveMember(
         hash,
         episodeId,
       );
+      if (episodeId)
+        await lifecycleFact(tx, s, episodeId, "poll.participated", at, {
+          channelId,
+          messageId: e.messageId,
+        });
+    }
     return true;
   }
   if (e.kind.startsWith("thread.member_")) {
@@ -532,6 +561,8 @@ export async function projectAdaptiveMember(
       hash,
       episodeId,
     );
+    if (episodeId && e.kind === "thread.member_added")
+      await lifecycleFact(tx, s, episodeId, e.kind, at, { channelId });
     return true;
   }
   if (e.kind === "message.sent") {
@@ -610,7 +641,8 @@ export async function projectAdaptiveMember(
       surface.ownerHash &&
       surface.ownerHash !== hash &&
       surface.createdAt &&
-      surface.createdAt <= at
+      surface.createdAt <= at &&
+      surface.creationObserved
     ) {
       const owner = (
         await sql<{
@@ -620,6 +652,9 @@ export async function projectAdaptiveMember(
         )
       ).rows[0];
       if (owner) {
+        await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"thread-response:" + s.organizationId + ":" + s.guildId + ":" + channelId},0))`.execute(
+          tx,
+        );
         const previous = (
           await sql`SELECT id FROM adaptive_facts WHERE ${tenant(s)} AND kind='thread.response_received' AND data->>'channelId'=${channelId}`.execute(
             tx,
@@ -699,6 +734,7 @@ async function qualifyVoice(
     data.connected ||
     data.guest ||
     data.stage ||
+    data.voiceKnown !== true ||
     seconds < cfg.communityModel.voiceThresholdSeconds
   )
     return;
@@ -742,10 +778,12 @@ async function projectVoice(
       (await state(tx, s, "guild", "afk"))?.data.channelId ??
       (await latestCapability(tx, s))?.afkChannelId;
   const channelId = e.channelId === afk ? null : (e.channelId ?? null),
-    stage = surface?.surface === "STAGE_TEXT";
+    stage = surface?.surface === "STAGE_TEXT",
+    voiceKnown = surface?.surface === "VOICE_TEXT";
   if (
     prior?.data.channelId === channelId &&
     prior.data.stage === stage &&
+    prior.data.voiceKnown === voiceKnown &&
     prior.data.suppress === e.suppress &&
     prior.data.guest === guest
   )
@@ -755,7 +793,7 @@ async function projectVoice(
       oldStage = Boolean(prior.data.stage),
       clock = await state(tx, s, "voice-channel", oldChannel),
       seconds = channelClock(clock?.data, at);
-    if (!oldStage && !prior.data.guest) {
+    if (prior.data.voiceKnown === true && !prior.data.guest) {
       await qualifyVoice(
         tx,
         s,
@@ -799,7 +837,7 @@ async function projectVoice(
       hash,
       episodeId,
     );
-    if (episodeId && !guest && !oldStage)
+    if (episodeId && !guest && prior.data.voiceKnown === true)
       await lifecycleFact(tx, s, episodeId, "voice.duration", at, {
         channelId: oldChannel,
         seconds: Math.max(
@@ -814,7 +852,7 @@ async function projectVoice(
   if (!channelId) return;
   const clock = await state(tx, s, "voice-channel", channelId),
     baseline = channelClock(clock?.data, at);
-  if (!stage && !guest)
+  if (voiceKnown && !guest)
     await setState(
       tx,
       s,
@@ -839,6 +877,7 @@ async function projectVoice(
       joinedAt: at.toISOString(),
       baseline,
       stage,
+      voiceKnown,
       suppress: e.suppress,
       guest,
       episodeId,
@@ -863,7 +902,7 @@ async function projectVoice(
     hash,
     episodeId,
   );
-  if (episodeId && !guest && !stage)
+  if (episodeId && !guest && voiceKnown)
     await lifecycleFact(tx, s, episodeId, "voice.started", at, { channelId });
   if (episodeId && !guest) {
     const events = (
@@ -874,7 +913,12 @@ async function projectVoice(
         tx,
       )
     ).rows;
-    for (const ev of events)
+    for (const ev of events) {
+      if (!(
+        (Number(ev.data.entityType) === 1 && stage) ||
+        (Number(ev.data.entityType) === 2 && voiceKnown)
+      ))
+        continue;
       await adaptiveFact(
         tx,
         s,
@@ -888,6 +932,12 @@ async function projectVoice(
         hash,
         episodeId,
       );
+      await lifecycleFact(tx, s, episodeId, "scheduled_event.attended", at, {
+        eventId: ev.state_key,
+        channelId,
+        entityType: Number(ev.data.entityType),
+      });
+    }
   }
 }
 export async function tickVoice(
@@ -904,7 +954,7 @@ export async function tickVoice(
       subject_hash: string;
       data: Record<string, unknown>;
       clock: Record<string, unknown>;
-    }>`SELECT v.subject_hash,v.data,c.data AS clock FROM adaptive_states v JOIN adaptive_states c ON c.organization_id=v.organization_id AND c.guild_id=v.guild_id AND c.domain='voice-channel' AND c.state_key=v.data->>'channelId' WHERE v.organization_id=${s.organizationId}::uuid AND v.guild_id=${s.guildId} AND v.domain='voice' AND v.data->>'connected'='false' AND v.data->>'guest'='false' AND v.data->>'stage'='false' LIMIT 500`.execute(
+    }>`SELECT v.subject_hash,v.data,c.data AS clock FROM adaptive_states v JOIN adaptive_states c ON c.organization_id=v.organization_id AND c.guild_id=v.guild_id AND c.domain='voice-channel' AND c.state_key=v.data->>'channelId' WHERE v.organization_id=${s.organizationId}::uuid AND v.guild_id=${s.guildId} AND v.domain='voice' AND v.data->>'connected'='false' AND v.data->>'guest'='false' AND v.data->>'stage'='false' ORDER BY ((c.data->>'seconds')::numeric-(v.data->>'baseline')::numeric+CASE WHEN (c.data->>'count')::integer>=2 THEN GREATEST(0,extract(epoch FROM ${now}-(c.data->>'since')::timestamptz)) ELSE 0 END) DESC LIMIT 500`.execute(
       tx,
     )
   ).rows;

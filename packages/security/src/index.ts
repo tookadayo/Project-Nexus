@@ -26,7 +26,7 @@ export class Components {
   const id=randomUUID();
   await sql`INSERT INTO component_tokens(organization_id,guild_id,id,actor_hash,intent,expires_at)
     VALUES(${s.organizationId}::uuid,${s.guildId},${id}::uuid,${actorHash},${json(intent)},${new Date(Date.now()+ttl*1000)})`.execute(tx);
-  const prefix=intent.action==='editNodeOpen'||intent.action==='controlNotificationEdit'?'modal:':intent.privateSettings===true?'private:':intent.action==='controlNavigate'?'nav:':'';
+  const prefix=['editNodeOpen','controlNotificationEdit','controlModelEdit'].includes(String(intent.action))?'modal:':intent.privateSettings===true?'private:':intent.action==='controlNavigate'?'nav:':'';
   return `${prefix}${id}.${this.mac(id)}`;
  }
  async read(tx:Tx,s:Scope,token:string,actorHash:string){

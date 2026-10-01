@@ -21,6 +21,22 @@ export type AdaptiveMetric = {
   purpose?: string;
 };
 export type AdaptivePresentation = {
+  progress?: {
+    entered: number;
+    eligible: number;
+    first: number;
+    connected: number;
+    repeated: number;
+    retained: number;
+    pending: number;
+    insufficient: number;
+    from: string;
+    through: string;
+    observationDays: number;
+    repeatDays: number;
+    returnFromDay: number;
+    returnThroughDay: number;
+  };
   profile: CommunityModel;
   capabilities: CapabilitySnapshot | null;
   volume: "LOW_VOLUME" | "STANDARD" | "HIGH_VOLUME";
@@ -75,12 +91,20 @@ export async function adaptivePresentation(
       db,
     )
   ).rows[0]!;
+  const scopeFilter = (data: string) => {
+    const ref = sql.ref(data);
+    return sql`(${ref}->>'channelId' IS NULL OR ${cfg.analysisScope.mode}='all' OR (${cfg.analysisScope.mode}='include')=(COALESCE((SELECT parent_id FROM discord_surface_state ch WHERE ch.organization_id=${s.organizationId}::uuid AND ch.guild_id=${s.guildId} AND ch.channel_id=${ref}->>'channelId'),${ref}->>'channelId')=ANY(${cfg.analysisScope.channelIds}::text[])))`;
+  };
+  const staffFilter = (hash: string) =>
+    roles.length
+      ? sql`NOT EXISTS(SELECT 1 FROM member_identity_map m JOIN membership_episodes e ON e.organization_id=m.organization_id AND e.guild_id=m.guild_id AND e.identity_id=m.id JOIN member_observable_state st ON st.organization_id=e.organization_id AND st.guild_id=e.guild_id AND st.episode_id=e.id WHERE m.organization_id=${s.organizationId}::uuid AND m.guild_id=${s.guildId} AND m.lookup_hash=${sql.ref(hash)} AND st.roles&&${roles}::text[])`
+      : sql`true`;
   const facts = (
       await sql<{
         kind: string;
         count: number;
         sample: number;
-      }>`SELECT kind,count(*)::integer AS count,count(DISTINCT subject_hash) FILTER(WHERE subject_hash<>'')::integer AS sample FROM adaptive_facts WHERE ${tenant(s)} AND occurred_at>=${from} AND occurred_at<=${now} GROUP BY kind`.execute(
+      }>`SELECT kind,count(*)::integer AS count,count(DISTINCT subject_hash) FILTER(WHERE subject_hash<>'')::integer AS sample FROM adaptive_facts f WHERE ${tenant(s)} AND occurred_at>=${from} AND occurred_at<=${now} AND ${scopeFilter("f.data")} AND ${staffFilter("f.subject_hash")} GROUP BY kind`.execute(
         db,
       )
     ).rows,
@@ -91,7 +115,7 @@ export async function adaptivePresentation(
         domain: string;
         count: number;
         sample: number;
-      }>`SELECT domain,count(DISTINCT (subject_hash,data->>'messageId'))::integer AS count,count(DISTINCT subject_hash)::integer AS sample FROM adaptive_states WHERE ${tenant(s)} AND domain IN ('reaction','poll') AND data->>'active'='true' GROUP BY domain`.execute(
+      }>`SELECT domain,count(DISTINCT (subject_hash,data->>'messageId'))::integer AS count,count(DISTINCT subject_hash)::integer AS sample FROM adaptive_states a WHERE ${tenant(s)} AND domain IN ('reaction','poll') AND data->>'active'='true' AND observed_at>=${from} AND observed_at<=${now} AND ${scopeFilter("a.data")} AND ${staffFilter("a.subject_hash")} GROUP BY domain`.execute(
         db,
       )
     ).rows,
@@ -112,7 +136,7 @@ export async function adaptivePresentation(
       median: number;
       p75: number;
       p90: number;
-    }>`SELECT data->>'surface' AS surface,data->>'purpose' AS purpose,count(*)::integer AS sample,percentile_cont(.5) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS median,percentile_cont(.75) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS p75,percentile_cont(.9) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS p90 FROM adaptive_facts WHERE ${tenant(s)} AND kind='thread.response_received' AND occurred_at>=${from} AND occurred_at<=${now} GROUP BY data->>'surface',data->>'purpose'`.execute(
+    }>`SELECT data->>'surface' AS surface,data->>'purpose' AS purpose,count(*)::integer AS sample,percentile_cont(.5) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS median,percentile_cont(.75) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS p75,percentile_cont(.9) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS p90 FROM adaptive_facts f WHERE ${tenant(s)} AND kind='thread.response_received' AND occurred_at>=${from} AND occurred_at<=${now} AND ${scopeFilter("f.data")} AND ${staffFilter("f.subject_hash")} GROUP BY data->>'surface',data->>'purpose'`.execute(
       db,
     )
   ).rows;
@@ -122,7 +146,7 @@ export async function adaptivePresentation(
       median: number | null;
       p75: number | null;
       p90: number | null;
-    }>`SELECT count(*)::integer AS sample,percentile_cont(.5) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS median,percentile_cont(.75) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS p75,percentile_cont(.9) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS p90 FROM lifecycle_events f JOIN membership_episodes ep ON ep.organization_id=f.organization_id AND ep.guild_id=f.guild_id AND ep.id=f.episode_id WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.kind='reply.received' AND f.context='PRODUCTION' AND f.occurred_at>=${from} AND f.occurred_at<=${now} AND NOT ep.screening_pending AND NOT ep.is_guest`.execute(
+    }>`SELECT count(*)::integer AS sample,percentile_cont(.5) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS median,percentile_cont(.75) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS p75,percentile_cont(.9) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS p90 FROM lifecycle_events f JOIN membership_episodes ep ON ep.organization_id=f.organization_id AND ep.guild_id=f.guild_id AND ep.id=f.episode_id WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.kind='reply.received' AND f.context='PRODUCTION' AND f.occurred_at>=${from} AND f.occurred_at<=${now} AND NOT ep.screening_pending AND NOT ep.is_guest AND ${scopeFilter("f.data")} AND NOT EXISTS(SELECT 1 FROM member_observable_state st WHERE st.organization_id=ep.organization_id AND st.guild_id=ep.guild_id AND st.episode_id=ep.id AND st.roles&&${roles}::text[])`.execute(
       db,
     )
   ).rows[0]!;
@@ -131,7 +155,7 @@ export async function adaptivePresentation(
       snapshot.coverage.ratio !== 1 ||
       snapshot.coverage.privateThreads === "PARTIAL",
     metrics: AdaptiveMetric[] = [],
-    modes = cfg.communityModel.modes,
+    modes = cfg.communityModel.confirmed ? cfg.communityModel.modes : [],
     has = (key: string) =>
       snapshot &&
       ["ENABLED", "OBSERVED", "CONFIGURED", "AVAILABLE"].includes(
@@ -182,6 +206,54 @@ export async function adaptivePresentation(
       p90Minutes: reply.p90,
     });
   }
+  const postGroups = (
+    await sql<{
+      unanswered: number;
+      purpose: string;
+      surface: string;
+      count: number;
+      sample: number;
+    }>`SELECT data->>'purpose' AS purpose,data->>'surface' AS surface,count(*)::integer AS count,count(DISTINCT subject_hash)::integer AS sample,count(*) FILTER(WHERE NOT EXISTS(SELECT id FROM adaptive_facts r WHERE r.organization_id=f.organization_id AND r.guild_id=f.guild_id AND r.kind='thread.response_received' AND r.data->>'channelId'=f.data->>'channelId' AND r.occurred_at<=${now}))::integer AS unanswered FROM adaptive_facts f WHERE ${tenant(s)} AND kind='thread.created' AND occurred_at>=${from} AND occurred_at<=${now} AND ${scopeFilter("f.data")} AND ${staffFilter("f.subject_hash")} GROUP BY data->>'purpose',data->>'surface'`.execute(
+      db,
+    )
+  ).rows;
+  for (const post of postGroups) {
+    const key =
+      post.purpose === "LFG" && modes.includes("LFG_PLAY")
+        ? "lfgPosts"
+        : post.purpose === "SUPPORT" && modes.includes("SUPPORT_QA")
+          ? "supportPosts"
+          : ["BUG_REPORT", "FEEDBACK"].includes(post.purpose) &&
+              modes.includes("DEVELOPMENT_FEEDBACK")
+            ? "feedbackPosts"
+            : post.surface === "MEDIA_POST" &&
+                modes.includes("CONTENT_SHOWCASE")
+              ? "showcasePosts"
+              : null;
+    if (!key) continue;
+    add(
+      key,
+      post.count,
+      post.sample,
+      "Posts whose creation was observed in the selected window; no historical backfill.",
+      null,
+    );
+    Object.assign(metrics.at(-1)!, {
+      surface: post.surface,
+      purpose: post.purpose,
+    });
+    add(
+      "postsAwaitingResponse",
+      post.unanswered,
+      post.count,
+      "Observed new posts without a first other-human message; silence does not prove failure or unresolved status.",
+      post.count,
+    );
+    Object.assign(metrics.at(-1)!, {
+      surface: post.surface,
+      purpose: post.purpose,
+    });
+  }
   for (const response of responses) {
     const allowed =
       (response.purpose === "LFG" && modes.includes("LFG_PLAY")) ||
@@ -210,7 +282,7 @@ export async function adaptivePresentation(
       (
         await sql<{
           count: number;
-        }>`SELECT count(*)::integer AS count FROM discord_surface_state WHERE ${tenant(s)} AND EXISTS(SELECT 1 FROM jsonb_array_elements(${JSON.stringify(cfg.communityModel.forumTags)}::jsonb) t WHERE t->>'channelId'=parent_id AND t->>'meaning'='RESOLVED' AND t->>'tagId'=ANY(tag_ids))`.execute(
+        }>`SELECT count(*)::integer AS count FROM discord_surface_state ch WHERE ${tenant(s)} AND (${cfg.analysisScope.mode}='all' OR (${cfg.analysisScope.mode}='include')=(COALESCE(parent_id,channel_id)=ANY(${cfg.analysisScope.channelIds}::text[]))) AND ${staffFilter("ch.owner_hash")} AND EXISTS(SELECT 1 FROM jsonb_array_elements(${JSON.stringify(cfg.communityModel.forumTags)}::jsonb) t WHERE t->>'channelId'=parent_id AND t->>'meaning'='RESOLVED' AND t->>'tagId'=ANY(tag_ids))`.execute(
           db,
         )
       ).rows[0]?.count ?? 0;
@@ -225,7 +297,7 @@ export async function adaptivePresentation(
   if ((modes.includes("VOICE") || modes.includes("LFG_PLAY")) && has("voice"))
     add(
       "voiceCopresence",
-      count("voice.copresence"),
+      counts.get("voice.copresence")?.sample ?? 0,
       counts.get("voice.copresence")?.sample ?? 0,
       `Observed human co-presence for at least ${cfg.communityModel.voiceThresholdSeconds / 60} minutes; excludes bots, AFK, guests, Stage audience. This does not prove conversation.`,
     );
@@ -234,7 +306,7 @@ export async function adaptivePresentation(
       await sql<{
         posts: number;
         after_voice: number;
-      }>`SELECT count(*) FILTER(WHERE f.kind='thread.created')::integer AS posts,count(DISTINCT f.subject_hash) FILTER(WHERE f.kind='voice.copresence' AND EXISTS(SELECT 1 FROM adaptive_facts p WHERE p.organization_id=f.organization_id AND p.guild_id=f.guild_id AND p.subject_hash=f.subject_hash AND p.kind='message.sent' AND p.data->>'purpose'='LFG' AND p.occurred_at<f.occurred_at AND p.occurred_at>f.occurred_at-interval '1 day'))::integer AS after_voice FROM adaptive_facts f WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.occurred_at>=${from}`.execute(
+      }>`SELECT count(*) FILTER(WHERE f.kind='thread.created')::integer AS posts,count(DISTINCT f.subject_hash) FILTER(WHERE f.kind='voice.copresence' AND EXISTS(SELECT 1 FROM adaptive_facts p WHERE p.organization_id=f.organization_id AND p.guild_id=f.guild_id AND p.subject_hash=f.subject_hash AND p.kind='message.sent' AND p.data->>'purpose'='LFG' AND p.occurred_at<f.occurred_at AND p.occurred_at>f.occurred_at-interval '1 day'))::integer AS after_voice FROM adaptive_facts f WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.occurred_at>=${from} AND f.occurred_at<=${now} AND ${scopeFilter("f.data")} AND ${staffFilter("f.subject_hash")}`.execute(
         db,
       )
     ).rows[0]!;
@@ -279,7 +351,7 @@ export async function adaptivePresentation(
         "activeReactions",
         states.get("reaction")?.count ?? 0,
         states.get("reaction")?.sample ?? 0,
-        "Current user/message reaction participation since collection began; bots/self reactions excluded. Unique humans shown as sample.",
+        "Current user/message reaction participation last observed in this window; bots/self reactions excluded. Unique humans shown as sample.",
         null,
       );
     if (count("poll.participated") || states.has("poll"))
@@ -287,7 +359,7 @@ export async function adaptivePresentation(
         "pollParticipants",
         states.get("poll")?.count ?? 0,
         states.get("poll")?.sample ?? 0,
-        "Current user/poll participation; multiple selected answers count once. No answer meaning collected.",
+        "Current user/poll participation last observed in this window; multiple selected answers count once. No answer meaning collected.",
         null,
       );
   }

@@ -11,7 +11,7 @@ function quantile(values:number[],p:number){if(!values.length)return null;const 
 export function computeOverview(episodes:MetricEpisode[],events:MetricEvent[],from:number,to:number,asOf:number,coverageRatio:number,activationHours=168):Overview {
  const cohort=[...new Map(episodes.filter(e=>e.context==='PRODUCTION'&&e.joinedAt>=from&&e.joinedAt<to&&e.joinedAt<=asOf).map(e=>[e.id,e])).values()];
  const activity=events.filter(e=>e.context==='PRODUCTION'&&e.at<=asOf);
- const byEpisode=new Map(cohort.map(e=>[e.id,activity.filter(a=>a.episodeId===e.id&&a.at>=e.joinedAt)]));
+ const eligible=new Map(cohort.map(e=>[e.id,e])),byEpisode=new Map(cohort.map(e=>[e.id,[] as MetricEvent[]]));for(const event of activity){const episode=eligible.get(event.episodeId);if(episode&&event.at>=episode.joinedAt)byEpisode.get(event.episodeId)!.push(event);}
  const metric=(value:number|null,n:number):MetricValue=>({value:coverageRatio===0?null:value,sampleSize:n,coverage:coverageRatio===0?'UNAVAILABLE':coverageRatio<1?'PARTIAL':'COMPLETE',coverageRatio});
  const rate=(numerator:number,denominator:number)=>metric(denominator?numerator/denominator:null,denominator);
  const started=cohort.filter(e=>byEpisode.get(e.id)!.some(a=>a.kind==='nexus_onboarding.started'));

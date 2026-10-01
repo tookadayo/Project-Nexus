@@ -52,3 +52,5 @@
 @media(max-width:800px){.product .measurement-grid{grid-template-columns:1fr}}
 
 .hero-title-ja .hero-phrase{display:inline-block}
+/* Community configuration and adaptive metrics share the existing surface design. */
+.adaptive-community .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin:20px 0}.adaptive-community .cards article{border:1px solid var(--border,#303744);border-radius:12px;padding:18px;min-width:0}.adaptive-community .cards article strong{font-size:1.8rem}.community-model fieldset{border:1px solid var(--border,#303744);border-radius:12px;padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:20px 0}.community-model fieldset label{display:flex;align-items:center;gap:10px}.community-model fieldset input{width:18px;height:18px}.community-model details{margin:16px 0}.community-model details>label{display:block;margin:12px 0;overflow-wrap:anywhere}.community-model details select{display:block;max-width:100%;margin-top:6px}.community-model button{margin:12px 12px 8px 0}.community-model li{overflow-wrap:anywhere}

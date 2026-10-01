@@ -3,6 +3,7 @@ ALTER TABLE membership_episodes ADD COLUMN engagement_started_at timestamptz;
 ALTER TABLE membership_episodes ADD COLUMN screening_pending boolean NOT NULL DEFAULT false;
 ALTER TABLE membership_episodes ADD COLUMN is_guest boolean NOT NULL DEFAULT false;
 ALTER TABLE membership_episodes ADD COLUMN member_flags integer NOT NULL DEFAULT 0;
+ALTER TABLE membership_episodes ADD COLUMN flags_observed_at timestamptz;
 CREATE TABLE guild_capability_snapshots (
  organization_id uuid NOT NULL, guild_id text NOT NULL, id uuid NOT NULL, snapshot jsonb NOT NULL, checked_at timestamptz NOT NULL,
  PRIMARY KEY(organization_id,guild_id,id), FOREIGN KEY(organization_id,guild_id) REFERENCES guilds ON DELETE CASCADE);
@@ -15,6 +16,7 @@ CREATE TABLE discord_surface_state (
  archived boolean NOT NULL DEFAULT false, locked boolean NOT NULL DEFAULT false, created_at timestamptz, tag_ids text[] NOT NULL DEFAULT '{}', observed_at timestamptz NOT NULL,
  PRIMARY KEY(organization_id,guild_id,channel_id), FOREIGN KEY(organization_id,guild_id) REFERENCES guilds ON DELETE CASCADE);
 CREATE INDEX discord_surface_parent ON discord_surface_state(organization_id,guild_id,parent_id);
+ALTER TABLE discord_surface_state ADD COLUMN creation_observed boolean NOT NULL DEFAULT false;
 CREATE TABLE adaptive_states (
  organization_id uuid NOT NULL, guild_id text NOT NULL, domain text NOT NULL, state_key text NOT NULL, subject_hash text NOT NULL DEFAULT '', target_hash text,
  data jsonb NOT NULL, observed_at timestamptz NOT NULL,
@@ -33,3 +35,5 @@ CREATE INDEX adaptive_facts_target ON adaptive_facts(organization_id,guild_id,ta
 CREATE UNIQUE INDEX adaptive_participation_once ON adaptive_facts(organization_id,guild_id,kind,subject_hash,(data->>'eventId')) WHERE kind='scheduled_event.attended';
 CREATE UNIQUE INDEX adaptive_poll_once ON adaptive_facts(organization_id,guild_id,kind,subject_hash,(data->>'messageId')) WHERE kind='poll.participated';
 CREATE UNIQUE INDEX adaptive_thread_response_once ON adaptive_facts(organization_id,guild_id,kind,(data->>'channelId')) WHERE kind='thread.response_received';
+CREATE UNIQUE INDEX lifecycle_poll_once ON lifecycle_events(organization_id,guild_id,episode_id,(data->>'messageId')) WHERE kind='poll.participated';
+CREATE UNIQUE INDEX lifecycle_attendance_once ON lifecycle_events(organization_id,guild_id,episode_id,(data->>'eventId')) WHERE kind='scheduled_event.attended';

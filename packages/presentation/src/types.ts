@@ -25,5 +25,5 @@ export type ResultsPresentation={generatedAt:string;items:ExperimentPresentation
 export type ActionTemplateKey='reply_rescue'|'welcome_helper'|'inactive_follow_up'|'channel_recommendation'|'event_recommendation';
 export type ActionTemplatePresentation={key:ActionTemplateKey;trigger:string;delaySeconds:number;condition:ActionCondition;action:ActionKind;safety:{mode:'suggest'|'approval'|'auto';contactsPerWeek:number;dmPerDay:number};requires:('channelId'|'eventId'|'recommendedChannelIds')[]};
 export type DiscordOption={id:string;label:string};
-export type DiscordOptions={channels:DiscordOption[];roles:DiscordOption[];events:DiscordOption[];available:boolean};
+export type DiscordOptions={channels:DiscordOption[];roles:DiscordOption[];events:DiscordOption[];available:boolean;surfaces?:{id:string;label:string;type:number}[];forumTags?:{channelId:string;id:string;label:string}[]};
 export type PresentationMetricKey='new_members'|'onboarding_completion'|'activation_rate'|'direct_reply_connection_rate'|'d7_active_retention';

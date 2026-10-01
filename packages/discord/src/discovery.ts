@@ -25,6 +25,7 @@ export type RawChannel = {
   };
 };
 export type DiscoverySource = {
+  botPermissions?:{manageGuild:boolean;manageRoles:boolean;sendMessages:boolean;highestRolePosition:number|null};
   features: string[];
   memberCount: number | null;
   afkChannelId: string | null;
@@ -113,8 +114,8 @@ export function buildCapabilitySnapshot(
   ] as const)
     put(
       key,
-      source.endpointStatus.channels === "UNKNOWN"
-        ? "UNKNOWN"
+      source.endpointStatus.channels !== "AVAILABLE"
+        ? (source.endpointStatus.channels ?? "UNKNOWN")
         : counts[String(type)]
           ? usage[key]
             ? "OBSERVED"
@@ -123,7 +124,7 @@ export function buildCapabilitySnapshot(
     );
   put(
     "threads",
-    source.endpointStatus.threads ?? "UNKNOWN",
+    source.endpointStatus.threads==='AVAILABLE'?usage.threads?'OBSERVED':source.threads.length?'ENABLED':'AVAILABLE':source.endpointStatus.threads??'UNKNOWN',
     "Accessible active threads only; archived/private totals unknown",
   );
   put(
@@ -184,6 +185,8 @@ export function buildCapabilitySnapshot(
     memberCount: source.memberCount,
     afkChannelId: source.afkChannelId,
     channelTypeCounts: counts,
+    botPermissions:source.botPermissions??null,
+    threadCounts:{active:source.endpointStatus.threads==='AVAILABLE'?source.threads.length:null,public:source.endpointStatus.threads==='AVAILABLE'?source.threads.filter(t=>t.type===11).length:null,private:source.endpointStatus.threads==='AVAILABLE'?source.threads.filter(t=>t.type===12).length:null,announcement:source.endpointStatus.threads==='AVAILABLE'?source.threads.filter(t=>t.type===10).length:null},
     capabilities,
     channels: source.channels,
     coverage: {

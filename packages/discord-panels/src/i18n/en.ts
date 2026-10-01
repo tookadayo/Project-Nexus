@@ -1,5 +1,6 @@
 import {webEn} from './web';
 export const en={...webEn,
+ 'control.model':'Community model',
  'polish.team':'Team','polish.goals':'Goals','polish.measurementScope':'Measurement scope','polish.weekIntro':'Results for members who completed the observation window.',
  'control.main':'Settings overview',
 "polish.today":"Today",

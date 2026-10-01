@@ -16,13 +16,18 @@ import type {IdentityVault} from '../../../packages/identity/src/index.js';
 import {resolveLocale,t} from '../../../packages/discord-panels/src/i18n/index.js';
 import {recordProductEvent} from '../../../packages/shared/src/product-telemetry.js';
 import {nextZonedDayStart} from '../../../packages/shared/src/timezones.js';
+import {latestCapability,requestCapabilityRefresh} from '../../../packages/lifecycle/src/discovery.js';
 
 export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:DiscordPort,vault?:IdentityVault){
  const base='/v3/organizations/:organizationId/guilds/:guildId',presentation=new PresentationService(db);
+ const optionsCache=new Map<string,{at:number;value:Awaited<ReturnType<NonNullable<DiscordPort['options']>>>}>();
  const roleCache=new Map<string,{at:number;ids:string[]}>();
  const automaticStaffRoles=async(guildId:string)=>{const cached=roleCache.get(guildId);if(cached&&Date.now()-cached.at<1800000)return cached.ids;if(!discord)return [];try{const roles=await discord.roles(guildId),flags=PermissionFlagsBits.Administrator|PermissionFlagsBits.ManageGuild|PermissionFlagsBits.ManageMessages|PermissionFlagsBits.ModerateMembers,ids=roles.filter(role=>(BigInt(role.permissions)&flags)!==0n).map(role=>role.id);roleCache.set(guildId,{at:Date.now(),ids});return ids;}catch{return cached?.ids??[];}};
  const auth=(params:unknown,header:unknown)=>{const scope=scopeSchema.parse(params);assert(validApiToken(key,scope,String(header??'').replace(/^Bearer /,'')),'FORBIDDEN',403);return scope;};
  const getScope=(req:{params:unknown;headers:{authorization?:unknown}},reply:{header:(name:string,value:string)=>unknown})=>{const scope=auth(req.params,req.headers.authorization);reply.header('Cache-Control','no-store');return scope;};
+ app.get(base+'/community-model',async(req,reply)=>{const s=getScope(req,reply),current=await new SettingsService(db).get(s);return {profile:current.communityModel,revision:current.revision,capabilities:await latestCapability(db,s)};});
+ app.post(base+'/community-model/refresh',async(req,reply)=>{const s=getScope(req,reply);await requestCapabilityRefresh(db,s,'manual');return {state:'PENDING'};});
+ app.post(base+'/settings/community-model',async(req,reply)=>{const s=getScope(req,reply),input=z.object({profile:settingsSchema.shape.communityModel,revision:z.number().int().nonnegative()}).strict().parse(req.body);return new SettingsService(db).update(s,{key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id},input.revision,{communityModel:input.profile});});
  const actionInput=z.object({templateKey:z.enum(['reply_rescue','welcome_helper','inactive_follow_up','channel_recommendation','event_recommendation']),channelId:z.string().optional(),eventId:z.string().optional(),recommendedChannelIds:z.array(z.string()).optional(),safetyMode:z.enum(['suggest','approval','auto']).optional()}).strict();
  app.post(base+'/product-event',async(req,reply)=>{const s=getScope(req,reply),input=z.object({event:z.enum(['web_dashboard_opened','attention_opened','analysis_opened','settings_opened','page_render_latency']),durationMs:z.number().int().min(0).max(600000).optional()}).strict().parse(req.body);await recordProductEvent(db,s,input.event,input.durationMs);return {ok:true};});
  const preflight=async(guildId:string,input:z.infer<typeof actionInput>)=>{
@@ -67,7 +72,7 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
  });
  app.get(base+'/actions',async(req,reply)=>presentation.actions(getScope(req,reply)));
  app.get(base+'/results',async(req,reply)=>presentation.results(getScope(req,reply)));
- app.get(base+'/options',async(req,reply)=>{const s=getScope(req,reply);if(!discord?.options)return {channels:[],roles:[],events:[],available:false};try{return {...await discord.options(s.guildId),available:true};}catch{return {channels:[],roles:[],events:[],available:false};}});
+ app.get(base+'/options',async(req,reply)=>{const s=getScope(req,reply);if(!discord?.options)return {channels:[],roles:[],events:[],available:false};try{const cached=optionsCache.get(s.guildId);if(cached&&Date.now()-cached.at<300000)return {...cached.value,available:true};const value=await discord.options(s.guildId);optionsCache.set(s.guildId,{at:Date.now(),value});return {...value,available:true};}catch{return {channels:[],roles:[],events:[],available:false};}});
  app.post(base+'/setup/activation',async(req,reply)=>{
   const s=getScope(req,reply),input=z.object({preset:z.enum(['reply','event','message'])}).strict().parse(req.body),event={reply:'reply.received',event:'scheduled_event.subscribed',message:'message.sent'}[input.preset],definition={name:`${event} within 7d`,windowSeconds:604800,rule:{op:'event',event,withinSeconds:604800}},actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
   assert(await new EntitlementService(db).canDefineActivation(s,definition),'ENTITLEMENT_REQUIRED',403);

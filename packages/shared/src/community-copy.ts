@@ -55,6 +55,36 @@ export const featureNames: Record<string, readonly [string, string]> = {
   incidents: ["安全性に関する状況", "Safety context"],
 };
 const metrics: Record<string, readonly [string, string, string, string]> = {
+  lfgPosts: [
+    "募集の投稿",
+    "LFG posts",
+    "作成を観測した募集目的の投稿。過去の投稿は補完しません。",
+    "LFG posts whose creation was observed; no historical backfill.",
+  ],
+  supportPosts: [
+    "質問・サポートの投稿",
+    "Support posts",
+    "作成を観測した質問・サポート目的の投稿。",
+    "Observed new posts in admin-mapped support channels.",
+  ],
+  feedbackPosts: [
+    "不具合・フィードバックの投稿",
+    "Feedback posts",
+    "管理者が目的を確認した場所での新規投稿。",
+    "Observed new posts in admin-mapped feedback or bug channels.",
+  ],
+  showcasePosts: [
+    "作品紹介の投稿",
+    "Showcase posts",
+    "公開APIで作成を観測したMedia投稿。画像・本文は収集しません。",
+    "Observed new Media posts; images and body are not collected.",
+  ],
+  postsAwaitingResponse: [
+    "最初の応答をまだ確認できない投稿",
+    "Posts awaiting first response",
+    "作成を観測した投稿のうち、他の人のメッセージをまだ確認できない数。未解決を意味しません。",
+    "Observed new posts without a first other-human message; unresolved status is not inferred.",
+  ],
   directReplies: [
     "直接返信",
     "Direct replies",

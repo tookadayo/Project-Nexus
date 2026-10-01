@@ -89,6 +89,29 @@ export class DiscoveryWorker {
                       : row.kind;
         usage[key] = (usage[key] ?? 0) + row.count;
       }
+      const surfaceUsage = (
+        await sql<{
+          surface: string;
+          count: number;
+        }>`SELECT data->>'surface' AS surface,count(*)::integer AS count FROM adaptive_facts WHERE ${tenant(s)} AND kind='message.sent' AND occurred_at>=${new Date(now.getTime() - 30 * 86400000)} GROUP BY data->>'surface'`.execute(
+          this.db,
+        )
+      ).rows;
+      for (const row of surfaceUsage) {
+        const key = (
+          {
+            TEXT: "text",
+            ANNOUNCEMENT: "announcements",
+            VOICE_TEXT: "voiceText",
+            STAGE_TEXT: "stageText",
+            FORUM_POST: "forum",
+            MEDIA_POST: "media",
+            THREAD: "threads",
+          } as Record<string, string>
+        )[row.surface];
+        if (key)
+          usage[key] = (key === "text" ? 0 : (usage[key] ?? 0)) + row.count;
+      }
       const snapshot = buildCapabilitySnapshot(source, now, prior, usage);
       await this.db.transaction().execute(async (tx) => {
         await privacyReadLock(tx, s);
@@ -113,6 +136,47 @@ export class DiscoveryWorker {
           if (thread.ownerHash && suppressed.has(thread.ownerHash))
             thread.ownerHash = null;
         await sql`INSERT INTO guild_capability_snapshots VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${json(snapshot)},${now})`.execute(
+          tx,
+        );
+        // Keep alpha.3 setup readers aligned with native Onboarding, without repeating its REST reads.
+        const gatewayLive =
+          (
+            await sql`SELECT last_seen FROM telemetry_cursor WHERE ${tenant(s)} AND last_seen>=${new Date(now.getTime() - 90000)} AND NOT EXISTS(SELECT id FROM telemetry_health WHERE ${tenant(s)} AND ended_at IS NULL)`.execute(
+              tx,
+            )
+          ).rows.length > 0;
+        const legacy = {
+          guildId: s.guildId,
+          communityEnabled: source.features.includes("COMMUNITY"),
+          nativeOnboardingAvailable:
+            source.endpointStatus.onboarding === "AVAILABLE",
+          nativeOnboardingEnabled: source.onboarding?.enabled ?? false,
+          membershipScreeningEnabled: source.features.includes(
+            "MEMBER_VERIFICATION_GATE_ENABLED",
+          ),
+          serverGuideSignalsAvailable: usage.serverGuide ? true : null,
+          intents: {
+            members: gatewayLive ? true : null,
+            messages: gatewayLive ? true : null,
+            reactions: gatewayLive ? true : null,
+            voice: gatewayLive ? true : null,
+            scheduledEvents: gatewayLive ? true : null,
+          },
+          manageGuild: source.botPermissions?.manageGuild ?? false,
+          manageRoles: source.botPermissions?.manageRoles ?? false,
+          sendMessages: source.botPermissions?.sendMessages ?? false,
+          highestBotRolePosition:
+            source.botPermissions?.highestRolePosition ?? null,
+          onboardingMode: "auto",
+          recommendedMode: source.onboarding?.enabled ? "native" : "fallback",
+          nativePromptIds: source.onboarding?.prompts.map((p) => p.id) ?? [],
+          checkedAt: now.toISOString(),
+          coverage:
+            source.endpointStatus.channels === "AVAILABLE"
+              ? "healthy"
+              : "unavailable",
+        };
+        await sql`INSERT INTO guild_capabilities VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${json(legacy)},${now})`.execute(
           tx,
         );
         for (const c of [

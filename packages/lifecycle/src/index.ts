@@ -9,7 +9,7 @@ import {scheduleNativeSnapshots,requestNativeRefresh} from './native.js';
 import {validateSignal} from '../../events/src/registry.js';
 import {projectActivation} from './activation.js';
 import {recordUsage} from '../../settings/src/entitlements.js';
-import {projectStructure,projectMemberFlags,projectAdaptiveMember} from './adaptive-projector.js';
+import {projectStructure,projectMemberFlags,projectAdaptiveMember,resolveSurface} from './adaptive-projector.js';
 export class AwaitingReference extends Error{}
 export class LifecycleService {
  constructor(private readonly db:Database,private readonly vault:IdentityVault,private readonly settings:SettingsService,private readonly discord:DiscordPort){}
@@ -56,7 +56,7 @@ export class LifecycleService {
    if(event.kind==='member.left'){
     await sql`INSERT INTO membership_departures VALUES(${s.organizationId}::uuid,${s.guildId},${identityId}::uuid,${at}) ON CONFLICT DO NOTHING`.execute(tx);
     const prior=(await sql<{id:string}>`SELECT id FROM membership_episodes WHERE ${tenant(s)} AND identity_id=${identityId}::uuid AND context='PRODUCTION' AND joined_at<=${at} ORDER BY joined_at DESC LIMIT 1`.execute(tx)).rows[0];
-    if(prior){await sql`UPDATE membership_episodes SET left_at=LEAST(COALESCE(left_at,${at}),${at}) WHERE ${tenant(s)} AND id=${prior.id}::uuid`.execute(tx);await this.record(tx,s,prior.id,'member.left',at,{});}
+    if(prior){await projectAdaptiveMember(tx,s,{...event,kind:'voice.state',channelId:null},settings,hash,prior.id);await sql`UPDATE membership_episodes SET left_at=LEAST(COALESCE(left_at,${at}),${at}) WHERE ${tenant(s)} AND id=${prior.id}::uuid`.execute(tx);await this.record(tx,s,prior.id,'member.left',at,{});}
     return;
    }
    let episode=(await sql<{id:string,joined_at:Date}>`SELECT id,joined_at FROM membership_episodes WHERE ${tenant(s)} AND identity_id=${identityId}::uuid AND context='PRODUCTION'
@@ -96,7 +96,8 @@ export class LifecycleService {
    }
    if(settings.flags.native_snapshot_v2&&event.kind==='member.joined')await scheduleNativeSnapshots(tx,s,episode.id,episode.joined_at);
    if(event.kind==='member.joined')return;
-   const channelAllowed=(channelId:string|null|undefined)=>!channelId||settings.analysisScope.mode==='all'||(settings.analysisScope.mode==='include')===settings.analysisScope.channelIds.includes(channelId);
+   const observedSurface=event.channelId?await resolveSurface(tx,s,event.channelId):null;
+   const channelAllowed=(channelId:string|null|undefined)=>!channelId||settings.analysisScope.mode==='all'||(settings.analysisScope.mode==='include')===settings.analysisScope.channelIds.includes(observedSurface?.parentId??channelId);
    if(event.kind==='reaction.added'&&channelAllowed(event.channelId)){
     const target=(await sql<{episode_id:string;identity_id:string;occurred_at:Date;joined_at:Date}>`SELECT f.episode_id,e.identity_id,f.occurred_at,e.joined_at FROM lifecycle_events f JOIN membership_episodes e ON e.organization_id=f.organization_id AND e.guild_id=f.guild_id AND e.id=f.episode_id WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.context='PRODUCTION' AND e.context='PRODUCTION' AND f.kind='message.sent' AND f.data->>'messageId'=${event.messageId??''} AND f.data->>'channelId'=${event.channelId??''} LIMIT 1`.execute(tx)).rows[0];
     // Received reactions are weak responses, never activity or a first connection.
