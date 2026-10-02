@@ -10,6 +10,7 @@ import type { Scope } from "../../shared/src/index";
 import { assert } from "../../shared/src/index";
 import type { Settings } from "../../settings/src/index";
 import type { MetricEvidence } from "../../shared/src/metric-evidence";
+import { metricEvidence } from "../../shared/src/metric-evidence";
 import {
   evidenceContext,
   buildMetricEvidence,
@@ -29,6 +30,7 @@ export function attentionEligibility(s: Scope, cfg: Settings, now: Date) {
   return sql`CASE WHEN ${mapped} THEN ${owner} AND f.data->>'receivedHumanParticipant' IS DISTINCT FROM 'true' ELSE COALESCE(e.engagement_started_at,e.joined_at)>=${new Date(now.getTime() - 3 * 86400000)} AND f.occurred_at>=COALESCE(e.engagement_started_at,e.joined_at) AND f.occurred_at<COALESCE(e.engagement_started_at,e.joined_at)+interval '72 hours' END`;
 }
 export type TeamOperations = {
+  evidence?: Record<string, MetricEvidence>;
   openBacklog: number;
   snoozed: number;
   oldestOpenAt: string | null;
@@ -73,6 +75,38 @@ export async function teamOperations(
     )
   ).rows;
   return {
+    evidence: Object.fromEntries(
+      [
+        ["openBacklog", r.open, r.open],
+        ["snoozed", r.snoozed, r.snoozed],
+        ["itemsOpened", r.opened, r.opened],
+        ["itemsResolved", r.resolved, r.resolved],
+        ["medianAcknowledgementSeconds", r.ack_median, r.ack_sample],
+        ["medianResolutionSeconds", r.resolve_median, r.resolve_sample],
+        ["p75ResolutionSeconds", r.resolve_p75, r.resolve_sample],
+      ].map(([key, value, sample]) => [
+        String(key),
+        metricEvidence({
+          metricKey: "team." + key,
+          definitionVersion: "attention-operations-v1",
+          definition:
+            "Tenant-scoped saved Attention queue; elapsed seconds use observed acknowledgement/resolution clocks only.",
+          value: Number.isFinite(value) ? Number(value) : null,
+          numerator: typeof sample === "number" ? sample : null,
+          denominator: null,
+          sampleSize: Number(sample),
+          minimumSample:
+            typeof key === "string" && key.endsWith("Seconds") ? 5 : 0,
+          coverageState: "COMPLETE",
+          requiredSurfaces: ["CANONICAL_ATTENTION_QUEUE"],
+          evidenceSources: ["attention_items"],
+          coverageReasons: [],
+          windowStart: from.toISOString(),
+          windowEnd: to.toISOString(),
+          collectionEpochIds: [],
+        }),
+      ]),
+    ),
     openBacklog: r.open,
     snoozed: r.snoozed,
     oldestOpenAt: r.oldest?.toISOString() ?? null,

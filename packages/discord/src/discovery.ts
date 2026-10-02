@@ -1,4 +1,4 @@
-import { PermissionFlagsBits,ChannelFlags } from "discord-api-types/v10";
+import { PermissionFlagsBits, ChannelFlags } from "discord-api-types/v10";
 import type {
   CapabilitySnapshot,
   ChannelMetadata,
@@ -27,7 +27,12 @@ export type RawChannel = {
 };
 export type DiscoverySource = {
   channelCensus?: "FULL" | "VISIBLE_ONLY" | "UNKNOWN";
-  botPermissions?:{manageGuild:boolean;manageRoles:boolean;sendMessages:boolean;highestRolePosition:number|null};
+  botPermissions?: {
+    manageGuild: boolean;
+    manageRoles: boolean;
+    sendMessages: boolean;
+    highestRolePosition: number | null;
+  };
   features: string[];
   memberCount: number | null;
   afkChannelId: string | null;
@@ -52,7 +57,7 @@ export function observableChannel(
   roles: { id: string; permissions: string }[],
   botRoles: string[],
 ) {
-  if((channel.flags??0)&ChannelFlags.ChannelObfuscated)return false;
+  if ((channel.flags ?? 0) & ChannelFlags.ChannelObfuscated) return false;
   let permissions = roles
     .filter((r) => r.id === guildId || botRoles.includes(r.id))
     .reduce((value, r) => value | BigInt(r.permissions), 0n);
@@ -127,7 +132,13 @@ export function buildCapabilitySnapshot(
     );
   put(
     "threads",
-    source.endpointStatus.threads==='AVAILABLE'?usage.threads?'OBSERVED':source.threads.length?'ENABLED':'AVAILABLE':source.endpointStatus.threads??'UNKNOWN',
+    source.endpointStatus.threads === "AVAILABLE"
+      ? usage.threads
+        ? "OBSERVED"
+        : source.threads.length
+          ? "ENABLED"
+          : "AVAILABLE"
+      : (source.endpointStatus.threads ?? "UNKNOWN"),
     "Accessible active threads only; archived/private totals unknown",
   );
   put(
@@ -171,8 +182,17 @@ export function buildCapabilitySnapshot(
     Object.values(source.incidents).some(Boolean) ? "OBSERVED" : "UNKNOWN",
     "No incident data does not establish absence of incidents",
   );
-  const fullCensus=source.endpointStatus.channels==='AVAILABLE'&&(source.channelCensus??(now<new Date('2026-11-16T00:00:00Z')?'FULL':'VISIBLE_ONLY'))==='FULL';
-  const totalState=source.endpointStatus.channels!=='AVAILABLE'?'UNKNOWN':fullCensus?'KNOWN':'LOWER_BOUND';
+  const fullCensus =
+    source.endpointStatus.channels === "AVAILABLE" &&
+    (source.channelCensus ??
+      (now < new Date("2026-11-16T00:00:00Z") ? "FULL" : "VISIBLE_ONLY")) ===
+      "FULL";
+  const totalState =
+    source.endpointStatus.channels !== "AVAILABLE"
+      ? "UNKNOWN"
+      : fullCensus
+        ? "KNOWN"
+        : "LOWER_BOUND";
   const relevant = source.channels.filter((c) =>
       [0, 2, 5, 13, 15, 16].includes(c.type),
     ),
@@ -190,15 +210,46 @@ export function buildCapabilitySnapshot(
     memberCount: source.memberCount,
     afkChannelId: source.afkChannelId,
     channelTypeCounts: counts,
-    botPermissions:source.botPermissions??null,
-    threadCounts:{active:source.endpointStatus.threads==='AVAILABLE'?source.threads.length:null,public:source.endpointStatus.threads==='AVAILABLE'?source.threads.filter(t=>t.type===11).length:null,private:source.endpointStatus.threads==='AVAILABLE'?source.threads.filter(t=>t.type===12).length:null,announcement:source.endpointStatus.threads==='AVAILABLE'?source.threads.filter(t=>t.type===10).length:null},
+    botPermissions: source.botPermissions ?? null,
+    threadCounts: {
+      active:
+        source.endpointStatus.threads === "AVAILABLE"
+          ? source.threads.length
+          : null,
+      public:
+        source.endpointStatus.threads === "AVAILABLE"
+          ? source.threads.filter((t) => t.type === 11).length
+          : null,
+      private:
+        source.endpointStatus.threads === "AVAILABLE"
+          ? source.threads.filter((t) => t.type === 12).length
+          : null,
+      announcement:
+        source.endpointStatus.threads === "AVAILABLE"
+          ? source.threads.filter((t) => t.type === 10).length
+          : null,
+    },
     capabilities,
     channels: source.channels,
     coverage: {
       totalState,
-      knownTotalChannels:fullCensus?relevant.length:null,
-      coverageState:totalState==='UNKNOWN'?'UNKNOWN':totalState==='LOWER_BOUND'?'LOWER_BOUND':observable.length===relevant.length?'COMPLETE':'PARTIAL',
-      reasons:totalState==='UNKNOWN'?['CHANNEL_DISCOVERY_UNAVAILABLE']:fullCensus?observable.length===relevant.length?[]:['VIEW_CHANNEL_MISSING']:['DISCORD_VISIBLE_CHANNELS_ONLY'],
+      knownTotalChannels: fullCensus ? relevant.length : null,
+      coverageState:
+        totalState === "UNKNOWN"
+          ? "UNKNOWN"
+          : totalState === "LOWER_BOUND"
+            ? "LOWER_BOUND"
+            : observable.length === relevant.length
+              ? "COMPLETE"
+              : "PARTIAL",
+      reasons:
+        totalState === "UNKNOWN"
+          ? ["CHANNEL_DISCOVERY_UNAVAILABLE"]
+          : fullCensus
+            ? observable.length === relevant.length
+              ? []
+              : ["VIEW_CHANNEL_MISSING"]
+            : ["DISCORD_VISIBLE_CHANNELS_ONLY"],
       observableChannels: observable.length,
       totalRelevantChannels: relevant.length,
       ratio:
@@ -207,7 +258,13 @@ export function buildCapabilitySnapshot(
           : null,
       blindSpots: relevant
         .filter((c) => !c.observable)
-        .map((c) => ({ channelId: c.id, reason: "VIEW_CHANNEL_MISSING" })),
+        .map((c) => ({
+          channelId: c.id,
+          reason:
+            source.endpointStatus.channels === "AVAILABLE"
+              ? "VIEW_CHANNEL_MISSING"
+              : "CHANNEL_VISIBILITY_UNKNOWN",
+        })),
       privateThreads: "PARTIAL",
     },
     onboarding: source.onboarding,

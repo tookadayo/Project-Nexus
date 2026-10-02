@@ -28,6 +28,8 @@ import {
 import { buildCapabilitySnapshot } from "../../packages/discord/src/discovery";
 import { json } from "../../packages/db/src/index";
 import { PrivacyService } from "../../packages/security/src/privacy";
+import { journeyAnalysis } from "../../packages/analytics/src/journeys";
+import { evidenceContext } from "../../packages/analytics/src/evidence";
 let infra: Awaited<ReturnType<typeof infrastructure>>,
   db: Database,
   counter = 0;
@@ -118,6 +120,29 @@ async function fixture() {
       pending: false,
     });
   return {
+    continuous: async (through: Date, from = now) => {
+      for (let at = from.getTime(); at < through.getTime(); at += 60000)
+        await service.process({
+          ...s,
+          shardId: 0,
+          gatewaySessionId: "adaptive-heartbeat",
+          sequence: ++sequence,
+          context: "PRODUCTION",
+          kind: "telemetry.heartbeat",
+          requestedIntents: ["members", "messages", "voice"],
+          at: new Date(at).toISOString(),
+        });
+      await service.process({
+        ...s,
+        shardId: 0,
+        gatewaySessionId: "adaptive-heartbeat",
+        sequence: ++sequence,
+        context: "PRODUCTION",
+        kind: "telemetry.heartbeat",
+        requestedIntents: ["members", "messages", "voice"],
+        at: through.toISOString(),
+      });
+    },
     health: async (at: Date) =>
       service.process({
         ...s,
@@ -126,7 +151,15 @@ async function fixture() {
         sequence: ++sequence,
         context: "PRODUCTION",
         kind: "telemetry.connected",
-        requestedIntents: ["members", "messages", "reactions", "polls", "voice", "scheduledEvents", "autoMod"],
+        requestedIntents: [
+          "members",
+          "messages",
+          "reactions",
+          "polls",
+          "voice",
+          "scheduledEvents",
+          "autoMod",
+        ],
         at: at.toISOString(),
       }),
     s,
@@ -496,6 +529,7 @@ it("qualifies sustained human voice co-presence without pairs, excludes AFK/gues
       )
     ).rows,
   ).toHaveLength(0);
+  await f.continuous(new Date(f.now.getTime() + 301000));
   await db
     .transaction()
     .execute((tx) =>
@@ -549,6 +583,7 @@ it("qualifies sustained human voice co-presence without pairs, excludes AFK/gues
 });
 it("separates event subscription from known-active Voice/Stage attendance and external unknown", async () => {
   const f = await fixture();
+  await f.health(f.now);
   await f.send("GUILD_SCHEDULED_EVENT_USER_ADD", {
     user_id: user,
     guild_scheduled_event_id: event,
@@ -591,6 +626,24 @@ it("separates event subscription from known-active Voice/Stage attendance and ex
       )
     ).rows,
   ).toHaveLength(1);
+  await sql`INSERT INTO guild_capability_snapshots VALUES(${f.s.organizationId}::uuid,${f.s.guildId},gen_random_uuid(),${json(buildCapabilitySnapshot(representativeSource(3), f.now))},${f.now})`.execute(
+    db,
+  );
+  await sql`UPDATE discord_integration_health SET rest_state='AVAILABLE',last_refresh_at=${f.now} WHERE ${tenant(f.s)}`.execute(
+    db,
+  );
+  const attendance = (
+    await new CommunityService(db, f.settings).overview(
+      f.s,
+      30,
+      new Date(f.now.getTime() + 1000),
+    )
+  ).adaptive!.metrics.find((m) => m.key === "eventAttendance")!;
+  expect(attendance.count).toBeNull();
+  expect(attendance.evidence!.observationState).toBe("UNKNOWN");
+  expect(attendance.evidence!.coverageReasons).toContain(
+    "EXTERNAL_OR_UNKNOWN_EVENT_ATTENDANCE",
+  );
 });
 it("persists partial capability detection, manual refresh and truthful adaptive definitions without content", async () => {
   const f = await fixture();
@@ -632,7 +685,12 @@ it("persists partial capability detection, manual refresh and truthful adaptive 
     false,
   );
   expect(
-    view.adaptive?.metrics.every((m) => m.definition && m.state === "UNKNOWN" && m.evidence?.coverageReasons.includes("GATEWAY_UNKNOWN")),
+    view.adaptive?.metrics.every(
+      (m) =>
+        m.definition &&
+        m.state === "UNKNOWN" &&
+        m.evidence?.coverageReasons.includes("GATEWAY_UNKNOWN"),
+    ),
   ).toBe(true);
   const encoded = JSON.stringify(
     (
@@ -735,7 +793,9 @@ it("inherits parent analysis scope, counts poll activity once, and omits exclude
     db,
   );
   await f.health(f.now);
-  await sql`UPDATE discord_integration_health SET rest_state='AVAILABLE',last_refresh_at=${f.now} WHERE ${tenant(f.s)}`.execute(db);
+  await sql`UPDATE discord_integration_health SET rest_state='AVAILABLE',last_refresh_at=${f.now} WHERE ${tenant(f.s)}`.execute(
+    db,
+  );
   const view = await new CommunityService(db, f.settings).overview(
     f.s,
     30,
@@ -945,4 +1005,125 @@ it("does not turn structural posts from an unknown or bot owner into human suppo
       )
     ).rows,
   ).toHaveLength(1);
+});
+
+it("counts each newcomer's first post once and excludes replies after a historical window", async () => {
+  const f = await fixture(),
+    at = (seconds: number) => new Date(f.now.getTime() + seconds * 1000);
+  await f.health(f.now);
+  await sql`INSERT INTO guild_capability_snapshots VALUES(${f.s.organizationId}::uuid,${f.s.guildId},gen_random_uuid(),${json(buildCapabilitySnapshot(representativeSource(4), f.now))},${f.now})`.execute(
+    db,
+  );
+  const post = async (
+    author: string,
+    id: string,
+    seconds: number,
+    reference?: { message_id: string; type: number },
+  ) =>
+    f.send(
+      "MESSAGE_CREATE",
+      {
+        ...messageData(author, id),
+        timestamp: at(seconds).toISOString(),
+        type: reference?.type === 0 ? 19 : 0,
+        ...(reference ? { message_reference: reference } : {}),
+      },
+      at(seconds),
+    );
+  await post(user, message, 10);
+  await post(user, "444444444444444445", 20);
+  await post(other, "444444444444444446", 30, { message_id: message, type: 1 });
+  await post(other, "444444444444444447", 60, { message_id: message, type: 0 });
+  await post(other, "444444444444444448", 70, {
+    message_id: "444444444444444445",
+    type: 0,
+  });
+  await f.health(at(80));
+  await sql`UPDATE discord_integration_health SET rest_state='AVAILABLE',last_refresh_at=${at(80)} WHERE ${tenant(f.s)}`.execute(
+    db,
+  );
+  const service = new CommunityService(db, f.settings),
+    historical = await service.overview(f.s, 30, at(55)),
+    current = await service.overview(f.s, 30, at(80)),
+    reply = current.adaptive!.metrics.find((m) => m.key === "directReplies")!;
+  expect(reply.denominator).toBe(2);
+  expect(reply.count).toBe(1);
+  expect(reply.medianMinutes).toBeCloseTo(50 / 60);
+  expect(
+    historical.adaptive!.metrics.find((m) => m.key === "directReplies")!.count,
+  ).toBe(0);
+  const cfg = await f.settings.get(f.s),
+    context = await evidenceContext(
+      db,
+      f.s,
+      new Date(at(80).getTime() - 30 * 86400000),
+      at(80),
+    ),
+    standalone = await journeyAnalysis(
+      db,
+      f.s,
+      cfg,
+      await latestCapability(db, f.s),
+      context,
+    );
+  expect(
+    current.adaptive!.journeys!.transitions.map((t) => [
+      t.from,
+      t.to,
+      t.evidence.numerator,
+      t.evidence.denominator,
+    ]),
+  ).toEqual(
+    standalone.transitions.map((t) => [
+      t.from,
+      t.to,
+      t.evidence.numerator,
+      t.evidence.denominator,
+    ]),
+  );
+});
+it("does not qualify voice from wall time and starts a new clock after a gateway gap", async () => {
+  const f = await fixture(),
+    at = (seconds: number) => new Date(f.now.getTime() + seconds * 1000),
+    join = async (id: string, time: Date) =>
+      f.send(
+        "VOICE_STATE_UPDATE",
+        {
+          user_id: id,
+          channel_id: voice,
+          suppress: false,
+          member: { user: { bot: false } },
+        },
+        time,
+      );
+  await f.health(f.now);
+  await join(user, f.now);
+  await join(other, f.now);
+  await db.transaction().execute((tx) => tickVoice(tx, f.s, f.cfg, at(301)));
+  expect(
+    (
+      await sql`SELECT * FROM adaptive_facts WHERE ${tenant(f.s)} AND kind='voice.copresence'`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(0);
+  await f.health(at(302));
+  expect(
+    (
+      await sql`SELECT * FROM adaptive_states WHERE ${tenant(f.s)} AND domain='voice'`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(0);
+  await join(user, at(302));
+  await join(other, at(302));
+  await f.continuous(at(603), at(302));
+  await db.transaction().execute((tx) => tickVoice(tx, f.s, f.cfg, at(603)));
+  expect(
+    (
+      await sql`SELECT * FROM adaptive_facts WHERE ${tenant(f.s)} AND kind='voice.copresence'`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(2);
 });

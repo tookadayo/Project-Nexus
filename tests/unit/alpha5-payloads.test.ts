@@ -2,7 +2,10 @@ import { it, expect } from "vitest";
 import { MessageFlags, ComponentType } from "discord-api-types/v10";
 import { controlPanel } from "../../packages/discord-panels/src/views/control";
 import { alpha5Visual } from "../fixtures/alpha5-visual";
-import { evidenceValue } from "../../packages/shared/src/measurement-view";
+import {
+  evidenceValue,
+  evidenceFraction,
+} from "../../packages/shared/src/measurement-view";
 import { errorPanel } from "../../packages/discord-panels/src/views/errors";
 const scenarios = [
   ["small", 0, "HEALTHY"],
@@ -84,4 +87,19 @@ it("does not format absent or unknown metric evidence as a count or percentage",
     const metric = alpha5Visual(0, state).model.metrics[0]!;
     expect(evidenceValue(metric.evidence, "en", true)).not.toBe("0%");
   }
+});
+it("shows a fraction only for a sufficient observed denominator", () => {
+  const e = alpha5Visual(4, "HEALTHY").model.metrics[0]!.evidence!;
+  expect(evidenceFraction(e, "ja")).toBe("24 / 37 · 65%");
+  expect(evidenceFraction({ ...e, numerator: 0 }, "en")).toBe("0 / 37 · 0%");
+  for (const state of [
+    "NO_DATA",
+    "COLLECTING",
+    "UNKNOWN",
+    "INTENT_UNAVAILABLE",
+  ] as const)
+    expect(
+      evidenceFraction(alpha5Visual(4, state).model.metrics[0]!.evidence, "en"),
+    ).toBeUndefined();
+  expect(evidenceFraction({ ...e, denominator: null }, "ja")).toBeUndefined();
 });

@@ -1,4 +1,6 @@
-# NEXUS v0.2 — Product
+# NEXUS v0.2 — Historical product record
+
+This document records the v0.2 implementation. It is not current setup or authorization guidance. Current OAuth, Server Verification, recipe, evidence and privacy behavior is documented in the root README and alpha.5 documents.
 
 NEXUSはDiscordで観測できる新人の行動を、Activationの定義、施策、対照群付き実験につなげます。Native Onboardingを読み取り、Discordの設定を書き換えません。Message Content / Presence Intentは使用しません。
 
@@ -12,7 +14,7 @@ NEXUSはDiscordで観測できる新人の行動を、Activationの定義、施�
 6. ExperimentsでControlを無介入、Treatmentを公開済み施策に設定します。スタッフ通知では日単位のtime-blockを推奨します。
 7. 成熟した結果、区間、Guardrailを見て停止・継続を判断します。観測不足は成功扱いにしません。
 
-Discordが主導線です。Webはguild管理者向けの補助画面で、定義のプレビュー・公開・過去版からの復元、施策承認、実験停止ができます。Webは共有管理パスワード方式であり、個人別OAuth/RBACは含みません。
+Discordが主導線です。Webはguild管理者向けの補助画面で、定義のプレビュー・公開・過去版からの復元、施策承認、実験停止ができます。v0.2当時のWebは共有管理パスワード方式でした。現在はproduction OAuthとServer Verificationが必要であり、development認証はproductionで拒否されます。
 
 ## 実装範囲
 

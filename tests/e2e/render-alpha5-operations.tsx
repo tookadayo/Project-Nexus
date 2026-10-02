@@ -6,6 +6,7 @@ import {
   CommunityModelEditor,
 } from "../../apps/web/app/community-model";
 import { OperationsView, JourneysView } from "../../apps/web/app/operations-ui";
+import { Attention } from "../../apps/web/app/attention";
 const require = createRequire(import.meta.url);
 const { createElement } =
   require("../../apps/web/node_modules/react/index.js") as typeof import("react");
@@ -59,4 +60,32 @@ for (const view of [1, 5, 9, 10, 11, 12, 13, 14])
       state: "HEALTHY",
     };
   }
+for (const locale of ["ja", "en"] as const) {
+  previews[`saved-attention-${locale}`] = {
+    state: "INTENT_UNAVAILABLE",
+    html: renderToStaticMarkup(
+      createElement(Attention, {
+        ready: false,
+        items: [
+          {
+            channelId: "333333333333333333",
+            messageId: "444444444444444444",
+            url: "https://discord.com/channels/111111111111111111/333333333333333333/444444444444444444",
+            waitingMinutes: 42,
+            status: "OPEN",
+            surface: "TEXT",
+            purpose: "GENERAL_CONVERSATION",
+          },
+        ],
+        locale,
+        channels: [{ id: "333333333333333333", label: "#general" }],
+        minutes: 30,
+        onChange: () => {},
+        onSnooze: () => {},
+        onRefresh: () => {},
+        onRules: () => {},
+      }),
+    ),
+  };
+}
 process.stdout.write(JSON.stringify(previews));

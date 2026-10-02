@@ -1,18 +1,20 @@
 # v0.1 → v0.2 migration
 
+> Historical record — this document describes an earlier implementation or design. Current alpha.5 behavior is defined by [the README](../../README.md) and the current evidence, privacy and operations documents.
+
 既存のidentity、tenant、flow version/session、role所有権、outboxを再利用します。公開済み定義や既存データを作り直しません。現在の作業treeには元からcommitがなく、今回も自動commitしていません。
 
-| Migration | 追加内容 |
-| --- | --- |
-| 005 | Native capabilities、設定revision/head、snapshot queue/state、既存guildのfallback明示 |
-| 006 | Activation版固定、role/voice観測状態 |
-| 007 | Intervention、assignment/exposure、プラン・使用量 |
-| 008 | 返信照合receipt、実験control |
-| 009 | 公平なepisode巡回 |
-| 010 | Redis前のdurable ingest |
-| 011 | 旧開始チャンネルActivationの公開版・既存episode pin backfill |
-| 012 | 匿名D30加入日counter、二重加算防止 |
-| 013 | 成熟実験成否の保存 |
+| Migration | 追加内容                                                                              |
+| --------- | ------------------------------------------------------------------------------------- |
+| 005       | Native capabilities、設定revision/head、snapshot queue/state、既存guildのfallback明示 |
+| 006       | Activation版固定、role/voice観測状態                                                  |
+| 007       | Intervention、assignment/exposure、プラン・使用量                                     |
+| 008       | 返信照合receipt、実験control                                                          |
+| 009       | 公平なepisode巡回                                                                     |
+| 010       | Redis前のdurable ingest                                                               |
+| 011       | 旧開始チャンネルActivationの公開版・既存episode pin backfill                          |
+| 012       | 匿名D30加入日counter、二重加算防止                                                    |
+| 013       | 成熟実験成否の保存                                                                    |
 
 ## 配備順
 

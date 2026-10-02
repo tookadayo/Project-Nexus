@@ -9,6 +9,7 @@ import {
 } from "./operations-ui";
 import {
   evidenceValue,
+  evidenceFraction,
   evidenceNote,
 } from "../../../packages/shared/src/measurement-view";
 import { recipeNames } from "../../../packages/shared/src/operations-copy";
@@ -173,7 +174,16 @@ export function AdaptiveCommunity({
           return (
             <article key={metric.key + ":" + i} data-metric={metric.key}>
               <h2>{copy.label}</h2>
-              <strong>{evidenceValue(metric.evidence, locale)}</strong>
+              <strong>
+                {((large || view === 1 || view === 5) &&
+                ["directReplies", "postResponse"].includes(metric.key)
+                  ? evidenceFraction(metric.evidence, locale)
+                  : undefined) ?? evidenceValue(metric.evidence, locale)}
+                {metric.evidence?.value !== null &&
+                metric.evidence?.value !== undefined
+                  ? copy.unit
+                  : ""}
+              </strong>
               {ready &&
                 metric.medianMinutes !== null &&
                 metric.medianMinutes !== undefined && (
@@ -189,7 +199,11 @@ export function AdaptiveCommunity({
                 )}
               <p>{copy.definition}</p>
               <p>{evidenceNote(metric.evidence, locale)}</p>
-              <EvidenceDetails evidence={metric.evidence} locale={locale} />
+              <EvidenceDetails
+                evidence={metric.evidence}
+                locale={locale}
+                definition={copy.definition}
+              />
             </article>
           );
         })}

@@ -1,5 +1,7 @@
 # NEXUS v0.1 Vertical Slice — implementation baseline
 
+> Historical record — this document describes an earlier implementation or design. Current alpha.5 behavior is defined by [the README](../../README.md) and the current evidence, privacy and operations documents.
+
 Status: proposed baseline; the separately referenced Build Plan and reporting format have not been supplied.
 
 ## Existing repository and environment

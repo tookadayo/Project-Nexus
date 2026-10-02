@@ -47,12 +47,21 @@ export function Attention({
         </div>
         <button onClick={onRefresh}>{t(locale, "control.refresh")}</button>
       </div>
-      {!ready ? (
-        <div className="empty-state">
-          <h2>{t(locale, "control.queueUnavailable")}</h2>
-          <p>{t(locale, "experience.noData")}</p>
+      {!ready && (
+        <div className="collection-warning" role="status">
+          <h2>
+            {locale === "ja"
+              ? "新しい対応対象を確認できません"
+              : "New attention items cannot be observed"}
+          </h2>
+          <p>
+            {locale === "ja"
+              ? "登録済みの対応は引き続き操作できます。"
+              : "Saved attention items remain available."}
+          </p>
         </div>
-      ) : items.length ? (
+      )}
+      {items.length ? (
         <>
           <p>{t(locale, "experience.queueRule", { count: minutes })}</p>
           <div className="attention-list">
@@ -126,7 +135,7 @@ export function Attention({
             ))}
           </div>
         </>
-      ) : (
+      ) : ready ? (
         <div className="empty-state">
           <h2>✅ {t(locale, "experience.allClear")}</h2>
           <p>{t(locale, "experience.queueRule", { count: minutes })}</p>
@@ -134,7 +143,7 @@ export function Attention({
             {t(locale, "experience.howMeasured")}
           </button>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }

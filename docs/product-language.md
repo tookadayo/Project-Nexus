@@ -15,46 +15,48 @@
 
 実装の共通辞書は `packages/discord-panels/src/i18n/{ja,en,web}.ts`。動的期間・返信分母・測定状態は `i18n/terminology.ts`、エラーは `i18n/errors.ts` をDiscord / Webで共有する。
 
-| Concept | JA | EN | Definition |
-|---|---|---|---|
-| Home | サーバー概要 | Server overview | 今日の人数と対応、完了した観測期間の比較 |
-| First connection | 最初の交流 | First connection | 参加後3日以内の他者からの直接返信、目的が合う投稿への最初の応答、または設定時間以上のボイス同席。リアクションだけでは成立しない |
-| First activity goal | 最初に確認する活動 | First activity to observe | 保存した定義で選択した投稿・直接返信・イベント参加登録。イベントへの実参加ではない |
-| Reply waiting | 返信待ち | Waiting for reply | 設定された時間を超え、観測した直接返信がない対象投稿 |
-| Reply average | 初回返信の平均時間 | Average time to first reply | 返信を受けた対象者だけの平均。返信あり人数 / 観測完了対象者数を併記 |
-| Configured later activity | 参加後7〜14日目の活動（設定に応じて変更） | Activity 7–14 days after joining | 開始以上、終了未満。参加後の経過時間で判定し、日付の境界とは区別する |
-| Canonical D7 activity | 参加7日後の活動 | Activity 7 days after joining | 詳細指標の固定 `[7,8)` 日。設定可能な活動期間と同一視しない |
-| Continuing member | 以前から参加しているメンバー | Existing members with recent activity | 設定の初期活動期間を過ぎ、直近の設定期間に必要活動日数を満たした人 |
-| Below recent activity threshold | 活動日数が基準未満 | Below the recent activity threshold | 活動ゼロとは限らない。期間と必要日数を計測方法に表示 |
-| Analysis scope | 分析するチャンネル | Channels to analyze | 集計に含める・除外するチャンネル |
-| Helper destination | 通知先 | Notification channel | スタッフ向け通知の送信先 |
-| Manager role | NEXUSを管理できるロール | NEXUS manager role | 現在のサーバー設定で管理を許可したロール |
+| Concept                         | JA                                        | EN                                    | Definition                                                                                                                      |
+| ------------------------------- | ----------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| Home                            | サーバー概要                              | Server overview                       | 今日の人数と対応、完了した観測期間の比較                                                                                        |
+| First connection                | 最初の交流                                | First connection                      | 参加後3日以内の他者からの直接返信、目的が合う投稿への最初の応答、または設定時間以上のボイス同席。リアクションだけでは成立しない |
+| First activity goal             | 最初に確認する活動                        | First activity to observe             | 保存した定義で選択した投稿・直接返信・イベント参加登録。イベントへの実参加ではない                                              |
+| Reply waiting                   | 返信待ち                                  | Waiting for reply                     | 設定された時間を超え、観測した直接返信がない対象投稿                                                                            |
+| Reply average                   | 初回返信の平均時間                        | Average time to first reply           | 返信を受けた対象者だけの平均。返信あり人数 / 観測完了対象者数を併記                                                             |
+| Configured later activity       | 参加後7〜14日目の活動（設定に応じて変更） | Activity 7–14 days after joining      | 開始以上、終了未満。参加後の経過時間で判定し、日付の境界とは区別する                                                            |
+| Canonical D7 activity           | 参加後7〜8日目の活動                      | Activity on days 7–8 after joining    | 詳細指標の固定 `[7,8)` 日。設定可能な活動期間と同一視しない                                                                     |
+| Continuing member               | 以前から参加しているメンバー              | Existing members with recent activity | 設定の初期活動期間を過ぎ、直近の設定期間に必要活動日数を満たした人                                                              |
+| Below recent activity threshold | 活動日数が基準未満                        | Below the recent activity threshold   | 活動ゼロとは限らない。期間と必要日数を計測方法に表示                                                                            |
+| Analysis scope                  | 分析するチャンネル                        | Channels to analyze                   | 集計に含める・除外するチャンネル                                                                                                |
+| Helper destination              | 通知先                                    | Notification channel                  | スタッフ向け通知の送信先                                                                                                        |
+| Manager role                    | NEXUSを管理できるロール                   | NEXUS manager role                    | 現在のサーバー設定で管理を許可したロール                                                                                        |
 
 ## States and numbers
 
-| State | JA / EN | Display rule |
-|---|---|---|
-| ZERO | 0人・0件・0% / 0 members, posts, percent | 観測と必要サンプルが成立して結果がゼロの場合だけ |
-| NO_ELIGIBLE_MEMBERS | 対象者なし / No eligible members | その集計の対象者がいない。今日の参加ゼロは「今日参加したメンバーはいません」 |
-| COLLECTING | 測定中 / Measuring | 対象者の観測期間が未完了。必要期間を併記 |
-| INSUFFICIENT_SAMPLE | まだ比較できません / Not enough observations | 比較に必要な人数未満。返信平均では追加で返信を受けた対象者が必要と伝える |
-| UNAVAILABLE | データを取得できませんでした / Could not retrieve data | 取得失敗・収集停止・観測欠損。ゼロに置き換えない |
+| State               | JA / EN                                                | Display rule                                                                     |
+| ------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| ZERO                | 0人・0件・0% / 0 members, posts, percent               | 観測と必要サンプルが成立して結果がゼロの場合だけ                                 |
+| NO_ELIGIBLE_MEMBERS | 対象者なし / No eligible members                       | その集計の対象者がいない。今日の参加ゼロは「今日参加したメンバーはいません」     |
+| COLLECTING          | 測定中 / Measuring                                     | 対象者の観測期間が未完了。必要期間を併記                                         |
+| INSUFFICIENT_SAMPLE | まだ比較できません / Not enough observations           | 比較に必要な人数未満。返信時間の中央値では追加で返信を受けた対象者が必要と伝える |
+| UNAVAILABLE         | データを取得できませんでした / Could not retrieve data | 取得失敗・収集停止・観測欠損。ゼロに置き換えない                                 |
 
 比較は直近の完了した参加期間と、その前の同じ長さの期間を使う。「今週」「先週」はカレンダー週の集計だけに使う。今回のHomeは移動する7日間の参加期間であり、観測完了までの待ち時間を引いた期間を表示する。
 
 Staff exclusion は計測方法に載せ、主要KPIにしない。分析の参加数・退出数は直近の期間、活動割合は観測を完了した参加期間であるため、各カードに期間を載せる。
 
+Coverage remains independent: COMPLETE is the declared observable scope, PARTIAL names missing required surfaces, LOWER_BOUND means Discord cannot establish the full total, and UNKNOWN means coverage itself cannot be proved. Never derive a percentage from an unknown denominator.
+
 ## Connection and action states
 
-| State | JA | EN |
-|---|---|---|
-| VERIFIED | 接続済み | Connected |
+| State                  | JA                       | EN                                  |
+| ---------------------- | ------------------------ | ----------------------------------- |
+| VERIFIED               | 接続済み                 | Connected                           |
 | INSTALLED_NOT_VERIFIED | NEXUS導入済み・Web未接続 | NEXUS installed · Web not connected |
-| VERIFICATION_PENDING | 接続コード発行済み | Connection code issued |
-| NOT_INSTALLED | NEXUS未導入 | NEXUS not installed |
-| ACKNOWLEDGED | スタッフ確認済み | Staff checked |
-| SNOOZED | 後で再確認 | Check later |
-| RESOLVED | 対応済み | Resolved |
+| VERIFICATION_PENDING   | 接続コード発行済み       | Connection code issued              |
+| NOT_INSTALLED          | NEXUS未導入              | NEXUS not installed                 |
+| ACKNOWLEDGED           | スタッフ確認済み         | Staff checked                       |
+| SNOOZED                | 後で再確認               | Check later                         |
+| RESOLVED               | 対応済み                 | Resolved                            |
 
 接続済みはWeb接続状態であり、Bot導入・現在の権限と別に確認する。サーバーごとの取得失敗には確認不能を表示し、未接続と断定しない。
 
@@ -77,3 +79,11 @@ Staff exclusion は計測方法に載せ、主要KPIにしない。分析の参�
 「ボイスで会話した」「参加登録したから出席した」「リアクションで交流が成立した」「アーカイブされたから解決した」「投票が特定の意見を示した」とは表現しない。公開APIで観測できた同席、登録、応答、対応付け済みタグ、投票参加をそれぞれ説明する。Server Guideの設定、外部イベント出席、private/archived Thread全体、過去の投票・リアクション履歴は未確認であることを明示する。
 
 共通辞書は `packages/shared/src/community-copy.ts`。7つの代表ProfileとJA/ENのWeb・Discord表示をテストする。Discord画像はComponents V2のレイアウト近似であり、実クライアント受け入れの証明ではない。
+
+## Alpha.5 operational evidence
+
+Use normal names: 新しく参加 / Joined, 返信あり / Direct reply received, 仲間募集への応答 / LFG response, 参加後7〜14日目にも活動 / Activity on days 7–14 after joining, 計測範囲 / Coverage, Discordとの接続状態 / Discord integration. Dynamic day ranges must match the saved recipe. A rolling window is a dated observation period, not 今週/先週 unless it is actually a calendar week.
+
+Never label a forward as reply, reaction as connection/reach/impression, subscription as attendance, co-presence as conversation, or archived/locked as resolved. Use the configured co-presence threshold in factual copy. UNKNOWN, NO_ELIGIBLE, COLLECTING and insufficient sample have their own labels; unavailable denominators never produce 0%. Partial and lower-bound coverage accompany the value.
+
+Discord answers what needs action now; Web explains purpose, location, evidence, comparison, collection and configuration. Small servers favor observed counts; sufficient large samples can show ratios, medians and p75. Technical collection details belong to method/operations views, not normal Home copy.

@@ -13,6 +13,7 @@ import {
   coverageNames,
 } from "../../../packages/shared/src/measurement-view";
 import { recipeNames } from "../../../packages/shared/src/operations-copy";
+import { metricCopy } from "../../../packages/shared/src/community-copy";
 export type IntegrationData = Awaited<
   ReturnType<typeof integrationOperations>
 > & { health: IntegrationHealth; epochs: CollectionEpoch[] };
@@ -20,9 +21,11 @@ type Locale = "ja" | "en";
 export function EvidenceDetails({
   evidence,
   locale,
+  definition,
 }: {
   evidence: MetricEvidence | undefined;
   locale: Locale;
+  definition?: string;
 }) {
   const ja = locale === "ja";
   return (
@@ -30,7 +33,7 @@ export function EvidenceDetails({
       <summary>{ja ? "計測方法を見る" : "Measurement method"}</summary>
       {evidence ? (
         <>
-          <p>{evidence.definition}</p>
+          <p>{definition ?? evidence.definition}</p>
           <p>{evidenceNote(evidence, locale)}</p>
           <p>
             {ja ? "集計期間" : "Observation window"}:{" "}
@@ -463,9 +466,13 @@ export function OperationsView({
                     (ja ? "確認できないチャンネル" : "Unobservable channel")}
                 </h3>
                 <p>
-                  {ja
-                    ? "不足している権限: チャンネルを見る"
-                    : "Missing permission: View Channel"}
+                  {c.missingPermissions.includes("VIEW_CHANNEL")
+                    ? ja
+                      ? "不足している権限: チャンネルを見る"
+                      : "Missing permission: View Channel"
+                    : ja
+                      ? "必要な権限を確認できません。"
+                      : "Permission state unavailable."}
                 </p>
                 <p>
                   {ja
@@ -482,7 +489,8 @@ export function OperationsView({
           <div className="cards">
             {model?.metrics.map((m) => (
               <article key={m.key}>
-                <h3>{m.evidence?.definition ?? m.definition}</h3>
+                <h3>{metricCopy(m, locale).label}</h3>
+                <p>{metricCopy(m, locale).definition}</p>
                 <p>{evidenceNote(m.evidence, locale)}</p>
               </article>
             ))}

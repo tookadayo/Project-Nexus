@@ -33,7 +33,15 @@ test("alpha.5 archetypes, evidence states and operations views fit desktop and m
           preview.state,
         )
       )
-        await expect(page.locator(".metric-cards")).not.toContainText("0%");
+        if (!name.startsWith("saved-attention"))
+          await expect(page.locator(".metric-cards")).not.toContainText("0%");
+      if (name.startsWith("saved-attention")) {
+        await expect(page.locator(".attention-card")).toHaveCount(1);
+        await expect(page.locator(".collection-warning")).toBeVisible();
+        await expect(
+          page.locator(".attention-card button").last(),
+        ).toBeEnabled();
+      }
       if (preview.state === "NO_DATA")
         await expect(page.locator(".metric-cards")).toContainText(
           "対象者がいません",

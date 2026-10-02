@@ -1,14 +1,16 @@
 # Plans, entitlements and MTM
 
+> Historical record — this document describes an earlier implementation or design. Current alpha.5 behavior is defined by [the README](../../README.md) and the current evidence, privacy and operations documents.
+
 料金・機能の実行時source of truthは`packages/settings/src/entitlements.ts`です。価格は今回の製品仕様の設定値であり、決済を実行したものではありません。
 
-| Plan | 月額USD | 含むMTM | Guild上限の定義 |
-| --- | ---: | ---: | ---: |
-| Free | 0 | 250 | 1 |
-| Starter | 15 | 1,000 | 1 |
-| Growth | 49 | 5,000 | 1 |
-| Scale | 149 | 25,000 | 5 |
-| Enterprise | 個別 | 個別 | 100 |
+| Plan       | 月額USD | 含むMTM | Guild上限の定義 |
+| ---------- | ------: | ------: | --------------: |
+| Free       |       0 |     250 |               1 |
+| Starter    |      15 |   1,000 |               1 |
+| Growth     |      49 |   5,000 |               1 |
+| Scale      |     149 |  25,000 |               5 |
+| Enterprise |    個別 |    個別 |             100 |
 
 Freeは既定の基本Activationを初回設定でき、custom ActivationはStarter以上、施策・実験はGrowth以上です。公開時と実行時に同じEntitlementServiceで確認します。expired/past_dueの契約はFreeへfail closedします。保存済み設定を消すことはありません。
 

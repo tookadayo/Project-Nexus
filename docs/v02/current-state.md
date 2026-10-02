@@ -1,5 +1,7 @@
 # v0.1 audit before v0.2 source changes
 
+> Historical record — this document describes an earlier implementation or design. Current alpha.5 behavior is defined by [the README](../../README.md) and the current evidence, privacy and operations documents.
+
 Inspected 2026-09-22. The repository has no commits; existing source is untracked. No reset, destructive replacement, or automatic commit is part of this migration. The two final user-provided v0.2 documents supersede the older WP-00–08 scope and ADR intent/retention limits.
 
 ## Inventory
@@ -20,12 +22,12 @@ No existing experiment or DSL implementation exists despite specification refere
 
 ## Migration map
 
-| Decision | Components | Work |
-| --- | --- | --- |
-| KEEP | identity, tenant constraints, signatures, component MACs, flow version/session model, outbox states, privacy tombstones | Extend through existing boundaries |
-| MODIFY | Discord REST, settings, flow engine, event envelope, projector, metrics, workers, API/panels/web, purge | Native reads, typed/versioned configuration, signals, observed-time projection, safe intervention/experiment loop |
-| DEPRECATE | personalize as primary entry, onboarding as primary product, unversioned message-only activation | Preserve legacy compatibility and migrate existing guilds to explicit fallback |
-| ADD | capability/config revisions/snapshot queue/coverage/activation/diagnosis/intervention/experiment/entitlements/usage | Additive tables, scoped services, feature gates, integration and regression tests |
+| Decision  | Components                                                                                                              | Work                                                                                                              |
+| --------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| KEEP      | identity, tenant constraints, signatures, component MACs, flow version/session model, outbox states, privacy tombstones | Extend through existing boundaries                                                                                |
+| MODIFY    | Discord REST, settings, flow engine, event envelope, projector, metrics, workers, API/panels/web, purge                 | Native reads, typed/versioned configuration, signals, observed-time projection, safe intervention/experiment loop |
+| DEPRECATE | personalize as primary entry, onboarding as primary product, unversioned message-only activation                        | Preserve legacy compatibility and migrate existing guilds to explicit fallback                                    |
+| ADD       | capability/config revisions/snapshot queue/coverage/activation/diagnosis/intervention/experiment/entitlements/usage     | Additive tables, scoped services, feature gates, integration and regression tests                                 |
 
 ## Execution and acceptance
 

@@ -19,6 +19,7 @@ import { t, type UiLocale } from "../i18n";
 import { metricCopy, modeNames } from "../../../shared/src/community-copy";
 import {
   evidenceValue,
+  evidenceFraction,
   evidenceNote,
 } from "../../../shared/src/measurement-view";
 import { recipeNames } from "../../../shared/src/operations-copy";
@@ -151,7 +152,7 @@ export async function adaptiveControlPanel(
     children.push(
       callout(
         copy.label,
-        `${evidenceValue(metric.evidence, ja ? "ja" : "en")}${large && metric.evidence?.sampleSize && metric.evidence.sampleSize >= 5 && metric.medianMinutes !== null && metric.medianMinutes !== undefined ? ` · ${ja ? "中央値" : "Median"} ${Math.round(metric.medianMinutes)} min${metric.p75Minutes !== null && metric.p75Minutes !== undefined ? ` · p75 ${Math.round(metric.p75Minutes)} min` : ""}` : ""}\n${evidenceNote(metric.evidence, ja ? "ja" : "en")}${page === "analysis" ? `\n${copy.definition}` : ""}`,
+        `${(large && ["directReplies", "postResponse"].includes(metric.key) ? evidenceFraction(metric.evidence, ja ? "ja" : "en") : undefined) ?? evidenceValue(metric.evidence, ja ? "ja" : "en")}${metric.evidence?.value !== null && metric.evidence?.value !== undefined ? copy.unit : ""}${large && metric.evidence?.sampleSize && metric.evidence.sampleSize >= 5 && metric.medianMinutes !== null && metric.medianMinutes !== undefined ? ` · ${ja ? "中央値" : "Median"} ${Math.round(metric.medianMinutes)} min${metric.p75Minutes !== null && metric.p75Minutes !== undefined ? ` · p75 ${Math.round(metric.p75Minutes)} min` : ""}` : ""}\n${evidenceNote(metric.evidence, ja ? "ja" : "en")}${page === "analysis" ? `\n${copy.definition}` : ""}`,
       ),
     );
   }

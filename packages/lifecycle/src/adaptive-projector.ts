@@ -21,6 +21,7 @@ import type { Settings } from "../../settings/src/index";
 import { latestCapability, requestCapabilityRefresh } from "./discovery";
 import { projectNativeSnapshot } from "./native";
 import { projectActivation } from "./activation";
+import { integrationHealth } from "./observation";
 const id = z.string().regex(/^\d{17,20}$/),
   hashSchema = z.string().regex(/^[a-f\d]{64}$/);
 const factData = z
@@ -416,7 +417,15 @@ export async function projectMemberFlags(
     !pending;
   if (passed)
     await adaptiveFact(tx, s, "screening.passed", at, {}, hash, episodeId);
-  await sql`UPDATE membership_episodes SET flags_observed_at=CASE WHEN ${flagsFresh} THEN ${at} ELSE flags_observed_at END,guest_observed_at=CASE WHEN ${flagsFresh} THEN ${at} ELSE guest_observed_at END,screening_observed_at=CASE WHEN ${pendingFresh} THEN ${at} ELSE screening_observed_at END,observation_source=${e.observationSource ?? "GATEWAY"},member_flags=${flags},screening_pending=${pending},is_guest=CASE WHEN ${flagsFresh} THEN ${Boolean(flags & GuildMemberFlags.IsGuest)} ELSE is_guest END,engagement_started_at=CASE WHEN ${passed} THEN ${at} WHEN ${pendingFresh && pending} THEN NULL ELSE engagement_started_at END WHERE ${tenant(s)} AND id=${episodeId}::uuid`.execute(
+  const newlyEligible =
+    (prior.screening_observed_at === null ||
+      prior.guest_observed_at === null ||
+      Boolean(prior.member_flags & GuildMemberFlags.IsGuest)) &&
+    Boolean(pendingFresh || prior.screening_observed_at) &&
+    Boolean(flagsFresh || prior.guest_observed_at) &&
+    !pending &&
+    !(flags & GuildMemberFlags.IsGuest);
+  await sql`UPDATE membership_episodes SET flags_observed_at=CASE WHEN ${flagsFresh} THEN ${at} ELSE flags_observed_at END,guest_observed_at=CASE WHEN ${flagsFresh} THEN ${at} ELSE guest_observed_at END,screening_observed_at=CASE WHEN ${pendingFresh} THEN ${at} ELSE screening_observed_at END,observation_source=${e.observationSource ?? "GATEWAY"},member_flags=${flags},screening_pending=${pending},is_guest=CASE WHEN ${flagsFresh} THEN ${Boolean(flags & GuildMemberFlags.IsGuest)} ELSE is_guest END,engagement_started_at=CASE WHEN ${passed || newlyEligible} THEN GREATEST(joined_at,${at},COALESCE(screening_observed_at,${at}),COALESCE(guest_observed_at,${at})) WHEN ${pendingFresh && pending} THEN NULL ELSE engagement_started_at END WHERE ${tenant(s)} AND id=${episodeId}::uuid`.execute(
     tx,
   );
 }
@@ -837,7 +846,10 @@ async function projectVoice(
   const order = clockRow ? compareClock(e, clockRow) : 1;
   if (order !== null && order <= 0) return;
   if (order === null) {
-    await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND domain='voice' AND subject_hash=${hash}`.execute(
+    // An unorderable participant transition invalidates this channel's shared clock.
+    // Keeping the old count could qualify other participants against a phantom member.
+    const channel = prior?.data.channelId;
+    await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND ((domain='voice' AND (subject_hash=${hash} OR data->>'channelId'=${typeof channel === "string" ? channel : ""})) OR (domain='voice-channel' AND state_key=${typeof channel === "string" ? channel : ""}))`.execute(
       tx,
     );
     return;
@@ -1044,6 +1056,18 @@ export async function tickVoice(
   cfg: Settings,
   now = new Date(),
 ) {
+  const health = await integrationHealth(tx, s, now);
+  if (
+    health.gateway !== "CONNECTED" ||
+    health.intents.voice !== "AVAILABLE" ||
+    !health.lastGatewayAt
+  )
+    return;
+  // A wall clock alone cannot prove continuous co-presence. Advance only through
+  // the last successful Gateway observation (including heartbeat acknowledgements).
+  const through = new Date(
+    Math.min(now.getTime(), Date.parse(health.lastGatewayAt)),
+  );
   await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"voice:" + s.organizationId + ":" + s.guildId},0))`.execute(
     tx,
   );
@@ -1065,9 +1089,9 @@ export async function tickVoice(
       session.data,
       Math.max(
         0,
-        channelClock(session.clock, now) - Number(session.data.baseline),
+        channelClock(session.clock, through) - Number(session.data.baseline),
       ),
-      now,
+      through,
     );
     if (session.data.connected)
       await setState(

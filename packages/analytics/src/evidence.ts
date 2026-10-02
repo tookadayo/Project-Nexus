@@ -7,10 +7,13 @@ import {
   type CoverageState,
   type MetricEvidence,
 } from "../../shared/src/metric-evidence";
-import { measurementDefinition } from "../../shared/src/measurement-definitions";
+import {
+  measurementDefinition,
+  visibilityChannelTypes,
+} from "../../shared/src/measurement-definitions";
 import {
   currentRecipe,
-  recipeWindowVersions,
+  recipeWindowAttributions,
   type RecipeVersion,
 } from "../../settings/src/recipes";
 import {
@@ -18,34 +21,62 @@ import {
   collectionEpochs,
 } from "../../lifecycle/src/observation";
 export async function evidenceContext(tx: Tx, s: Scope, from: Date, to: Date) {
-  const [health, epochs, gaps, safety, recipe, recipeVersions] =
+  const [health, epochs, gaps, safety, recipe, recipeVersions, unknownEntries] =
     await Promise.all([
       integrationHealth(tx, s, to),
       collectionEpochs(tx, s, from, to),
-      sql`SELECT id FROM telemetry_health WHERE ${tenant(s)} AND started_at<${to} AND (ended_at IS NULL OR ended_at>${from}) LIMIT 1`.execute(
+      sql<{
+        started_at: Date;
+        ended_at: Date | null;
+      }>`SELECT started_at,ended_at FROM telemetry_health WHERE ${tenant(s)} AND started_at<${to} AND (ended_at IS NULL OR ended_at>${from}) `.execute(
         tx,
       ),
-      sql`SELECT id FROM adaptive_facts WHERE ${tenant(s)} AND kind='safety.context' AND occurred_at>=${from} AND occurred_at<${to} LIMIT 1`.execute(
+      sql<{
+        occurred_at: Date;
+      }>`SELECT occurred_at FROM adaptive_facts WHERE ${tenant(s)} AND kind='safety.context' AND occurred_at>=${from} AND occurred_at<${to}`.execute(
         tx,
       ),
       currentRecipe(tx, s),
-      recipeWindowVersions(tx, s, from, to),
+      recipeWindowAttributions(tx, s, from, to),
+      sql<{
+        joined_at: Date;
+      }>`SELECT joined_at FROM membership_episodes WHERE ${tenant(s)} AND context='PRODUCTION' AND joined_at>=${from} AND joined_at<${to} AND (screening_observed_at IS NULL OR guest_observed_at IS NULL OR GREATEST(screening_observed_at,guest_observed_at)>${to})`.execute(
+        tx,
+      ),
     ]);
   return {
     health,
     epochs,
     gap: gaps.rows.length > 0,
+    gaps: gaps.rows,
+    safetyTimes: safety.rows.map((r) => r.occurred_at),
     safety: safety.rows.length > 0,
     from,
     to,
     recipe,
-    recipeVersions,
+    recipeVersions: recipeVersions.map((r) => r.id),
+    definitionVersions: [
+      ...new Set(recipeVersions.map((r) => r.definition_version)),
+    ],
+    unknownJoins: unknownEntries.rows.map((r) => r.joined_at),
   };
 }
 export type EvidenceContext = Omit<
   Awaited<ReturnType<typeof evidenceContext>>,
-  "recipe" | "recipeVersions"
-> & { recipe?: RecipeVersion | null; recipeVersions?: (string | null)[] };
+  | "recipe"
+  | "recipeVersions"
+  | "gaps"
+  | "safetyTimes"
+  | "unknownJoins"
+  | "definitionVersions"
+> & {
+  recipe?: RecipeVersion | null;
+  recipeVersions?: (string | null)[];
+  gaps?: { started_at: Date; ended_at: Date | null }[];
+  safetyTimes?: Date[];
+  unknownJoins?: Date[];
+  definitionVersions?: string[];
+};
 export function metricCoverage(
   required: string[],
   snapshot: CapabilitySnapshot | null,
@@ -57,6 +88,10 @@ export function metricCoverage(
   if (context.health.gateway !== "CONNECTED") {
     reasons.push("GATEWAY_" + context.health.gateway);
     states.push("UNKNOWN");
+  }
+  if (required.includes("members") && context.unknownJoins?.length) {
+    reasons.push("MEMBER_ELIGIBILITY_UNOBSERVED");
+    states.push("PARTIAL");
   }
   if (context.gap) {
     reasons.push("COLLECTION_GAP");
@@ -87,6 +122,17 @@ export function metricCoverage(
     reasons.push("COLLECTION_GAP");
     states.push("PARTIAL");
   }
+  if (
+    required.some((s) => s.endsWith("Visibility")) &&
+    context.epochs.some(
+      (e) =>
+        ["PERMISSION_CHANGED", "CAPABILITY_CHANGED"].includes(e.startReason) &&
+        Date.parse(e.startedAt) > context.from.getTime(),
+    )
+  ) {
+    reasons.push("OBSERVATION_SCOPE_CHANGED");
+    states.push("PARTIAL");
+  }
   for (const key of required) {
     if (key in context.health.intents) {
       const state =
@@ -107,16 +153,7 @@ export function metricCoverage(
       states.push("UNKNOWN");
       continue;
     }
-    const types =
-      key === "voiceVisibility"
-        ? [2, 13]
-        : key === "stageVisibility"
-          ? [13]
-          : key === "forumVisibility"
-            ? [15]
-            : key === "mediaVisibility"
-              ? [16]
-              : [0, 5, 15, 16];
+    const types = visibilityChannelTypes(key);
     const channels = snapshot.channels.filter(
       (c) =>
         types.includes(c.type) &&
@@ -186,11 +223,46 @@ export function buildMetricEvidence(
     context.epochs.some((e) =>
       ["PERMISSION_CHANGED", "CAPABILITY_CHANGED"].includes(e.startReason),
     );
+  const mixedRecipe = Boolean(
+    context.recipe &&
+    context.recipeVersions?.some((id) => id !== context.recipe!.id),
+  );
+  const sensitive =
+    key.startsWith("journey.") ||
+    key.startsWith("journey:") ||
+    [
+      "voiceCopresence",
+      "lfgThenVoice",
+      "resolvedPosts",
+      "cohort.connection",
+      "cohort.retention",
+    ].includes(key);
+  const legacyReply =
+    (key === "directReplies" ||
+      key === "cohort.reply" ||
+      key.includes("reply-distribution")) &&
+    context.definitionVersions?.some((v) => v !== "observation-v3");
   return metricEvidence({
     metricKey: key,
+    available:
+      !(
+        required.includes("members") &&
+        context.unknownJoins?.length &&
+        input.sample === 0
+      ) &&
+      !(mixedRecipe && sensitive) &&
+      !legacyReply,
+    definitionVersions: context.definitionVersions,
+    recipeVersionIds: context.recipeVersions?.filter(
+      (id): id is string => id !== null,
+    ),
     definitionVersion:
       (input.definitionVersion ?? definition.version) +
-      (context.recipe?.definition ? "@" + context.recipe.id : ""),
+      (mixedRecipe
+        ? "@mixed"
+        : context.recipe?.definition
+          ? "@" + context.recipe.id
+          : ""),
     definition: input.definition,
     value: input.value,
     numerator: input.numerator,
@@ -206,7 +278,16 @@ export function buildMetricEvidence(
     collecting: input.collecting,
     minimumSample: input.minimumSample,
     comparisonBlockers: [
+      ...(legacyReply ? ["LEGACY_REPLY_SEMANTICS_UNKNOWN"] : []),
       ...(coverage.reasons.includes("COLLECTION_GAP")
+        ? ["COLLECTION_GAP"]
+        : []),
+      ...(context.epochs.some(
+        (e) =>
+          ["GATEWAY_GAP", "PROCESS_RESTART", "INTENT_UNAVAILABLE"].includes(
+            e.startReason,
+          ) && Date.parse(e.startedAt) > context.from.getTime(),
+      )
         ? ["COLLECTION_GAP"]
         : []),
       ...(context.safety ? ["SAFETY_CONTEXT"] : []),
@@ -220,4 +301,30 @@ export function buildMetricEvidence(
         : []),
     ],
   });
+}
+
+export function evidenceWindow(
+  context: EvidenceContext,
+  from: Date,
+  to: Date,
+): EvidenceContext {
+  return {
+    ...context,
+    from,
+    to,
+    unknownJoins: context.unknownJoins?.filter((at) => at >= from && at < to),
+    epochs: context.epochs.filter(
+      (e) =>
+        Date.parse(e.startedAt) < to.getTime() &&
+        (!e.endedAt || Date.parse(e.endedAt) > from.getTime()),
+    ),
+    gap: context.gaps
+      ? context.gaps.some(
+          (g) => g.started_at < to && (!g.ended_at || g.ended_at > from),
+        )
+      : context.gap,
+    safety: context.safetyTimes
+      ? context.safetyTimes.some((at) => at >= from && at < to)
+      : context.safety,
+  };
 }

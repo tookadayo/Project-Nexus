@@ -1,29 +1,258 @@
-export type Maturity='mature'|'provisional'|'unavailable';
-export type DataHealthNote='no_verified_data'|'maturing'|'missing_observations'|'retention_gap';
-export type DataHealthSummary={status:'healthy'|'degraded'|'incomplete'|'unavailable';coverageRatio:number|null;label:'healthy'|'partial'|'unavailable';notes:DataHealthNote[]};
-export type KPI={key:'new_members'|'activation_rate'|'direct_reply_connection_rate'|'d7_active_retention';current:number|null;previous:number|null;delta:number|null;sampleSize:number;maturity:Maturity;coverage:DataHealthSummary};
-export type JourneyStage={key:'joined'|'onboarded'|'first_value'|'connected'|'d7_active';value:number|null;valueKind:'count'|'rate';count:number|null;rateFromJoined:number|null;conversionFromPrevious:null;sampleSize:number;sampleKind:'eligible'|'mature'|'observed';maturity:Maturity;coverage:DataHealthSummary};
-export type TrendPoint={bucket:string;value:number|null;sampleSize:number;maturity:Maturity;coverage:DataHealthSummary};
-export type RetentionCohort={cohort:string;members:number;d1:number|null;d7:number|null;d30:number|null;maturity:{d1:Maturity;d7:Maturity;d30:Maturity};coverage:DataHealthSummary};
-export type ResponseDistribution={bucket:'under_5m'|'5m_1h'|'1h_6h'|'6h_24h'|'unanswered_24h';count:number|null;rate:number|null};
-export type Opportunity={id:string;type:string;severity:'warning'|'critical';stage:JourneyStage['key']|'data'|'delivery';current:number|null;previous:number|null;difference:number|null;sampleSize:number;dataHealth:DataHealthSummary;evidence:'observational'|'insufficient';causality:'not_established';reason:'threshold_change'|'measurement_coverage'|'delivery_failures';suggestedAction:'reply_rescue'|'welcome_helper'|'inactive_follow_up'|'channel_recommendation'|'event_recommendation'|null};
-export type DeliveryState='triggered'|'eligible'|'approved'|'delivered'|'failed'|'unknown'|'suppressed';
-export type DeliveryFunnel={triggered:number;eligible:number;approved:number;delivered:number;failed:number;unknown:number;suppressed:number};
-export type ActionCondition='not_connected'|'not_activated'|'all_eligible';
-export type ActionKind='staff_alert'|'send_dm'|'recommend_channels'|'recommend_event'|'channel_message'|'assign_role'|'remove_role';
-export type ActionPresentation={id:string;name:string;version:number;status:'active';trigger:string;delaySeconds:number;condition:ActionCondition;action:ActionKind;safety:{mode:'suggest'|'approval'|'auto';contactsPerWeek:number;dmPerDay:number};delivery:DeliveryFunnel;recentState:DeliveryState|null;approvals:{id:string;state:'eligible'}[]};
-export type ExperimentPresentation={id:string;name:string;primaryMetric:'activation'|'connection'|'retention';control:{sampleSize:number;rate:number|null};treatment:{sampleSize:number;rate:number|null};absoluteLift:number|null;credibleInterval:[number,number]|null;probabilityTreatmentBetter:number|null;evidence:'supported'|'directional'|'inconclusive'|'insufficient'|'guardrail';maturity:{assigned:number;mature:number;provisional:boolean};deliveryHealth:{failureRate:number|null;alertVolume:number};guardrailStatus:'healthy'|'paused';dataHealth:DataHealthSummary;randomization:'member'|'time_block';timeline:{startedAt:string|null;windowDays:number};analysis:'intention_to_treat';spilloverRisk:boolean;state:'running'|'paused'|'stopped'};
-export type SetupReason='ready'|'capability_unknown'|'permissions_missing'|'ingestion_unavailable'|'activation_missing'|'native_not_ready'|'fallback_not_ready'|'hybrid_not_ready'|'measurement_waiting';
-export type SetupState={required:boolean;recommendedMode:'native'|'fallback'|null;nativeOnboardingEnabled?:boolean|null;steps:{key:'connect'|'activation'|'onboarding'|'measuring';complete:boolean;reason:SetupReason}[];activationPreset:'reply'|'event'|'message'|'custom'|'not_configured';activationWindowDays:number};
-export type HomePresentation={generatedAt:string;kpis:KPI[];journey:JourneyStage[];communityOpportunity:Opportunity|null;measurementWarning:Opportunity|null;actionWarning:Opportunity|null;suggestedAction:Opportunity['suggestedAction'];dataHealth:DataHealthSummary;setup:SetupState};
-export type NewcomerChannel={channelId:string;firstMessages:number;firstReplies:number;firstSuccesses:number;goalCompleted:number|null;goalEligible:number|null};
-export type JourneyPresentation={generatedAt:string;range:7|30|90;funnel:JourneyStage[];trends:Record<'activation'|'connection'|'d7_retention',TrendPoint[]>;retention:RetentionCohort[];firstReplyDistribution:ResponseDistribution[];channels:NewcomerChannel[];hiddenChannelCount:number;dataHealth:DataHealthSummary};
-export type OpportunitiesPresentation={generatedAt:string;items:Opportunity[];measurementWarnings:Opportunity[];dataHealth:DataHealthSummary};
-export type ActionsPresentation={generatedAt:string;templates:ActionTemplatePresentation[];items:ActionPresentation[]};
-export type SimpleComparison={actionId:string;name:string;metric:'activation_rate'|'direct_reply_connection_rate';before:KPI;after:KPI;startedAt:string;collecting:boolean;controlledAvailable:boolean};
-export type ResultsPresentation={generatedAt:string;items:ExperimentPresentation[];simple:SimpleComparison[]};
-export type ActionTemplateKey='reply_rescue'|'welcome_helper'|'inactive_follow_up'|'channel_recommendation'|'event_recommendation';
-export type ActionTemplatePresentation={key:ActionTemplateKey;trigger:string;delaySeconds:number;condition:ActionCondition;action:ActionKind;safety:{mode:'suggest'|'approval'|'auto';contactsPerWeek:number;dmPerDay:number};requires:('channelId'|'eventId'|'recommendedChannelIds')[]};
-export type DiscordOption={id:string;label:string};
-export type DiscordOptions={channels:DiscordOption[];roles:DiscordOption[];events:DiscordOption[];available:boolean;surfaces?:{id:string;label:string;type:number}[];forumTags?:{channelId:string;id:string;label:string}[]};
-export type PresentationMetricKey='new_members'|'onboarding_completion'|'activation_rate'|'direct_reply_connection_rate'|'d7_active_retention';
+import type { MetricEvidence } from "../../shared/src/metric-evidence.js";
+export type Maturity = "mature" | "provisional" | "unavailable";
+export type DataHealthNote =
+  "no_verified_data" | "maturing" | "missing_observations" | "retention_gap";
+export type DataHealthSummary = {
+  status: "healthy" | "degraded" | "incomplete" | "unavailable";
+  coverageRatio: number | null;
+  label: "healthy" | "partial" | "unavailable";
+  notes: DataHealthNote[];
+};
+export type KPI = {
+  key:
+    | "new_members"
+    | "activation_rate"
+    | "direct_reply_connection_rate"
+    | "d7_active_retention";
+  current: number | null;
+  previous: number | null;
+  delta: number | null;
+  sampleSize: number;
+  maturity: Maturity;
+  coverage: DataHealthSummary;
+  evidence?: MetricEvidence;
+};
+export type JourneyStage = {
+  key: "joined" | "onboarded" | "first_value" | "connected" | "d7_active";
+  value: number | null;
+  valueKind: "count" | "rate";
+  count: number | null;
+  rateFromJoined: number | null;
+  conversionFromPrevious: null;
+  sampleSize: number;
+  sampleKind: "eligible" | "mature" | "observed";
+  maturity: Maturity;
+  coverage: DataHealthSummary;
+};
+export type TrendPoint = {
+  bucket: string;
+  value: number | null;
+  sampleSize: number;
+  maturity: Maturity;
+  coverage: DataHealthSummary;
+};
+export type RetentionCohort = {
+  cohort: string;
+  members: number;
+  evidence?: Record<"d1" | "d7" | "d30", MetricEvidence>;
+  d1: number | null;
+  d7: number | null;
+  d30: number | null;
+  maturity: { d1: Maturity; d7: Maturity; d30: Maturity };
+  coverage: DataHealthSummary;
+};
+export type ResponseDistribution = {
+  bucket: "under_5m" | "5m_1h" | "1h_6h" | "6h_24h" | "unanswered_24h";
+  count: number | null;
+  rate: number | null;
+  evidence?: MetricEvidence;
+};
+export type Opportunity = {
+  id: string;
+  type: string;
+  severity: "warning" | "critical";
+  stage: JourneyStage["key"] | "data" | "delivery";
+  current: number | null;
+  previous: number | null;
+  difference: number | null;
+  sampleSize: number;
+  dataHealth: DataHealthSummary;
+  evidence: "observational" | "insufficient";
+  causality: "not_established";
+  reason: "threshold_change" | "measurement_coverage" | "delivery_failures";
+  suggestedAction:
+    | "reply_rescue"
+    | "welcome_helper"
+    | "inactive_follow_up"
+    | "channel_recommendation"
+    | "event_recommendation"
+    | null;
+};
+export type DeliveryState =
+  | "triggered"
+  | "eligible"
+  | "approved"
+  | "delivered"
+  | "failed"
+  | "unknown"
+  | "suppressed";
+export type DeliveryFunnel = {
+  triggered: number;
+  eligible: number;
+  approved: number;
+  delivered: number;
+  failed: number;
+  unknown: number;
+  suppressed: number;
+};
+export type ActionCondition =
+  "not_connected" | "not_activated" | "all_eligible";
+export type ActionKind =
+  | "staff_alert"
+  | "send_dm"
+  | "recommend_channels"
+  | "recommend_event"
+  | "channel_message"
+  | "assign_role"
+  | "remove_role";
+export type ActionPresentation = {
+  id: string;
+  name: string;
+  version: number;
+  status: "active";
+  trigger: string;
+  delaySeconds: number;
+  condition: ActionCondition;
+  action: ActionKind;
+  safety: {
+    mode: "suggest" | "approval" | "auto";
+    contactsPerWeek: number;
+    dmPerDay: number;
+  };
+  delivery: DeliveryFunnel;
+  recentState: DeliveryState | null;
+  approvals: { id: string; state: "eligible" }[];
+};
+export type ExperimentPresentation = {
+  id: string;
+  name: string;
+  primaryMetric: "activation" | "connection" | "retention";
+  control: { sampleSize: number; rate: number | null };
+  treatment: { sampleSize: number; rate: number | null };
+  absoluteLift: number | null;
+  credibleInterval: [number, number] | null;
+  probabilityTreatmentBetter: number | null;
+  evidence:
+    "supported" | "directional" | "inconclusive" | "insufficient" | "guardrail";
+  maturity: { assigned: number; mature: number; provisional: boolean };
+  deliveryHealth: { failureRate: number | null; alertVolume: number };
+  guardrailStatus: "healthy" | "paused";
+  dataHealth: DataHealthSummary;
+  randomization: "member" | "time_block";
+  timeline: { startedAt: string | null; windowDays: number };
+  analysis: "intention_to_treat";
+  spilloverRisk: boolean;
+  state: "running" | "paused" | "stopped";
+};
+export type SetupReason =
+  | "ready"
+  | "capability_unknown"
+  | "permissions_missing"
+  | "ingestion_unavailable"
+  | "activation_missing"
+  | "native_not_ready"
+  | "fallback_not_ready"
+  | "hybrid_not_ready"
+  | "measurement_waiting";
+export type SetupState = {
+  required: boolean;
+  recommendedMode: "native" | "fallback" | null;
+  nativeOnboardingEnabled?: boolean | null;
+  steps: {
+    key: "connect" | "activation" | "onboarding" | "measuring";
+    complete: boolean;
+    reason: SetupReason;
+  }[];
+  activationPreset: "reply" | "event" | "message" | "custom" | "not_configured";
+  activationWindowDays: number;
+};
+export type HomePresentation = {
+  generatedAt: string;
+  kpis: KPI[];
+  journey: JourneyStage[];
+  communityOpportunity: Opportunity | null;
+  measurementWarning: Opportunity | null;
+  actionWarning: Opportunity | null;
+  suggestedAction: Opportunity["suggestedAction"];
+  dataHealth: DataHealthSummary;
+  setup: SetupState;
+};
+export type NewcomerChannel = {
+  channelId: string;
+  firstMessages: number;
+  firstReplies: number;
+  firstSuccesses: number;
+  goalCompleted: number | null;
+  goalEligible: number | null;
+};
+export type JourneyPresentation = {
+  generatedAt: string;
+  range: 7 | 30 | 90;
+  funnel: JourneyStage[];
+  trends: Record<"activation" | "connection" | "d7_retention", TrendPoint[]>;
+  retention: RetentionCohort[];
+  firstReplyDistribution: ResponseDistribution[];
+  channels: NewcomerChannel[];
+  hiddenChannelCount: number;
+  dataHealth: DataHealthSummary;
+};
+export type OpportunitiesPresentation = {
+  generatedAt: string;
+  items: Opportunity[];
+  measurementWarnings: Opportunity[];
+  dataHealth: DataHealthSummary;
+};
+export type ActionsPresentation = {
+  generatedAt: string;
+  templates: ActionTemplatePresentation[];
+  items: ActionPresentation[];
+};
+export type SimpleComparison = {
+  actionId: string;
+  name: string;
+  metric: "activation_rate" | "direct_reply_connection_rate";
+  before: KPI;
+  after: KPI;
+  startedAt: string;
+  collecting: boolean;
+  controlledAvailable: boolean;
+};
+export type ResultsPresentation = {
+  generatedAt: string;
+  items: ExperimentPresentation[];
+  simple: SimpleComparison[];
+};
+export type ActionTemplateKey =
+  | "reply_rescue"
+  | "welcome_helper"
+  | "inactive_follow_up"
+  | "channel_recommendation"
+  | "event_recommendation";
+export type ActionTemplatePresentation = {
+  key: ActionTemplateKey;
+  trigger: string;
+  delaySeconds: number;
+  condition: ActionCondition;
+  action: ActionKind;
+  safety: {
+    mode: "suggest" | "approval" | "auto";
+    contactsPerWeek: number;
+    dmPerDay: number;
+  };
+  requires: ("channelId" | "eventId" | "recommendedChannelIds")[];
+};
+export type DiscordOption = { id: string; label: string };
+export type DiscordOptions = {
+  channels: DiscordOption[];
+  roles: DiscordOption[];
+  events: DiscordOption[];
+  available: boolean;
+  surfaces?: { id: string; label: string; type: number }[];
+  forumTags?: { channelId: string; id: string; label: string }[];
+};
+export type PresentationMetricKey =
+  | "new_members"
+  | "onboarding_completion"
+  | "activation_rate"
+  | "direct_reply_connection_rate"
+  | "d7_active_retention";

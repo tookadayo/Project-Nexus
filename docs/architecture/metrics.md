@@ -1,19 +1,21 @@
 # Minimal analytics contract
 
+> Historical record — this document describes an earlier implementation or design. Current alpha.5 behavior is defined by [the README](../../README.md) and the current evidence, privacy and operations documents.
+
 All metric objects contain value (number or null), sampleSize, coverage and coverageRatio. Rates are fractions, not percentage points. Only PRODUCTION membership episodes joined in the selected interval are included. The overview query is capped at 45 days; default is the last 30 days. No individual lookup or cohort breakdown UI is provided in this slice, so no small-cohort data is published.
 
-| Metric | Definition / denominator |
-| --- | --- |
-| New Members | Number of membership episodes joined in range; rejoins are separate episodes |
-| Onboarding Start Rate | Episodes with a NEXUS start / all episodes |
-| Onboarding Completion Rate | Started episodes with completion / started episodes |
-| Activation Rate | First start-channel message within the configured window / episodes whose full activation window has elapsed |
-| Silent Joiner Rate | No observed message within activation window / fully matured episodes |
-| Median / P75 TTFV | Seconds from join to earliest activation; linear-interpolated quantiles among activated episodes |
-| D1 / D7 / D30 Active Retention | A message in [join+D days, join+(D+1) days); only fully elapsed windows in the denominator |
-| First Response Rate | First newcomer message receiving an explicit reply within 24h / first messages observed for at least 24h |
-| Median First Response Time | Latency among qualifying first-message replies above |
-| Unanswered after 1h / 6h / 24h | Count without reply by that threshold; sampleSize is messages old enough for that threshold |
+| Metric                         | Definition / denominator                                                                                     |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| New Members                    | Number of membership episodes joined in range; rejoins are separate episodes                                 |
+| Onboarding Start Rate          | Episodes with a NEXUS start / all episodes                                                                   |
+| Onboarding Completion Rate     | Started episodes with completion / started episodes                                                          |
+| Activation Rate                | First start-channel message within the configured window / episodes whose full activation window has elapsed |
+| Silent Joiner Rate             | No observed message within activation window / fully matured episodes                                        |
+| Median / P75 TTFV              | Seconds from join to earliest activation; linear-interpolated quantiles among activated episodes             |
+| D1 / D7 / D30 Active Retention | A message in [join+D days, join+(D+1) days); only fully elapsed windows in the denominator                   |
+| First Response Rate            | First newcomer message receiving an explicit reply within 24h / first messages observed for at least 24h     |
+| Median First Response Time     | Latency among qualifying first-message replies above                                                         |
+| Unanswered after 1h / 6h / 24h | Count without reply by that threshold; sampleSize is messages old enough for that threshold                  |
 
 Existing responder means their membership episode began before the newcomer episode. Bots and self replies do not qualify. Only explicit message references qualify. General message rows do not store reply target IDs; target rows receive only receivedExplicitReply and firstReplyLatencySeconds. Missing target metadata remains pending in the short-lived stream and lowers coverage.
 

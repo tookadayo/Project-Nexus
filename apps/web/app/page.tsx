@@ -1,16 +1,325 @@
-import {Preview,SiteCta,SiteShell,copy,siteLocale} from './public-ui';
-export default async function Home(){const locale=await siteLocale();return <SiteShell locale={locale}>
- <section className="site-hero"><div className="hero-copy"><p className="site-eyebrow">DISCORD COMMUNITY OPERATIONS</p><h1 className={locale==='ja'?'hero-title-ja':undefined}>{copy(locale,<><span className="hero-phrase">新規メンバーへの</span><span className="hero-phrase">対応を</span><br/><em>見落としにくくする</em><br/>Discord運営ツール。</>,<>Keep track of<br/><em>newcomer replies</em><br/>in your Discord server.</>)}</h1><p className="site-lead">{copy(locale,'新しく参加したメンバーへの返信、最初の交流、参加後の活動を確認し、対応が必要な投稿と改善案を表示します。','NEXUS tracks replies, first connections and activity after joining. It shows posts needing attention and improvements your team can try.')}</p><SiteCta locale={locale}/><p className="hero-note">{copy(locale,'ログインは管理画面へ · Botの追加はDiscordの認可画面へ','Sign in opens the dashboard · Add to Discord starts bot installation')}</p></div><div className="hero-visual"><Preview locale={locale}/></div></section>
- <section className="site-section story-intro"><p className="site-eyebrow">THE PROBLEM</p><h2>{copy(locale,<>参加人数に加えて、<br/>返信と交流を確認できます。</>,<>See replies and connections<br/>alongside join counts.</>)}</h2><p>{copy(locale,'参加人数だけでは、投稿に初めて返信がついたか、誰かと交流できたかは見えません。NEXUSは運営が動ける形でその差を示します。','A join count cannot tell you whether a newcomer post received a reply or a member connected with someone. NEXUS turns those gaps into clear next steps.')}</p></section>
- <section className="site-section"><div className="section-heading"><p className="site-eyebrow">HOW NEXUS WORKS</p><h2>{copy(locale,'活動を確認し、対応し、結果を比べる。','From observation to action, in one flow.')}</h2></div><div className="story-grid">{[copy(locale,['01','見る','新規メンバーの参加と最初の交流を確認。'],['01','Observe','See newcomer activity and first connections.']),copy(locale,['02','見つける','直接返信を確認できない投稿を表示。'],['02','Detect','Spot unanswered posts and stalled paths.']),copy(locale,['03','比較の条件を見る','人数・期間・判定条件を示す。'],['03','Explain','Show the evidence, sample, and measurement rule.']),copy(locale,['04','実行する','Discord上で対応し、変更前にプレビュー。'],['04','Act','Respond in Discord and preview changes.']),copy(locale,['05','効果を見る','改善後の変化を、データが揃ってから確認。'],['05','Measure','Compare outcomes when enough data has matured.'])].map(([number,title,body])=><article className="story-card" key={number}><span>{number}</span><h3>{title}</h3><p>{body}</p></article>)}</div></section>
- <section className="site-section split-feature"><div><p className="site-eyebrow">DISCORD + WEB</p><h2>{copy(locale,'今日の対応はDiscordで。長期の改善はWebで。','Respond in Discord. Understand the pattern on Web.')}</h2><p>{copy(locale,'対応キューでは投稿を開き、スタッフ確認、後で確認、解決を選べます。Webでは新規メンバーの流れ、根拠、改善結果をたどれます。','Open a post, acknowledge it, snooze it, or resolve it from Discord. Use Web to follow the newcomer journey, evidence, and results.')}</p><a className="inline-link" href="/product">{copy(locale,'使い方を見る','See how it works')} →</a></div><div className="feature-panel"><span className="badge badge-amber">{copy(locale,'対応','ATTENTION')}</span><h3>{copy(locale,'返信を待っている投稿','A post is waiting for a reply')}</h3><p>#general · 37 min</p><div className="mock-buttons"><span>{copy(locale,'投稿を開く','Open post')}</span><span>{copy(locale,'スタッフ確認','Acknowledge')}</span><span>{copy(locale,'後で','Snooze')}</span></div><small>{copy(locale,'画面イメージ · サンプルデータ','Illustrative preview · Example data')}</small></div></section>
- <section className="site-section trust-strip"><div><p className="site-eyebrow">MEASUREMENT YOU CAN INSPECT</p><h2>{copy(locale,'数える活動と対象期間を確認できます。','Know what every number means.')}</h2><p>{copy(locale,'「最初の交流」は直接返信やボイスでの交流を確認したもの。イベントの参加登録を実際の参加とは呼びません。対象者なし、測定中、人数不足、取得失敗を区別します。','A first connection requires an observable interaction, such as a direct reply or voice connection. Event signup is never labeled attendance. No eligible members, incomplete observations, small samples and unavailable data have distinct states.')}</p></div><div className="rule-preview"><span className="badge badge-violet">{copy(locale,'判定ルール','MEASUREMENT RULE')}</span><h3>💬 {copy(locale,'投稿に初めて返信がつく','First reply to a post')}</h3><dl><div><dt>{copy(locale,'対象','Who')}</dt><dd>{copy(locale,'新規メンバー','New members')}</dd></div><div><dt>{copy(locale,'判定','Detected by')}</dt><dd>{copy(locale,'別のメンバーからの直接返信','Direct reply from another member')}</dd></div><div><dt>{copy(locale,'除外','Excluded')}</dt><dd>Bots · {copy(locale,'本人','Self replies')}</dd></div></dl></div></section>
- <section className="site-section pricing-teaser"><p className="site-eyebrow">START FREE</p><h2>{copy(locale,'サーバーの規模と必要な機能で選ぶ。','Choose a plan for your server and required features.')}</h2><div className="pricing-teaser-grid">{(['FREE','STARTER','GROWTH'] as const).map(plan=><article key={plan}><h3>{plan}</h3><p>{plan==='FREE'?copy(locale,'NEXUSを試す · 1サーバー','Try NEXUS · 1 server'):plan==='STARTER'?copy(locale,'小さなコミュニティの最初の交流に','First connections in smaller communities'):copy(locale,'参加後の活動と改善結果を確認する運営に','For teams improving returning activity')}</p></article>)}</div><a className="inline-link" href="/pricing">{copy(locale,'料金を見る','View plans')} →</a></section>
- <section className="site-section faq"><h2>{copy(locale,'よくある質問','Frequently asked questions')}</h2>{[
- [copy(locale,'何を計測しますか？','What does NEXUS measure?'),copy(locale,'新規参加、直接返信やボイスでの最初の交流、別の日の活動、参加後の活動を、観測できる範囲で確認します。','NEXUS observes new members, direct replies and voice connections, returning activity and activity after joining.')],
- [copy(locale,'メッセージ本文を保存しますか？','Does NEXUS store message content?'),copy(locale,'本文、添付、DM本文は保存しません。活動の種類と時刻など、計測に必要な情報だけを使用します。','No message content, attachments or DM content is stored. Measurement uses activity types, timestamps and necessary metadata.')],
- [copy(locale,'Discordだけでも使えますか？','Can I use NEXUS from Discord?'),copy(locale,'日々の対応と主要設定はDiscordで行えます。Webでは詳細な分析と設定を確認できます。','Handle daily responses and key settings in Discord. Web provides detailed analysis and settings.')],
- [copy(locale,'無料で使えますか？','Can I start free?'),copy(locale,'Freeで1サーバーの基本的な参加時案内と改善アクションを利用できます。有料プランの利用についてはお問い合わせください。','Free includes basic onboarding and improvement actions for one server. Contact us about paid plan availability.')]
- ].map(([question,answer])=><details key={question}><summary>{question}</summary><p>{answer}</p></details>)}</section>
- <section className="site-section final-cta"><p className="site-eyebrow">START WITH THE FIRST CONNECTION</p><h2>{copy(locale,'新規メンバーへの返信を確認する。','Track replies to new members.')}</h2><SiteCta locale={locale}/></section>
- </SiteShell>}
+import { Preview, SiteCta, SiteShell, copy, siteLocale } from "./public-ui";
+export default async function Home() {
+  const locale = await siteLocale();
+  return (
+    <SiteShell locale={locale}>
+      <section className="site-hero">
+        <div className="hero-copy">
+          <p className="site-eyebrow">DISCORD COMMUNITY OPERATIONS</p>
+          <h1 className={locale === "ja" ? "hero-title-ja" : undefined}>
+            {copy(
+              locale,
+              <>
+                <span className="hero-phrase">新規メンバーへの</span>
+                <span className="hero-phrase">対応を</span>
+                <br />
+                <em>見落としにくくする</em>
+                <br />
+                Discord運営ツール。
+              </>,
+              <>
+                Keep track of
+                <br />
+                <em>newcomer replies</em>
+                <br />
+                in your Discord server.
+              </>,
+            )}
+          </h1>
+          <p className="site-lead">
+            {copy(
+              locale,
+              "新しく参加したメンバーへの返信、最初の交流、参加後の活動を確認し、対応が必要な投稿と改善案を表示します。",
+              "NEXUS tracks replies, first connections and activity after joining. It shows posts needing attention and improvements your team can try.",
+            )}
+          </p>
+          <SiteCta locale={locale} />
+          <p className="hero-note">
+            {copy(
+              locale,
+              "ログインは管理画面へ · Botの追加はDiscordの認可画面へ",
+              "Sign in opens the dashboard · Add to Discord starts bot installation",
+            )}
+          </p>
+        </div>
+        <div className="hero-visual">
+          <Preview locale={locale} />
+        </div>
+      </section>
+      <section className="site-section story-intro">
+        <p className="site-eyebrow">THE PROBLEM</p>
+        <h2>
+          {copy(
+            locale,
+            <>
+              参加人数に加えて、
+              <br />
+              返信と交流を確認できます。
+            </>,
+            <>
+              See replies and connections
+              <br />
+              alongside join counts.
+            </>,
+          )}
+        </h2>
+        <p>
+          {copy(
+            locale,
+            "参加人数だけでは、投稿に初めて返信がついたか、誰かと交流できたかは見えません。NEXUSは運営が動ける形でその差を示します。",
+            "A join count cannot tell you whether a newcomer post received a reply or a member connected with someone. NEXUS turns those gaps into clear next steps.",
+          )}
+        </p>
+      </section>
+      <section className="site-section">
+        <div className="section-heading">
+          <p className="site-eyebrow">HOW NEXUS WORKS</p>
+          <h2>
+            {copy(
+              locale,
+              "活動を確認し、対応し、結果を比べる。",
+              "From observation to action, in one flow.",
+            )}
+          </h2>
+        </div>
+        <div className="story-grid">
+          {[
+            copy(
+              locale,
+              ["01", "見る", "新規メンバーの参加と最初の交流を確認。"],
+              ["01", "Observe", "See newcomer activity and first connections."],
+            ),
+            copy(
+              locale,
+              ["02", "見つける", "直接返信を確認できない投稿を表示。"],
+              ["02", "Detect", "Spot unanswered posts and stalled paths."],
+            ),
+            copy(
+              locale,
+              ["03", "比較の条件を見る", "人数・期間・判定条件を示す。"],
+              [
+                "03",
+                "Explain",
+                "Show the evidence, sample, and measurement rule.",
+              ],
+            ),
+            copy(
+              locale,
+              ["04", "実行する", "Discord上で対応し、変更前にプレビュー。"],
+              ["04", "Act", "Respond in Discord and preview changes."],
+            ),
+            copy(
+              locale,
+              ["05", "効果を見る", "改善後の変化を、データが揃ってから確認。"],
+              [
+                "05",
+                "Measure",
+                "Compare outcomes when enough data has matured.",
+              ],
+            ),
+          ].map(([number, title, body]) => (
+            <article className="story-card" key={number}>
+              <span>{number}</span>
+              <h3>{title}</h3>
+              <p>{body}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className="site-section split-feature">
+        <div>
+          <p className="site-eyebrow">DISCORD + WEB</p>
+          <h2>
+            {copy(
+              locale,
+              "今日の対応はDiscordで。長期の改善はWebで。",
+              "Respond in Discord. Understand the pattern on Web.",
+            )}
+          </h2>
+          <p>
+            {copy(
+              locale,
+              "対応キューでは投稿を開き、スタッフ確認、後で確認、解決を選べます。Webでは新規メンバーの流れ、根拠、改善結果をたどれます。",
+              "Open a post, acknowledge it, snooze it, or resolve it from Discord. Use Web to follow the newcomer journey, evidence, and results.",
+            )}
+          </p>
+          <a className="inline-link" href="/product">
+            {copy(locale, "使い方を見る", "See how it works")} →
+          </a>
+        </div>
+        <div className="feature-panel">
+          <span className="badge badge-amber">
+            {copy(locale, "対応", "ATTENTION")}
+          </span>
+          <h3>
+            {copy(
+              locale,
+              "返信を待っている投稿",
+              "A post is waiting for a reply",
+            )}
+          </h3>
+          <p>#general · 37 min</p>
+          <div className="mock-buttons">
+            <span>{copy(locale, "投稿を開く", "Open post")}</span>
+            <span>{copy(locale, "スタッフ確認", "Acknowledge")}</span>
+            <span>{copy(locale, "後で", "Snooze")}</span>
+          </div>
+          <small>
+            {copy(
+              locale,
+              "画面イメージ · サンプルデータ",
+              "Illustrative preview · Example data",
+            )}
+          </small>
+        </div>
+      </section>
+      <section className="site-section trust-strip">
+        <div>
+          <p className="site-eyebrow">MEASUREMENT YOU CAN INSPECT</p>
+          <h2>
+            {copy(
+              locale,
+              "数える活動と対象期間を確認できます。",
+              "Know what every number means.",
+            )}
+          </h2>
+          <p>
+            {copy(
+              locale,
+              "「最初の交流」は直接返信や条件を満たすボイス同席を確認したもの。イベントの参加登録を実際の参加とは呼びません。対象者なし、測定中、人数不足、取得失敗を区別します。",
+              "A first connection requires an observable interaction, such as a direct reply or qualified voice co-presence. Event signup is never labeled attendance. No eligible members, incomplete observations, small samples and unavailable data have distinct states.",
+            )}
+          </p>
+        </div>
+        <div className="rule-preview">
+          <span className="badge badge-violet">
+            {copy(locale, "判定ルール", "MEASUREMENT RULE")}
+          </span>
+          <h3>
+            💬 {copy(locale, "投稿に初めて返信がつく", "First reply to a post")}
+          </h3>
+          <dl>
+            <div>
+              <dt>{copy(locale, "対象", "Who")}</dt>
+              <dd>{copy(locale, "新規メンバー", "New members")}</dd>
+            </div>
+            <div>
+              <dt>{copy(locale, "判定", "Detected by")}</dt>
+              <dd>
+                {copy(
+                  locale,
+                  "別のメンバーからの直接返信",
+                  "Direct reply from another member",
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>{copy(locale, "除外", "Excluded")}</dt>
+              <dd>Bots · {copy(locale, "本人", "Self replies")}</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+      <section className="site-section pricing-teaser">
+        <p className="site-eyebrow">START FREE</p>
+        <h2>
+          {copy(
+            locale,
+            "サーバーの規模と必要な機能で選ぶ。",
+            "Choose a plan for your server and required features.",
+          )}
+        </h2>
+        <div className="pricing-teaser-grid">
+          {(["FREE", "STARTER", "GROWTH"] as const).map((plan) => (
+            <article key={plan}>
+              <h3>{plan}</h3>
+              <p>
+                {plan === "FREE"
+                  ? copy(
+                      locale,
+                      "NEXUSを試す · 1サーバー",
+                      "Try NEXUS · 1 server",
+                    )
+                  : plan === "STARTER"
+                    ? copy(
+                        locale,
+                        "小さなコミュニティの最初の交流に",
+                        "First connections in smaller communities",
+                      )
+                    : copy(
+                        locale,
+                        "参加後の活動と改善結果を確認する運営に",
+                        "For teams improving returning activity",
+                      )}
+              </p>
+            </article>
+          ))}
+        </div>
+        <a className="inline-link" href="/pricing">
+          {copy(locale, "料金を見る", "View plans")} →
+        </a>
+      </section>
+      <section className="site-section faq">
+        <h2>{copy(locale, "よくある質問", "Frequently asked questions")}</h2>
+        {[
+          [
+            copy(locale, "何を計測しますか？", "What does NEXUS measure?"),
+            copy(
+              locale,
+              "新規参加、直接返信やボイスでの最初の交流、別の日の活動、参加後の活動を、観測できる範囲で確認します。",
+              "NEXUS observes new members, direct replies and voice connections, returning activity and activity after joining.",
+            ),
+          ],
+          [
+            copy(
+              locale,
+              "メッセージ本文を保存しますか？",
+              "Does NEXUS store message content?",
+            ),
+            copy(
+              locale,
+              "本文、添付、DM本文は保存しません。活動の種類と時刻など、計測に必要な情報だけを使用します。",
+              "No message content, attachments or DM content is stored. Measurement uses activity types, timestamps and necessary metadata.",
+            ),
+          ],
+          [
+            copy(
+              locale,
+              "Discordだけでも使えますか？",
+              "Can I use NEXUS from Discord?",
+            ),
+            copy(
+              locale,
+              "日々の対応と主要設定はDiscordで行えます。Webでは詳細な分析と設定を確認できます。",
+              "Handle daily responses and key settings in Discord. Web provides detailed analysis and settings.",
+            ),
+          ],
+          [
+            copy(locale, "無料で使えますか？", "Can I start free?"),
+            copy(
+              locale,
+              "Freeで1サーバーの基本的な参加時案内と改善アクションを利用できます。有料プランの利用についてはお問い合わせください。",
+              "Free includes basic onboarding and improvement actions for one server. Contact us about paid plan availability.",
+            ),
+          ],
+        ].map(([question, answer]) => (
+          <details key={question}>
+            <summary>{question}</summary>
+            <p>{answer}</p>
+          </details>
+        ))}
+      </section>
+      <section className="site-section final-cta">
+        <p className="site-eyebrow">START WITH THE FIRST CONNECTION</p>
+        <h2>
+          {copy(
+            locale,
+            "新規メンバーへの返信を確認する。",
+            "Track replies to new members.",
+          )}
+        </h2>
+        <SiteCta locale={locale} />
+      </section>
+    </SiteShell>
+  );
+}

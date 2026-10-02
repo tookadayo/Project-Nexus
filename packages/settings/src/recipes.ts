@@ -56,7 +56,7 @@ export async function saveRecipe(
   );
   return id;
 }
-export async function recipeWindowVersions(
+export async function recipeWindowAttributions(
   tx: Tx,
   s: Scope,
   from: Date,
@@ -65,8 +65,22 @@ export async function recipeWindowVersions(
   return (
     await sql<{
       id: string | null;
-    }>`SELECT DISTINCT NULLIF(recipe_key,'')::uuid AS id FROM lifecycle_daily_rollups WHERE ${tenant(s)} AND day>=(${from}::timestamptz AT TIME ZONE 'UTC')::date AND day<=(${to}::timestamptz AT TIME ZONE 'UTC')::date UNION SELECT DISTINCT recipe_version_id FROM adaptive_facts WHERE ${tenant(s)} AND occurred_at>=${from} AND occurred_at<${to}`.execute(
+      definition_version: string;
+    }>`SELECT DISTINCT NULLIF(recipe_key,'')::uuid AS id,definition_version FROM lifecycle_daily_rollups WHERE ${tenant(s)} AND day>=(${from}::timestamptz AT TIME ZONE 'UTC')::date AND day<=(${to}::timestamptz AT TIME ZONE 'UTC')::date UNION SELECT DISTINCT recipe_version_id AS id,definition_version FROM adaptive_facts WHERE ${tenant(s)} AND occurred_at>=${from} AND occurred_at<${to}`.execute(
       tx,
     )
-  ).rows.map((r) => r.id);
+  ).rows;
+}
+
+export async function recipeWindowVersions(
+  tx: Tx,
+  s: Scope,
+  from: Date,
+  to: Date,
+) {
+  return [
+    ...new Set(
+      (await recipeWindowAttributions(tx, s, from, to)).map((r) => r.id),
+    ),
+  ];
 }

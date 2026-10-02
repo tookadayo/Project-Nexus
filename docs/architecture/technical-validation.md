@@ -1,5 +1,7 @@
 # Technical Validation
 
+> Historical record — this document describes an earlier implementation or design. Current alpha.5 behavior is defined by [the README](../../README.md) and the current evidence, privacy and operations documents.
+
 Report format: changes / verification / privacy and permissions / unresolved items (approved by user).
 
 ## Findings

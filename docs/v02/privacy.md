@@ -1,19 +1,21 @@
 # Privacy and retention
 
+> Historical record — this document describes an earlier implementation or design. Current alpha.5 behavior is defined by [the README](../../README.md) and the current evidence, privacy and operations documents.
+
 メッセージ本文、添付、embed、sticker、poll本文、DM内容、ユーザー名、メールは収集しません。永続化前のstrict schemaで未知fieldを拒否します。DiscordユーザーIDはguild限定HMAC lookupとAES-256-GCM vaultで扱います。分析はmembership episode UUIDを使用します。
 
 ## 保持カテゴリー
 
-| データ | 保持 |
-| --- | --- |
-| 詳細signal、正規化ingest、Native snapshot、通常施策履歴、監査、flow回答、role所有権証跡 | 既定30日、選択7/14/30日 |
-| Interaction job/token | 15分 |
-| Redisの正規化stream、返信照合用receipt | 24時間 |
-| 匿名日次指標・D30加入日counter・実験集計snapshot | 既定24か月、選択3/12/24か月 |
-| MTMのguild限定HMAC | 当該UTC請求月。翌月purge |
-| 現在のmembership routing、固定Activation版/成否、Native初回観測状態 | 在籍中。退会後は詳細保持日数で削除 |
-| 実験assignment・成否・紐づく配送証跡 | 観測窓終了後90日まで。membership削除時はそれ以前でもcascade |
-| 公開設定・flow版 | 設定履歴として保持。guild削除時に削除 |
+| データ                                                                                  | 保持                                                        |
+| --------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| 詳細signal、正規化ingest、Native snapshot、通常施策履歴、監査、flow回答、role所有権証跡 | 既定30日、選択7/14/30日                                     |
+| Interaction job/token                                                                   | 15分                                                        |
+| Redisの正規化stream、返信照合用receipt                                                  | 24時間                                                      |
+| 匿名日次指標・D30加入日counter・実験集計snapshot                                        | 既定24か月、選択3/12/24か月                                 |
+| MTMのguild限定HMAC                                                                      | 当該UTC請求月。翌月purge                                    |
+| 現在のmembership routing、固定Activation版/成否、Native初回観測状態                     | 在籍中。退会後は詳細保持日数で削除                          |
+| 実験assignment・成否・紐づく配送証跡                                                    | 観測窓終了後90日まで。membership削除時はそれ以前でもcascade |
+| 公開設定・flow版                                                                        | 設定履歴として保持。guild削除時に削除                       |
 
 30日はすべてのDB行の一律TTLではありません。運用上必要な在籍状態、実験状態、請求期間、匿名集計を別カテゴリーにしています。7/14日を選ぶと長い観測窓の詳細証拠は不足し得るため、Coverageを落とし、否定条件で未観測を成功にしません。
 

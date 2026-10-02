@@ -1,170 +1,638 @@
-import {traceStep} from '../../shared/src/observability.js';
-import {randomUUID} from 'node:crypto';
-import {sql,tenant,json,privacyReadLock,type Database,type Tx} from '../../db/src/index.js';
-import {eventSchema,dedupeKey,isDirectReply,type Envelope} from '../../events/src/index.js';
-import {memberEligibility,type MemberObservation} from '../../shared/src/member-observation.js';
-import {GuildMemberFlags} from 'discord-api-types/v10';
-import {IdentityVault} from '../../identity/src/index.js';
-import {SettingsService} from '../../settings/src/index.js';
-import type {DiscordPort} from '../../discord/src/rest.js';
-import type {Scope} from '../../shared/src/index.js';
-import {scheduleNativeSnapshots,requestNativeRefresh} from './native.js';
-import {validateSignal} from '../../events/src/registry.js';
-import {projectActivation} from './activation.js';
-import {recordUsage} from '../../settings/src/entitlements.js';
-import {projectStructure,projectMemberFlags,projectAdaptiveMember,resolveSurface} from './adaptive-projector.js';
-import {projectObservation} from './observation.js';
-export class AwaitingReference extends Error{}
+import { traceStep } from "../../shared/src/observability.js";
+import { randomUUID } from "node:crypto";
+import {
+  sql,
+  tenant,
+  json,
+  privacyReadLock,
+  type Database,
+  type Tx,
+} from "../../db/src/index.js";
+import {
+  eventSchema,
+  dedupeKey,
+  isDirectReply,
+  type Envelope,
+} from "../../events/src/index.js";
+import {
+  memberEligibility,
+  type MemberObservation,
+} from "../../shared/src/member-observation.js";
+import { GuildMemberFlags } from "discord-api-types/v10";
+import { IdentityVault } from "../../identity/src/index.js";
+import { SettingsService } from "../../settings/src/index.js";
+import type { DiscordPort } from "../../discord/src/rest.js";
+import type { Scope } from "../../shared/src/index.js";
+import { scheduleNativeSnapshots, requestNativeRefresh } from "./native.js";
+import { validateSignal } from "../../events/src/registry.js";
+import { projectActivation } from "./activation.js";
+import { recordUsage } from "../../settings/src/entitlements.js";
+import {
+  projectStructure,
+  projectMemberFlags,
+  projectAdaptiveMember,
+  resolveSurface,
+} from "./adaptive-projector.js";
+import { projectObservation } from "./observation.js";
+export class AwaitingReference extends Error {}
 export class LifecycleService {
- constructor(private readonly db:Database,private readonly vault:IdentityVault,private readonly settings:SettingsService,private readonly discord:DiscordPort){}
- async deliveryHealth(event:Envelope,pending:boolean){
-  const s={organizationId:event.organizationId,guildId:event.guildId};const reason=`pending:${dedupeKey(event)}`;
-  if(pending)await sql`INSERT INTO telemetry_health(organization_id,guild_id,id,started_at,reason)
+  constructor(
+    private readonly db: Database,
+    private readonly vault: IdentityVault,
+    private readonly settings: SettingsService,
+    private readonly discord: DiscordPort,
+  ) {}
+  async deliveryHealth(event: Envelope, pending: boolean) {
+    const s = { organizationId: event.organizationId, guildId: event.guildId };
+    const reason = `pending:${dedupeKey(event)}`;
+    if (pending)
+      await sql`INSERT INTO telemetry_health(organization_id,guild_id,id,started_at,reason)
    SELECT ${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${new Date(event.at)},${reason}
-   WHERE EXISTS(SELECT 1 FROM guilds WHERE ${tenant(s)}) AND NOT EXISTS(SELECT 1 FROM telemetry_health WHERE ${tenant(s)} AND reason=${reason})`.execute(this.db);
-  else await sql`DELETE FROM telemetry_health WHERE ${tenant(s)} AND reason=${reason}`.execute(this.db);
- }
- async streamReset(s:Scope){
-  const now=new Date();await sql`INSERT INTO telemetry_health(organization_id,guild_id,id,started_at,ended_at,reason)
-   SELECT organization_id,guild_id,${randomUUID()}::uuid,last_seen,${now},'Redis stream reset' FROM telemetry_cursor WHERE ${tenant(s)}`.execute(this.db);
- }
- async process(input:Envelope){return traceStep('event.project',{'signal.kind':input.kind},()=>this.processInternal(input));}
- private async processInternal(input:Envelope){
-  const event=eventSchema.parse(input);const s:Scope={organizationId:event.organizationId,guildId:event.guildId};const at=new Date(event.at);
-  let observedMember:Awaited<ReturnType<DiscordPort['member']>>|undefined;
-  if(event.encryptedUserId&&event.kind!=='member.left'&&(await this.settings.get(s)).enabled){
-   const userId=this.vault.open(s,event.encryptedUserId),hash=this.vault.hash(s,userId);
-   const suppressed=(await sql`SELECT id FROM deletion_requests WHERE ${tenant(s)} AND (lookup_hash IS NULL OR lookup_hash=${hash})`.execute(this.db)).rows.length;
-   if(!suppressed){const existing=event.joinedAt?true:(await sql`SELECT e.id FROM membership_episodes e JOIN member_identity_map m ON m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.identity_id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND m.lookup_hash=${hash} AND e.joined_at<=${at} AND (e.left_at IS NULL OR e.left_at>${at}) AND e.context='PRODUCTION' LIMIT 1`.execute(this.db)).rows.length>0;
-    if(!existing&&!event.joinedAt&&!((event.memberFlags??0)&16))observedMember=await (this.discord.memberSnapshot?.(s.guildId,userId)??this.discord.member(s.guildId,userId));
-   }
+   WHERE EXISTS(SELECT 1 FROM guilds WHERE ${tenant(s)}) AND NOT EXISTS(SELECT 1 FROM telemetry_health WHERE ${tenant(s)} AND reason=${reason})`.execute(
+        this.db,
+      );
+    else
+      await sql`DELETE FROM telemetry_health WHERE ${tenant(s)} AND reason=${reason}`.execute(
+        this.db,
+      );
   }
-  return this.db.transaction().execute(async tx=>{
-   await privacyReadLock(tx,s);
-   const guild=(await sql`SELECT guild_id FROM guilds WHERE ${tenant(s)}`.execute(tx)).rows[0];if(!guild)return;
-   if((await sql`SELECT id FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash IS NULL AND completed_at IS NOT NULL`.execute(tx)).rows.length)return;
-   await sql`UPDATE gateway_ingest SET projected_at=now() WHERE ${tenant(s)} AND dedupe_key=${dedupeKey(event)}`.execute(tx);
-   const inserted=await sql`INSERT INTO event_inbox(organization_id,guild_id,dedupe_key) VALUES(${s.organizationId}::uuid,${s.guildId},${dedupeKey(event)}) ON CONFLICT DO NOTHING RETURNING dedupe_key`.execute(tx);if(!inserted.rows.length)return;
-   const settings=await this.settings.get(s,tx);if(!settings.enabled)return;
-   await projectObservation(tx,s,event);
-   if(event.kind.startsWith('telemetry.')){const health=(await sql<{last_gateway_at:Date|null}>`SELECT last_gateway_at FROM discord_integration_health WHERE ${tenant(s)}`.execute(tx)).rows[0];if(!health?.last_gateway_at||health.last_gateway_at<=at)await projectStructure(tx,s,event,settings);await this.health(tx,s,event);return;}
-   if(await projectStructure(tx,s,event,settings)||!event.encryptedUserId)return;
-   const userId=this.vault.open(s,event.encryptedUserId);const hash=this.vault.hash(s,userId);
-   if(observedMember?.bot)return;
-   if((await sql`SELECT id FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash=${hash}`.execute(tx)).rows.length)return;
-   const guestObservation=(await sql<{observed_at:Date}>`SELECT observed_at FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(tx)).rows[0];
-   const previousGuest=Boolean(guestObservation), observationAt=new Date(event.observedAt??event.at);
-   const observedFlags=event.memberFlags??(observedMember?.flags===undefined?undefined:Number(observedMember.flags));
-   const guest=observedFlags===undefined||(guestObservation&&guestObservation.observed_at>observationAt)?previousGuest:Boolean(observedFlags&GuildMemberFlags.IsGuest);
-   if(guest&&observedFlags!==undefined){const known=(await sql<{id:string}>`SELECT e.id FROM membership_episodes e JOIN member_identity_map m ON m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.identity_id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND m.lookup_hash=${hash} AND e.joined_at<=${at} AND (e.left_at IS NULL OR e.left_at>${at}) AND e.context='PRODUCTION' LIMIT 1`.execute(tx)).rows[0];if(known)await projectMemberFlags(tx,s,{...event,memberFlags:observedFlags,observationSource:observedMember?'REST':'GATEWAY'},known.id,hash);}
-   if(guest){if(event.kind==='member.left'){await projectAdaptiveMember(tx,s,{...event,kind:'voice.state',channelId:null},settings,hash,null,true);await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(tx);}else{await sql`INSERT INTO adaptive_states VALUES(${s.organizationId}::uuid,${s.guildId},'guest','membership',${hash},NULL,'{}'::jsonb,${at}) ON CONFLICT(organization_id,guild_id,domain,state_key,subject_hash) DO UPDATE SET observed_at=EXCLUDED.observed_at WHERE adaptive_states.observed_at<=EXCLUDED.observed_at`.execute(tx);await projectAdaptiveMember(tx,s,event,settings,hash,null,true);}return;}
-   if(previousGuest)await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(tx);
-   const identityId=await this.vault.resolve(tx,s,userId);
-   await recordUsage(tx,s,hash,at);
-   await sql`SELECT pg_advisory_xact_lock(hashtextextended(${s.guildId+identityId+'PRODUCTION'},0))`.execute(tx);
-   if(event.kind==='member.left'){
-    await sql`INSERT INTO membership_departures VALUES(${s.organizationId}::uuid,${s.guildId},${identityId}::uuid,${at}) ON CONFLICT DO NOTHING`.execute(tx);
-    const prior=(await sql<{id:string}>`SELECT id FROM membership_episodes WHERE ${tenant(s)} AND identity_id=${identityId}::uuid AND context='PRODUCTION' AND joined_at<=${at} ORDER BY joined_at DESC LIMIT 1`.execute(tx)).rows[0];
-    if(prior){await projectAdaptiveMember(tx,s,{...event,kind:'voice.state',channelId:null},settings,hash,prior.id);await sql`UPDATE membership_episodes SET left_at=LEAST(COALESCE(left_at,${at}),${at}) WHERE ${tenant(s)} AND id=${prior.id}::uuid`.execute(tx);await this.record(tx,s,prior.id,'member.left',at,{});}
-    return;
-   }
-   let episode=(await sql<{id:string,joined_at:Date}>`SELECT id,joined_at FROM membership_episodes WHERE ${tenant(s)} AND identity_id=${identityId}::uuid AND context='PRODUCTION'
-    AND joined_at<=${at} AND (left_at IS NULL OR left_at>${at}) ORDER BY joined_at DESC LIMIT 1`.execute(tx)).rows[0];
-   if(event.kind==='member.joined'||!episode){
-    if(!event.joinedAt&&!observedMember)throw new AwaitingReference('Membership changed during observation; retry required');
-    const joinedAt=new Date(event.joinedAt??observedMember!.joinedAt);
-    if(joinedAt>at){await this.gap(tx,s,at,at,'unattributed historical event');return;}
-    const departure=(await sql<{departed_at:Date}>`SELECT departed_at FROM membership_departures WHERE ${tenant(s)} AND identity_id=${identityId}::uuid AND departed_at>=${joinedAt} ORDER BY departed_at LIMIT 1`.execute(tx)).rows[0];
-    await sql`INSERT INTO membership_episodes(organization_id,guild_id,id,identity_id,joined_at,left_at,context)
-     VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${identityId}::uuid,${joinedAt},${departure?.departed_at??null},'PRODUCTION') ON CONFLICT DO NOTHING`.execute(tx);
-    episode=(await sql<{id:string,joined_at:Date}>`SELECT id,joined_at FROM membership_episodes WHERE ${tenant(s)} AND identity_id=${identityId}::uuid AND joined_at=${joinedAt} AND context='PRODUCTION'`.execute(tx)).rows[0]!;
-    if(event.kind==='member.joined'){
-     const joinedExists=(await sql`SELECT id FROM lifecycle_events WHERE ${tenant(s)} AND episode_id=${episode.id}::uuid AND context='PRODUCTION' AND kind IN ('member.joined','member.rejoined')`.execute(tx)).rows.length;
-     if(!joinedExists)await this.record(tx,s,episode.id,'member.joined',joinedAt,{});
-     if(departure)await this.record(tx,s,episode.id,'member.left',departure.departed_at,{});
-     await sql`UPDATE lifecycle_events e SET kind=CASE WHEN EXISTS(SELECT 1 FROM membership_episodes prior WHERE prior.organization_id=e.organization_id AND prior.guild_id=e.guild_id AND prior.identity_id=${identityId}::uuid AND prior.joined_at<m.joined_at AND prior.context='PRODUCTION') THEN 'member.rejoined' ELSE 'member.joined' END
-      FROM membership_episodes m WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.episode_id AND m.identity_id=${identityId}::uuid AND e.kind IN ('member.joined','member.rejoined')`.execute(tx);
+  async streamReset(s: Scope) {
+    const now = new Date();
+    await sql`INSERT INTO telemetry_health(organization_id,guild_id,id,started_at,ended_at,reason)
+   SELECT organization_id,guild_id,${randomUUID()}::uuid,last_seen,${now},'Redis stream reset' FROM telemetry_cursor WHERE ${tenant(s)}`.execute(
+      this.db,
+    );
+  }
+  async process(input: Envelope) {
+    return traceStep("event.project", { "signal.kind": input.kind }, () =>
+      this.processInternal(input),
+    );
+  }
+  private async processInternal(input: Envelope) {
+    const event = eventSchema.parse(input);
+    const s: Scope = {
+      organizationId: event.organizationId,
+      guildId: event.guildId,
+    };
+    const at = new Date(event.at);
+    let observedMember: Awaited<ReturnType<DiscordPort["member"]>> | undefined,
+      observedMemberAt: Date | undefined;
+    if (
+      event.encryptedUserId &&
+      event.kind !== "member.left" &&
+      (await this.settings.get(s)).enabled
+    ) {
+      const userId = this.vault.open(s, event.encryptedUserId),
+        hash = this.vault.hash(s, userId);
+      const suppressed = (
+        await sql`SELECT id FROM deletion_requests WHERE ${tenant(s)} AND (lookup_hash IS NULL OR lookup_hash=${hash})`.execute(
+          this.db,
+        )
+      ).rows.length;
+      if (!suppressed) {
+        const existing = event.joinedAt
+          ? true
+          : (
+              await sql`SELECT e.id FROM membership_episodes e JOIN member_identity_map m ON m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.identity_id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND m.lookup_hash=${hash} AND e.joined_at<=${at} AND (e.left_at IS NULL OR e.left_at>${at}) AND e.context='PRODUCTION' LIMIT 1`.execute(
+                this.db,
+              )
+            ).rows.length > 0;
+        if (
+          !existing &&
+          !event.joinedAt &&
+          !((event.memberFlags ?? 0) & GuildMemberFlags.IsGuest)
+        ) {
+          observedMember = await (this.discord.memberSnapshot?.(
+            s.guildId,
+            userId,
+          ) ?? this.discord.member(s.guildId, userId));
+          observedMemberAt = new Date();
+        }
+      }
     }
-   }
-   if(event.roles){
-    const previous=(await sql<{roles:string[]}>`SELECT roles FROM member_observable_state WHERE ${tenant(s)} AND episode_id=${episode.id}::uuid`.execute(tx)).rows[0];
-    if(previous){for(const roleId of event.roles.filter(r=>!previous.roles.includes(r)))await this.record(tx,s,episode.id,'role.added',at,{roleId});for(const roleId of previous.roles.filter(r=>!event.roles!.includes(r)))await this.record(tx,s,episode.id,'role.removed',at,{roleId});}
-    await sql`INSERT INTO member_observable_state(organization_id,guild_id,episode_id,roles,roles_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episode.id}::uuid,${event.roles}::text[],${at}) ON CONFLICT(organization_id,guild_id,episode_id) DO UPDATE SET roles=EXCLUDED.roles,roles_observed_at=EXCLUDED.roles_observed_at WHERE member_observable_state.roles_observed_at IS NULL OR member_observable_state.roles_observed_at<=EXCLUDED.roles_observed_at`.execute(tx);
-   }
-   if(!event.roles&&observedMember?.roles?.length){
-    await sql`INSERT INTO member_observable_state(organization_id,guild_id,episode_id,roles,roles_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episode.id}::uuid,${observedMember.roles}::text[],${at}) ON CONFLICT DO NOTHING`.execute(tx);
-   }
-   await projectMemberFlags(tx,s,{...event,memberFlags:observedFlags,pending:event.pending??observedMember?.pending??undefined,observationSource:observedMember?'REST':'GATEWAY'},episode.id,hash);
-   const eligibility=(await sql<MemberObservation>`SELECT screening_pending,is_guest,screening_observed_at,guest_observed_at FROM membership_episodes WHERE ${tenant(s)} AND id=${episode.id}::uuid`.execute(tx)).rows[0]!;
-   if(memberEligibility(eligibility)!=='ELIGIBLE')return;
-   if(await projectAdaptiveMember(tx,s,event.kind==='voice.started'||event.kind==='voice.ended'?{...event,kind:'voice.state',channelId:event.kind==='voice.ended'?null:event.channelId}:event,settings,hash,episode.id))return;
-   if(settings.flags.activation_dsl_v2)await projectActivation(tx,s,episode.id,at);
-   if(settings.flags.native_snapshot_v2&&event.kind!=='member.joined')await requestNativeRefresh(tx,s,episode.id,at);
-   if(event.kind==='member.roles_updated'&&event.roles){
-    await sql`UPDATE nexus_role_grants SET revoked_at=now() WHERE ${tenant(s)} AND episode_id=${episode.id}::uuid AND revoked_at IS NULL AND role_id<>ALL(${event.roles}::text[])`.execute(tx);return;
-   }
-   if(settings.flags.native_snapshot_v2&&event.kind==='member.joined')await scheduleNativeSnapshots(tx,s,episode.id,episode.joined_at);
-   if(event.kind==='member.joined')return;
-   const observedSurface=event.channelId?await resolveSurface(tx,s,event.channelId):null;
-   const channelAllowed=(channelId:string|null|undefined)=>!channelId||settings.analysisScope.mode==='all'||(settings.analysisScope.mode==='include')===settings.analysisScope.channelIds.includes(observedSurface?.parentId??channelId);
-   if(event.kind==='reaction.added'&&channelAllowed(event.channelId)){
-    const target=(await sql<{episode_id:string;identity_id:string;occurred_at:Date;joined_at:Date}>`SELECT f.episode_id,e.identity_id,f.occurred_at,e.joined_at FROM lifecycle_events f JOIN membership_episodes e ON e.organization_id=f.organization_id AND e.guild_id=f.guild_id AND e.id=f.episode_id WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.context='PRODUCTION' AND e.context='PRODUCTION' AND f.kind='message.sent' AND f.data->>'messageId'=${event.messageId??''} AND f.data->>'channelId'=${event.channelId??''} LIMIT 1`.execute(tx)).rows[0];
-    // Received reactions are weak responses, never activity or a first connection.
-    // No emoji, content or cross-member identity is retained in the received fact.
-    if(!target||target.identity_id!==identityId){
-     await this.record(tx,s,episode.id,event.kind,at,{channelId:event.channelId,messageId:event.messageId});
-     if(target&&at>=target.occurred_at&&target.occurred_at>=target.joined_at&&at.getTime()<target.joined_at.getTime()+72*3600000)await this.record(tx,s,target.episode_id,'reaction.received',at,{channelId:event.channelId,messageId:event.messageId});
+    return this.db.transaction().execute(async (tx) => {
+      await privacyReadLock(tx, s);
+      const guild = (
+        await sql`SELECT guild_id FROM guilds WHERE ${tenant(s)}`.execute(tx)
+      ).rows[0];
+      if (!guild) return;
+      if (
+        (
+          await sql`SELECT id FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash IS NULL AND completed_at IS NOT NULL`.execute(
+            tx,
+          )
+        ).rows.length
+      )
+        return;
+      await sql`UPDATE gateway_ingest SET projected_at=now() WHERE ${tenant(s)} AND dedupe_key=${dedupeKey(event)}`.execute(
+        tx,
+      );
+      const inserted =
+        await sql`INSERT INTO event_inbox(organization_id,guild_id,dedupe_key) VALUES(${s.organizationId}::uuid,${s.guildId},${dedupeKey(event)}) ON CONFLICT DO NOTHING RETURNING dedupe_key`.execute(
+          tx,
+        );
+      if (!inserted.rows.length) return;
+      const settings = await this.settings.get(s, tx);
+      if (!settings.enabled) return;
+      await projectObservation(tx, s, event);
+      if (event.kind.startsWith("telemetry.")) {
+        const health = (
+          await sql<{
+            last_gateway_at: Date | null;
+          }>`SELECT last_gateway_at FROM discord_integration_health WHERE ${tenant(s)}`.execute(
+            tx,
+          )
+        ).rows[0];
+        if (!health?.last_gateway_at || health.last_gateway_at <= at)
+          await projectStructure(tx, s, event, settings);
+        await this.health(tx, s, event);
+        return;
+      }
+      if (
+        (await projectStructure(tx, s, event, settings)) ||
+        !event.encryptedUserId
+      )
+        return;
+      const userId = this.vault.open(s, event.encryptedUserId);
+      const hash = this.vault.hash(s, userId);
+      if (observedMember?.bot) return;
+      if (
+        (
+          await sql`SELECT id FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash=${hash}`.execute(
+            tx,
+          )
+        ).rows.length
+      )
+        return;
+      const guestObservation = (
+        await sql<{
+          observed_at: Date;
+        }>`SELECT observed_at FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(
+          tx,
+        )
+      ).rows[0];
+      const previousGuest = Boolean(guestObservation),
+        observationAt =
+          event.memberFlags === undefined && observedMemberAt
+            ? observedMemberAt
+            : new Date(event.observedAt ?? event.at);
+      const applyMemberProofs = async (episodeId: string) => {
+        await projectMemberFlags(
+          tx,
+          s,
+          { ...event, observationSource: "GATEWAY" },
+          episodeId,
+          hash,
+        );
+        if (observedMemberAt)
+          await projectMemberFlags(
+            tx,
+            s,
+            {
+              ...event,
+              observedAt: observedMemberAt.toISOString(),
+              memberFlags:
+                event.memberFlags === undefined &&
+                observedMember?.flags !== undefined
+                  ? Number(observedMember.flags)
+                  : undefined,
+              pending:
+                event.pending === undefined
+                  ? (observedMember?.pending ?? undefined)
+                  : undefined,
+              observationSource: "REST",
+            },
+            episodeId,
+            hash,
+          );
+      };
+      const observedFlags =
+        event.memberFlags ??
+        (observedMember?.flags === undefined
+          ? undefined
+          : Number(observedMember.flags));
+      const guest =
+        observedFlags === undefined ||
+        (guestObservation && guestObservation.observed_at > observationAt)
+          ? previousGuest
+          : Boolean(observedFlags & GuildMemberFlags.IsGuest);
+      if (guest && observedFlags !== undefined) {
+        const known = (
+          await sql<{
+            id: string;
+          }>`SELECT e.id FROM membership_episodes e JOIN member_identity_map m ON m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.identity_id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND m.lookup_hash=${hash} AND e.joined_at<=${at} AND (e.left_at IS NULL OR e.left_at>${at}) AND e.context='PRODUCTION' LIMIT 1`.execute(
+            tx,
+          )
+        ).rows[0];
+        if (known) await applyMemberProofs(known.id);
+      }
+      if (guest) {
+        if (event.kind === "member.left") {
+          await projectAdaptiveMember(
+            tx,
+            s,
+            { ...event, kind: "voice.state", channelId: null },
+            settings,
+            hash,
+            null,
+            true,
+          );
+          await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(
+            tx,
+          );
+        } else {
+          await sql`INSERT INTO adaptive_states VALUES(${s.organizationId}::uuid,${s.guildId},'guest','membership',${hash},NULL,'{}'::jsonb,${at}) ON CONFLICT(organization_id,guild_id,domain,state_key,subject_hash) DO UPDATE SET observed_at=EXCLUDED.observed_at WHERE adaptive_states.observed_at<=EXCLUDED.observed_at`.execute(
+            tx,
+          );
+          await projectAdaptiveMember(tx, s, event, settings, hash, null, true);
+        }
+        return;
+      }
+      if (previousGuest)
+        await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(
+          tx,
+        );
+      const identityId = await this.vault.resolve(tx, s, userId);
+      await recordUsage(tx, s, hash, at);
+      await sql`SELECT pg_advisory_xact_lock(hashtextextended(${s.organizationId + s.guildId + identityId + "PRODUCTION"},0))`.execute(
+        tx,
+      );
+      if (event.kind === "member.left") {
+        await sql`INSERT INTO membership_departures VALUES(${s.organizationId}::uuid,${s.guildId},${identityId}::uuid,${at}) ON CONFLICT DO NOTHING`.execute(
+          tx,
+        );
+        const prior = (
+          await sql<{
+            id: string;
+          }>`SELECT id FROM membership_episodes WHERE ${tenant(s)} AND identity_id=${identityId}::uuid AND context='PRODUCTION' AND joined_at<=${at} ORDER BY joined_at DESC LIMIT 1`.execute(
+            tx,
+          )
+        ).rows[0];
+        if (prior) {
+          await projectAdaptiveMember(
+            tx,
+            s,
+            { ...event, kind: "voice.state", channelId: null },
+            settings,
+            hash,
+            prior.id,
+          );
+          await sql`UPDATE membership_episodes SET left_at=LEAST(COALESCE(left_at,${at}),${at}) WHERE ${tenant(s)} AND id=${prior.id}::uuid`.execute(
+            tx,
+          );
+          await this.record(tx, s, prior.id, "member.left", at, {});
+        }
+        return;
+      }
+      let episode = (
+        await sql<{
+          id: string;
+          joined_at: Date;
+        }>`SELECT id,joined_at FROM membership_episodes WHERE ${tenant(s)} AND identity_id=${identityId}::uuid AND context='PRODUCTION'
+    AND joined_at<=${at} AND (left_at IS NULL OR left_at>${at}) ORDER BY joined_at DESC LIMIT 1`.execute(
+          tx,
+        )
+      ).rows[0];
+      if (event.kind === "member.joined" || !episode) {
+        if (!event.joinedAt && !observedMember)
+          throw new AwaitingReference(
+            "Membership changed during observation; retry required",
+          );
+        const joinedAt = new Date(event.joinedAt ?? observedMember!.joinedAt);
+        if (joinedAt > at) {
+          await this.gap(tx, s, at, at, "unattributed historical event");
+          return;
+        }
+        const departure = (
+          await sql<{
+            departed_at: Date;
+          }>`SELECT departed_at FROM membership_departures WHERE ${tenant(s)} AND identity_id=${identityId}::uuid AND departed_at>=${joinedAt} ORDER BY departed_at LIMIT 1`.execute(
+            tx,
+          )
+        ).rows[0];
+        await sql`INSERT INTO membership_episodes(organization_id,guild_id,id,identity_id,joined_at,left_at,context)
+     VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${identityId}::uuid,${joinedAt},${departure?.departed_at ?? null},'PRODUCTION') ON CONFLICT DO NOTHING`.execute(
+          tx,
+        );
+        episode = (
+          await sql<{
+            id: string;
+            joined_at: Date;
+          }>`SELECT id,joined_at FROM membership_episodes WHERE ${tenant(s)} AND identity_id=${identityId}::uuid AND joined_at=${joinedAt} AND context='PRODUCTION'`.execute(
+            tx,
+          )
+        ).rows[0]!;
+        if (event.kind === "member.joined") {
+          const joinedExists = (
+            await sql`SELECT id FROM lifecycle_events WHERE ${tenant(s)} AND episode_id=${episode.id}::uuid AND context='PRODUCTION' AND kind IN ('member.joined','member.rejoined')`.execute(
+              tx,
+            )
+          ).rows.length;
+          if (!joinedExists)
+            await this.record(tx, s, episode.id, "member.joined", joinedAt, {});
+          if (departure)
+            await this.record(
+              tx,
+              s,
+              episode.id,
+              "member.left",
+              departure.departed_at,
+              {},
+            );
+          await sql`UPDATE lifecycle_events e SET kind=CASE WHEN EXISTS(SELECT 1 FROM membership_episodes prior WHERE prior.organization_id=e.organization_id AND prior.guild_id=e.guild_id AND prior.identity_id=${identityId}::uuid AND prior.joined_at<m.joined_at AND prior.context='PRODUCTION') THEN 'member.rejoined' ELSE 'member.joined' END
+      FROM membership_episodes m WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.episode_id AND m.identity_id=${identityId}::uuid AND e.kind IN ('member.joined','member.rejoined')`.execute(
+            tx,
+          );
+        }
+      }
+      if (event.roles) {
+        const previous = (
+          await sql<{
+            roles: string[];
+          }>`SELECT roles FROM member_observable_state WHERE ${tenant(s)} AND episode_id=${episode.id}::uuid`.execute(
+            tx,
+          )
+        ).rows[0];
+        if (previous) {
+          for (const roleId of event.roles.filter(
+            (r) => !previous.roles.includes(r),
+          ))
+            await this.record(tx, s, episode.id, "role.added", at, { roleId });
+          for (const roleId of previous.roles.filter(
+            (r) => !event.roles!.includes(r),
+          ))
+            await this.record(tx, s, episode.id, "role.removed", at, {
+              roleId,
+            });
+        }
+        await sql`INSERT INTO member_observable_state(organization_id,guild_id,episode_id,roles,roles_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episode.id}::uuid,${event.roles}::text[],${at}) ON CONFLICT(organization_id,guild_id,episode_id) DO UPDATE SET roles=EXCLUDED.roles,roles_observed_at=EXCLUDED.roles_observed_at WHERE member_observable_state.roles_observed_at IS NULL OR member_observable_state.roles_observed_at<=EXCLUDED.roles_observed_at`.execute(
+          tx,
+        );
+      }
+      if (!event.roles && observedMember?.roles?.length) {
+        await sql`INSERT INTO member_observable_state(organization_id,guild_id,episode_id,roles,roles_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episode.id}::uuid,${observedMember.roles}::text[],${observedMemberAt ?? at}) ON CONFLICT DO NOTHING`.execute(
+          tx,
+        );
+      }
+      await applyMemberProofs(episode.id);
+      const eligibility = (
+        await sql<
+          MemberObservation & { engagement_started_at: Date | null }
+        >`SELECT screening_pending,is_guest,screening_observed_at,guest_observed_at,engagement_started_at FROM membership_episodes WHERE ${tenant(s)} AND id=${episode.id}::uuid`.execute(
+          tx,
+        )
+      ).rows[0]!;
+      if (
+        memberEligibility(eligibility) !== "ELIGIBLE" ||
+        at < (eligibility.engagement_started_at ?? episode.joined_at)
+      )
+        return;
+      if (
+        await projectAdaptiveMember(
+          tx,
+          s,
+          event.kind === "voice.started" || event.kind === "voice.ended"
+            ? {
+                ...event,
+                kind: "voice.state",
+                channelId:
+                  event.kind === "voice.ended" ? null : event.channelId,
+              }
+            : event,
+          settings,
+          hash,
+          episode.id,
+        )
+      )
+        return;
+      if (settings.flags.activation_dsl_v2)
+        await projectActivation(tx, s, episode.id, at);
+      if (settings.flags.native_snapshot_v2 && event.kind !== "member.joined")
+        await requestNativeRefresh(tx, s, episode.id, at);
+      if (event.kind === "member.roles_updated" && event.roles) {
+        await sql`UPDATE nexus_role_grants SET revoked_at=now() WHERE ${tenant(s)} AND episode_id=${episode.id}::uuid AND revoked_at IS NULL AND role_id<>ALL(${event.roles}::text[])`.execute(
+          tx,
+        );
+        return;
+      }
+      if (settings.flags.native_snapshot_v2 && event.kind === "member.joined")
+        await scheduleNativeSnapshots(tx, s, episode.id, episode.joined_at);
+      if (event.kind === "member.joined") return;
+      const observedSurface = event.channelId
+        ? await resolveSurface(tx, s, event.channelId)
+        : null;
+      const channelAllowed = (channelId: string | null | undefined) =>
+        !channelId ||
+        settings.analysisScope.mode === "all" ||
+        (settings.analysisScope.mode === "include") ===
+          settings.analysisScope.channelIds.includes(
+            observedSurface?.parentId ?? channelId,
+          );
+      if (event.kind === "reaction.added" && channelAllowed(event.channelId)) {
+        const target = (
+          await sql<{
+            episode_id: string;
+            identity_id: string;
+            occurred_at: Date;
+            joined_at: Date;
+          }>`SELECT f.episode_id,e.identity_id,f.occurred_at,e.joined_at FROM lifecycle_events f JOIN membership_episodes e ON e.organization_id=f.organization_id AND e.guild_id=f.guild_id AND e.id=f.episode_id WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.context='PRODUCTION' AND e.context='PRODUCTION' AND f.kind='message.sent' AND f.data->>'messageId'=${event.messageId ?? ""} AND f.data->>'channelId'=${event.channelId ?? ""} LIMIT 1`.execute(
+            tx,
+          )
+        ).rows[0];
+        // Received reactions are weak responses, never activity or a first connection.
+        // No emoji, content or cross-member identity is retained in the received fact.
+        if (!target || target.identity_id !== identityId) {
+          await this.record(tx, s, episode.id, event.kind, at, {
+            channelId: event.channelId,
+            messageId: event.messageId,
+          });
+          if (
+            target &&
+            at >= target.occurred_at &&
+            target.occurred_at >= target.joined_at &&
+            at.getTime() < target.joined_at.getTime() + 72 * 3600000
+          )
+            await this.record(
+              tx,
+              s,
+              target.episode_id,
+              "reaction.received",
+              at,
+              { channelId: event.channelId, messageId: event.messageId },
+            );
+        }
+      }
+      if (
+        event.kind === "scheduled_event.subscribed" ||
+        event.kind === "scheduled_event.unsubscribed"
+      )
+        await this.record(tx, s, episode.id, event.kind, at, {
+          eventId: event.eventId,
+        });
+      if (event.kind === "message.sent") {
+        if (!channelAllowed(event.channelId)) return;
+        if (
+          (
+            await sql`SELECT id FROM lifecycle_events WHERE ${tenant(s)} AND kind='message.sent' AND context='PRODUCTION' AND data->>'messageId'=${event.messageId ?? ""}`.execute(
+              tx,
+            )
+          ).rows.length
+        )
+          return;
+        if (isDirectReply(event)) {
+          const reciprocal = (
+            await sql`SELECT reply_message_id FROM reply_receipts WHERE ${tenant(s)} AND reply_message_id=${event.referenceId} AND episode_id=${episode.id}::uuid AND expires_at>${at}`.execute(
+              tx,
+            )
+          ).rows.length;
+          if (reciprocal)
+            await this.record(tx, s, episode.id, "reply.established", at, {});
+          const target = (
+            await sql<{
+              id: string;
+              episode_id: string;
+              occurred_at: Date;
+              data: Record<string, unknown>;
+              identity_id: string;
+              joined_at: Date;
+            }>`SELECT e.id,e.episode_id,e.occurred_at,e.data,m.identity_id,m.joined_at FROM lifecycle_events e JOIN membership_episodes m
+      ON m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.episode_id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND e.context='PRODUCTION' AND e.kind='message.sent' AND e.data->>'messageId'=${event.referenceId} AND e.data->>'channelId'=${event.channelId ?? ""} AND m.screening_observed_at IS NOT NULL AND m.guest_observed_at IS NOT NULL AND NOT m.screening_pending AND NOT m.is_guest AND e.occurred_at>=COALESCE(m.engagement_started_at,m.joined_at)`.execute(
+              tx,
+            )
+          ).rows[0];
+          if (!target && Date.now() - at.getTime() < 86400000)
+            throw new AwaitingReference("Referenced metadata has not arrived");
+          if (
+            target &&
+            target.identity_id !== identityId &&
+            at >= target.occurred_at
+          ) {
+            const latency =
+              (at.getTime() - target.occurred_at.getTime()) / 1000;
+            await this.record(tx, s, target.episode_id, "reply.received", at, {
+              latencySeconds: latency,
+              channelId: target.data.channelId,
+            });
+            await this.pair(tx, s, target.episode_id, identityId, at);
+            await this.pair(tx, s, episode.id, target.identity_id, at);
+            await sql`INSERT INTO reply_receipts VALUES(${s.organizationId}::uuid,${s.guildId},${event.messageId!},${target.episode_id}::uuid,${new Date(at.getTime() + 86400000)}) ON CONFLICT DO NOTHING`.execute(
+              tx,
+            );
+            if (settings.flags.activation_dsl_v2)
+              await projectActivation(tx, s, target.episode_id, at);
+            await sql`UPDATE lifecycle_events SET data=jsonb_set(jsonb_set(data,'{receivedExplicitReply}','true'::jsonb),'{firstReplyLatencySeconds}',to_jsonb(LEAST(COALESCE((data->>'firstReplyLatencySeconds')::double precision,${latency}),${latency}))) WHERE ${tenant(s)} AND id=${target.id}::uuid`.execute(
+              tx,
+            );
+          }
+        }
+        await this.record(tx, s, episode.id, "message.sent", at, {
+          messageId: event.messageId,
+          channelId: event.channelId,
+          messageType: event.messageType,
+        });
+        const first = (
+          await sql<{
+            at: Date | null;
+          }>`SELECT min(occurred_at) AS at FROM lifecycle_events WHERE ${tenant(s)} AND episode_id=${episode.id}::uuid AND context='PRODUCTION' AND kind='message.sent'
+     AND data->>'channelId'=${settings.startChannelId} AND occurred_at>=${episode.joined_at} AND occurred_at<=${new Date(episode.joined_at.getTime() + settings.activationWindowHours * 3600000)}`.execute(
+            tx,
+          )
+        ).rows[0]?.at;
+        if (first && !settings.flags.activation_dsl_v2) {
+          await sql`INSERT INTO member_lifecycle_state VALUES(${s.organizationId}::uuid,${s.guildId},${episode.id}::uuid,'PRODUCTION',${first})
+      ON CONFLICT(organization_id,guild_id,episode_id) DO UPDATE SET activated_at=LEAST(member_lifecycle_state.activated_at,EXCLUDED.activated_at)`.execute(
+            tx,
+          );
+          await this.record(
+            tx,
+            s,
+            episode.id,
+            "activation.completed",
+            first,
+            {},
+          );
+          await sql`UPDATE lifecycle_events SET occurred_at=LEAST(occurred_at,${first}) WHERE ${tenant(s)} AND episode_id=${episode.id}::uuid AND kind='activation.completed' AND context='PRODUCTION'`.execute(
+            tx,
+          );
+        }
+      }
+      if (settings.flags.activation_dsl_v2)
+        await projectActivation(tx, s, episode.id, at);
+    });
+  }
+  private async record(
+    tx: Tx,
+    s: Scope,
+    episodeId: string,
+    kind: string,
+    at: Date,
+    data: Record<string, unknown>,
+  ) {
+    validateSignal(kind, data);
+    await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data) VALUES
+   (${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episodeId}::uuid,${kind},${at},'PRODUCTION',${json(data)}) ON CONFLICT DO NOTHING`.execute(
+      tx,
+    );
+  }
+  private async pair(
+    tx: Tx,
+    s: Scope,
+    episodeId: string,
+    peerIdentityId: string,
+    at: Date,
+  ) {
+    await sql`INSERT INTO member_interaction_pairs(organization_id,guild_id,episode_id,peer_identity_id,first_at,source) VALUES(${s.organizationId}::uuid,${s.guildId},${episodeId}::uuid,${peerIdentityId}::uuid,${at},'DIRECT_REPLY') ON CONFLICT(organization_id,guild_id,episode_id,peer_identity_id) DO UPDATE SET first_at=LEAST(member_interaction_pairs.first_at,EXCLUDED.first_at),source='DIRECT_REPLY'`.execute(
+      tx,
+    );
+  }
+  private async gap(
+    tx: Tx,
+    s: Scope,
+    start: Date,
+    end: Date | null,
+    reason: string,
+  ) {
+    await sql`INSERT INTO telemetry_health VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${start},${end},${reason})`.execute(
+      tx,
+    );
+  }
+  private async health(tx: Tx, s: Scope, e: Envelope) {
+    const at = new Date(e.at);
+    const cursor = (
+      await sql<{
+        last_seen: Date;
+      }>`SELECT last_seen FROM telemetry_cursor WHERE ${tenant(s)} FOR UPDATE`.execute(
+        tx,
+      )
+    ).rows[0];
+    if (e.kind === "telemetry.disconnected") {
+      await this.gap(
+        tx,
+        s,
+        at,
+        cursor && cursor.last_seen > at ? cursor.last_seen : null,
+        "gateway disconnected",
+      );
+      return;
     }
-   }
-   if(event.kind==='scheduled_event.subscribed'||event.kind==='scheduled_event.unsubscribed')await this.record(tx,s,episode.id,event.kind,at,{eventId:event.eventId});
-   if(event.kind==='message.sent'){
-    if(!channelAllowed(event.channelId))return;
-    if((await sql`SELECT id FROM lifecycle_events WHERE ${tenant(s)} AND kind='message.sent' AND context='PRODUCTION' AND data->>'messageId'=${event.messageId??''}`.execute(tx)).rows.length)return;
-    if(isDirectReply(event)){
-     const reciprocal=(await sql`SELECT reply_message_id FROM reply_receipts WHERE ${tenant(s)} AND reply_message_id=${event.referenceId} AND episode_id=${episode.id}::uuid AND expires_at>${at}`.execute(tx)).rows.length;
-     if(reciprocal)await this.record(tx,s,episode.id,'reply.established',at,{});
-     const target=(await sql<{id:string,episode_id:string,occurred_at:Date,data:Record<string,unknown>,identity_id:string,joined_at:Date}>`SELECT e.id,e.episode_id,e.occurred_at,e.data,m.identity_id,m.joined_at FROM lifecycle_events e JOIN membership_episodes m
-      ON m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.episode_id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND e.context='PRODUCTION' AND e.kind='message.sent' AND e.data->>'messageId'=${event.referenceId} AND e.data->>'channelId'=${event.channelId??''} AND m.screening_observed_at IS NOT NULL AND m.guest_observed_at IS NOT NULL AND NOT m.screening_pending AND NOT m.is_guest`.execute(tx)).rows[0];
-     if(!target&&Date.now()-at.getTime()<86400000)throw new AwaitingReference('Referenced metadata has not arrived');
-     if(target&&target.identity_id!==identityId&&at>=target.occurred_at){
-      const latency=(at.getTime()-target.occurred_at.getTime())/1000;
-      await this.record(tx,s,target.episode_id,'reply.received',at,{latencySeconds:latency,channelId:target.data.channelId});
-      await this.pair(tx,s,target.episode_id,identityId,at);
-      await this.pair(tx,s,episode.id,target.identity_id,at);
-      await sql`INSERT INTO reply_receipts VALUES(${s.organizationId}::uuid,${s.guildId},${event.messageId!},${target.episode_id}::uuid,${new Date(at.getTime()+86400000)}) ON CONFLICT DO NOTHING`.execute(tx);
-      if(settings.flags.activation_dsl_v2)await projectActivation(tx,s,target.episode_id,at);
-      await sql`UPDATE lifecycle_events SET data=jsonb_set(jsonb_set(data,'{receivedExplicitReply}','true'::jsonb),'{firstReplyLatencySeconds}',to_jsonb(LEAST(COALESCE((data->>'firstReplyLatencySeconds')::double precision,${latency}),${latency}))) WHERE ${tenant(s)} AND id=${target.id}::uuid`.execute(tx);
-     }
+    if (e.kind === "telemetry.gap") {
+      await this.gap(
+        tx,
+        s,
+        new Date(e.gapStart ?? e.at),
+        at,
+        "Redis publication lost",
+      );
+      return;
     }
-    await this.record(tx,s,episode.id,'message.sent',at,{messageId:event.messageId,channelId:event.channelId,messageType:event.messageType});
-    const first=(await sql<{at:Date|null}>`SELECT min(occurred_at) AS at FROM lifecycle_events WHERE ${tenant(s)} AND episode_id=${episode.id}::uuid AND context='PRODUCTION' AND kind='message.sent'
-     AND data->>'channelId'=${settings.startChannelId} AND occurred_at>=${episode.joined_at} AND occurred_at<=${new Date(episode.joined_at.getTime()+settings.activationWindowHours*3600000)}`.execute(tx)).rows[0]?.at;
-    if(first&&!settings.flags.activation_dsl_v2){
-     await sql`INSERT INTO member_lifecycle_state VALUES(${s.organizationId}::uuid,${s.guildId},${episode.id}::uuid,'PRODUCTION',${first})
-      ON CONFLICT(organization_id,guild_id,episode_id) DO UPDATE SET activated_at=LEAST(member_lifecycle_state.activated_at,EXCLUDED.activated_at)`.execute(tx);
-     await this.record(tx,s,episode.id,'activation.completed',first,{});
-     await sql`UPDATE lifecycle_events SET occurred_at=LEAST(occurred_at,${first}) WHERE ${tenant(s)} AND episode_id=${episode.id}::uuid AND kind='activation.completed' AND context='PRODUCTION'`.execute(tx);
-    }
-   }
-   if(settings.flags.activation_dsl_v2)await projectActivation(tx,s,episode.id,at);
-  });
- }
- private async record(tx:Tx,s:Scope,episodeId:string,kind:string,at:Date,data:Record<string,unknown>){
-  validateSignal(kind,data);
-  await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data) VALUES
-   (${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episodeId}::uuid,${kind},${at},'PRODUCTION',${json(data)}) ON CONFLICT DO NOTHING`.execute(tx);
- }
- private async pair(tx:Tx,s:Scope,episodeId:string,peerIdentityId:string,at:Date){
-  await sql`INSERT INTO member_interaction_pairs(organization_id,guild_id,episode_id,peer_identity_id,first_at,source) VALUES(${s.organizationId}::uuid,${s.guildId},${episodeId}::uuid,${peerIdentityId}::uuid,${at},'DIRECT_REPLY') ON CONFLICT(organization_id,guild_id,episode_id,peer_identity_id) DO UPDATE SET first_at=LEAST(member_interaction_pairs.first_at,EXCLUDED.first_at),source='DIRECT_REPLY'`.execute(tx);
- }
- private async gap(tx:Tx,s:Scope,start:Date,end:Date|null,reason:string){await sql`INSERT INTO telemetry_health VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${start},${end},${reason})`.execute(tx);}
- private async health(tx:Tx,s:Scope,e:Envelope){
-  const at=new Date(e.at);const cursor=(await sql<{last_seen:Date}>`SELECT last_seen FROM telemetry_cursor WHERE ${tenant(s)} FOR UPDATE`.execute(tx)).rows[0];
-  if(e.kind==='telemetry.disconnected'){await this.gap(tx,s,at,cursor&&cursor.last_seen>at?cursor.last_seen:null,'gateway disconnected');return;}
-  if(e.kind==='telemetry.gap'){await this.gap(tx,s,new Date(e.gapStart??e.at),at,'Redis publication lost');return;}
-  if(cursor&&at.getTime()-cursor.last_seen.getTime()>90000)await this.gap(tx,s,cursor.last_seen,at,'heartbeat missing');
-  await sql`UPDATE telemetry_health SET ended_at=${at} WHERE ${tenant(s)} AND ended_at IS NULL AND started_at<=${at} AND reason='gateway disconnected'`.execute(tx);
-  await sql`INSERT INTO telemetry_cursor VALUES(${s.organizationId}::uuid,${s.guildId},${at},${at}) ON CONFLICT(organization_id,guild_id)
-   DO UPDATE SET last_seen=GREATEST(telemetry_cursor.last_seen,EXCLUDED.last_seen),first_seen=LEAST(telemetry_cursor.first_seen,EXCLUDED.first_seen)`.execute(tx);
- }
+    if (cursor && at.getTime() - cursor.last_seen.getTime() > 90000)
+      await this.gap(tx, s, cursor.last_seen, at, "heartbeat missing");
+    await sql`UPDATE telemetry_health SET ended_at=${at} WHERE ${tenant(s)} AND ended_at IS NULL AND started_at<=${at} AND reason='gateway disconnected'`.execute(
+      tx,
+    );
+    await sql`INSERT INTO telemetry_cursor VALUES(${s.organizationId}::uuid,${s.guildId},${at},${at}) ON CONFLICT(organization_id,guild_id)
+   DO UPDATE SET last_seen=GREATEST(telemetry_cursor.last_seen,EXCLUDED.last_seen),first_seen=LEAST(telemetry_cursor.first_seen,EXCLUDED.first_seen)`.execute(
+      tx,
+    );
+  }
 }

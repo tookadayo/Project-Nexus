@@ -16,10 +16,42 @@ import { buildCapabilitySnapshot } from "../../packages/discord/src/discovery";
 import { representativeSource } from "../fixtures/community-profiles";
 
 let infra: Awaited<ReturnType<typeof infrastructure>>, db: Database;
-let tenThousandDuration = 0;
+let tenThousandDuration = 0,
+  profiling = false;
+const queryTimes: { ms: number; tables: string }[] = [],
+  queries = new Map<object, { start: number; tables: string }>();
 beforeAll(async () => {
   infra = await infrastructure();
-  db = connect(infra.databaseUrl);
+  db = connect(infra.databaseUrl).withPlugin({
+    transformQuery(args) {
+      const source = JSON.stringify(args.node);
+      if (profiling)
+        queries.set(args.queryId, {
+          start: performance.now(),
+          tables: [
+            "membership_episodes",
+            "lifecycle_daily_rollups",
+            "message_observations",
+            "lifecycle_events",
+            "adaptive_facts",
+            "attention_items",
+            "reaction_state",
+            "poll_participant_state",
+          ]
+            .filter((table) => source.includes(table))
+            .join(","),
+        });
+      return args.node;
+    },
+    async transformResult(args) {
+      const q = queries.get(args.queryId);
+      if (q) {
+        queryTimes.push({ ms: performance.now() - q.start, tables: q.tables });
+        queries.delete(args.queryId);
+      }
+      return args.result;
+    },
+  });
   await migrate(db);
 });
 afterAll(async () => {
@@ -67,6 +99,11 @@ for (const size of [10000, 50000])
         db,
       );
     }
+    if (size === 50000) {
+      await sql`INSERT INTO reaction_state(organization_id,guild_id,channel_id,message_id,emoji_hash,reaction_type,subject_hash,target_hash,active,observed_at) SELECT ${s.organizationId}::uuid,${s.guildId},'933333333333333330',(970000000000000000::bigint+n)::text,lpad(to_hex(n),64,'0'),0,lpad(to_hex(n%10000),64,'0'),lpad(to_hex(1000000+n),64,'0'),true,now() FROM generate_series(1,100000) n`.execute(
+        db,
+      );
+    }
     // The fixture measures dashboard reads, so bypass write-time retention projections.
     await sql`ALTER TABLE membership_episodes DISABLE TRIGGER ALL`.execute(db);
     try {
@@ -75,7 +112,7 @@ for (const size of [10000, 50000])
         db,
       );
       await sql`INSERT INTO membership_episodes(organization_id,guild_id,id,identity_id,joined_at,context,screening_observed_at,guest_observed_at)
-   SELECT ${s.organizationId}::uuid,${s.guildId},gen_random_uuid(),id,now()-interval '20 days','PRODUCTION',now(),now() FROM member_identity_map WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId}`.execute(
+   SELECT ${s.organizationId}::uuid,${s.guildId},gen_random_uuid(),id,now()-interval '20 days','PRODUCTION',now()-interval '20 days',now()-interval '20 days' FROM member_identity_map WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId}`.execute(
         db,
       );
     } finally {
@@ -115,6 +152,19 @@ for (const size of [10000, 50000])
     await sql`INSERT INTO poll_participant_state SELECT ${s.organizationId}::uuid,${s.guildId},'933333333333333330',(970000000000000000::bigint+n)::text,lpad(to_hex(n%10000),64,'0'),1,now(),false FROM generate_series(1,100000) n WHERE ${size}=50000`.execute(
       db,
     );
+    await sql`SELECT nexus_rebuild_message_observations(${s.organizationId}::uuid,${s.guildId})`.execute(
+      db,
+    );
+    // Bulk loading bypasses normal autovacuum cadence; use representative planner statistics.
+    for (const table of [
+      "membership_episodes",
+      "message_observations",
+      "reaction_state",
+      "poll_participant_state",
+      "lifecycle_daily_rollups",
+      "adaptive_facts",
+    ])
+      await sql`ANALYZE ${sql.table(table)}`.execute(db);
     const key = "synthetic-performance",
       api = createApi(
         new AnalyticsService(db, new SettingsService(db)),
@@ -122,6 +172,8 @@ for (const size of [10000, 50000])
         db,
       ),
       path = `/v3/organizations/${s.organizationId}/guilds/${s.guildId}/community?range=30`;
+    profiling = true;
+    queryTimes.length = 0;
     const started = performance.now(),
       result = await api.inject({
         method: "GET",
@@ -129,6 +181,15 @@ for (const size of [10000, 50000])
         headers: { authorization: `Bearer ${apiToken(key, s)}` },
       }),
       duration = performance.now() - started;
+    profiling = false;
+    process.stdout.write(
+      `Query profile ${size}: ${JSON.stringify(
+        [...queryTimes]
+          .sort((a, b) => b.ms - a.ms)
+          .slice(0, 8)
+          .map((q) => ({ ...q, ms: Math.round(q.ms) })),
+      )}\n`,
+    );
     expect(result.statusCode).toBe(200);
     const body = result.json();
     expect(body.eligibleMembers).toBe(size);

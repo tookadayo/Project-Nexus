@@ -16,6 +16,7 @@ import {
   tickVoice,
 } from "../../packages/lifecycle/src/adaptive-projector";
 import type { Envelope } from "../../packages/events/src/index";
+import { projectObservation } from "../../packages/lifecycle/src/observation";
 
 let infra: Awaited<ReturnType<typeof infrastructure>>, db: Database;
 beforeAll(async () => {
@@ -90,6 +91,25 @@ it("keeps 600 voice participants in linear state, processes a bounded tick and c
       ),
     );
   const qualifiedAt = new Date(now.getTime() + 301000);
+  for (
+    let at = now.getTime();
+    at <= qualifiedAt.getTime();
+    at = Math.min(at + 60000, qualifiedAt.getTime())
+  ) {
+    await db.transaction().execute((tx) =>
+      projectObservation(tx, s, {
+        ...s,
+        shardId: 0,
+        gatewaySessionId: "voice-perf",
+        sequence: 600 + Math.round((at - now.getTime()) / 1000),
+        context: "PRODUCTION",
+        kind: "telemetry.heartbeat",
+        at: new Date(at).toISOString(),
+        requestedIntents: ["members", "voice"],
+      }),
+    );
+    if (at === qualifiedAt.getTime()) break;
+  }
   await db.transaction().execute((tx) => tickVoice(tx, s, cfg, qualifiedAt));
   expect(
     (

@@ -243,6 +243,7 @@ export async function journeyAnalysis(
   cfg: Settings,
   snapshot: CapabilitySnapshot | null,
   context: EvidenceContext,
+  prepared?: JourneyObservation[],
 ): Promise<{ recipeId: string | null; transitions: JourneyTransition[] }> {
   const recipe = context.recipe,
     definition = recipe?.definition;
@@ -265,30 +266,31 @@ export async function journeyAnalysis(
       purpose: string | null;
       resolved: boolean;
     }>`WITH eligible AS (
-  SELECT e.id,m.lookup_hash AS member,COALESCE(e.engagement_started_at,e.joined_at) AS joined_at FROM membership_episodes e JOIN member_identity_map m ON m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.identity_id LEFT JOIN member_observable_state st ON st.organization_id=e.organization_id AND st.guild_id=e.guild_id AND st.episode_id=e.id
+  SELECT e.id,${prepared ? sql`e.id::text` : sql`m.lookup_hash`} AS member,m.lookup_hash AS lookup_hash,COALESCE(e.engagement_started_at,e.joined_at) AS joined_at FROM membership_episodes e JOIN member_identity_map m ON m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.identity_id LEFT JOIN member_observable_state st ON st.organization_id=e.organization_id AND st.guild_id=e.guild_id AND st.episode_id=e.id
   WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND e.context='PRODUCTION' AND e.screening_observed_at IS NOT NULL AND e.guest_observed_at IS NOT NULL AND NOT e.screening_pending AND NOT e.is_guest AND NOT(COALESCE(st.roles,'{}'::text[])&&${roles}::text[])
  ), facts AS (
-  SELECT e.member,f.kind,f.occurred_at AS at,e.joined_at,f.data->>'channelId' AS channel_id,f.data->>'eventId' AS event_id,COALESCE(f.data->>'purpose',mapping->>'purpose') AS purpose,COALESCE(f.data->>'resolved'='true',false) AS resolved FROM (${activityRollupQuery(s, context.from, new Date(context.to.getTime() - 1))}) f JOIN eligible e ON e.id=f.episode_id LEFT JOIN discord_surface_state ch ON ch.organization_id=${s.organizationId}::uuid AND ch.guild_id=${s.guildId} AND ch.channel_id=f.data->>'channelId' LEFT JOIN jsonb_array_elements(${JSON.stringify(definition.channels)}::jsonb) mapping ON mapping->>'channelId'=COALESCE(ch.parent_id,ch.channel_id)
-  WHERE f.occurred_at>=${context.from} AND f.occurred_at<${context.to}
-  UNION ALL SELECT e.member,f.kind,f.occurred_at,e.joined_at,f.data->>'channelId',f.data->>'eventId',f.data->>'purpose',COALESCE(f.data->>'resolved'='true',false) FROM adaptive_facts f JOIN eligible e ON e.member=f.subject_hash WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.occurred_at>=${context.from} AND f.occurred_at<${context.to}
-  UNION ALL SELECT member,'member.joined',joined_at,joined_at,NULL,NULL,NULL,false FROM eligible WHERE joined_at>=${context.from} AND joined_at<${context.to}
+  ${prepared ? sql`` : sql`SELECT e.member,f.kind,f.occurred_at AS at,e.joined_at,f.data->>'channelId' AS channel_id,f.data->>'eventId' AS event_id,COALESCE(f.data->>'purpose',mapping->>'purpose') AS purpose,COALESCE(f.data->>'resolved'='true',false) AS resolved FROM (${activityRollupQuery(s, context.from, new Date(context.to.getTime() - 1))}) f JOIN eligible e ON e.id=f.episode_id LEFT JOIN discord_surface_state ch ON ch.organization_id=${s.organizationId}::uuid AND ch.guild_id=${s.guildId} AND ch.channel_id=f.data->>'channelId' LEFT JOIN jsonb_array_elements(${JSON.stringify(definition.channels)}::jsonb) mapping ON mapping->>'channelId'=COALESCE(ch.parent_id,ch.channel_id) WHERE f.occurred_at>=${context.from} AND f.occurred_at<${context.to} UNION ALL `} SELECT e.member,f.kind,f.occurred_at AS at,e.joined_at,f.data->>'channelId' AS channel_id,f.data->>'eventId' AS event_id,f.data->>'purpose' AS purpose,COALESCE(f.data->>'resolved'='true',false) AS resolved FROM adaptive_facts f JOIN eligible e ON e.lookup_hash=f.subject_hash WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.occurred_at>=${context.from} AND f.occurred_at<${context.to}
+  ${prepared ? sql`` : sql`UNION ALL SELECT member,'member.joined',joined_at,joined_at,NULL,NULL,NULL,false FROM eligible WHERE joined_at>=${context.from} AND joined_at<${context.to}`}
  ) SELECT member,kind,min(at) AS at,max(at) AS last_at,joined_at,channel_id,event_id,purpose,resolved FROM facts WHERE channel_id IS NULL OR ${definition.scope.mode}='all' OR (${definition.scope.mode}='include')=(COALESCE((SELECT parent_id FROM discord_surface_state WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId} AND channel_id=facts.channel_id),channel_id)=ANY(${definition.scope.channelIds}::text[])) GROUP BY member,kind,joined_at,channel_id,event_id,purpose,resolved,date_trunc('day',at)`.execute(
       tx,
     )
   ).rows;
-  const observations: JourneyObservation[] = rows.flatMap((r) => {
-    const o = {
-      member: r.member,
-      kind: r.kind,
-      at: r.at.getTime(),
-      joinedAt: r.joined_at.getTime(),
-      channelId: r.channel_id,
-      eventId: r.event_id,
-      purpose: r.purpose,
-      resolved: r.resolved,
-    };
-    return r.last_at > r.at ? [o, { ...o, at: r.last_at.getTime() }] : [o];
-  });
+  const observations: JourneyObservation[] = [
+    ...(prepared ?? []),
+    ...rows.flatMap((r) => {
+      const o = {
+        member: r.member,
+        kind: r.kind,
+        at: r.at.getTime(),
+        joinedAt: r.joined_at.getTime(),
+        channelId: r.channel_id,
+        eventId: r.event_id,
+        purpose: r.purpose,
+        resolved: r.resolved,
+      };
+      return r.last_at > r.at ? [o, { ...o, at: r.last_at.getTime() }] : [o];
+    }),
+  ];
   const eventTypes = new Map(
     (
       await sql<{

@@ -1,5 +1,7 @@
 # Experiments and evidence
 
+> Historical record — this document describes an earlier implementation or design. Current alpha.5 behavior is defined by [the README](../../README.md) and the current evidence, privacy and operations documents.
+
 memberはexperiment revision + membership episode、time-blockはrevision + UTC block番号をSHA-256で決定的に割り付けます。Control/Treatmentの2群、重み、無介入のnull treatmentを型で表します。assignmentはDBでimmutableです。Controlを配送APIでTreatmentへすり替えることも拒否します。
 
 現行headはdomainごとに1つです。公開済み施策はSuggest / Approval / Autoを保持します。Suggestを実験に紐づけても自動送信しません。新しい実験への移行時は旧実験を停止してから公開してください。新しい版の公開は旧版の配送を自動停止する操作ではありません。

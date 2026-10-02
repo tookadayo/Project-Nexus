@@ -19,6 +19,7 @@ import { DiscordFailure } from "../../packages/discord/src/rest";
 import { SettingsService } from "../../packages/settings/src/index";
 import { OnboardingService } from "../../packages/onboarding/src/index";
 import { IdentityVault } from "../../packages/identity/src/index";
+import { CommunityService } from "../../packages/presentation/src/community";
 let infra: Awaited<ReturnType<typeof infrastructure>>, db: Database;
 const vault = new IdentityVault("aa".repeat(32), "bb".repeat(32)),
   now = new Date(),
@@ -46,6 +47,27 @@ async function fixture() {
   );
   return { s, operations };
 }
+it("preserves saved attention when current collection is unavailable", async () => {
+  const f = await fixture(),
+    result = await new CommunityService(db, new SettingsService(db)).overview(
+      f.s,
+      30,
+      now,
+    );
+  expect(result.daily.ready).toBe(false);
+  expect(result.daily.attentionCount).toBeNull();
+  expect(result.attention.map((r) => r.messageId)).toContain(message);
+  await f.operations.action(f.s, message, channel, "ACKNOWLEDGED", now);
+  expect(
+    (
+      await new CommunityService(db, new SettingsService(db)).overview(
+        f.s,
+        30,
+        now,
+      )
+    ).attention.find((r) => r.messageId === message)?.status,
+  ).toBe("ACKNOWLEDGED");
+});
 it("keeps ACK/Resolve races and duplicate actions idempotent with a transactional panel outbox", async () => {
   const f = await fixture();
   const result = await Promise.all([
@@ -116,7 +138,9 @@ it.each([429, 500, 0])(
     let attempts = 0;
     discord.editPanel = async () => {
       if (++attempts === 1)
-        throw new DiscordFailure(status, 2, {kind:status === 0 ? "timeout" : "http"});
+        throw new DiscordFailure(status, 2, {
+          kind: status === 0 ? "timeout" : "http",
+        });
     };
     const worker = new ActionWorker(
       db,

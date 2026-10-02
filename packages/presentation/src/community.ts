@@ -1,75 +1,885 @@
-import {activityRollups} from '../../lifecycle/src/rollups.js';
-import {surfaceFor,purposeFor} from '../../shared/src/community-model.js';
-import {AttentionOperations,teamOperations} from '../../operations/src/attention.js';
-import {meaningfulActivityKinds} from '../../shared/src/community-model.js';
-import {sql,tenant,type Database} from '../../db/src/index.js';
-import type {Scope} from '../../shared/src/index.js';
-import {zonedDayStart} from '../../shared/src/timezones.js';
-import {SettingsService} from '../../settings/src/index.js';
+import type { JourneyObservation } from "../../analytics/src/journeys.js";
+import { evidenceContext } from "../../analytics/src/evidence.js";
+import { measurementEvidence } from "./evidence-compat.js";
+import { activityRollups } from "../../lifecycle/src/rollups.js";
+import { surfaceFor, purposeFor } from "../../shared/src/community-model.js";
+import {
+  AttentionOperations,
+  teamOperations,
+} from "../../operations/src/attention.js";
+import { meaningfulActivityKinds } from "../../shared/src/community-model.js";
+import { sql, tenant, type Database } from "../../db/src/index.js";
+import type { Scope } from "../../shared/src/index.js";
+import { zonedDayStart } from "../../shared/src/timezones.js";
+import { SettingsService } from "../../settings/src/index.js";
 
-import {weeklyMeasurements} from './measurement.js';
-import {adaptivePresentation,type AdaptivePresentation} from './adaptive.js';
+import { weeklyMeasurements } from "./measurement.js";
+import { adaptivePresentation, type AdaptivePresentation } from "./adaptive.js";
 
-const DAY=86400000;
-type Episode={id:string;identity_id:string;joined_at:Date;left_at:Date|null;roles:string[]|null};
-type Fact={episode_id:string;kind:string;occurred_at:Date;data:Record<string,unknown>;reaction_count:number};
-type Stage='new'|'starting'|'continuing'|'inactive'|'staff'|'exited';
-type Member={episode:Episode;stage:Stage;facts:Fact[];active:Fact[];days:Set<string>;channels:Set<string>;first:Fact|null;connected:Fact|null;repeated:boolean;retained:boolean;replyMinutes:number|null;voice:boolean;event:boolean;earlyChannels:Set<string>;earlyPartners:number};
-const channel=(fact:Fact)=>typeof fact.data.channelId==='string'?fact.data.channelId:null;
-const percent=(part:number,total:number)=>total?Math.round(part/total*100):null;
-export class CommunityService{
- constructor(private readonly db:Database,private readonly settings=new SettingsService(db)){}
- async overview(s:Scope,range:7|30|90=30,now=new Date(),autoStaffRoleIds:string[]=[],attentionOffset=0,attentionLimit=1){
-  const cfg=await this.settings.get(s),from=new Date(now.getTime()-Math.max(range+cfg.memberStages.retainedThroughDay,cfg.memberStages.recentDays,cfg.detailedRetentionDays)*DAY),cursor=(await sql<{first_seen:Date;last_seen:Date}>`SELECT first_seen,last_seen FROM telemetry_cursor WHERE ${tenant(s)}`.execute(this.db)).rows[0],gaps=(await sql<{started_at:Date;ended_at:Date|null}>`SELECT started_at,ended_at FROM telemetry_health WHERE ${tenant(s)} AND started_at<${now} AND (ended_at IS NULL OR ended_at>${from})`.execute(this.db)).rows;
-  const [episodes,facts,partnerRows]=await Promise.all([
-   sql<Episode>`SELECT e.id,e.identity_id,COALESCE(e.engagement_started_at,e.joined_at) AS joined_at,e.left_at,st.roles FROM membership_episodes e LEFT JOIN member_observable_state st ON st.organization_id=e.organization_id AND st.guild_id=e.guild_id AND st.episode_id=e.id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND e.context='PRODUCTION' AND e.screening_observed_at IS NOT NULL AND e.guest_observed_at IS NOT NULL AND NOT e.screening_pending AND NOT e.is_guest AND (e.left_at IS NULL OR e.left_at>=${from})`.execute(this.db).then(r=>r.rows),
-   activityRollups(this.db,s,from,now,new Date(now.getTime()-range*DAY)),
-   sql<{episode_id:string;partners:number}>`SELECT pair.episode_id,count(*)::integer AS partners FROM member_interaction_pairs pair JOIN membership_episodes episode ON episode.organization_id=pair.organization_id AND episode.guild_id=pair.guild_id AND episode.id=pair.episode_id WHERE pair.organization_id=${s.organizationId}::uuid AND pair.guild_id=${s.guildId} AND episode.context='PRODUCTION' AND pair.source='DIRECT_REPLY' AND pair.first_at>=episode.joined_at AND pair.first_at<episode.joined_at+interval '3 days' AND episode.joined_at>=${from} AND episode.joined_at<=${now} GROUP BY pair.episode_id`.execute(this.db).then(r=>r.rows)
-  ]);
-  const earlyPartners=new Map(partnerRows.map(row=>[row.episode_id,row.partners]));
-  const byEpisode=new Map<string,Fact[]>();for(const f of facts){const list=byEpisode.get(f.episode_id)??[];list.push(f);byEpisode.set(f.episode_id,list);}
-  const parents=new Map(cfg.analysisScope.mode==='all'?[]:(await sql<{channel_id:string,parent_id:string|null}>`SELECT channel_id,parent_id FROM discord_surface_state WHERE ${tenant(s)}`.execute(this.db)).rows.map(ch=>[ch.channel_id,ch.parent_id]));
-  const allowed=(f:Fact)=>{const original=channel(f),id=original?(parents.get(original)??original):null;return !id||cfg.analysisScope.mode==='all'||(cfg.analysisScope.mode==='include')===cfg.analysisScope.channelIds.includes(id);};
-  const staffRoles=new Set([...cfg.staffRoleIds,...cfg.managerRoleIds,...cfg.helperRoleIds,...autoStaffRoleIds]);
-  const ACTIVE=meaningfulActivityKinds(cfg.communityModel);
-  const members:Member[]=episodes.map(episode=>{const all=(byEpisode.get(episode.id)??[]).filter(allowed),active=all.filter(f=>ACTIVE.has(f.kind)&&f.occurred_at>=episode.joined_at),days=new Set(active.map(f=>f.occurred_at.toISOString().slice(0,10))),channels=new Set(active.map(channel).filter((id):id is string=>id!==null)),age=(now.getTime()-episode.joined_at.getTime())/DAY,staff=episode.roles?.some(role=>staffRoles.has(role))??false,stage:Stage=staff?'staff':episode.left_at?'exited':age<=cfg.memberStages.newDays?'new':age<=cfg.memberStages.startingDays?'starting':new Set(active.filter(f=>f.occurred_at.getTime()>=now.getTime()-cfg.memberStages.recentDays*DAY).map(f=>f.occurred_at.toISOString().slice(0,10))).size>=cfg.memberStages.activeDays?'continuing':'inactive',first=active.find(f=>f.occurred_at.getTime()<=episode.joined_at.getTime()+cfg.activationWindowHours*3600000)??null,connected=all.find(f=>f.occurred_at>=episode.joined_at&&f.occurred_at.getTime()<episode.joined_at.getTime()+3*DAY&&(f.kind==='reply.received'||f.kind==='reply.established'||f.kind==='thread.response_received'||f.kind==='voice.connected'))??null,earlyChannels=new Set(active.filter(f=>f.occurred_at.getTime()<episode.joined_at.getTime()+3*DAY).map(channel).filter((id):id is string=>id!==null)),reply=all.find(f=>f.kind==='reply.received'),earlyDays=new Set(active.filter(f=>f.occurred_at.getTime()<episode.joined_at.getTime()+cfg.memberStages.retainedFromDay*DAY).map(f=>f.occurred_at.toISOString().slice(0,10)));return {episode,stage,facts:all,active,days,channels,first,connected,repeated:earlyDays.size>=cfg.memberStages.repeatDays,retained:active.some(f=>{const elapsed=(f.occurred_at.getTime()-episode.joined_at.getTime())/DAY;return elapsed>=cfg.memberStages.retainedFromDay&&elapsed<cfg.memberStages.retainedThroughDay;}),replyMinutes:typeof reply?.data.latencySeconds==='number'?reply.data.latencySeconds/60:null,voice:active.some(f=>f.kind==='voice.started'||f.kind==='voice.duration'),event:active.some(f=>f.kind==='scheduled_event.subscribed'),earlyChannels,earlyPartners:earlyPartners.get(episode.id)??0};});
-  const observed=(a:Date,b:Date)=>Boolean(cursor&&cursor.first_seen<=a&&cursor.last_seen>=b&&!gaps.some(g=>g.started_at<b&&(g.ended_at===null||g.ended_at>a)));
-  const entered=members.filter(m=>m.stage!=='staff'&&m.episode.joined_at>=new Date(now.getTime()-range*DAY)&&m.episode.joined_at<=now&&Boolean(cursor&&m.episode.joined_at>=cursor.first_seen));
-  const maturityDays=cfg.memberStages.retainedThroughDay,cohortThrough=new Date(now.getTime()-maturityDays*DAY),cohortFrom=new Date(cohortThrough.getTime()-range*DAY);
-  const matureCohort=members.filter(m=>m.stage!=='staff'&&m.episode.joined_at>=cohortFrom&&m.episode.joined_at<cohortThrough);
-  const eligible=matureCohort.filter(m=>m.episode.joined_at.getTime()>=now.getTime()-cfg.detailedRetentionDays*DAY&&observed(m.episode.joined_at,new Date(m.episode.joined_at.getTime()+maturityDays*DAY)));
-  const steps=[{key:'joined',count:eligible.length},{key:'activated',count:eligible.filter(m=>m.first).length},{key:'connected',count:eligible.filter(m=>m.first&&m.connected&&m.connected.occurred_at>=m.first.occurred_at).length},{key:'repeated',count:eligible.filter(m=>m.first&&m.connected&&m.repeated).length},{key:'retained',count:eligible.filter(m=>m.first&&m.connected&&m.repeated&&m.retained).length}];
-  const drops=steps.slice(1).map((step,i)=>({fromKey:steps[i]!.key,toKey:step.key,count:steps[i]!.count-step.count}));const largest=drops.sort((a,b)=>b.count-a.count)[0]??null;
-  const summarize=(group:Member[],window:'early'|'recent')=>{const subset=(m:Member)=>m.facts.filter(f=>window==='early'?f.occurred_at>=m.episode.joined_at&&f.occurred_at<new Date(m.episode.joined_at.getTime()+3*DAY):f.occurred_at>=new Date(now.getTime()-3*DAY)),replies=group.map(m=>subset(m).find(f=>f.kind==='reply.received')).map(f=>f?.data.latencySeconds).filter((n):n is number=>typeof n==='number');return {members:group.length,receivedReplyPercent:percent(replies.length,group.length),replyMinutes:replies.length?Math.round(replies.reduce((a,b)=>a+b,0)/replies.length/60):null,activeDays:group.length?Math.round(group.reduce((n,m)=>n+new Set(subset(m).filter(f=>ACTIVE.has(f.kind)).map(f=>f.occurred_at.toISOString().slice(0,10))).size,0)/group.length*10)/10:null,channelCount:group.length?Math.round(group.reduce((n,m)=>n+new Set(subset(m).filter(f=>ACTIVE.has(f.kind)).map(channel).filter(Boolean)).size,0)/group.length*10)/10:null,interactionPartners:window==='early'&&group.length?Math.round(group.reduce((n,m)=>n+m.earlyPartners,0)/group.length*10)/10:null,voicePercent:percent(group.filter(m=>subset(m).some(f=>f.kind==='voice.started'||f.kind==='voice.duration')).length,group.length),eventPercent:percent(group.filter(m=>subset(m).some(f=>f.kind==='scheduled_event.subscribed')).length,group.length)};};
-  const newcomers=entered.filter(m=>m.episode.joined_at<=new Date(now.getTime()-3*DAY)&&observed(m.episode.joined_at,new Date(m.episode.joined_at.getTime()+3*DAY))),continuing=members.filter(m=>m.stage==='continuing'),recentObserved=Boolean(cursor&&cursor.last_seen.getTime()>=now.getTime()-10*60*1000&&observed(new Date(now.getTime()-3*DAY),cursor.last_seen)),comparisonContinuing=recentObserved?continuing:[];
-  const compare={newcomers:newcomers.length>=5?summarize(newcomers,'early'):null,continuing:comparisonContinuing.length>=5?summarize(comparisonContinuing,'recent'):null,available:newcomers.length>=5&&comparisonContinuing.length>=5};
-  const settled=entered.filter(m=>m.episode.joined_at.getTime()>=now.getTime()-cfg.detailedRetentionDays*DAY&&observed(m.episode.joined_at,new Date(m.episode.joined_at.getTime()+maturityDays*DAY))),settledIds=new Set(settled.map(m=>m.episode.id));const retained=settled.filter(m=>m.retained),notRetained=settled.filter(m=>!m.retained),pending=entered.filter(m=>m.episode.joined_at.getTime()+maturityDays*DAY>now.getTime()).length,insufficient=entered.length-settled.length-pending;const outcomes={retained:retained.length,notRetained:notRetained.length,pending,insufficient,patterns:retained.length>=5&&notRetained.length>=5?{retained:summarize(retained,'early'),notRetained:summarize(notRetained,'early')}:null};
-  const channels=new Map<string,Member[]>(),channelPeople=new Map<string,Set<string>>();for(const member of entered){for(const id of member.earlyChannels){const people=channelPeople.get(id)??new Set<string>();if(!people.has(member.episode.identity_id)){const group=channels.get(id)??[];group.push(member);channels.set(id,group);people.add(member.episode.identity_id);channelPeople.set(id,people);}}}
-  const channelSummary=[...channels].filter(([,group])=>group.length>=3).map(([id,group])=>{const firstAt=(m:Member)=>m.active.find(f=>channel(f)===id)?.occurred_at;const replyGroup=group.filter(m=>{const start=firstAt(m);return start&&observed(start,new Date(start.getTime()+DAY));}),laterGroup=group.filter(m=>{const start=firstAt(m);return start&&observed(start,new Date(start.getTime()+3*DAY));}),weekGroup=group.filter(m=>settledIds.has(m.episode.id));return {channelId:id,newcomers:group.length,receivedReplyPercent:replyGroup.length>=3?percent(replyGroup.filter(m=>{const start=firstAt(m)!;return m.facts.some(f=>f.kind==='reply.received'&&channel(f)===id&&f.occurred_at>start&&f.occurred_at.getTime()<start.getTime()+DAY);}).length,replyGroup.length):null,laterElsewherePercent:laterGroup.length>=3?percent(laterGroup.filter(m=>{const start=firstAt(m)!;return m.active.some(f=>channel(f)!==null&&channel(f)!==id&&f.occurred_at>start&&f.occurred_at.getTime()<start.getTime()+3*DAY);}).length,laterGroup.length):null,weekLaterPercent:weekGroup.length>=3?percent(weekGroup.filter(m=>m.retained).length,weekGroup.length):null};}).sort((a,b)=>b.newcomers-a.newcomers);
-  const purposeByChannel=new Map(cfg.importantChannels.map(item=>[item.channelId,item.purpose])),importantPlaces=channelSummary.filter(item=>purposeByChannel.has(item.channelId)).map(item=>({...item,purpose:purposeByChannel.get(item.channelId)!}));
-  const transitionPeople=new Map<string,Set<string>>();for(const m of entered){const path:string[]=[];for(const fact of m.active){const id=channel(fact)??(fact.kind.startsWith('voice.')?'voice':null);if(id&&path.at(-1)!==id)path.push(id);}for(let i=1;i<path.length;i++){const key=`${path[i-1]}:${path[i]}`,people=transitionPeople.get(key)??new Set<string>();people.add(m.episode.identity_id);transitionPeople.set(key,people);}}
-  const transitions=[...transitionPeople].filter(([,people])=>people.size>=3).map(([path,people])=>({from:path.split(':')[0]!,to:path.split(':')[1]!,count:people.size})).sort((a,b)=>b.count-a.count).slice(0,20);
-  // The alpha.4 comparison has no versioned evidence. Keep its wire shape without producing unsupported advice.
-  const suggestion=null as {key:'reply_rescue';basis:{newcomerMinutes:number;continuingMinutes:number}}|null;
-  const operation=await new AttentionOperations(this.db).observe(s,cfg,now);
-  const live=operation.available&&Boolean(cursor&&cursor.last_seen.getTime()>=now.getTime()-90000&&!gaps.some(g=>g.ended_at===null));
-  const attention=live?(await sql<{channel_id:string;message_id:string;occurred_at:Date;status:string;total:number;item_type:string;opened_at:Date|null;acknowledged_at:Date|null;threshold_seconds:number|null;evidence:import('../../shared/src/metric-evidence').MetricEvidence|null}>`SELECT channel_id,message_id,detected_at AS occurred_at,status,item_type,opened_at,acknowledged_at,threshold_seconds,evidence,count(*) OVER()::integer AS total FROM attention_items WHERE ${tenant(s)} AND status IN ('OPEN','ACKNOWLEDGED') AND item_type IN ('TEXT_NEWCOMER','FORUM_SUPPORT','LFG_RESPONSE') ORDER BY detected_at,message_id LIMIT ${Math.max(1,Math.min(50,attentionLimit))} OFFSET ${Math.max(0,Math.min(1000,attentionOffset))}`.execute(this.db)).rows:[];
-  const operations=await teamOperations(this.db,s,new Date(now.getTime()-range*DAY),now);
-  const attentionPlaces=new Map((attention.length?(await sql<{channel_id:string;channel_type:number;parent_id:string|null;parent_type:number|null}>`SELECT ch.channel_id,ch.channel_type,ch.parent_id,parent.channel_type AS parent_type FROM discord_surface_state ch LEFT JOIN discord_surface_state parent ON parent.organization_id=ch.organization_id AND parent.guild_id=ch.guild_id AND parent.channel_id=ch.parent_id WHERE ch.organization_id=${s.organizationId}::uuid AND ch.guild_id=${s.guildId} AND ch.channel_id=ANY(${attention.map(row=>row.channel_id)}::text[])`.execute(this.db)).rows:[]).map(ch=>[ch.channel_id,ch]));
-  const todayStart=zonedDayStart(now,cfg.timezone),yesterdayStart=zonedDayStart(new Date(todayStart.getTime()-1),cfg.timezone),yesterday=members.filter(m=>m.stage!=='staff'&&m.episode.joined_at>=yesterdayStart&&m.episode.joined_at<todayStart);
-  const today=members.filter(m=>m.stage!=='staff'&&m.episode.joined_at>=todayStart&&m.episode.joined_at<=now);
-  const todayCovered=live&&cursor!.last_seen>=todayStart&&observed(todayStart,cursor!.last_seen);
-  const daily={timezone:cfg.timezone,from:todayStart.toISOString(),ready:live,todayJoined:todayCovered?today.length:null,todayConnected:todayCovered?today.filter(m=>m.connected&&m.connected.occurred_at>=todayStart&&m.connected.occurred_at<=now).length:null,yesterdayJoined:live?yesterday.length:null,yesterdayConnected:live?yesterday.filter(m=>m.connected&&m.connected.occurred_at>=yesterdayStart&&m.connected.occurred_at<todayStart).length:null,attentionCount:live?(attention[0]?.total??0):null};
-  const coverageRows=(await sql<{bucket:number;sample:number;median_minutes:number}>`SELECT (floor(extract(hour FROM (occurred_at-(data->>'latencySeconds')::numeric*interval '1 second') AT TIME ZONE 'UTC')/6)*6)::integer AS bucket,count(*)::integer AS sample,percentile_cont(0.5) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS median_minutes FROM lifecycle_events WHERE ${tenant(s)} AND context='PRODUCTION' AND kind='reply.received' AND occurred_at>=${new Date(now.getTime()-30*DAY)} AND occurred_at<=${now} AND jsonb_typeof(data->'latencySeconds')='number' GROUP BY bucket HAVING count(*)>=5 ORDER BY bucket`.execute(this.db)).rows;
-  const helperCoverage=coverageRows.map(row=>({fromHourUtc:row.bucket,throughHourUtc:row.bucket+6,sample:row.sample,medianReplyMinutes:Math.round(row.median_minutes)}));
-  const measurementMembers=members.filter(m=>m.stage!=='staff').map(m=>({joinedAt:m.episode.joined_at,firstReplyMinutes:m.facts.find(f=>f.kind==='reply.received'&&f.occurred_at>=m.episode.joined_at&&f.occurred_at.getTime()<m.episode.joined_at.getTime()+3*DAY)?.data.latencySeconds as number|undefined,connected:Boolean(m.connected),retained:m.retained})).map(m=>({...m,firstReplyMinutes:m.firstReplyMinutes===undefined?null:m.firstReplyMinutes/60}));
-  const weekly=weeklyMeasurements(measurementMembers,now,maturityDays,cfg.detailedRetentionDays,observed,live,cfg.memberStages.retainedFromDay);
-  const analysis={retention:weeklyMeasurements(measurementMembers,now,maturityDays,cfg.detailedRetentionDays,observed,live,cfg.memberStages.retainedFromDay,range).retention,joined:live?entered.length:null,exited:live?members.filter(m=>m.stage!=='staff'&&m.episode.left_at&&m.episode.left_at>=new Date(now.getTime()-range*DAY)).length:null,rules:cfg.memberStages};
-  weekly.retention.activityFromDay=cfg.memberStages.retainedFromDay;
-  const reactions=members.filter(m=>m.stage!=='staff').reduce((total,m)=>total+m.facts.reduce((count,f)=>count+(f.reaction_count??0),0),0);
-  const adaptive=await adaptivePresentation(this.db,s,cfg,range,now,attention[0]?.total??0,autoStaffRoleIds);
-  adaptive.progress={entered:entered.length,eligible:eligible.length,first:steps[1]!.count,connected:steps[2]!.count,repeated:steps[3]!.count,retained:steps[4]!.count,pending,insufficient,from:cohortFrom.toISOString(),through:cohortThrough.toISOString(),observationDays:maturityDays,repeatDays:cfg.memberStages.repeatDays,returnFromDay:cfg.memberStages.retainedFromDay,returnThroughDay:cfg.memberStages.retainedThroughDay};
-  const adaptation:{adaptive?:AdaptivePresentation}={adaptive};
-  return {...adaptation,operations,weekly,analysis,reactionsReceived:reactions,generatedAt:now.toISOString(),range,scope:cfg.analysisScope,goalPreset:cfg.goalPreset,importantPlaces,arrivalCount:entered.length,cohortWindow:{joinedFrom:cohortFrom.toISOString(),joinedThrough:cohortThrough.toISOString(),observedThroughDays:maturityDays,total:matureCohort.length},stages:steps,eligibleMembers:eligible.length,largestDrop:eligible.length>=5?largest:null,classification:{new:members.filter(m=>m.stage==='new').length,starting:members.filter(m=>m.stage==='starting').length,continuing:continuing.length,inactive:members.filter(m=>m.stage==='inactive').length,exited:members.filter(m=>m.stage==='exited').length,staffExcluded:members.filter(m=>m.stage==='staff').length},compare,outcomes,channels:channelSummary,hiddenChannelCount:channels.size-channelSummary.length,transitions,suggestion,attention:attention.map(row=>({type:row.item_type,openedAt:row.opened_at?.toISOString()??null,acknowledgedAt:row.acknowledged_at?.toISOString()??null,thresholdSeconds:row.threshold_seconds,evidence:row.evidence,surface:surfaceFor(attentionPlaces.get(row.channel_id)?.channel_type,attentionPlaces.get(row.channel_id)?.parent_type??undefined),purpose:purposeFor(cfg.communityModel,row.channel_id,attentionPlaces.get(row.channel_id)?.parent_id),channelId:row.channel_id,messageId:row.message_id,status:row.status,waitingMinutes:Math.max(0,Math.floor((now.getTime()-row.occurred_at.getTime())/60000)),url:`https://discord.com/channels/${s.guildId}/${row.channel_id}/${row.message_id}`})),daily,helperCoverage,dataReady:eligible.length>=5};
- }
+const DAY = 86400000;
+type Episode = {
+  id: string;
+  identity_id: string;
+  joined_at: Date;
+  left_at: Date | null;
+  roles: string[] | null;
+};
+type Fact = {
+  episode_id: string;
+  kind: string;
+  occurred_at: Date;
+  data: Record<string, unknown>;
+  reaction_count: number;
+};
+type Stage =
+  "new" | "starting" | "continuing" | "inactive" | "staff" | "exited";
+type Member = {
+  episode: Episode;
+  stage: Stage;
+  facts: Fact[];
+  active: Fact[];
+  days: Set<string>;
+  channels: Set<string>;
+  first: Fact | null;
+  connected: Fact | null;
+  repeated: boolean;
+  retained: boolean;
+  replyMinutes: number | null;
+  voice: boolean;
+  event: boolean;
+  earlyChannels: Set<string>;
+  earlyPartners: number;
+};
+const channel = (fact: Fact) =>
+  typeof fact.data.channelId === "string" ? fact.data.channelId : null;
+const percent = (part: number, total: number) =>
+  total ? Math.round((part / total) * 100) : null;
+export class CommunityService {
+  constructor(
+    private readonly db: Database,
+    private readonly settings = new SettingsService(db),
+  ) {}
+  async overview(
+    s: Scope,
+    range: 7 | 30 | 90 = 30,
+    now = new Date(),
+    autoStaffRoleIds: string[] = [],
+    attentionOffset = 0,
+    attentionLimit = 1,
+  ) {
+    const cfg = await this.settings.get(s),
+      from = new Date(
+        now.getTime() -
+          Math.max(
+            range + cfg.memberStages.retainedThroughDay,
+            cfg.memberStages.recentDays,
+            cfg.detailedRetentionDays,
+          ) *
+            DAY,
+      ),
+      cursor = (
+        await sql<{
+          first_seen: Date;
+          last_seen: Date;
+        }>`SELECT first_seen,last_seen FROM telemetry_cursor WHERE ${tenant(s)}`.execute(
+          this.db,
+        )
+      ).rows[0],
+      gaps = (
+        await sql<{
+          started_at: Date;
+          ended_at: Date | null;
+        }>`SELECT started_at,ended_at FROM telemetry_health WHERE ${tenant(s)} AND started_at<${now} AND (ended_at IS NULL OR ended_at>${from})`.execute(
+          this.db,
+        )
+      ).rows;
+    const [episodes, facts, partnerRows] = await Promise.all([
+      sql<Episode>`SELECT e.id,e.identity_id,COALESCE(e.engagement_started_at,e.joined_at) AS joined_at,e.left_at,st.roles FROM membership_episodes e LEFT JOIN member_observable_state st ON st.organization_id=e.organization_id AND st.guild_id=e.guild_id AND st.episode_id=e.id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND e.context='PRODUCTION' AND e.screening_observed_at IS NOT NULL AND e.guest_observed_at IS NOT NULL AND NOT e.screening_pending AND NOT e.is_guest AND (e.left_at IS NULL OR e.left_at>=${from})`
+        .execute(this.db)
+        .then((r) => r.rows),
+      activityRollups(
+        this.db,
+        s,
+        from,
+        now,
+        new Date(now.getTime() - range * DAY),
+      ),
+      sql<{
+        episode_id: string;
+        partners: number;
+      }>`SELECT pair.episode_id,count(*)::integer AS partners FROM member_interaction_pairs pair JOIN membership_episodes episode ON episode.organization_id=pair.organization_id AND episode.guild_id=pair.guild_id AND episode.id=pair.episode_id WHERE pair.organization_id=${s.organizationId}::uuid AND pair.guild_id=${s.guildId} AND episode.context='PRODUCTION' AND pair.source='DIRECT_REPLY' AND pair.first_at>=episode.joined_at AND pair.first_at<episode.joined_at+interval '3 days' AND episode.joined_at>=${from} AND episode.joined_at<=${now} GROUP BY pair.episode_id`
+        .execute(this.db)
+        .then((r) => r.rows),
+    ]);
+    const earlyPartners = new Map(
+      partnerRows.map((row) => [row.episode_id, row.partners]),
+    );
+    const byEpisode = new Map<string, Fact[]>();
+    for (const f of facts) {
+      const list = byEpisode.get(f.episode_id) ?? [];
+      list.push(f);
+      byEpisode.set(f.episode_id, list);
+    }
+    const parents = new Map(
+      cfg.analysisScope.mode === "all" && !cfg.communityModel.channels.length
+        ? []
+        : (
+            await sql<{
+              channel_id: string;
+              parent_id: string | null;
+            }>`SELECT channel_id,parent_id FROM discord_surface_state WHERE ${tenant(s)}`.execute(
+              this.db,
+            )
+          ).rows.map((ch) => [ch.channel_id, ch.parent_id]),
+    );
+    const allowed = (f: Fact) => {
+      const original = channel(f),
+        id = original ? (parents.get(original) ?? original) : null;
+      return (
+        !id ||
+        cfg.analysisScope.mode === "all" ||
+        (cfg.analysisScope.mode === "include") ===
+          cfg.analysisScope.channelIds.includes(id)
+      );
+    };
+    const staffRoles = new Set([
+      ...cfg.staffRoleIds,
+      ...cfg.managerRoleIds,
+      ...cfg.helperRoleIds,
+      ...autoStaffRoleIds,
+    ]);
+    const ACTIVE = meaningfulActivityKinds(cfg.communityModel);
+    const members: Member[] = episodes.map((episode) => {
+      const all = (byEpisode.get(episode.id) ?? [])
+          .filter((f) => f.occurred_at >= episode.joined_at)
+          .filter(allowed),
+        active = all.filter(
+          (f) => ACTIVE.has(f.kind) && f.occurred_at >= episode.joined_at,
+        ),
+        days = new Set(
+          active.map((f) => f.occurred_at.toISOString().slice(0, 10)),
+        ),
+        channels = new Set(
+          active.map(channel).filter((id): id is string => id !== null),
+        ),
+        age = (now.getTime() - episode.joined_at.getTime()) / DAY,
+        staff = episode.roles?.some((role) => staffRoles.has(role)) ?? false,
+        stage: Stage = staff
+          ? "staff"
+          : episode.left_at
+            ? "exited"
+            : age <= cfg.memberStages.newDays
+              ? "new"
+              : age <= cfg.memberStages.startingDays
+                ? "starting"
+                : new Set(
+                      active
+                        .filter(
+                          (f) =>
+                            f.occurred_at.getTime() >=
+                            now.getTime() - cfg.memberStages.recentDays * DAY,
+                        )
+                        .map((f) => f.occurred_at.toISOString().slice(0, 10)),
+                    ).size >= cfg.memberStages.activeDays
+                  ? "continuing"
+                  : "inactive",
+        first =
+          active.find(
+            (f) =>
+              f.occurred_at.getTime() <=
+              episode.joined_at.getTime() + cfg.activationWindowHours * 3600000,
+          ) ?? null,
+        connected =
+          all.find(
+            (f) =>
+              f.occurred_at >= episode.joined_at &&
+              f.occurred_at.getTime() < episode.joined_at.getTime() + 3 * DAY &&
+              (f.kind === "reply.received" ||
+                f.kind === "reply.established" ||
+                f.kind === "thread.response_received" ||
+                f.kind === "voice.connected"),
+          ) ?? null,
+        earlyChannels = new Set(
+          active
+            .filter(
+              (f) =>
+                f.occurred_at.getTime() < episode.joined_at.getTime() + 3 * DAY,
+            )
+            .map(channel)
+            .filter((id): id is string => id !== null),
+        ),
+        reply = all.find((f) => f.kind === "reply.received"),
+        earlyDays = new Set(
+          active
+            .filter(
+              (f) =>
+                f.occurred_at.getTime() <
+                episode.joined_at.getTime() +
+                  cfg.memberStages.retainedFromDay * DAY,
+            )
+            .map((f) => f.occurred_at.toISOString().slice(0, 10)),
+        );
+      return {
+        episode,
+        stage,
+        facts: all,
+        active,
+        days,
+        channels,
+        first,
+        connected,
+        repeated: earlyDays.size >= cfg.memberStages.repeatDays,
+        retained: active.some((f) => {
+          const elapsed =
+            (f.occurred_at.getTime() - episode.joined_at.getTime()) / DAY;
+          return (
+            elapsed >= cfg.memberStages.retainedFromDay &&
+            elapsed < cfg.memberStages.retainedThroughDay
+          );
+        }),
+        replyMinutes:
+          typeof reply?.data.latencySeconds === "number"
+            ? reply.data.latencySeconds / 60
+            : null,
+        voice: active.some(
+          (f) => f.kind === "voice.started" || f.kind === "voice.duration",
+        ),
+        event: active.some((f) => f.kind === "scheduled_event.subscribed"),
+        earlyChannels,
+        earlyPartners: earlyPartners.get(episode.id) ?? 0,
+      };
+    });
+    const observed = (a: Date, b: Date) =>
+      Boolean(
+        cursor &&
+        cursor.first_seen <= a &&
+        cursor.last_seen >= b &&
+        !gaps.some(
+          (g) => g.started_at < b && (g.ended_at === null || g.ended_at > a),
+        ),
+      );
+    const entered = members.filter(
+      (m) =>
+        m.stage !== "staff" &&
+        m.episode.joined_at >= new Date(now.getTime() - range * DAY) &&
+        m.episode.joined_at <= now &&
+        Boolean(cursor && m.episode.joined_at >= cursor.first_seen),
+    );
+    const maturityDays = cfg.memberStages.retainedThroughDay,
+      cohortThrough = new Date(now.getTime() - maturityDays * DAY),
+      cohortFrom = new Date(cohortThrough.getTime() - range * DAY);
+    const matureCohort = members.filter(
+      (m) =>
+        m.stage !== "staff" &&
+        m.episode.joined_at >= cohortFrom &&
+        m.episode.joined_at < cohortThrough,
+    );
+    const eligible = matureCohort.filter(
+      (m) =>
+        m.episode.joined_at.getTime() >=
+          now.getTime() - cfg.detailedRetentionDays * DAY &&
+        observed(
+          m.episode.joined_at,
+          new Date(m.episode.joined_at.getTime() + maturityDays * DAY),
+        ),
+    );
+    const steps = [
+      { key: "joined", count: eligible.length },
+      { key: "activated", count: eligible.filter((m) => m.first).length },
+      {
+        key: "connected",
+        count: eligible.filter(
+          (m) =>
+            m.first &&
+            m.connected &&
+            m.connected.occurred_at >= m.first.occurred_at,
+        ).length,
+      },
+      {
+        key: "repeated",
+        count: eligible.filter((m) => m.first && m.connected && m.repeated)
+          .length,
+      },
+      {
+        key: "retained",
+        count: eligible.filter(
+          (m) => m.first && m.connected && m.repeated && m.retained,
+        ).length,
+      },
+    ];
+    const drops = steps.slice(1).map((step, i) => ({
+      fromKey: steps[i]!.key,
+      toKey: step.key,
+      count: steps[i]!.count - step.count,
+    }));
+    const largest = drops.sort((a, b) => b.count - a.count)[0] ?? null;
+    const summarize = (group: Member[], window: "early" | "recent") => {
+      const subset = (m: Member) =>
+          m.facts.filter((f) =>
+            window === "early"
+              ? f.occurred_at >= m.episode.joined_at &&
+                f.occurred_at <
+                  new Date(m.episode.joined_at.getTime() + 3 * DAY)
+              : f.occurred_at >= new Date(now.getTime() - 3 * DAY),
+          ),
+        replies = group
+          .map((m) => subset(m).find((f) => f.kind === "reply.received"))
+          .map((f) => f?.data.latencySeconds)
+          .filter((n): n is number => typeof n === "number");
+      return {
+        members: group.length,
+        receivedReplyPercent: percent(replies.length, group.length),
+        replyMinutes: replies.length
+          ? Math.round(replies.reduce((a, b) => a + b, 0) / replies.length / 60)
+          : null,
+        activeDays: group.length
+          ? Math.round(
+              (group.reduce(
+                (n, m) =>
+                  n +
+                  new Set(
+                    subset(m)
+                      .filter((f) => ACTIVE.has(f.kind))
+                      .map((f) => f.occurred_at.toISOString().slice(0, 10)),
+                  ).size,
+                0,
+              ) /
+                group.length) *
+                10,
+            ) / 10
+          : null,
+        channelCount: group.length
+          ? Math.round(
+              (group.reduce(
+                (n, m) =>
+                  n +
+                  new Set(
+                    subset(m)
+                      .filter((f) => ACTIVE.has(f.kind))
+                      .map(channel)
+                      .filter(Boolean),
+                  ).size,
+                0,
+              ) /
+                group.length) *
+                10,
+            ) / 10
+          : null,
+        interactionPartners:
+          window === "early" && group.length
+            ? Math.round(
+                (group.reduce((n, m) => n + m.earlyPartners, 0) /
+                  group.length) *
+                  10,
+              ) / 10
+            : null,
+        voicePercent: percent(
+          group.filter((m) =>
+            subset(m).some(
+              (f) => f.kind === "voice.started" || f.kind === "voice.duration",
+            ),
+          ).length,
+          group.length,
+        ),
+        eventPercent: percent(
+          group.filter((m) =>
+            subset(m).some((f) => f.kind === "scheduled_event.subscribed"),
+          ).length,
+          group.length,
+        ),
+      };
+    };
+    const newcomers = entered.filter(
+        (m) =>
+          m.episode.joined_at <= new Date(now.getTime() - 3 * DAY) &&
+          observed(
+            m.episode.joined_at,
+            new Date(m.episode.joined_at.getTime() + 3 * DAY),
+          ),
+      ),
+      continuing = members.filter((m) => m.stage === "continuing"),
+      recentObserved = Boolean(
+        cursor &&
+        cursor.last_seen.getTime() >= now.getTime() - 10 * 60 * 1000 &&
+        observed(new Date(now.getTime() - 3 * DAY), cursor.last_seen),
+      ),
+      comparisonContinuing = recentObserved ? continuing : [];
+    const compare = {
+      newcomers: newcomers.length >= 5 ? summarize(newcomers, "early") : null,
+      continuing:
+        comparisonContinuing.length >= 5
+          ? summarize(comparisonContinuing, "recent")
+          : null,
+      available: newcomers.length >= 5 && comparisonContinuing.length >= 5,
+    };
+    const settled = entered.filter(
+        (m) =>
+          m.episode.joined_at.getTime() >=
+            now.getTime() - cfg.detailedRetentionDays * DAY &&
+          observed(
+            m.episode.joined_at,
+            new Date(m.episode.joined_at.getTime() + maturityDays * DAY),
+          ),
+      ),
+      settledIds = new Set(settled.map((m) => m.episode.id));
+    const retained = settled.filter((m) => m.retained),
+      notRetained = settled.filter((m) => !m.retained),
+      pending = entered.filter(
+        (m) =>
+          m.episode.joined_at.getTime() + maturityDays * DAY > now.getTime(),
+      ).length,
+      insufficient = entered.length - settled.length - pending;
+    const outcomes = {
+      retained: retained.length,
+      notRetained: notRetained.length,
+      pending,
+      insufficient,
+      patterns:
+        retained.length >= 5 && notRetained.length >= 5
+          ? {
+              retained: summarize(retained, "early"),
+              notRetained: summarize(notRetained, "early"),
+            }
+          : null,
+    };
+    const channels = new Map<string, Member[]>(),
+      channelPeople = new Map<string, Set<string>>();
+    for (const member of entered) {
+      for (const id of member.earlyChannels) {
+        const people = channelPeople.get(id) ?? new Set<string>();
+        if (!people.has(member.episode.identity_id)) {
+          const group = channels.get(id) ?? [];
+          group.push(member);
+          channels.set(id, group);
+          people.add(member.episode.identity_id);
+          channelPeople.set(id, people);
+        }
+      }
+    }
+    const channelSummary = [...channels]
+      .filter(([, group]) => group.length >= 3)
+      .map(([id, group]) => {
+        const firstAt = (m: Member) =>
+          m.active.find((f) => channel(f) === id)?.occurred_at;
+        const replyGroup = group.filter((m) => {
+            const start = firstAt(m);
+            return start && observed(start, new Date(start.getTime() + DAY));
+          }),
+          laterGroup = group.filter((m) => {
+            const start = firstAt(m);
+            return (
+              start && observed(start, new Date(start.getTime() + 3 * DAY))
+            );
+          }),
+          weekGroup = group.filter((m) => settledIds.has(m.episode.id));
+        return {
+          channelId: id,
+          newcomers: group.length,
+          receivedReplyPercent:
+            replyGroup.length >= 3
+              ? percent(
+                  replyGroup.filter((m) => {
+                    const start = firstAt(m)!;
+                    return m.facts.some(
+                      (f) =>
+                        f.kind === "reply.received" &&
+                        channel(f) === id &&
+                        f.occurred_at > start &&
+                        f.occurred_at.getTime() < start.getTime() + DAY,
+                    );
+                  }).length,
+                  replyGroup.length,
+                )
+              : null,
+          laterElsewherePercent:
+            laterGroup.length >= 3
+              ? percent(
+                  laterGroup.filter((m) => {
+                    const start = firstAt(m)!;
+                    return m.active.some(
+                      (f) =>
+                        channel(f) !== null &&
+                        channel(f) !== id &&
+                        f.occurred_at > start &&
+                        f.occurred_at.getTime() < start.getTime() + 3 * DAY,
+                    );
+                  }).length,
+                  laterGroup.length,
+                )
+              : null,
+          weekLaterPercent:
+            weekGroup.length >= 3
+              ? percent(
+                  weekGroup.filter((m) => m.retained).length,
+                  weekGroup.length,
+                )
+              : null,
+        };
+      })
+      .sort((a, b) => b.newcomers - a.newcomers);
+    const purposeByChannel = new Map(
+        cfg.importantChannels.map((item) => [item.channelId, item.purpose]),
+      ),
+      importantPlaces = channelSummary
+        .filter((item) => purposeByChannel.has(item.channelId))
+        .map((item) => ({
+          ...item,
+          purpose: purposeByChannel.get(item.channelId)!,
+        }));
+    const transitionPeople = new Map<string, Set<string>>();
+    for (const m of entered) {
+      const path: string[] = [];
+      for (const fact of m.active) {
+        const id =
+          channel(fact) ?? (fact.kind.startsWith("voice.") ? "voice" : null);
+        if (id && path.at(-1) !== id) path.push(id);
+      }
+      for (let i = 1; i < path.length; i++) {
+        const key = `${path[i - 1]}:${path[i]}`,
+          people = transitionPeople.get(key) ?? new Set<string>();
+        people.add(m.episode.identity_id);
+        transitionPeople.set(key, people);
+      }
+    }
+    const transitions = [...transitionPeople]
+      .filter(([, people]) => people.size >= 3)
+      .map(([path, people]) => ({
+        from: path.split(":")[0]!,
+        to: path.split(":")[1]!,
+        count: people.size,
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 20);
+    // The alpha.4 comparison has no versioned evidence. Keep its wire shape without producing unsupported advice.
+    const suggestion = null as {
+      key: "reply_rescue";
+      basis: { newcomerMinutes: number; continuingMinutes: number };
+    } | null;
+    const operation = await new AttentionOperations(this.db).observe(
+      s,
+      cfg,
+      now,
+    );
+    const live =
+      operation.available &&
+      Boolean(
+        cursor &&
+        cursor.last_seen.getTime() >= now.getTime() - 90000 &&
+        !gaps.some((g) => g.ended_at === null),
+      );
+    const attention = (
+      await sql<{
+        channel_id: string;
+        message_id: string;
+        occurred_at: Date;
+        status: string;
+        total: number;
+        item_type: string;
+        opened_at: Date | null;
+        acknowledged_at: Date | null;
+        threshold_seconds: number | null;
+        evidence:
+          import("../../shared/src/metric-evidence").MetricEvidence | null;
+      }>`SELECT channel_id,message_id,detected_at AS occurred_at,status,item_type,opened_at,acknowledged_at,threshold_seconds,evidence,count(*) OVER()::integer AS total FROM attention_items WHERE ${tenant(s)} AND status IN ('OPEN','ACKNOWLEDGED') AND item_type IN ('TEXT_NEWCOMER','FORUM_SUPPORT','LFG_RESPONSE') ORDER BY detected_at,message_id LIMIT ${Math.max(1, Math.min(50, attentionLimit))} OFFSET ${Math.max(0, Math.min(1000, attentionOffset))}`.execute(
+        this.db,
+      )
+    ).rows;
+    const operations = await teamOperations(
+      this.db,
+      s,
+      new Date(now.getTime() - range * DAY),
+      now,
+    );
+    const attentionPlaces = new Map(
+      (attention.length
+        ? (
+            await sql<{
+              channel_id: string;
+              channel_type: number;
+              parent_id: string | null;
+              parent_type: number | null;
+            }>`SELECT ch.channel_id,ch.channel_type,ch.parent_id,parent.channel_type AS parent_type FROM discord_surface_state ch LEFT JOIN discord_surface_state parent ON parent.organization_id=ch.organization_id AND parent.guild_id=ch.guild_id AND parent.channel_id=ch.parent_id WHERE ch.organization_id=${s.organizationId}::uuid AND ch.guild_id=${s.guildId} AND ch.channel_id=ANY(${attention.map((row) => row.channel_id)}::text[])`.execute(
+              this.db,
+            )
+          ).rows
+        : []
+      ).map((ch) => [ch.channel_id, ch]),
+    );
+    const todayStart = zonedDayStart(now, cfg.timezone),
+      yesterdayStart = zonedDayStart(
+        new Date(todayStart.getTime() - 1),
+        cfg.timezone,
+      ),
+      yesterday = members.filter(
+        (m) =>
+          m.stage !== "staff" &&
+          m.episode.joined_at >= yesterdayStart &&
+          m.episode.joined_at < todayStart,
+      );
+    const today = members.filter(
+      (m) =>
+        m.stage !== "staff" &&
+        m.episode.joined_at >= todayStart &&
+        m.episode.joined_at <= now,
+    );
+    const todayCovered =
+      live &&
+      cursor!.last_seen >= todayStart &&
+      observed(todayStart, cursor!.last_seen);
+    const daily = {
+      timezone: cfg.timezone,
+      from: todayStart.toISOString(),
+      ready: live,
+      todayJoined: todayCovered ? today.length : null,
+      todayConnected: todayCovered
+        ? today.filter(
+            (m) =>
+              m.connected &&
+              m.connected.occurred_at >= todayStart &&
+              m.connected.occurred_at <= now,
+          ).length
+        : null,
+      yesterdayJoined: live ? yesterday.length : null,
+      yesterdayConnected: live
+        ? yesterday.filter(
+            (m) =>
+              m.connected &&
+              m.connected.occurred_at >= yesterdayStart &&
+              m.connected.occurred_at < todayStart,
+          ).length
+        : null,
+      attentionCount: live ? (attention[0]?.total ?? 0) : null,
+    };
+    const coverageRows = (
+      await sql<{
+        bucket: number;
+        sample: number;
+        median_minutes: number;
+      }>`SELECT (floor(extract(hour FROM (occurred_at-(data->>'latencySeconds')::numeric*interval '1 second') AT TIME ZONE 'UTC')/6)*6)::integer AS bucket,count(*)::integer AS sample,percentile_cont(0.5) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS median_minutes FROM lifecycle_events WHERE ${tenant(s)} AND context='PRODUCTION' AND kind='reply.received' AND occurred_at>=${new Date(now.getTime() - 30 * DAY)} AND occurred_at<=${now} AND jsonb_typeof(data->'latencySeconds')='number' GROUP BY bucket HAVING count(*)>=5 ORDER BY bucket`.execute(
+        this.db,
+      )
+    ).rows;
+    const helperCoverage = coverageRows.map((row) => ({
+      fromHourUtc: row.bucket,
+      throughHourUtc: row.bucket + 6,
+      sample: row.sample,
+      medianReplyMinutes: Math.round(row.median_minutes),
+    }));
+    const measurementMembers = members
+      .filter((m) => m.stage !== "staff")
+      .map((m) => ({
+        joinedAt: m.episode.joined_at,
+        firstReplyMinutes: m.facts.find(
+          (f) =>
+            f.kind === "reply.received" &&
+            f.occurred_at >= m.episode.joined_at &&
+            f.occurred_at.getTime() < m.episode.joined_at.getTime() + 3 * DAY,
+        )?.data.latencySeconds as number | undefined,
+        connected: Boolean(m.connected),
+        retained: m.retained,
+      }))
+      .map((m) => ({
+        ...m,
+        firstReplyMinutes:
+          m.firstReplyMinutes === undefined ? null : m.firstReplyMinutes / 60,
+      }));
+    const weekly = weeklyMeasurements(
+      measurementMembers,
+      now,
+      maturityDays,
+      cfg.detailedRetentionDays,
+      observed,
+      live,
+      cfg.memberStages.retainedFromDay,
+    );
+    const analysis = {
+      retention: weeklyMeasurements(
+        measurementMembers,
+        now,
+        maturityDays,
+        cfg.detailedRetentionDays,
+        observed,
+        live,
+        cfg.memberStages.retainedFromDay,
+        range,
+      ).retention,
+      joined: live ? entered.length : null,
+      exited: live
+        ? members.filter(
+            (m) =>
+              m.stage !== "staff" &&
+              m.episode.left_at &&
+              m.episode.left_at >= new Date(now.getTime() - range * DAY),
+          ).length
+        : null,
+      rules: cfg.memberStages,
+    };
+    weekly.retention.activityFromDay = cfg.memberStages.retainedFromDay;
+    const reactions = members
+      .filter((m) => m.stage !== "staff")
+      .reduce(
+        (total, m) =>
+          total +
+          m.facts.reduce((count, f) => count + (f.reaction_count ?? 0), 0),
+        0,
+      );
+    const contractContext = await evidenceContext(this.db, s, from, now);
+    if (
+      contractContext.unknownJoins?.some((at) => at >= todayStart && at <= now)
+    ) {
+      daily.todayJoined = null;
+      daily.todayConnected = null;
+    }
+    if (
+      contractContext.unknownJoins?.some(
+        (at) => at >= yesterdayStart && at < todayStart,
+      )
+    ) {
+      daily.yesterdayJoined = null;
+      daily.yesterdayConnected = null;
+    }
+    const journeyFrom = new Date(now.getTime() - range * DAY),
+      preparedJourney: JourneyObservation[] = members
+        .filter((m) => m.stage !== "staff")
+        .flatMap((m) => {
+          const base = {
+              member: m.episode.id,
+              joinedAt: m.episode.joined_at.getTime(),
+            },
+            observations: JourneyObservation[] = m.facts
+              .filter(
+                (f) => f.occurred_at >= journeyFrom && f.occurred_at < now,
+              )
+              .map((f) => ({
+                ...base,
+                kind: f.kind,
+                at: f.occurred_at.getTime(),
+                channelId: channel(f),
+                eventId:
+                  typeof f.data.eventId === "string" ? f.data.eventId : null,
+                purpose:
+                  typeof f.data.purpose === "string"
+                    ? f.data.purpose
+                    : purposeFor(
+                        cfg.communityModel,
+                        channel(f) ?? "",
+                        parents.get(channel(f) ?? "") ?? null,
+                      ),
+                resolved: f.data.resolved === true,
+              }));
+          if (m.episode.joined_at >= journeyFrom && m.episode.joined_at < now)
+            observations.push({
+              ...base,
+              kind: "member.joined",
+              at: base.joinedAt,
+            });
+          return observations;
+        });
+    const adaptive = await adaptivePresentation(
+      this.db,
+      s,
+      cfg,
+      range,
+      now,
+      attention[0]?.total ?? 0,
+      autoStaffRoleIds,
+      contractContext,
+      preparedJourney,
+    );
+    for (const key of ["reply", "connection", "retention"] as const)
+      measurementEvidence(
+        weekly[key],
+        key,
+        adaptive.capabilities,
+        cfg,
+        contractContext,
+      );
+    measurementEvidence(
+      analysis.retention,
+      "retention",
+      adaptive.capabilities,
+      cfg,
+      contractContext,
+    );
+    adaptive.progress = {
+      entered: entered.length,
+      eligible: eligible.length,
+      first: steps[1]!.count,
+      connected: steps[2]!.count,
+      repeated: steps[3]!.count,
+      retained: steps[4]!.count,
+      pending,
+      insufficient,
+      from: cohortFrom.toISOString(),
+      through: cohortThrough.toISOString(),
+      observationDays: maturityDays,
+      repeatDays: cfg.memberStages.repeatDays,
+      returnFromDay: cfg.memberStages.retainedFromDay,
+      returnThroughDay: cfg.memberStages.retainedThroughDay,
+    };
+    const adaptation: { adaptive?: AdaptivePresentation } = { adaptive };
+    return {
+      ...adaptation,
+      operations,
+      weekly,
+      analysis,
+      reactionsReceived: reactions,
+      generatedAt: now.toISOString(),
+      range,
+      scope: cfg.analysisScope,
+      goalPreset: cfg.goalPreset,
+      importantPlaces,
+      arrivalCount: entered.length,
+      cohortWindow: {
+        joinedFrom: cohortFrom.toISOString(),
+        joinedThrough: cohortThrough.toISOString(),
+        observedThroughDays: maturityDays,
+        total: matureCohort.length,
+      },
+      stages: steps,
+      eligibleMembers: eligible.length,
+      largestDrop: eligible.length >= 5 ? largest : null,
+      classification: {
+        new: members.filter((m) => m.stage === "new").length,
+        starting: members.filter((m) => m.stage === "starting").length,
+        continuing: continuing.length,
+        inactive: members.filter((m) => m.stage === "inactive").length,
+        exited: members.filter((m) => m.stage === "exited").length,
+        staffExcluded: members.filter((m) => m.stage === "staff").length,
+      },
+      compare,
+      outcomes,
+      channels: channelSummary,
+      hiddenChannelCount: channels.size - channelSummary.length,
+      transitions,
+      suggestion,
+      attention: attention.map((row) => ({
+        type: row.item_type,
+        openedAt: row.opened_at?.toISOString() ?? null,
+        acknowledgedAt: row.acknowledged_at?.toISOString() ?? null,
+        thresholdSeconds: row.threshold_seconds,
+        evidence: row.evidence,
+        surface: surfaceFor(
+          attentionPlaces.get(row.channel_id)?.channel_type,
+          attentionPlaces.get(row.channel_id)?.parent_type ?? undefined,
+        ),
+        purpose: purposeFor(
+          cfg.communityModel,
+          row.channel_id,
+          attentionPlaces.get(row.channel_id)?.parent_id,
+        ),
+        channelId: row.channel_id,
+        messageId: row.message_id,
+        status: row.status,
+        waitingMinutes: Math.max(
+          0,
+          Math.floor((now.getTime() - row.occurred_at.getTime()) / 60000),
+        ),
+        url: `https://discord.com/channels/${s.guildId}/${row.channel_id}/${row.message_id}`,
+      })),
+      daily,
+      helperCoverage,
+      dataReady: eligible.length >= 5,
+    };
+  }
 }

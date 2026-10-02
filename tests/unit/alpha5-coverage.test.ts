@@ -8,6 +8,7 @@ import { settingsSchema } from "../../packages/settings/src/index";
 import { buildCapabilitySnapshot } from "../../packages/discord/src/discovery";
 import { representativeSource } from "../fixtures/community-profiles";
 import { observationIntents } from "../../packages/shared/src/integration-health";
+import { capabilityInspector } from "../../packages/operations/src/integration";
 const cfg = settingsSchema.parse({}),
   from = new Date("2026-10-01T00:00:00Z"),
   to = new Date("2026-10-02T00:00:00Z");
@@ -80,6 +81,45 @@ it("supports early omitted-channel testing and unavailable REST without a fabric
   const m = buildCapabilitySnapshot(source, to);
   expect(m.coverage.totalState).toBe("UNKNOWN");
   expect(m.coverage.ratio).toBeNull();
+});
+it("does not invent a missing permission when discovery cannot establish permissions", () => {
+  const source = representativeSource(1);
+  source.channels[0]!.observable = false;
+  source.endpointStatus.channels = "UNKNOWN";
+  const snapshot = buildCapabilitySnapshot(source, to);
+  expect(snapshot.coverage.blindSpots[0]!.reason).toBe(
+    "CHANNEL_VISIBILITY_UNKNOWN",
+  );
+  expect(
+    capabilityInspector(snapshot, ["directReplies"])[0]!.missingPermissions,
+  ).toEqual([]);
+  source.endpointStatus.channels = "AVAILABLE";
+  expect(
+    capabilityInspector(buildCapabilitySnapshot(source, to), [
+      "directReplies",
+    ])[0]!.missingPermissions,
+  ).toEqual(["VIEW_CHANNEL"]);
+});
+it("explains channel impact using the same metric-specific surfaces as evidence", () => {
+  const source = representativeSource(4);
+  const inspector = capabilityInspector(buildCapabilitySnapshot(source, to), [
+    "directReplies",
+    "postResponse",
+    "voiceCopresence",
+    "showcasePosts",
+  ]);
+  expect(
+    inspector.find((c) => c.channelId === source.channels[1]!.id)!
+      .affectedMetrics,
+  ).toEqual(["voiceCopresence"]);
+  expect(
+    inspector.find((c) => c.channelId === source.channels[4]!.id)!
+      .affectedMetrics,
+  ).toEqual(["directReplies", "postResponse"]);
+  expect(
+    inspector.find((c) => c.channelId === source.channels[5]!.id)!
+      .affectedMetrics,
+  ).toEqual(["directReplies", "showcasePosts"]);
 });
 it("can measure a known include scope without claiming a complete guild census", () => {
   const source = representativeSource(1);

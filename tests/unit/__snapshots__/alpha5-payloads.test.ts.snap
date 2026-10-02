@@ -32,9 +32,9 @@ Discordとの接続を確認できません。この期間は比較に使用し�
           "type": 10,
         },
         {
-          "content": "**直接返信**
+          "content": "**新しいメンバーへの初回返信**
 確認できません
-対象: 37 · 計測範囲: 完全",
+対象: 未確認 · 計測範囲: 完全",
           "type": 10,
         },
         {
@@ -181,9 +181,9 @@ exports[`Discord Components V2 alpha.5 integration 1`] = `
           "type": 10,
         },
         {
-          "content": "**直接返信**
+          "content": "**新しいメンバーへの初回返信**
 確認できません
-対象: 37 · 計測範囲: 完全",
+対象: 未確認 · 計測範囲: 完全",
           "type": 10,
         },
         {
@@ -328,14 +328,14 @@ exports[`Discord Components V2 alpha.5 large 1`] = `
           "type": 10,
         },
         {
-          "content": "**直接返信**
-24 · 中央値 12 min · p75 20 min
+          "content": "**新しいメンバーへの初回返信**
+24 / 37 · 65% · 中央値 12 min · p75 20 min
 対象: 37 · 計測範囲: 完全",
           "type": 10,
         },
         {
           "content": "**投稿への最初の応答**
-24 · 中央値 12 min · p75 20 min
+24 / 37 · 65% · 中央値 12 min · p75 20 min
 対象: 37 · 計測範囲: 完全",
           "type": 10,
         },
@@ -658,7 +658,7 @@ exports[`Discord Components V2 alpha.5 no-data 1`] = `
           "type": 10,
         },
         {
-          "content": "**直接返信**
+          "content": "**新しいメンバーへの初回返信**
 対象者がいません
 対象: 0 · 計測範囲: 完全",
           "type": 10,
@@ -802,7 +802,7 @@ exports[`Discord Components V2 alpha.5 partial 1`] = `
           "type": 10,
         },
         {
-          "content": "**直接返信**
+          "content": "**新しいメンバーへの初回返信**
 24
 対象: 37 · 計測範囲: 一部",
           "type": 10,
@@ -952,7 +952,7 @@ exports[`Discord Components V2 alpha.5 small 1`] = `
           "type": 10,
         },
         {
-          "content": "**直接返信**
+          "content": "**新しいメンバーへの初回返信**
 24
 対象: 37 · 計測範囲: 完全",
           "type": 10,

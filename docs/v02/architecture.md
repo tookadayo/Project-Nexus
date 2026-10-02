@@ -1,5 +1,7 @@
 # v0.2 Architecture
 
+> Historical record — this document describes an earlier implementation or design. Current alpha.5 behavior is defined by [the README](../../README.md) and the current evidence, privacy and operations documents.
+
 既存5 apps / 12 packagesを維持し、001–004の上に追加マイグレーションを適用します。事前調査は[current-state.md](current-state.md)に記録しています。
 
 ```mermaid

@@ -273,6 +273,7 @@ it("rollups preserve exact boundaries, late updates, and member deletion without
     },
   );
   for (const table of [
+    "message_observations",
     "lifecycle_daily_rollups",
     "member_daily_activity",
     "voice_sessions",
@@ -284,4 +285,32 @@ it("rollups preserve exact boundaries, late updates, and member deletion without
         )
       ).rows,
     ).toEqual([]);
+});
+
+it("preserves an interior reaction cutoff without double counting boundary facts", async () => {
+  const s = await scope(),
+    m = await member(s);
+  for (const [n, at] of [
+    "2026-10-03T10:00:00Z",
+    "2026-10-03T12:00:00Z",
+    "2026-10-03T13:00:00Z",
+    "2026-10-03T14:00:00Z",
+  ].entries())
+    await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${m.episode}::uuid,'reaction.received',${new Date(at)},'PRODUCTION',${json({ channelId: channel, messageId: String(444444444444444440n + BigInt(n)) })})`.execute(
+      db,
+    );
+  const rows = await activityRollups(
+    db,
+    s,
+    new Date("2026-10-02T12:00:00Z"),
+    new Date("2026-10-04T09:00:00Z"),
+    new Date("2026-10-03T11:00:00Z"),
+  );
+  expect(rows).toHaveLength(3);
+  expect(rows.reduce((n, r) => n + r.reaction_count, 0)).toBe(3);
+  expect(rows.map((r) => r.occurred_at.toISOString())).toEqual([
+    "2026-10-03T12:00:00.000Z",
+    "2026-10-03T13:00:00.000Z",
+    "2026-10-03T14:00:00.000Z",
+  ]);
 });

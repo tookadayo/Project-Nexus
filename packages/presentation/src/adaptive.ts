@@ -1,4 +1,5 @@
 import { sql, tenant, type Database } from "../../db/src/index";
+import { GuildScheduledEventEntityType } from "discord-api-types/v10";
 import type { Scope } from "../../shared/src/index";
 import {
   volumeMode,
@@ -10,6 +11,8 @@ import { latestCapability } from "../../lifecycle/src/discovery";
 import {
   buildMetricEvidence,
   evidenceContext,
+  evidenceWindow,
+  type EvidenceContext,
 } from "../../analytics/src/evidence";
 import type { MetricEvidence } from "../../shared/src/metric-evidence";
 import type {
@@ -24,6 +27,7 @@ import {
 import {
   journeyAnalysis,
   type JourneyTransition,
+  type JourneyObservation,
 } from "../../analytics/src/journeys";
 import {
   responseRecommendations,
@@ -110,6 +114,8 @@ export async function adaptivePresentation(
   now: Date,
   attention: number,
   staffRoles: string[] = [],
+  contractContext?: EvidenceContext,
+  preparedJourney?: JourneyObservation[],
 ): Promise<AdaptivePresentation> {
   const snapshot = await latestCapability(db, s),
     from = new Date(now.getTime() - range * 86400000),
@@ -158,7 +164,7 @@ export async function adaptivePresentation(
         domain: string;
         count: number;
         sample: number;
-      }>`SELECT domain,count(DISTINCT (subject_hash,message_id))::integer AS count,count(DISTINCT subject_hash)::integer AS sample FROM (SELECT 'reaction' AS domain,subject_hash,message_id,jsonb_build_object('channelId',channel_id) AS data,observed_at,ambiguous FROM reaction_state WHERE ${tenant(s)} AND active AND target_hash IS NOT NULL UNION ALL SELECT 'poll',subject_hash,message_id,jsonb_build_object('channelId',channel_id),observed_at,ambiguous FROM poll_participant_state WHERE ${tenant(s)} AND answer_count>0) a WHERE NOT ambiguous AND observed_at>=${from} AND observed_at<=${now} AND ${scopeFilter("a.data")} AND ${staffFilter("a.subject_hash")} GROUP BY domain`.execute(
+      }>`SELECT domain,count(DISTINCT (subject_hash COLLATE "C",message_id COLLATE "C"))::integer AS count,count(DISTINCT subject_hash COLLATE "C")::integer AS sample FROM (SELECT 'reaction' AS domain,subject_hash,message_id,jsonb_build_object('channelId',channel_id) AS data,observed_at,ambiguous FROM reaction_state WHERE ${tenant(s)} AND active AND target_hash IS NOT NULL UNION ALL SELECT 'poll',subject_hash,message_id,jsonb_build_object('channelId',channel_id),observed_at,ambiguous FROM poll_participant_state WHERE ${tenant(s)} AND answer_count>0) a WHERE NOT ambiguous AND observed_at>=${from} AND observed_at<=${now} AND ${scopeFilter("a.data")} AND ${staffFilter("a.subject_hash")} GROUP BY domain`.execute(
         db,
       )
     ).rows,
@@ -186,10 +192,11 @@ export async function adaptivePresentation(
   const reply = (
     await sql<{
       sample: number;
+      eligible_posts: number;
       median: number | null;
       p75: number | null;
       p90: number | null;
-    }>`SELECT count(*)::integer AS sample,percentile_cont(.5) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS median,percentile_cont(.75) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS p75,percentile_cont(.9) WITHIN GROUP(ORDER BY (data->>'latencySeconds')::numeric/60)::double precision AS p90 FROM lifecycle_events f JOIN membership_episodes ep ON ep.organization_id=f.organization_id AND ep.guild_id=f.guild_id AND ep.id=f.episode_id WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.kind='reply.received' AND f.context='PRODUCTION' AND f.occurred_at>=${from} AND f.occurred_at<=${now} AND ep.screening_observed_at IS NOT NULL AND ep.guest_observed_at IS NOT NULL AND NOT ep.screening_pending AND NOT ep.is_guest AND ${scopeFilter("f.data")} AND ${roles.length ? sql`NOT EXISTS(SELECT 1 FROM member_observable_state st WHERE st.organization_id=ep.organization_id AND st.guild_id=ep.guild_id AND st.episode_id=ep.id AND st.roles&&${roles}::text[])` : sql`true`}`.execute(
+    }>`WITH eligible AS MATERIALIZED (SELECT ep.id,COALESCE(ep.engagement_started_at,ep.joined_at) AS eligible_at FROM membership_episodes ep WHERE ep.organization_id=${s.organizationId}::uuid AND ep.guild_id=${s.guildId} AND ep.context='PRODUCTION' AND ep.screening_observed_at IS NOT NULL AND ep.guest_observed_at IS NOT NULL AND NOT ep.screening_pending AND NOT ep.is_guest AND COALESCE(ep.engagement_started_at,ep.joined_at)>=${from} AND COALESCE(ep.engagement_started_at,ep.joined_at)<${now} AND ${roles.length ? sql`NOT EXISTS(SELECT 1 FROM member_observable_state st WHERE st.organization_id=ep.organization_id AND st.guild_id=ep.guild_id AND st.episode_id=ep.id AND st.roles&&${roles}::text[])` : sql`true`}), first_posts AS (SELECT DISTINCT ON(ep.id) CASE WHEN f.sent_at+f.first_reply_seconds*interval '1 second'<=${now} THEN f.first_reply_seconds ELSE NULL END AS first_reply_seconds FROM message_observations f JOIN eligible ep ON ep.id=f.episode_id WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.sent_at>=${from} AND f.sent_at<=${now} AND f.sent_at>=ep.eligible_at AND f.sent_at<ep.eligible_at+interval '3 days' AND ${cfg.analysisScope.mode === "all" ? sql`true` : sql`(${cfg.analysisScope.mode === "include"})=(COALESCE((SELECT parent_id FROM discord_surface_state WHERE organization_id=f.organization_id AND guild_id=f.guild_id AND channel_id=f.channel_id),f.channel_id)=ANY(${cfg.analysisScope.channelIds}::text[]))`} ORDER BY ep.id,f.sent_at,f.fact_id) SELECT count(*) FILTER(WHERE first_reply_seconds IS NOT NULL)::integer AS sample,count(*)::integer AS eligible_posts,percentile_cont(.5) WITHIN GROUP(ORDER BY first_reply_seconds/60)::double precision AS median,percentile_cont(.75) WITHIN GROUP(ORDER BY first_reply_seconds/60)::double precision AS p75,percentile_cont(.9) WITHIN GROUP(ORDER BY first_reply_seconds/60)::double precision AS p90 FROM first_posts`.execute(
       db,
     )
   ).rows[0]!;
@@ -237,8 +244,9 @@ export async function adaptivePresentation(
     add(
       "directReplies",
       reply.sample,
-      reply.sample,
-      "Explicit reply references from another human; median elapsed minutes.",
+      reply.eligible_posts,
+      "New eligible members whose first scoped post within three days received a direct other-human reply by the window end; denominator is members with such a first post, counted once. Median elapsed minutes per replied-to first post.",
+      reply.eligible_posts,
     );
     Object.assign(metrics.at(-1)!, {
       medianMinutes: reply.median,
@@ -253,7 +261,7 @@ export async function adaptivePresentation(
       surface: string;
       count: number;
       sample: number;
-    }>`SELECT data->>'purpose' AS purpose,data->>'surface' AS surface,count(*)::integer AS count,count(DISTINCT subject_hash)::integer AS sample,count(*) FILTER(WHERE NOT EXISTS(SELECT id FROM adaptive_facts r WHERE r.organization_id=f.organization_id AND r.guild_id=f.guild_id AND r.kind='thread.response_received' AND r.data->>'channelId'=f.data->>'channelId' AND r.occurred_at<=${now}))::integer AS unanswered FROM adaptive_facts f WHERE ${tenant(s)} AND kind='thread.created' AND EXISTS(SELECT 1 FROM member_identity_map m JOIN membership_episodes e ON e.organization_id=m.organization_id AND e.guild_id=m.guild_id AND e.identity_id=m.id WHERE m.organization_id=f.organization_id AND m.guild_id=f.guild_id AND m.lookup_hash=f.subject_hash AND e.context='PRODUCTION' AND e.screening_observed_at IS NOT NULL AND e.guest_observed_at IS NOT NULL AND NOT e.screening_pending AND NOT e.is_guest AND e.joined_at<=f.occurred_at AND (e.left_at IS NULL OR e.left_at>f.occurred_at)) AND occurred_at>=${from} AND occurred_at<=${now} AND ${scopeFilter("f.data")} AND ${staffFilter("f.subject_hash")} GROUP BY data->>'purpose',data->>'surface'`.execute(
+    }>`SELECT data->>'purpose' AS purpose,data->>'surface' AS surface,count(*)::integer AS count,count(DISTINCT subject_hash)::integer AS sample,count(*) FILTER(WHERE NOT EXISTS(SELECT id FROM adaptive_facts r WHERE r.organization_id=f.organization_id AND r.guild_id=f.guild_id AND r.kind='thread.response_received' AND r.data->>'channelId'=f.data->>'channelId' AND r.occurred_at<=${now}))::integer AS unanswered FROM adaptive_facts f WHERE ${tenant(s)} AND kind='thread.created' AND EXISTS(SELECT 1 FROM member_identity_map m JOIN membership_episodes e ON e.organization_id=m.organization_id AND e.guild_id=m.guild_id AND e.identity_id=m.id WHERE m.organization_id=f.organization_id AND m.guild_id=f.guild_id AND m.lookup_hash=f.subject_hash AND e.context='PRODUCTION' AND e.screening_observed_at IS NOT NULL AND e.guest_observed_at IS NOT NULL AND NOT e.screening_pending AND NOT e.is_guest AND COALESCE(e.engagement_started_at,e.joined_at)<=f.occurred_at AND (e.left_at IS NULL OR e.left_at>f.occurred_at)) AND occurred_at>=${from} AND occurred_at<=${now} AND ${scopeFilter("f.data")} AND ${staffFilter("f.subject_hash")} GROUP BY data->>'purpose',data->>'surface'`.execute(
       db,
     )
   ).rows;
@@ -442,7 +450,18 @@ export async function adaptivePresentation(
       db,
     )
   ).rows;
-  const evidence = await evidenceContext(db, s, from, now);
+  const unknownAttendance =
+    metrics.some((m) => m.key === "eventAttendance") &&
+    (
+      await sql<{ unknown: boolean }>`SELECT EXISTS(
+    SELECT 1 FROM adaptive_facts f LEFT JOIN adaptive_states v ON v.organization_id=f.organization_id AND v.guild_id=f.guild_id AND v.domain='event' AND v.state_key=f.data->>'eventId'
+    WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.kind='scheduled_event.subscribed' AND f.occurred_at>=${from} AND f.occurred_at<=${now} AND COALESCE((v.data->>'entityType')::integer,-1) NOT IN (${GuildScheduledEventEntityType.StageInstance},${GuildScheduledEventEntityType.Voice})
+    UNION ALL SELECT 1 FROM adaptive_states WHERE ${tenant(s)} AND domain='event' AND COALESCE((data->>'entityType')::integer,-1) NOT IN (${GuildScheduledEventEntityType.StageInstance},${GuildScheduledEventEntityType.Voice}) AND observed_at<=${now} AND (observed_at>=${from} OR data->>'status'='2')
+  ) AS unknown`.execute(db)
+    ).rows[0]!.unknown;
+  const evidence = contractContext
+    ? evidenceWindow(contractContext, from, now)
+    : await evidenceContext(db, s, from, now);
   for (const metric of metrics) {
     metric.evidence = buildMetricEvidence(
       metric.key,
@@ -476,6 +495,19 @@ export async function adaptivePresentation(
       metric.evidence.comparable = false;
       metric.evidence.comparisonBlockers.push("STATE_ORDER_UNKNOWN");
     }
+    if (metric.key === "eventAttendance" && unknownAttendance) {
+      Object.assign(metric.evidence, {
+        value: null,
+        numerator: null,
+        observationState: "UNKNOWN",
+        coverageState: "UNKNOWN",
+        comparable: false,
+      });
+      metric.evidence.coverageReasons.push(
+        "EXTERNAL_OR_UNKNOWN_EVENT_ATTENDANCE",
+      );
+      metric.evidence.comparisonBlockers.push("ATTENDANCE_UNOBSERVABLE");
+    }
     metric.count = metric.evidence.value;
     metric.state =
       metric.evidence.observationState === "UNKNOWN"
@@ -501,7 +533,14 @@ export async function adaptivePresentation(
   return {
     profile: cfg.communityModel,
     recipe: evidence.recipe,
-    journeys: await journeyAnalysis(db, s, cfg, snapshot, evidence),
+    journeys: await journeyAnalysis(
+      db,
+      s,
+      cfg,
+      snapshot,
+      evidence,
+      preparedJourney,
+    ),
     recommendations: await responseRecommendations(
       db,
       s,

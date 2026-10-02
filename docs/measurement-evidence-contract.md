@@ -13,3 +13,15 @@ Comparisons require sufficient samples, complete required coverage, attributed c
 Member eligibility requires independently observed `pending` and member flags. Legacy default false rows remain unknown. Direct replies require the Discord reply message type and default message reference, within the same channel/guild. Forward references, mentions and later messages in a channel are not direct replies. Thread responses, reactions, event subscriptions and voice co-presence keep their separate meanings.
 
 Primary specifications: [message references](https://docs.discord.com/developers/resources/message), [threads](https://docs.discord.com/developers/topics/threads), [voice states](https://docs.discord.com/developers/resources/voice), [scheduled events](https://docs.discord.com/developers/resources/guild-scheduled-event). Verified 2026-10-02.
+
+## Compatibility and distributions
+
+Legacy cohort measurements retain their API shape and carry evidence/previous evidence. Reply time is a median, not a mean. A COHORT_JOIN window identifies join eligibility; the definition states the subsequent observation duration. Comparison requires compatible primary cohort windows and complete required collection over the full follow-up window. Old count-only diagnostics cannot authorize recommendations.
+
+Team operations metrics also carry evidence from the canonical saved queue. Empty observed backlog is a real zero; an empty response-time sample is not a zero-second response. These DB operation records do not invent Discord collection epochs. Active reaction/poll state and event counts remain different measurements.
+
+## First new-member post replies
+
+`newcomer-first-post-reply-v3` counts each eligible new member once. The denominator contains members with a first scoped post within three days of the independently proved eligible-start time. Only direct other-human replies received by the observation-window end count in the numerator; later replies do not leak into historical windows. Median/p75 summarize the replied-to first posts. Forward, mention and subsequent unrelated posts remain distinct. Legacy reply latencies do not become proved replies after migration.
+
+Recipe-sensitive transitions are unavailable for windows containing mixed or legacy recipe attributions. Fact definition versions and recipe IDs are retained in evidence, including compatibility projections. They cannot be relabeled with the current definition.

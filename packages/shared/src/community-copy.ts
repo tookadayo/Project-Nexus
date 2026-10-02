@@ -86,10 +86,10 @@ const metrics: Record<string, readonly [string, string, string, string]> = {
     "Observed new posts without a first other-human message; unresolved status is not inferred.",
   ],
   directReplies: [
-    "直接返信",
-    "Direct replies",
-    "他の人からの明示的な返信。時間は中央値です。",
-    "Explicit replies from another human. Time is the median.",
+    "新しいメンバーへの初回返信",
+    "First reply to new members",
+    "計測開始後3日以内の最初の対象投稿に、他の人から直接返信があった人数。1人を1回数えます。",
+    "Members whose first scoped post within three days received a direct human reply. Each member counts once.",
   ],
   postResponse: [
     "投稿への最初の応答",
@@ -163,5 +163,10 @@ export function metricCopy(metric: AdaptiveMetric, locale: "ja" | "en") {
   return {
     label: row?.[locale === "ja" ? 0 : 1] ?? metric.key,
     definition: row?.[locale === "ja" ? 2 : 3] ?? metric.definition,
+    unit: ["activeReactions", "pollParticipants"].includes(metric.key)
+      ? locale === "ja"
+        ? "組"
+        : " pairs"
+      : "",
   };
 }

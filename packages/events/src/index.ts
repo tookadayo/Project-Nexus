@@ -1,66 +1,586 @@
-import {traceSync} from '../../shared/src/observability';
-import {z} from 'zod';
-import {MessageReferenceType,MessageType,ChannelFlags} from 'discord-api-types/v10';
-import {scopeForGuild} from '../../security/src/index.js';
-import type {IdentityVault} from '../../identity/src/index.js';
-const id=z.string().regex(/^\d{17,20}$/);
-const hash=z.string().regex(/^[a-f\d]{64}$/);
-export const eventSchema=z.object({organizationId:z.uuid(),guildId:id,shardId:z.number().int(),gatewaySessionId:z.string().min(1),sequence:z.number().int(),ordinal:z.number().int().nonnegative().optional(),schemaVersion:z.literal(2).optional(),
- kind:z.enum(['member.joined','member.left','member.roles_updated','message.sent','reaction.added','reaction.removed','reaction.removed_all','reaction.removed_emoji','poll.vote_added','poll.vote_removed','voice.state','voice.started','voice.ended','guild.updated','channel.changed','channel.deleted','thread.created','thread.updated','thread.deleted','thread.list_synced','thread.member_added','thread.member_removed','stage.created','stage.updated','stage.deleted','scheduled_event.created','scheduled_event.updated','scheduled_event.deleted','auto_moderation.executed','scheduled_event.subscribed','scheduled_event.unsubscribed','telemetry.connected','telemetry.disconnected','telemetry.heartbeat','telemetry.gap']),
- healthReason:z.enum(['BOT_INSTALLED','GATEWAY_CONNECTED','GATEWAY_RESUMED','PROCESS_RESTART','INTENT_UNAVAILABLE','INTENT_RESTORED']).optional(),requestedIntents:z.array(z.enum(['members','messages','reactions','polls','voice','scheduledEvents','autoMod'])).optional(),at:z.iso.datetime(),observedAt:z.iso.datetime().optional(),context:z.literal('PRODUCTION'),encryptedUserId:z.string().optional(),joinedAt:z.iso.datetime().optional(),
- messageId:id.optional(),channelId:id.nullable().optional(),messageType:z.number().int().optional(),referenceId:id.optional(),referenceType:z.number().int().optional(),channelObfuscated:z.boolean().optional(),observationSource:z.enum(['GATEWAY','REST']).optional(),roles:z.array(id).optional(),gapStart:z.iso.datetime().optional(),eventId:id.optional(),pending:z.boolean().optional(),memberFlags:z.number().int().nonnegative().optional(),humanVerified:z.boolean().optional(),targetHash:hash.optional(),mentionHashes:z.array(hash).max(100).optional(),emojiHash:hash.optional(),answerHash:hash.optional(),reactionType:z.number().int().optional(),channelType:z.number().int().optional(),parentId:id.nullable().optional(),ownerHash:hash.optional(),archived:z.boolean().optional(),locked:z.boolean().optional(),createdAt:z.iso.datetime().optional(),tagIds:z.array(id).optional(),suppress:z.boolean().optional(),entityType:z.number().int().optional(),eventStatus:z.number().int().optional(),ruleHash:hash.optional(),actionType:z.number().int().optional(),afkChannelId:id.nullable().optional(),incidents:z.record(z.string(),z.string().nullable()).optional()}).strict();
-export type Envelope=z.infer<typeof eventSchema>;
-export function isDirectReply(e:Envelope){return e.kind==='message.sent'&&e.messageType===MessageType.Reply&&e.referenceType!==MessageReferenceType.Forward&&Boolean(e.referenceId);}
-export type Dispatch={t:string|null,s:number|null,d:unknown};
-export function normalize(packet:Dispatch,shardId:number,sessionId:string,vault:IdentityVault,now=new Date()):Envelope|null {return normalizeMany(packet,shardId,sessionId,vault,now)[0]??null;}
-export function normalizeMany(packet:Dispatch,shardId:number,sessionId:string,vault:IdentityVault,now=new Date()){return traceSync('event.normalize',{'signal.kind':packet.t??'UNKNOWN'},()=>normalizeManyInternal(packet,shardId,sessionId,vault,now));}
-function normalizeManyInternal(packet:Dispatch,shardId:number,sessionId:string,vault:IdentityVault,now=new Date()):Envelope[]{
- if(packet.s===null||!packet.d||typeof packet.d!=='object')return [];
- const raw=packet.d as Record<string,unknown>,guildId=raw.guild_id??(packet.t==='GUILD_CREATE'||packet.t==='GUILD_UPDATE'?raw.id:undefined);if(!id.safeParse(guildId).success)return [];
- const s=scopeForGuild(String(guildId)),base={...s,shardId,gatewaySessionId:sessionId,sequence:packet.s,context:'PRODUCTION' as const,schemaVersion:2 as const,at:now.toISOString(),observedAt:now.toISOString()},events:Envelope[]=[];
- const emit=(event:Partial<Envelope>&{kind:Envelope['kind']})=>events.push(eventSchema.parse({...base,...event,ordinal:events.length}));
- const seal=(userId:string)=>vault.seal(s,userId),scopedHash=(key:string,value:string)=>vault.digest(key,`${s.organizationId}:${s.guildId}:${value}`);
- const channel=(d:Record<string,unknown>,kind:Envelope['kind'])=>{if(typeof d.flags==='number'&&(d.flags&ChannelFlags.ChannelObfuscated)!==0){if(id.safeParse(d.id).success)emit({kind,channelId:String(d.id),channelType:typeof d.type==='number'?d.type:undefined,parentId:id.nullable().safeParse(d.parent_id).success?d.parent_id as string|null:undefined,channelObfuscated:true});return;}const c=z.object({id,type:z.number().int(),parent_id:id.nullable().optional(),owner_id:id.optional(),applied_tags:z.array(id).optional(),thread_metadata:z.object({archived:z.boolean(),locked:z.boolean(),create_timestamp:z.iso.datetime().optional()}).optional()}).safeParse(d);if(c.success)emit({kind,channelId:c.data.id,channelType:c.data.type,channelObfuscated:false,parentId:c.data.parent_id,ownerHash:c.data.owner_id?vault.hash(s,c.data.owner_id):undefined,archived:c.data.thread_metadata?.archived,locked:c.data.thread_metadata?.locked,createdAt:c.data.thread_metadata?.create_timestamp,tagIds:c.data.applied_tags});};
- if(packet.t==='GUILD_CREATE'||packet.t==='GUILD_UPDATE'){
-  const incidents:Record<string,string|null>={};const data=raw.incidents_data as Record<string,unknown>|undefined;for(const key of ['invites_disabled_until','dms_disabled_until','dm_spam_detected_at','raid_detected_at'])if(typeof data?.[key]==='string'||data?.[key]===null)incidents[key]=data[key] as string|null;
-  emit({kind:'guild.updated',afkChannelId:id.nullable().safeParse(raw.afk_channel_id).success?raw.afk_channel_id as string|null:undefined,incidents});
-  for(const c of Array.isArray(raw.channels)?raw.channels:[])channel(c as Record<string,unknown>,'channel.changed');for(const c of Array.isArray(raw.threads)?raw.threads:[])channel(c as Record<string,unknown>,'thread.list_synced');
-  return events;
- }
- if(packet.t?.startsWith('CHANNEL_')){channel(raw,packet.t==='CHANNEL_DELETE'?'channel.deleted':'channel.changed');return events;}
- if(['THREAD_CREATE','THREAD_UPDATE','THREAD_DELETE'].includes(packet.t??'')){channel(raw,packet.t==='THREAD_CREATE'?(raw.newly_created===true?'thread.created':'thread.list_synced'):packet.t==='THREAD_UPDATE'?'thread.updated':'thread.deleted');return events;}
- if(packet.t==='THREAD_LIST_SYNC'){for(const c of Array.isArray(raw.threads)?raw.threads:[])channel(c as Record<string,unknown>,'thread.list_synced');return events;}
- if(packet.t==='THREAD_MEMBERS_UPDATE'){
-  if(!id.safeParse(raw.id).success)return [];for(const item of Array.isArray(raw.added_members)?raw.added_members:[]){const m=z.object({user_id:id.optional(),member:z.object({user:z.object({id,bot:z.boolean().optional()})}).optional()}).safeParse(item);if(m.success&&!m.data.member?.user.bot){const user=m.data.user_id??m.data.member?.user.id;if(user)emit({kind:'thread.member_added',channelId:raw.id as string,encryptedUserId:seal(user),humanVerified:m.data.member?.user.bot===false});}}
-  for(const user of Array.isArray(raw.removed_member_ids)?raw.removed_member_ids:[])if(id.safeParse(user).success)emit({kind:'thread.member_removed',channelId:raw.id as string,encryptedUserId:seal(String(user))});return events;
- }
- if(packet.t==='GUILD_MEMBER_ADD'||packet.t==='GUILD_MEMBER_REMOVE'||packet.t==='GUILD_MEMBER_UPDATE'){
-  const data=z.object({user:z.object({id,bot:z.boolean().optional()}),joined_at:z.iso.datetime().nullable().optional(),roles:z.array(id).optional(),flags:z.number().int().optional(),pending:z.boolean().optional()}).safeParse(packet.d);
-  if(!data.success||data.data.user.bot)return [];
-  emit({kind:packet.t==='GUILD_MEMBER_ADD'?'member.joined':packet.t==='GUILD_MEMBER_REMOVE'?'member.left':'member.roles_updated',at:packet.t==='GUILD_MEMBER_ADD'?data.data.joined_at??now.toISOString():now.toISOString(),joinedAt:data.data.joined_at??undefined,roles:data.data.roles,memberFlags:data.data.flags,pending:data.data.pending,humanVerified:true,encryptedUserId:seal(data.data.user.id)});return events;
- }
- if(packet.t==='MESSAGE_CREATE'){
-  const data=z.object({id,channel_id:id,author:z.object({id,bot:z.boolean().optional()}),timestamp:z.iso.datetime(),type:z.number().int(),message_reference:z.object({type:z.number().int().optional(),message_id:id.optional(),channel_id:id.optional(),guild_id:id.optional()}).optional(),webhook_id:z.string().optional(),mentions:z.array(z.object({id,bot:z.boolean().optional()})).optional()}).safeParse(packet.d);
-  if(!data.success||data.data.author.bot||data.data.webhook_id||![MessageType.Default,MessageType.Reply].includes(data.data.type))return [];
-  const d=data.data,r=d.message_reference,direct=d.type===MessageType.Reply&&(r?.type??MessageReferenceType.Default)===MessageReferenceType.Default&&(!r?.channel_id||r.channel_id===d.channel_id)&&(!r?.guild_id||r.guild_id===s.guildId);
-  emit({kind:'message.sent',at:d.timestamp,encryptedUserId:seal(d.author.id),messageId:d.id,channelId:d.channel_id,messageType:d.type,referenceType:r?.type,referenceId:direct?r?.message_id:undefined,humanVerified:true,mentionHashes:d.mentions?.filter(m=>!m.bot&&m.id!==d.author.id).slice(0,100).map(m=>vault.hash(s,m.id))});return events;
- }
- if(packet.t==='GUILD_SCHEDULED_EVENT_USER_ADD'||packet.t==='GUILD_SCHEDULED_EVENT_USER_REMOVE'){
-  const data=z.object({user_id:id,guild_scheduled_event_id:id}).safeParse(packet.d);if(!data.success)return [];
-  emit({kind:packet.t.endsWith('ADD')?'scheduled_event.subscribed':'scheduled_event.unsubscribed',encryptedUserId:seal(data.data.user_id),eventId:data.data.guild_scheduled_event_id});return events;
- }
- if(packet.t?.startsWith('MESSAGE_REACTION_')){
-  const data=z.object({user_id:id.optional(),message_id:id,channel_id:id,message_author_id:id.optional(),emoji:z.object({id:id.nullable().optional(),name:z.string().nullable().optional()}).optional(),type:z.number().int().optional(),member:z.object({user:z.object({bot:z.boolean().optional()}).optional()}).optional()}).safeParse(packet.d);if(!data.success||data.data.member?.user?.bot)return [];
-  const d=data.data;emit({kind:packet.t==='MESSAGE_REACTION_ADD'?'reaction.added':packet.t==='MESSAGE_REACTION_REMOVE'?'reaction.removed':packet.t==='MESSAGE_REACTION_REMOVE_ALL'?'reaction.removed_all':'reaction.removed_emoji',encryptedUserId:d.user_id?seal(d.user_id):undefined,messageId:d.message_id,channelId:d.channel_id,targetHash:d.message_author_id?vault.hash(s,d.message_author_id):undefined,emojiHash:d.emoji?scopedHash('reaction-emoji',d.emoji.id??d.emoji.name??'unknown'):undefined,reactionType:d.type??0,humanVerified:d.member?.user?.bot===false});return events;
- }
- if(packet.t==='MESSAGE_POLL_VOTE_ADD'||packet.t==='MESSAGE_POLL_VOTE_REMOVE'){const d=z.object({user_id:id,message_id:id,channel_id:id,answer_id:z.number().int().positive()}).safeParse(raw);if(d.success)emit({kind:packet.t.endsWith('ADD')?'poll.vote_added':'poll.vote_removed',encryptedUserId:seal(d.data.user_id),channelId:d.data.channel_id,messageId:d.data.message_id,answerHash:scopedHash('poll-answer',`${d.data.message_id}:${d.data.answer_id}`)});return events;}
- if(packet.t==='VOICE_STATE_UPDATE'){
-  const data=z.object({user_id:id,channel_id:id.nullable(),suppress:z.boolean().optional(),member:z.object({joined_at:z.iso.datetime().nullable().optional(),flags:z.number().int().optional(),pending:z.boolean().optional(),user:z.object({bot:z.boolean().optional()}).optional()}).optional()}).safeParse(packet.d);if(!data.success||data.data.member?.user?.bot)return [];
-  emit({kind:'voice.state',encryptedUserId:seal(data.data.user_id),channelId:data.data.channel_id,suppress:data.data.suppress,joinedAt:data.data.member?.joined_at??undefined,memberFlags:data.data.member?.flags,pending:data.data.member?.pending,humanVerified:data.data.member?.user?.bot===false});return events;
- }
- if(packet.t?.startsWith('GUILD_SCHEDULED_EVENT_')){const d=z.object({id,channel_id:id.nullable(),entity_type:z.number().int(),status:z.number().int()}).safeParse(raw);if(d.success)emit({kind:packet.t.endsWith('CREATE')?'scheduled_event.created':packet.t.endsWith('DELETE')?'scheduled_event.deleted':'scheduled_event.updated',eventId:d.data.id,channelId:d.data.channel_id,entityType:d.data.entity_type,eventStatus:d.data.status});return events;}
- if(packet.t?.startsWith('STAGE_INSTANCE_')){if(id.safeParse(raw.channel_id).success)emit({kind:packet.t.endsWith('CREATE')?'stage.created':packet.t.endsWith('DELETE')?'stage.deleted':'stage.updated',channelId:raw.channel_id as string});return events;}
- if(packet.t==='AUTO_MODERATION_ACTION_EXECUTION'){const d=z.object({user_id:id,channel_id:id.nullable().optional(),rule_id:id,action:z.object({type:z.number().int()})}).safeParse(raw);if(d.success)emit({kind:'auto_moderation.executed',encryptedUserId:seal(d.data.user_id),channelId:d.data.channel_id,ruleHash:scopedHash('automod-rule',d.data.rule_id),actionType:d.data.action.type});return events;}
- return events;
+import { traceSync } from "../../shared/src/observability";
+import { z } from "zod";
+import {
+  MessageReferenceType,
+  MessageType,
+  ChannelFlags,
+} from "discord-api-types/v10";
+import { scopeForGuild } from "../../security/src/index.js";
+import type { IdentityVault } from "../../identity/src/index.js";
+const id = z.string().regex(/^\d{17,20}$/);
+const hash = z.string().regex(/^[a-f\d]{64}$/);
+export const eventSchema = z
+  .object({
+    organizationId: z.uuid(),
+    guildId: id,
+    shardId: z.number().int(),
+    gatewaySessionId: z.string().min(1),
+    sequence: z.number().int(),
+    ordinal: z.number().int().nonnegative().optional(),
+    schemaVersion: z.literal(2).optional(),
+    kind: z.enum([
+      "member.joined",
+      "member.left",
+      "member.roles_updated",
+      "message.sent",
+      "reaction.added",
+      "reaction.removed",
+      "reaction.removed_all",
+      "reaction.removed_emoji",
+      "poll.vote_added",
+      "poll.vote_removed",
+      "voice.state",
+      "voice.started",
+      "voice.ended",
+      "guild.updated",
+      "channel.changed",
+      "channel.deleted",
+      "thread.created",
+      "thread.updated",
+      "thread.deleted",
+      "thread.list_synced",
+      "thread.member_added",
+      "thread.member_removed",
+      "stage.created",
+      "stage.updated",
+      "stage.deleted",
+      "scheduled_event.created",
+      "scheduled_event.updated",
+      "scheduled_event.deleted",
+      "auto_moderation.executed",
+      "scheduled_event.subscribed",
+      "scheduled_event.unsubscribed",
+      "telemetry.connected",
+      "telemetry.disconnected",
+      "telemetry.heartbeat",
+      "telemetry.gap",
+    ]),
+    healthReason: z
+      .enum([
+        "BOT_INSTALLED",
+        "GATEWAY_CONNECTED",
+        "GATEWAY_RESUMED",
+        "PROCESS_RESTART",
+        "INTENT_UNAVAILABLE",
+        "INTENT_RESTORED",
+      ])
+      .optional(),
+    requestedIntents: z
+      .array(
+        z.enum([
+          "members",
+          "messages",
+          "reactions",
+          "polls",
+          "voice",
+          "scheduledEvents",
+          "autoMod",
+        ]),
+      )
+      .optional(),
+    at: z.iso.datetime(),
+    observedAt: z.iso.datetime().optional(),
+    context: z.literal("PRODUCTION"),
+    encryptedUserId: z.string().optional(),
+    joinedAt: z.iso.datetime().optional(),
+    messageId: id.optional(),
+    channelId: id.nullable().optional(),
+    messageType: z.number().int().optional(),
+    referenceId: id.optional(),
+    referenceType: z.number().int().optional(),
+    channelObfuscated: z.boolean().optional(),
+    observationSource: z.enum(["GATEWAY", "REST"]).optional(),
+    roles: z.array(id).optional(),
+    gapStart: z.iso.datetime().optional(),
+    eventId: id.optional(),
+    pending: z.boolean().optional(),
+    memberFlags: z.number().int().nonnegative().optional(),
+    humanVerified: z.boolean().optional(),
+    targetHash: hash.optional(),
+    mentionHashes: z.array(hash).max(100).optional(),
+    emojiHash: hash.optional(),
+    answerHash: hash.optional(),
+    reactionType: z.number().int().optional(),
+    channelType: z.number().int().optional(),
+    parentId: id.nullable().optional(),
+    ownerHash: hash.optional(),
+    archived: z.boolean().optional(),
+    locked: z.boolean().optional(),
+    createdAt: z.iso.datetime().optional(),
+    tagIds: z.array(id).optional(),
+    suppress: z.boolean().optional(),
+    entityType: z.number().int().optional(),
+    eventStatus: z.number().int().optional(),
+    ruleHash: hash.optional(),
+    actionType: z.number().int().optional(),
+    afkChannelId: id.nullable().optional(),
+    incidents: z.record(z.string(), z.string().nullable()).optional(),
+  })
+  .strict();
+export type Envelope = z.infer<typeof eventSchema>;
+export function isDirectReply(e: Envelope) {
+  return (
+    e.kind === "message.sent" &&
+    e.messageType === MessageType.Reply &&
+    (e.referenceType === undefined ||
+      e.referenceType === MessageReferenceType.Default) &&
+    Boolean(e.referenceId)
+  );
 }
-export function dedupeKey(e:Envelope){return `${e.shardId}:${e.gatewaySessionId}:${e.sequence}:${e.kind}:${e.guildId}${e.ordinal?':'+e.ordinal:''}`;}
+export type Dispatch = { t: string | null; s: number | null; d: unknown };
+export function normalize(
+  packet: Dispatch,
+  shardId: number,
+  sessionId: string,
+  vault: IdentityVault,
+  now = new Date(),
+): Envelope | null {
+  return normalizeMany(packet, shardId, sessionId, vault, now)[0] ?? null;
+}
+export function normalizeMany(
+  packet: Dispatch,
+  shardId: number,
+  sessionId: string,
+  vault: IdentityVault,
+  now = new Date(),
+) {
+  return traceSync(
+    "event.normalize",
+    { "signal.kind": packet.t ?? "UNKNOWN" },
+    () => normalizeManyInternal(packet, shardId, sessionId, vault, now),
+  );
+}
+function normalizeManyInternal(
+  packet: Dispatch,
+  shardId: number,
+  sessionId: string,
+  vault: IdentityVault,
+  now = new Date(),
+): Envelope[] {
+  if (packet.s === null || !packet.d || typeof packet.d !== "object") return [];
+  const raw = packet.d as Record<string, unknown>,
+    guildId =
+      raw.guild_id ??
+      (packet.t === "GUILD_CREATE" || packet.t === "GUILD_UPDATE"
+        ? raw.id
+        : undefined);
+  if (!id.safeParse(guildId).success) return [];
+  const s = scopeForGuild(String(guildId)),
+    base = {
+      ...s,
+      shardId,
+      gatewaySessionId: sessionId,
+      sequence: packet.s,
+      context: "PRODUCTION" as const,
+      schemaVersion: 2 as const,
+      at: now.toISOString(),
+      observedAt: now.toISOString(),
+    },
+    events: Envelope[] = [];
+  const emit = (event: Partial<Envelope> & { kind: Envelope["kind"] }) =>
+    events.push(
+      eventSchema.parse({ ...base, ...event, ordinal: events.length }),
+    );
+  const seal = (userId: string) => vault.seal(s, userId),
+    scopedHash = (key: string, value: string) =>
+      vault.digest(key, `${s.organizationId}:${s.guildId}:${value}`);
+  const channel = (d: Record<string, unknown>, kind: Envelope["kind"]) => {
+    if (
+      typeof d.flags === "number" &&
+      (d.flags & ChannelFlags.ChannelObfuscated) !== 0
+    ) {
+      if (id.safeParse(d.id).success)
+        emit({
+          kind,
+          channelId: String(d.id),
+          channelType: typeof d.type === "number" ? d.type : undefined,
+          parentId: id.nullable().safeParse(d.parent_id).success
+            ? (d.parent_id as string | null)
+            : undefined,
+          channelObfuscated: true,
+        });
+      return;
+    }
+    const c = z
+      .object({
+        id,
+        type: z.number().int(),
+        parent_id: id.nullable().optional(),
+        owner_id: id.optional(),
+        applied_tags: z.array(id).optional(),
+        thread_metadata: z
+          .object({
+            archived: z.boolean(),
+            locked: z.boolean(),
+            create_timestamp: z.iso.datetime().optional(),
+          })
+          .optional(),
+      })
+      .safeParse(d);
+    if (c.success)
+      emit({
+        kind,
+        channelId: c.data.id,
+        channelType: c.data.type,
+        channelObfuscated: false,
+        parentId: c.data.parent_id,
+        ownerHash: c.data.owner_id ? vault.hash(s, c.data.owner_id) : undefined,
+        archived: c.data.thread_metadata?.archived,
+        locked: c.data.thread_metadata?.locked,
+        createdAt: c.data.thread_metadata?.create_timestamp,
+        tagIds: c.data.applied_tags,
+      });
+  };
+  if (packet.t === "GUILD_CREATE" || packet.t === "GUILD_UPDATE") {
+    const incidents: Record<string, string | null> = {};
+    const data = raw.incidents_data as Record<string, unknown> | undefined;
+    for (const key of [
+      "invites_disabled_until",
+      "dms_disabled_until",
+      "dm_spam_detected_at",
+      "raid_detected_at",
+    ])
+      if (typeof data?.[key] === "string" || data?.[key] === null)
+        incidents[key] = data[key] as string | null;
+    emit({
+      kind: "guild.updated",
+      afkChannelId: id.nullable().safeParse(raw.afk_channel_id).success
+        ? (raw.afk_channel_id as string | null)
+        : undefined,
+      incidents,
+    });
+    for (const c of Array.isArray(raw.channels) ? raw.channels : [])
+      channel(c as Record<string, unknown>, "channel.changed");
+    for (const c of Array.isArray(raw.threads) ? raw.threads : [])
+      channel(c as Record<string, unknown>, "thread.list_synced");
+    return events;
+  }
+  if (packet.t?.startsWith("CHANNEL_")) {
+    channel(
+      raw,
+      packet.t === "CHANNEL_DELETE" ? "channel.deleted" : "channel.changed",
+    );
+    return events;
+  }
+  if (
+    ["THREAD_CREATE", "THREAD_UPDATE", "THREAD_DELETE"].includes(packet.t ?? "")
+  ) {
+    channel(
+      raw,
+      packet.t === "THREAD_CREATE"
+        ? raw.newly_created === true
+          ? "thread.created"
+          : "thread.list_synced"
+        : packet.t === "THREAD_UPDATE"
+          ? "thread.updated"
+          : "thread.deleted",
+    );
+    return events;
+  }
+  if (packet.t === "THREAD_LIST_SYNC") {
+    for (const c of Array.isArray(raw.threads) ? raw.threads : [])
+      channel(c as Record<string, unknown>, "thread.list_synced");
+    return events;
+  }
+  if (packet.t === "THREAD_MEMBERS_UPDATE") {
+    if (!id.safeParse(raw.id).success) return [];
+    for (const item of Array.isArray(raw.added_members)
+      ? raw.added_members
+      : []) {
+      const m = z
+        .object({
+          user_id: id.optional(),
+          member: z
+            .object({ user: z.object({ id, bot: z.boolean().optional() }) })
+            .optional(),
+        })
+        .safeParse(item);
+      if (m.success && !m.data.member?.user.bot) {
+        const user = m.data.user_id ?? m.data.member?.user.id;
+        if (user)
+          emit({
+            kind: "thread.member_added",
+            channelId: raw.id as string,
+            encryptedUserId: seal(user),
+            humanVerified: m.data.member?.user.bot === false,
+          });
+      }
+    }
+    for (const user of Array.isArray(raw.removed_member_ids)
+      ? raw.removed_member_ids
+      : [])
+      if (id.safeParse(user).success)
+        emit({
+          kind: "thread.member_removed",
+          channelId: raw.id as string,
+          encryptedUserId: seal(String(user)),
+        });
+    return events;
+  }
+  if (
+    packet.t === "GUILD_MEMBER_ADD" ||
+    packet.t === "GUILD_MEMBER_REMOVE" ||
+    packet.t === "GUILD_MEMBER_UPDATE"
+  ) {
+    const data = z
+      .object({
+        user: z.object({ id, bot: z.boolean().optional() }),
+        joined_at: z.iso.datetime().nullable().optional(),
+        roles: z.array(id).optional(),
+        flags: z.number().int().optional(),
+        pending: z.boolean().optional(),
+      })
+      .safeParse(packet.d);
+    if (!data.success || data.data.user.bot) return [];
+    emit({
+      kind:
+        packet.t === "GUILD_MEMBER_ADD"
+          ? "member.joined"
+          : packet.t === "GUILD_MEMBER_REMOVE"
+            ? "member.left"
+            : "member.roles_updated",
+      at:
+        packet.t === "GUILD_MEMBER_ADD"
+          ? (data.data.joined_at ?? now.toISOString())
+          : now.toISOString(),
+      joinedAt: data.data.joined_at ?? undefined,
+      roles: data.data.roles,
+      memberFlags: data.data.flags,
+      pending: data.data.pending,
+      humanVerified: true,
+      encryptedUserId: seal(data.data.user.id),
+    });
+    return events;
+  }
+  if (packet.t === "MESSAGE_CREATE") {
+    const data = z
+      .object({
+        id,
+        channel_id: id,
+        author: z.object({ id, bot: z.boolean().optional() }),
+        timestamp: z.iso.datetime(),
+        type: z.number().int(),
+        message_reference: z
+          .object({
+            type: z.number().int().optional(),
+            message_id: id.optional(),
+            channel_id: id.optional(),
+            guild_id: id.optional(),
+          })
+          .optional(),
+        webhook_id: z.string().optional(),
+        mentions: z
+          .array(z.object({ id, bot: z.boolean().optional() }))
+          .optional(),
+      })
+      .safeParse(packet.d);
+    if (
+      !data.success ||
+      data.data.author.bot ||
+      data.data.webhook_id ||
+      ![MessageType.Default, MessageType.Reply].includes(data.data.type)
+    )
+      return [];
+    const d = data.data,
+      r = d.message_reference,
+      direct =
+        d.type === MessageType.Reply &&
+        (r?.type ?? MessageReferenceType.Default) ===
+          MessageReferenceType.Default &&
+        (!r?.channel_id || r.channel_id === d.channel_id) &&
+        (!r?.guild_id || r.guild_id === s.guildId);
+    emit({
+      kind: "message.sent",
+      at: d.timestamp,
+      encryptedUserId: seal(d.author.id),
+      messageId: d.id,
+      channelId: d.channel_id,
+      messageType: d.type,
+      referenceType: r?.type,
+      referenceId: direct ? r?.message_id : undefined,
+      humanVerified: true,
+      mentionHashes: d.mentions
+        ?.filter((m) => !m.bot && m.id !== d.author.id)
+        .slice(0, 100)
+        .map((m) => vault.hash(s, m.id)),
+    });
+    return events;
+  }
+  if (
+    packet.t === "GUILD_SCHEDULED_EVENT_USER_ADD" ||
+    packet.t === "GUILD_SCHEDULED_EVENT_USER_REMOVE"
+  ) {
+    const data = z
+      .object({ user_id: id, guild_scheduled_event_id: id })
+      .safeParse(packet.d);
+    if (!data.success) return [];
+    emit({
+      kind: packet.t.endsWith("ADD")
+        ? "scheduled_event.subscribed"
+        : "scheduled_event.unsubscribed",
+      encryptedUserId: seal(data.data.user_id),
+      eventId: data.data.guild_scheduled_event_id,
+    });
+    return events;
+  }
+  if (packet.t?.startsWith("MESSAGE_REACTION_")) {
+    const data = z
+      .object({
+        user_id: id.optional(),
+        message_id: id,
+        channel_id: id,
+        message_author_id: id.optional(),
+        emoji: z
+          .object({
+            id: id.nullable().optional(),
+            name: z.string().nullable().optional(),
+          })
+          .optional(),
+        type: z.number().int().optional(),
+        member: z
+          .object({
+            user: z.object({ bot: z.boolean().optional() }).optional(),
+          })
+          .optional(),
+      })
+      .safeParse(packet.d);
+    if (!data.success || data.data.member?.user?.bot) return [];
+    const d = data.data;
+    emit({
+      kind:
+        packet.t === "MESSAGE_REACTION_ADD"
+          ? "reaction.added"
+          : packet.t === "MESSAGE_REACTION_REMOVE"
+            ? "reaction.removed"
+            : packet.t === "MESSAGE_REACTION_REMOVE_ALL"
+              ? "reaction.removed_all"
+              : "reaction.removed_emoji",
+      encryptedUserId: d.user_id ? seal(d.user_id) : undefined,
+      messageId: d.message_id,
+      channelId: d.channel_id,
+      targetHash: d.message_author_id
+        ? vault.hash(s, d.message_author_id)
+        : undefined,
+      emojiHash: d.emoji
+        ? scopedHash("reaction-emoji", d.emoji.id ?? d.emoji.name ?? "unknown")
+        : undefined,
+      reactionType: d.type ?? 0,
+      humanVerified: d.member?.user?.bot === false,
+    });
+    return events;
+  }
+  if (
+    packet.t === "MESSAGE_POLL_VOTE_ADD" ||
+    packet.t === "MESSAGE_POLL_VOTE_REMOVE"
+  ) {
+    const d = z
+      .object({
+        user_id: id,
+        message_id: id,
+        channel_id: id,
+        answer_id: z.number().int().positive(),
+      })
+      .safeParse(raw);
+    if (d.success)
+      emit({
+        kind: packet.t.endsWith("ADD")
+          ? "poll.vote_added"
+          : "poll.vote_removed",
+        encryptedUserId: seal(d.data.user_id),
+        channelId: d.data.channel_id,
+        messageId: d.data.message_id,
+        answerHash: scopedHash(
+          "poll-answer",
+          `${d.data.message_id}:${d.data.answer_id}`,
+        ),
+      });
+    return events;
+  }
+  if (packet.t === "VOICE_STATE_UPDATE") {
+    const data = z
+      .object({
+        user_id: id,
+        channel_id: id.nullable(),
+        suppress: z.boolean().optional(),
+        member: z
+          .object({
+            joined_at: z.iso.datetime().nullable().optional(),
+            flags: z.number().int().optional(),
+            pending: z.boolean().optional(),
+            user: z.object({ bot: z.boolean().optional() }).optional(),
+          })
+          .optional(),
+      })
+      .safeParse(packet.d);
+    if (!data.success || data.data.member?.user?.bot) return [];
+    emit({
+      kind: "voice.state",
+      encryptedUserId: seal(data.data.user_id),
+      channelId: data.data.channel_id,
+      suppress: data.data.suppress,
+      joinedAt: data.data.member?.joined_at ?? undefined,
+      memberFlags: data.data.member?.flags,
+      pending: data.data.member?.pending,
+      humanVerified: data.data.member?.user?.bot === false,
+    });
+    return events;
+  }
+  if (packet.t?.startsWith("GUILD_SCHEDULED_EVENT_")) {
+    const d = z
+      .object({
+        id,
+        channel_id: id.nullable(),
+        entity_type: z.number().int(),
+        status: z.number().int(),
+      })
+      .safeParse(raw);
+    if (d.success)
+      emit({
+        kind: packet.t.endsWith("CREATE")
+          ? "scheduled_event.created"
+          : packet.t.endsWith("DELETE")
+            ? "scheduled_event.deleted"
+            : "scheduled_event.updated",
+        eventId: d.data.id,
+        channelId: d.data.channel_id,
+        entityType: d.data.entity_type,
+        eventStatus: d.data.status,
+      });
+    return events;
+  }
+  if (packet.t?.startsWith("STAGE_INSTANCE_")) {
+    if (id.safeParse(raw.channel_id).success)
+      emit({
+        kind: packet.t.endsWith("CREATE")
+          ? "stage.created"
+          : packet.t.endsWith("DELETE")
+            ? "stage.deleted"
+            : "stage.updated",
+        channelId: raw.channel_id as string,
+      });
+    return events;
+  }
+  if (packet.t === "AUTO_MODERATION_ACTION_EXECUTION") {
+    const d = z
+      .object({
+        user_id: id,
+        channel_id: id.nullable().optional(),
+        rule_id: id,
+        action: z.object({ type: z.number().int() }),
+      })
+      .safeParse(raw);
+    if (d.success)
+      emit({
+        kind: "auto_moderation.executed",
+        encryptedUserId: seal(d.data.user_id),
+        channelId: d.data.channel_id,
+        ruleHash: scopedHash("automod-rule", d.data.rule_id),
+        actionType: d.data.action.type,
+      });
+    return events;
+  }
+  return events;
+}
+export function dedupeKey(e: Envelope) {
+  return `${e.shardId}:${e.gatewaySessionId}:${e.sequence}:${e.kind}:${e.guildId}${e.ordinal ? ":" + e.ordinal : ""}`;
+}

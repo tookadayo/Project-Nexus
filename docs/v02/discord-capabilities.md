@@ -1,19 +1,21 @@
 # Discord capability contract
 
+> Historical record — this document describes an earlier implementation or design. Current alpha.5 behavior is defined by [the README](../../README.md) and the current evidence, privacy and operations documents.
+
 仕様確認日: 2026-09-22。公式資料に記載された読み取り契約を使用します。
 
-| 項目 | 実装と境界 |
-| --- | --- |
-| Community / Screening | Guild featuresで検出 |
-| Native Onboarding | GET guild onboardingのenabled/prompts。取得失敗はunavailable |
-| Member flags | REST member snapshotのStartedOnboarding=8、CompletedOnboarding=2、StartedHomeActions=32、CompletedHomeActions=64 |
-| Gateway member update | rolesを処理。flagsが送られることを前提にしない |
-| Native完了時刻 | `first_observed_*`。実際の完了時刻と称しない |
-| Server Guide | 設定全体の検出はunknown。Home Actions flagsを独立して観測 |
-| Reply | message_referenceによる明示返信。本文解析なし |
-| Voice | join/leaveの既知ペア。欠測中の滞在は推定しない |
-| Scheduled event | user add/removeの購読シグナル。参加の証明ではない |
-| 観測できないもの | Nativeの回答全文、チャンネル閲覧、DM閲覧、主観的満足度 |
+| 項目                  | 実装と境界                                                                                                       |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Community / Screening | Guild featuresで検出                                                                                             |
+| Native Onboarding     | GET guild onboardingのenabled/prompts。取得失敗はunavailable                                                     |
+| Member flags          | REST member snapshotのStartedOnboarding=8、CompletedOnboarding=2、StartedHomeActions=32、CompletedHomeActions=64 |
+| Gateway member update | rolesを処理。flagsが送られることを前提にしない                                                                   |
+| Native完了時刻        | `first_observed_*`。実際の完了時刻と称しない                                                                     |
+| Server Guide          | 設定全体の検出はunknown。Home Actions flagsを独立して観測                                                        |
+| Reply                 | message_referenceによる明示返信。本文解析なし                                                                    |
+| Voice                 | join/leaveの既知ペア。欠測中の滞在は推定しない                                                                   |
+| Scheduled event       | user add/removeの購読シグナル。参加の証明ではない                                                                |
+| 観測できないもの      | Nativeの回答全文、チャンネル閲覧、DM閲覧、主観的満足度                                                           |
 
 GatewayはGuilds、GuildMembers、GuildMessages、GuildMessageReactions、GuildVoiceStates、GuildScheduledEventsを要求します。privileged intentはGuildMembersのみです。Message ContentとPresenceは要求しません。接続成功時に要求intentsを能力profileへ反映します。未確認時はnullです。
 

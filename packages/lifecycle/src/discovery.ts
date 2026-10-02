@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import {
   sql,
   tenant,
@@ -186,8 +187,10 @@ export class DiscoveryWorker {
         );
         if (
           prior &&
-          JSON.stringify([prior.channels, prior.capabilities]) !==
-            JSON.stringify([snapshot.channels, snapshot.capabilities])
+          !isDeepStrictEqual(
+            [prior.channels, prior.capabilities],
+            [snapshot.channels, snapshot.capabilities],
+          )
         )
           await openCollectionEpoch(
             tx,

@@ -1,8 +1,37 @@
 import { sql, tenant, type Tx } from "../../db/src/index";
 import type { Scope } from "../../shared/src/index";
 import { latestCapability } from "../../lifecycle/src/discovery";
-import { measurementDefinition } from "../../shared/src/measurement-definitions";
+import {
+  measurementDefinition,
+  visibilityChannelTypes,
+} from "../../shared/src/measurement-definitions";
+import type { CapabilitySnapshot } from "../../shared/src/community-model";
 import { currentRecipe } from "../../settings/src/recipes";
+export function capabilityInspector(
+  snapshot: CapabilitySnapshot | null,
+  metrics: readonly string[],
+) {
+  return (
+    snapshot?.channels.map((c) => ({
+      channelId: c.id,
+      observable: c.observable,
+      missingPermissions:
+        !c.observable &&
+        snapshot.coverage.coverageState !== "UNKNOWN" &&
+        snapshot.coverage.blindSpots.some(
+          (spot) =>
+            spot.channelId === c.id && spot.reason === "VIEW_CHANNEL_MISSING",
+        )
+          ? ["VIEW_CHANNEL"]
+          : [],
+      affectedMetrics: metrics.filter((key) =>
+        measurementDefinition(key).surfaces.some((surface) =>
+          visibilityChannelTypes(surface).includes(c.type),
+        ),
+      ),
+    })) ?? []
+  );
+}
 export async function integrationOperations(tx: Tx, s: Scope) {
   const [snapshot, recipe, queues] = await Promise.all([
     latestCapability(tx, s),
@@ -21,18 +50,6 @@ export async function integrationOperations(tx: Tx, s: Scope) {
   return {
     queues: queues.rows[0]!,
     coverage: snapshot?.coverage ?? null,
-    inspector:
-      snapshot?.channels.map((c) => ({
-        channelId: c.id,
-        observable: c.observable,
-        missingPermissions: c.observable ? [] : ["VIEW_CHANNEL"],
-        affectedMetrics: metrics.filter((key) =>
-          measurementDefinition(key).surfaces.some(
-            (surface) =>
-              surface.endsWith("Visibility") &&
-              (!surface.startsWith("voice") || [2, 13].includes(c.type)),
-          ),
-        ),
-      })) ?? [],
+    inspector: capabilityInspector(snapshot, metrics),
   };
 }
