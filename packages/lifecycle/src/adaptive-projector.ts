@@ -711,7 +711,7 @@ export async function projectAdaptiveMember(
               at,
               { channelId, latencySeconds },
             );
-          await sql`UPDATE lifecycle_events SET data=jsonb_set(data,'{receivedExplicitReply}','true'::jsonb) WHERE ${tenant(s)} AND episode_id=${owner.id}::uuid AND kind='message.sent' AND data->>'channelId'=${channelId}`.execute(
+          await sql`UPDATE lifecycle_events SET data=jsonb_set(data,'{receivedHumanParticipant}','true'::jsonb) WHERE ${tenant(s)} AND episode_id=${owner.id}::uuid AND kind='message.sent' AND data->>'channelId'=${channelId}`.execute(
             tx,
           );
         }

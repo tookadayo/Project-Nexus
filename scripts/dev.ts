@@ -1,3 +1,4 @@
+import {AttentionOperations} from '../packages/operations/src/attention.js';
 import {loadEnvFile} from 'node:process';
 import {hostname} from 'node:os';
 import {Queue,Worker} from 'bullmq';
@@ -47,7 +48,7 @@ const nativeSnapshots=new NativeMemberSnapshotWorker(db,vault,discord);
 const optimization=new OptimizationWorker(db);
 const weekly=new WeeklySummaryWorker(db,discord);
 const helpers=new HelperWorker(db,discord,settings);
-const actions=new ActionWorker(db,vault,discord,onboarding,interactionHealth);const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,(s,user,actor,guild)=>privacy.delete(s,user,actor,guild),()=>({gatewayConnected:gateway.client.isReady(),redisConnected:redis.status==='ready',interaction:interactionHealth.snapshot(),commandHash:hash}));
+const actions=new ActionWorker(db,vault,discord,onboarding,interactionHealth,s=>interactions.refreshHome(s));const interactions=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,(s,user,actor,guild)=>privacy.delete(s,user,actor,guild),()=>({gatewayConnected:gateway.client.isReady(),redisConnected:redis.status==='ready',interaction:interactionHealth.snapshot(),commandHash:hash}));
 const wake=async(s:Scope,id:string)=>{await queue.add('guild',s,{jobId:`interaction-${id}`,removeOnComplete:true,removeOnFail:true,attempts:3,backoff:{type:'exponential',delay:1000}});};
 const http=createInteractionServer({db,vault,publicKey:cfg.DISCORD_PUBLIC_KEY,applicationId:cfg.DISCORD_APPLICATION_ID,components:tokens,discord,health:interactionHealth,wake});
 const gateway=createGateway(redis,vault,()=>process.stderr.write('Gateway operation failed\n'),db,cfg.NEXUS_INTERACTION_TRANSPORT==='gateway'?interaction=>handleGatewayInteraction(interaction,{db,vault,components:tokens,health:interactionHealth,wake}):undefined);const api=createApi(analytics,cfg.API_KEY,db,discord,()=>({discordConnected:gateway.client.isReady(),redisConnected:redis.status==='ready',interaction:interactionHealth.snapshot(),commandHash:hash}),vault);
@@ -65,6 +66,7 @@ const worker=new Worker<Scope>('nexus-work',async job=>{
   for(let i=0;i<30&&await actions.tick(s);i++){/* bounded drain */}
   for(let i=0;i<5&&await nativeSnapshots.tick(s);i++){/* bounded REST snapshots */}
   await optimization.tick(s);
+  await new AttentionOperations(db).observe(s,await settings.get(s));
  }finally{span.end();}});
 },{connection,concurrency:4});worker.on('error',()=>process.stderr.write('Background worker unavailable\n'));
 let stopped=false;let lastMaintenance=0;let lastAggregate=0;let lastCapabilities=0;let lastWeekly=0;

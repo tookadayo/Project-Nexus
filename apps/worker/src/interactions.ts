@@ -1,3 +1,4 @@
+import {AttentionOperations} from '../../../packages/operations/src/attention.js';
 import {connectionCodePanel,disconnectPanel} from '../../../packages/discord-panels/src/views/connection.js';
 import {z} from 'zod';
 import {userFailure} from '../../../packages/shared/src/errors.js';
@@ -150,7 +151,7 @@ export class InteractionWorker {
    assert(!alreadyReplied,'ATTENTION_NOT_ACTIVE');
    if(action==='contextResolve')assert(prior&&prior.status!=='RESOLVED','ATTENTION_NOT_ACTIVE');
    const status=action==='contextAdd'?'OPEN':'RESOLVED';
-   await sql`INSERT INTO attention_items(organization_id,guild_id,channel_id,message_id,detected_at,status,resolved_at) VALUES(${s.organizationId}::uuid,${s.guildId},${channelId},${messageId},${source.occurred_at},${status},${status==='RESOLVED'?new Date():null}) ON CONFLICT(organization_id,guild_id,message_id) DO UPDATE SET status=EXCLUDED.status,resolved_at=EXCLUDED.resolved_at,snooze_until=NULL`.execute(this.db);
+   const operations=new AttentionOperations(this.db);if(status==='OPEN')await operations.addObserved(s,channelId,messageId,new Date(),source.occurred_at);else await operations.action(s,messageId,channelId,status);
    return nexusPanel({title:locale==='ja'?'投稿の判定':'Message detection',children:[divider(),callout(t(locale,'control.queueTitle',{channel:channelId}),action==='contextAdd'?locale==='ja'?'対応対象に追加しました。':'Added to Attention.':locale==='ja'?'解決済みにしました。':'Marked resolved.')]});
   }
   const followupControlActions=new Set(['controlManagersConfirm','controlCancelManagers','controlApplyImprove','controlSnooze','controlCancelImprove']);
@@ -317,7 +318,7 @@ export class InteractionWorker {
    let snoozeUntil:Date|null=null;if(status==='SNOOZED'){
      snoozeUntil=intent.until==='today'?nextZonedDayStart(new Date(),current.timezone):new Date(Date.now()+z.number().int().min(1).max(1440).parse(intent.minutes)*60000);
    }
-   await sql`INSERT INTO attention_items(organization_id,guild_id,channel_id,message_id,detected_at,status,snooze_until,resolved_at) VALUES(${s.organizationId}::uuid,${s.guildId},${channelId},${messageId},${source.occurred_at},${status},${snoozeUntil},${status==='RESOLVED'?new Date():null}) ON CONFLICT(organization_id,guild_id,message_id) DO UPDATE SET status=EXCLUDED.status,snooze_until=EXCLUDED.snooze_until,resolved_at=EXCLUDED.resolved_at`.execute(this.db);
+   const operations=new AttentionOperations(this.db);await operations.observe(s,current);await operations.action(s,messageId,channelId,status,new Date(),snoozeUntil);
    return this.communityPanel(issue,s,publicLocale,'attention');
   }
   if(action==='controlOpenDiagnostics')return this.communityPanel(issue,s,publicLocale,'diagnostics');
@@ -455,6 +456,7 @@ export class InteractionWorker {
   if(!progress.next){if(before.setupVersion<2||!Object.values(before.setupSteps).every(Boolean))void recordProductEvent(this.db,s,'setup_completed').catch(()=>{});return successPanel(issue,locale==='ja'?'セットアップ完了':'Setup complete',locale==='ja'?'ホームへ戻れます。':'Return to Home.',{label:locale==='ja'?'ホーム':'Home',action:'setupHome'},locale);}
   return this.communityPanel(issue,s,locale,'settings',progress.next);
  }
+ async refreshHome(s:Scope){const cfg=await this.settings.get(s),issue:Issue=data=>this.tokens.issue(this.db,s,data,null,31536000);return this.communityPanel(issue,s,resolveLocale(cfg.uiLanguage));}
  private async communityPanel(issue:Issue,s:Scope,locale:UiLocale,page:ControlPage='overview',section:SettingsSection='main',channelPage=0,summaryField:'none'|'channel'|'day'|'hour'|'timezone'='none',goalPurpose:'none'|'lfg'|'feedback'|'bug'|'playtest'='none',analysisView:AnalysisView='overall',attentionIndex=0){
   const web=await this.webLink(s);
   const data:Parameters<typeof controlPanel>[2]={dashboardUrl:web.url,webVerified:web.verified,updatedAt:new Date()};

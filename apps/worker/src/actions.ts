@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import {randomUUID} from 'node:crypto';
 import {sql,tenant,type Database} from '../../../packages/db/src/index.js';
 import type {Scope} from '../../../packages/shared/src/index.js';
 import {IdentityVault} from '../../../packages/identity/src/index.js';
@@ -11,30 +12,32 @@ import {audit,SettingsService} from '../../../packages/settings/src/index.js';
 import type {Panel} from '../../../packages/discord-panels/src/index.js';
 import {InterventionWorker} from './interventions.js';
 import type {InteractionHealth} from '../../interaction/src/health.js';
-type Action={id:string,kind:ActionKind,payload:Record<string,unknown>,attempts:number};
+type Action={id:string,kind:ActionKind,payload:Record<string,unknown>,attempts:number;leaseToken:string};
 export class ActionWorker {
- constructor(private readonly db:Database,private readonly vault:IdentityVault,private readonly discord:DiscordPort,private readonly onboarding:OnboardingService,private readonly interactionHealth?:InteractionHealth){}
+ constructor(private readonly db:Database,private readonly vault:IdentityVault,private readonly discord:DiscordPort,private readonly onboarding:OnboardingService,private readonly interactionHealth?:InteractionHealth,private readonly refreshPanel?:(s:Scope)=>Promise<Panel>){}
  async tick(s:Scope):Promise<boolean>{
   // A crashed worker may have performed a REST operation; never blindly retry its expired lease.
-  await sql`UPDATE action_outbox SET state=CASE WHEN kind IN ('PANEL_UPSERT','PANEL_DELETE') THEN 'PENDING' ELSE 'UNKNOWN' END,last_error='worker lease expired',lease_until=NULL WHERE ${tenant(s)} AND state='RUNNING' AND lease_until<now()`.execute(this.db);
+  await sql`UPDATE action_outbox SET state=CASE WHEN kind IN ('PANEL_UPSERT','PANEL_DELETE','PANEL_REFRESH') THEN 'PENDING' ELSE 'UNKNOWN' END,last_error='Worker lease expired',error_category='LEASE_EXPIRED',lease_until=NULL,lease_token=NULL,updated_at=now() WHERE ${tenant(s)} AND state='RUNNING' AND lease_until<now()`.execute(this.db);
   const action=await this.db.transaction().execute(async tx=>{
-   const row=(await sql<Action>`SELECT id,kind,payload,attempts FROM action_outbox WHERE ${tenant(s)} AND state='PENDING' AND available_at<=now() ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1`.execute(tx)).rows[0];
-   if(row)await sql`UPDATE action_outbox SET state='RUNNING',attempts=attempts+1,lease_until=now()+interval '60 seconds' WHERE ${tenant(s)} AND id=${row.id}::uuid`.execute(tx);
+   await sql`SELECT pg_advisory_xact_lock(hashtextextended(${'action-claim:'+s.organizationId+':'+s.guildId},0))`.execute(tx);
+   const row=(await sql<Action>`SELECT id,kind,payload,attempts FROM action_outbox q WHERE ${tenant(s)} AND state='PENDING' AND available_at<=now() AND (kind<>'PANEL_REFRESH' OR NOT EXISTS(SELECT 1 FROM action_outbox running WHERE running.organization_id=q.organization_id AND running.guild_id=q.guild_id AND running.kind='PANEL_REFRESH' AND running.state='RUNNING')) ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1`.execute(tx)).rows[0];
+   if(row){row.leaseToken=randomUUID();await sql`UPDATE action_outbox SET state='RUNNING',attempts=attempts+1,lease_until=now()+interval '60 seconds',lease_token=${row.leaseToken}::uuid,updated_at=now() WHERE ${tenant(s)} AND id=${row.id}::uuid`.execute(tx);}
    return row;
   });
   if(!action)return false;
+  if(action.kind==='PANEL_REFRESH')return this.refresh(s,action);
   if(action.kind==='INTERVENTION_DELIVER'){
    const runId=z.uuid().parse(action.payload.runId);await new InterventionWorker(this.db,this.vault,this.discord).tick(s,runId);
    const run=(await sql<{state:string,available_at:Date}>`SELECT state,available_at FROM intervention_runs WHERE ${tenant(s)} AND id=${runId}::uuid`.execute(this.db)).rows[0];
    const state=run?.state==='queued'?'PENDING':run?.state==='delivered'?'SUCCEEDED':run?.state==='unknown'||run?.state==='running'?'UNKNOWN':'FAILED';
-   await sql`UPDATE action_outbox SET state=${state},available_at=${run?.available_at??new Date()},lease_until=NULL WHERE ${tenant(s)} AND id=${action.id}::uuid`.execute(this.db);return true;
+   await sql`UPDATE action_outbox SET state=${state},available_at=${run?.available_at??new Date()},lease_until=NULL WHERE ${tenant(s)} AND id=${action.id}::uuid AND lease_token=${action.leaseToken}::uuid`.execute(this.db);return true;
   }
   let sideEffectStarted=false,replyCompleted=false;
   try{await this.db.connection().execute(async tx=>{
    const privacyKey='privacy:'+s.organizationId+':'+s.guildId;let roleKey:string|null=null;
    await sql`SELECT pg_advisory_lock_shared(hashtextextended(${privacyKey},0))`.execute(tx);
    try{
-   const live=(await sql`SELECT id FROM action_outbox WHERE ${tenant(s)} AND id=${action.id}::uuid AND state='RUNNING'`.execute(tx)).rows[0];
+   const live=(await sql`SELECT id FROM action_outbox WHERE ${tenant(s)} AND id=${action.id}::uuid AND state='RUNNING' AND lease_token=${action.leaseToken}::uuid AND lease_until>now()`.execute(tx)).rows[0];
    if(!live)return;
    if(action.kind.startsWith('ROLE_')){
     const payload=z.object({sessionId:z.uuid(),roleId:z.string().optional()}).parse(action.payload);
@@ -107,5 +110,26 @@ export class ActionWorker {
    if(action.kind==='REPLY_EDIT'){this.interactionHealth?.failed('reply_failed');const hash=typeof action.payload.interactionHash==='string'?action.payload.interactionHash:null;if(hash)await sql`UPDATE interaction_diagnostics SET result=${state==='UNKNOWN'?'unknown':state==='FAILED'?'failed':'queued'},error_code=${known?`HTTP_${error.status}`:'REPLY_ERROR'} WHERE ${tenant(s)} AND interaction_hash=${hash}`.execute(this.db);}
   }
   return true;
+ }
+ private async refresh(s:Scope,action:Action){
+  // Editing an existing panel is idempotent. Rendering and REST run without a DB transaction or lock.
+  const renderStartedAt=new Date();
+  try{
+   const existing=(await sql<{channel_id:string;message_id:string}>`SELECT channel_id,message_id FROM settings_panels WHERE ${tenant(s)}`.execute(this.db)).rows[0];
+   if(existing){
+    if(!this.refreshPanel)throw new Error('Panel renderer unavailable');
+    const body=await this.refreshPanel(s);
+    const live=(await sql`SELECT id FROM action_outbox WHERE ${tenant(s)} AND id=${action.id}::uuid AND state='RUNNING' AND lease_token=${action.leaseToken}::uuid AND lease_until>now() AND NOT EXISTS(SELECT 1 FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash IS NULL AND completed_at IS NOT NULL)`.execute(this.db)).rows.length;
+    if(!live)return true;
+    await this.discord.editPanel(existing.channel_id,existing.message_id,body);
+   }
+   await sql`UPDATE action_outbox SET state='SUCCEEDED',completed_at=now(),updated_at=now(),lease_until=NULL,lease_token=NULL,last_error=NULL,error_category=NULL WHERE ${tenant(s)} AND id=${action.id}::uuid AND lease_token=${action.leaseToken}::uuid`.execute(this.db);
+   await sql`UPDATE action_outbox SET state='SUCCEEDED',completed_at=now(),updated_at=now(),error_category=NULL,last_error=NULL WHERE ${tenant(s)} AND kind='PANEL_REFRESH' AND state='PENDING' AND created_at<=${renderStartedAt}`.execute(this.db);
+  }catch(error){
+   const known=error instanceof DiscordFailure,retry=(!known||error.status===0||error.status===429||error.status>=500)&&action.attempts<5;
+   const category=known?error.status===429?'DISCORD_RATE_LIMIT':error.status===0?'DISCORD_TIMEOUT':error.status>=500?'DISCORD_UNAVAILABLE':'DISCORD_PERMISSION':'INTERNAL';
+   logFailure({reference:errorReference(),action:'PANEL_REFRESH',stage:'action_execution',error});
+   await sql`UPDATE action_outbox SET state=${retry?'PENDING':'FAILED'},lease_until=NULL,lease_token=NULL,error_category=${category},last_error=${category},updated_at=now(),completed_at=CASE WHEN ${!retry} THEN now() ELSE NULL END,available_at=${new Date(Date.now()+Math.max(known?error.retryAfter:0,2**action.attempts)*1000)} WHERE ${tenant(s)} AND id=${action.id}::uuid AND lease_token=${action.leaseToken}::uuid`.execute(this.db);
+  }return true;
  }
 }

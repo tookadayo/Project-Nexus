@@ -24,12 +24,15 @@ async function setup(){
  const s=scopeForGuild(String(711111111111111110n+BigInt(++counter)));await ensureGuild(db,s);
  const settings=new SettingsService(db),discord=new FakeDiscord(),tokens=new Components('polish-test'),now=new Date(),joined=new Date(now.getTime()-3600000);
  await settings.update(s,actor,0,{enabled:true,setupVersion:2,setupSteps:{scope:true,team:true,notifications:true,goals:true},helperChannelId:channel,managerRoleIds:[managerRole]});
- discord.members.set(newcomer,{joinedAt:joined.toISOString(),roles:[],permissions:'0',bot:false});
- discord.members.set(helper,{joinedAt:new Date(now.getTime()-30*86400000).toISOString(),roles:[],permissions:'8',bot:false});
+ discord.members.set(newcomer,{joinedAt:joined.toISOString(),roles:[],permissions:'0',bot:false,pending:false,flags:'0'});
+ discord.members.set(helper,{joinedAt:new Date(now.getTime()-30*86400000).toISOString(),roles:[],permissions:'8',bot:false,pending:false,flags:'0'});
  discord.members.set(bot,{joinedAt:joined.toISOString(),roles:[],permissions:'0',bot:true});
  const lifecycle=new LifecycleService(db,vault,settings,discord),onboarding=new OnboardingService(db,settings,vault),worker=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,async()=>{});
+ await lifecycle.process({...s,shardId:0,gatewaySessionId:'health',sequence:0,context:'PRODUCTION',kind:'telemetry.connected',at:new Date(now.getTime()-86400000).toISOString(),requestedIntents:['members','messages','reactions','polls','voice','scheduledEvents','autoMod']});
+ await lifecycle.process(normalize({t:'CHANNEL_CREATE',s:1000,d:{guild_id:s.guildId,id:channel,type:0}},0,'polish',vault,now)!);
  await lifecycle.process(normalize({t:'MESSAGE_CREATE',s:1,d:{guild_id:s.guildId,id:messageId,channel_id:channel,author:{id:newcomer},timestamp:joined.toISOString(),type:0,content:'never retain'}},0,'polish',vault)!);
- await sql`INSERT INTO telemetry_cursor VALUES(${s.organizationId}::uuid,${s.guildId},${new Date(now.getTime()-86400000)},${now})`.execute(db);
+ await lifecycle.process({...s,shardId:0,gatewaySessionId:'health',sequence:1,context:'PRODUCTION',kind:'telemetry.heartbeat',at:now.toISOString(),requestedIntents:['members','messages','reactions','polls','voice','scheduledEvents','autoMod']});
+ await sql`DELETE FROM telemetry_health WHERE ${tenant(s)} AND reason='heartbeat missing'`.execute(db);
  await sql`INSERT INTO settings_panels VALUES(${s.organizationId}::uuid,${s.guildId},${channel},${root})`.execute(db);
  return {s,settings,discord,tokens,lifecycle,worker,now,joined};
 }
@@ -65,6 +68,8 @@ it.each(['reply','voice'] as const)('recognizes a strong %s connection while rea
  const ctx=await setup();await ctx.lifecycle.process(reaction(ctx,helper,2));
  if(kind==='reply')await ctx.lifecycle.process(normalize({t:'MESSAGE_CREATE',s:3,d:{guild_id:ctx.s.guildId,id:'744444444444444445',channel_id:channel,author:{id:helper},timestamp:ctx.now.toISOString(),type:19,message_reference:{message_id:messageId}}},0,'polish',vault)!);
  else{await ctx.lifecycle.process(normalize({t:'CHANNEL_CREATE',s:100,d:{guild_id:ctx.s.guildId,id:channel,type:2}},0,'polish',vault,ctx.now)!);await ctx.settings.update(ctx.s,actor,(await ctx.settings.get(ctx.s)).revision,{communityModel:{modes:['VOICE'],confirmed:true,channels:[],forumTags:[],voiceThresholdSeconds:300}});for(const [i,user_id] of [newcomer,helper].entries())await ctx.lifecycle.process(normalize({t:'VOICE_STATE_UPDATE',s:3+i,d:{guild_id:ctx.s.guildId,user_id,channel_id:channel}},0,'polish',vault,ctx.now)!);ctx.now=new Date(ctx.now.getTime()+301000);await db.transaction().execute(async tx=>tickVoice(tx,ctx.s,await ctx.settings.get(ctx.s),ctx.now));}
+ await ctx.lifecycle.process({...ctx.s,shardId:0,gatewaySessionId:'health',sequence:2,context:'PRODUCTION',kind:'telemetry.heartbeat',at:ctx.now.toISOString(),requestedIntents:['members','messages','reactions','polls','voice','scheduledEvents','autoMod']});
+ await sql`DELETE FROM telemetry_health WHERE ${tenant(ctx.s)} AND reason='heartbeat missing'`.execute(db);
  const view=await new CommunityService(db,ctx.settings).overview(ctx.s,30,ctx.now);
  expect(view.daily.todayConnected).toBe(1);expect(view.reactionsReceived).toBe(1);
 });

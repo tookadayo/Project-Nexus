@@ -9,6 +9,7 @@ import {domainRevisions} from '../../../packages/settings/src/domain-config.js';
 import {SettingsService,settingsSchema,type Actor} from '../../../packages/settings/src/index.js';
 import {EntitlementService} from '../../../packages/settings/src/entitlements.js';
 import type {DiscordPort} from '../../../packages/discord/src/rest.js';
+import {AttentionOperations} from '../../../packages/operations/src/attention.js';
 import {randomUUID} from 'node:crypto';
 import {CommunityService} from '../../../packages/presentation/src/community.js';
 import {PermissionFlagsBits} from 'discord-api-types/v10';
@@ -51,13 +52,10 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
  app.get(base+'/community',async(req,reply)=>{const s=getScope(req,reply),query=req.query as {range?:unknown;limit?:unknown},range=z.coerce.number().pipe(z.union([z.literal(7),z.literal(30),z.literal(90)])).catch(30).parse(query.range),limit=z.coerce.number().int().min(1).max(50).catch(1).parse(query.limit);return new CommunityService(db).overview(s,range,new Date(),await automaticStaffRoles(s),0,limit);});
  app.post(base+'/attention/action',async(req,reply)=>{
   const s=getScope(req,reply),input=z.object({channelId:z.string().regex(/^\d{17,20}$/),messageId:z.string().regex(/^\d{17,20}$/),status:z.enum(['ACKNOWLEDGED','SNOOZED','RESOLVED']),minutes:z.union([z.literal(30),z.literal(60)]).optional(),untilToday:z.boolean().optional()}).strict().parse(req.body);
-  const queue=await new CommunityService(db).overview(s,30,new Date(),await automaticStaffRoles(s),0,50);
-  assert(queue.attention.some(item=>item.messageId===input.messageId&&item.channelId===input.channelId),'ATTENTION_NOT_ACTIVE',409);
-  const source=(await sql<{occurred_at:Date}>`SELECT occurred_at FROM lifecycle_events WHERE ${tenant(s)} AND context='PRODUCTION' AND kind='message.sent' AND data->>'messageId'=${input.messageId} AND data->>'channelId'=${input.channelId} LIMIT 1`.execute(db)).rows[0];assert(source,'ATTENTION_NOT_FOUND',404);
-  const prior=(await sql<{status:string}>`SELECT status FROM attention_items WHERE ${tenant(s)} AND message_id=${input.messageId}`.execute(db)).rows[0];assert(prior?.status!=='RESOLVED','ATTENTION_NOT_ACTIVE',409);
-  const settings=await new SettingsService(db).get(s),snoozeUntil=input.status!=='SNOOZED'?null:input.untilToday?nextZonedDayStart(new Date(),settings.timezone):new Date(Date.now()+(input.minutes??30)*60000);
-  await sql`INSERT INTO attention_items(organization_id,guild_id,channel_id,message_id,detected_at,status,snooze_until,resolved_at) VALUES(${s.organizationId}::uuid,${s.guildId},${input.channelId},${input.messageId},${source.occurred_at},${input.status},${snoozeUntil},${input.status==='RESOLVED'?new Date():null}) ON CONFLICT(organization_id,guild_id,message_id) DO UPDATE SET status=EXCLUDED.status,snooze_until=EXCLUDED.snooze_until,resolved_at=EXCLUDED.resolved_at`.execute(db);
-  return {status:input.status};
+  const settings=await new SettingsService(db).get(s),operations=new AttentionOperations(db);
+  await operations.observe(s,settings);
+  const snoozeUntil=input.status!=='SNOOZED'?null:input.untilToday?nextZonedDayStart(new Date(),settings.timezone):new Date(Date.now()+(input.minutes??30)*60000);
+  return operations.action(s,input.messageId,input.channelId,input.status,new Date(),snoozeUntil);
  });
  app.get(base+'/weekly-summary/status',async(req,reply)=>{const s=getScope(req,reply);return (await sql<{state:string;status_note:string|null;attempted_at:Date}>`SELECT state,status_note,attempted_at FROM weekly_summary_deliveries WHERE ${tenant(s)} ORDER BY week_start DESC LIMIT 1`.execute(db)).rows[0]??null;});
  app.get(base+'/audit',async(req,reply)=>{

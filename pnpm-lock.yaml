@@ -129,6 +129,8 @@ importers:
 
   packages/onboarding: {}
 
+  packages/operations: {}
+
   packages/presentation: {}
 
   packages/security: {}
