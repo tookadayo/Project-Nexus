@@ -1,0 +1,1484 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Discord Components V2 alpha.5 discord-unavailable 1`] = `
+{
+  "allowed_mentions": {
+    "parse": [],
+  },
+  "components": [
+    {
+      "accent_color": 15774258,
+      "components": [
+        {
+          "content": "## サーバー概要",
+          "type": 10,
+        },
+        {
+          "content": "**計測を一部停止しています**
+Discordとの接続を確認できません。この期間は比較に使用しません。",
+          "type": 10,
+        },
+        {
+          "content": "**対応待ち**
+新しい対応対象を確認できません",
+          "type": 10,
+        },
+        {
+          "content": "**今日、新しく参加**
+確認できません
+
+**今日、最初の交流を確認**
+確認できません",
+          "type": 10,
+        },
+        {
+          "content": "**直接返信**
+確認できません
+対象: 37 · 計測範囲: 完全",
+          "type": 10,
+        },
+        {
+          "content": "-# 2026-09-02 — 2026-10-02 · 確認できるチャンネル 1 / 1",
+          "type": 10,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:1",
+              "disabled": undefined,
+              "emoji": {
+                "name": "📥",
+              },
+              "label": "対応を見る",
+              "style": 1,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:2",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "新規メンバー",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:3",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "分析",
+              "style": 2,
+              "type": 2,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:4",
+              "options": [
+                {
+                  "default": true,
+                  "label": "ホーム",
+                  "value": "overview",
+                },
+                {
+                  "default": false,
+                  "label": "新しいメンバー",
+                  "value": "newMembers",
+                },
+                {
+                  "default": false,
+                  "label": "対応",
+                  "value": "attention",
+                },
+                {
+                  "default": false,
+                  "label": "分析",
+                  "value": "analysis",
+                },
+                {
+                  "default": false,
+                  "label": "結果",
+                  "value": "results",
+                },
+                {
+                  "default": false,
+                  "label": "設定",
+                  "value": "settings",
+                },
+              ],
+              "placeholder": "ページを選ぶ",
+              "type": 3,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:5",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "コミュニティモデル",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:6",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "更新",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "label": "Dashboard",
+              "style": 5,
+              "type": 2,
+              "url": "https://nexus.example/dashboard",
+            },
+          ],
+          "type": 1,
+        },
+      ],
+      "type": 17,
+    },
+  ],
+  "flags": 32768,
+}
+`;
+
+exports[`Discord Components V2 alpha.5 integration 1`] = `
+{
+  "allowed_mentions": {
+    "parse": [],
+  },
+  "components": [
+    {
+      "accent_color": 15774258,
+      "components": [
+        {
+          "content": "## サーバー概要",
+          "type": 10,
+        },
+        {
+          "content": "**計測を一部停止しています**
+必要なメンバー情報を正常に受信できていません。この期間は比較に使用しません。",
+          "type": 10,
+        },
+        {
+          "content": "**対応待ち**
+新しい対応対象を確認できません",
+          "type": 10,
+        },
+        {
+          "content": "**今日、新しく参加**
+確認できません
+
+**今日、最初の交流を確認**
+確認できません",
+          "type": 10,
+        },
+        {
+          "content": "**直接返信**
+確認できません
+対象: 37 · 計測範囲: 完全",
+          "type": 10,
+        },
+        {
+          "content": "-# 2026-09-02 — 2026-10-02 · 確認できるチャンネル 1 / 1",
+          "type": 10,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:1",
+              "disabled": undefined,
+              "emoji": {
+                "name": "📥",
+              },
+              "label": "対応を見る",
+              "style": 1,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:2",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "新規メンバー",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:3",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "分析",
+              "style": 2,
+              "type": 2,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:4",
+              "options": [
+                {
+                  "default": true,
+                  "label": "ホーム",
+                  "value": "overview",
+                },
+                {
+                  "default": false,
+                  "label": "新しいメンバー",
+                  "value": "newMembers",
+                },
+                {
+                  "default": false,
+                  "label": "対応",
+                  "value": "attention",
+                },
+                {
+                  "default": false,
+                  "label": "分析",
+                  "value": "analysis",
+                },
+                {
+                  "default": false,
+                  "label": "結果",
+                  "value": "results",
+                },
+                {
+                  "default": false,
+                  "label": "設定",
+                  "value": "settings",
+                },
+              ],
+              "placeholder": "ページを選ぶ",
+              "type": 3,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:5",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "コミュニティモデル",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:6",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "更新",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "label": "Dashboard",
+              "style": 5,
+              "type": 2,
+              "url": "https://nexus.example/dashboard",
+            },
+          ],
+          "type": 1,
+        },
+      ],
+      "type": 17,
+    },
+  ],
+  "flags": 32768,
+}
+`;
+
+exports[`Discord Components V2 alpha.5 large 1`] = `
+{
+  "allowed_mentions": {
+    "parse": [],
+  },
+  "components": [
+    {
+      "accent_color": 5793266,
+      "components": [
+        {
+          "content": "## サーバー概要",
+          "type": 10,
+        },
+        {
+          "content": "**対応待ち**
+47 件 · 最長 41 分",
+          "type": 10,
+        },
+        {
+          "content": "**登録済みの対応**
+47
+
+**対応完了時間の中央値**
+14 min
+
+**p75**
+31 min",
+          "type": 10,
+        },
+        {
+          "content": "**直接返信**
+24 · 中央値 12 min · p75 20 min
+対象: 37 · 計測範囲: 完全",
+          "type": 10,
+        },
+        {
+          "content": "**投稿への最初の応答**
+24 · 中央値 12 min · p75 20 min
+対象: 37 · 計測範囲: 完全",
+          "type": 10,
+        },
+        {
+          "content": "**一定時間のボイス同席**
+24
+対象: 37 · 計測範囲: 完全",
+          "type": 10,
+        },
+        {
+          "content": "-# 2026-09-02 — 2026-10-02 · 確認できるチャンネル 5 / 6",
+          "type": 10,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:1",
+              "disabled": undefined,
+              "emoji": {
+                "name": "📥",
+              },
+              "label": "対応を見る",
+              "style": 1,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:2",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "新規メンバー",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:3",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "分析",
+              "style": 2,
+              "type": 2,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:4",
+              "options": [
+                {
+                  "default": true,
+                  "label": "ホーム",
+                  "value": "overview",
+                },
+                {
+                  "default": false,
+                  "label": "新しいメンバー",
+                  "value": "newMembers",
+                },
+                {
+                  "default": false,
+                  "label": "対応",
+                  "value": "attention",
+                },
+                {
+                  "default": false,
+                  "label": "分析",
+                  "value": "analysis",
+                },
+                {
+                  "default": false,
+                  "label": "結果",
+                  "value": "results",
+                },
+                {
+                  "default": false,
+                  "label": "設定",
+                  "value": "settings",
+                },
+              ],
+              "placeholder": "ページを選ぶ",
+              "type": 3,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:5",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "コミュニティモデル",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:6",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "更新",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "label": "Dashboard",
+              "style": 5,
+              "type": 2,
+              "url": "https://nexus.example/dashboard",
+            },
+          ],
+          "type": 1,
+        },
+      ],
+      "type": 17,
+    },
+  ],
+  "flags": 32768,
+}
+`;
+
+exports[`Discord Components V2 alpha.5 lfg 1`] = `
+{
+  "allowed_mentions": {
+    "parse": [],
+  },
+  "components": [
+    {
+      "accent_color": 5793266,
+      "components": [
+        {
+          "content": "## NEXUS · コミュニティ管理
+-# 対応 · 新しいメンバーの状態を確認します",
+          "type": 10,
+        },
+        {
+          "divider": true,
+          "spacing": 1,
+          "type": 14,
+        },
+        {
+          "content": "**⏳ 対応 · 1 / 1**
+<#944444444444444445> · 41分
+返信待ち",
+          "type": 10,
+        },
+        {
+          "content": "**判定ルール**
+設定した時間内に、他の人からの直接返信をまだ確認できません。
+参加後72時間以内のメンバーの投稿に、20分間直接返信を確認できないと対象にします。",
+          "type": 10,
+        },
+        {
+          "content": "**投稿を見る**
+https://discord.com/channels/911111111111111111/944444444444444445/944444444444444446",
+          "type": 10,
+        },
+        {
+          "content": "-# 更新: <t:1790899200:R>",
+          "type": 10,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:1",
+              "options": [
+                {
+                  "default": false,
+                  "emoji": {
+                    "name": "🏠",
+                  },
+                  "label": "ホーム",
+                  "value": "overview",
+                },
+                {
+                  "default": false,
+                  "emoji": {
+                    "name": "👋",
+                  },
+                  "label": "新しいメンバー",
+                  "value": "newMembers",
+                },
+                {
+                  "default": true,
+                  "emoji": {
+                    "name": "📥",
+                  },
+                  "label": "対応",
+                  "value": "attention",
+                },
+                {
+                  "default": false,
+                  "emoji": {
+                    "name": "📊",
+                  },
+                  "label": "分析",
+                  "value": "analysis",
+                },
+                {
+                  "default": false,
+                  "emoji": {
+                    "name": "🧪",
+                  },
+                  "label": "結果",
+                  "value": "results",
+                },
+                {
+                  "default": false,
+                  "emoji": {
+                    "name": "⚙️",
+                  },
+                  "label": "設定",
+                  "value": "settings",
+                },
+              ],
+              "placeholder": "ページを選ぶ",
+              "type": 3,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:2",
+              "disabled": true,
+              "emoji": undefined,
+              "label": "前へ",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:3",
+              "disabled": false,
+              "emoji": undefined,
+              "label": "スタッフ確認済み",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:4",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "後で再確認",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:5",
+              "disabled": undefined,
+              "emoji": {
+                "name": "✅",
+              },
+              "label": "対応済み",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:6",
+              "disabled": true,
+              "emoji": undefined,
+              "label": "次へ",
+              "style": 2,
+              "type": 2,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:7",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "↻ 更新",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "label": "Webで詳しく見る",
+              "style": 5,
+              "type": 2,
+              "url": "https://nexus.example/dashboard",
+            },
+          ],
+          "type": 1,
+        },
+      ],
+      "type": 17,
+    },
+  ],
+  "flags": 32768,
+}
+`;
+
+exports[`Discord Components V2 alpha.5 no-data 1`] = `
+{
+  "allowed_mentions": {
+    "parse": [],
+  },
+  "components": [
+    {
+      "accent_color": 3908957,
+      "components": [
+        {
+          "content": "## サーバー概要",
+          "type": 10,
+        },
+        {
+          "content": "**対応待ち**
+0 件",
+          "type": 10,
+        },
+        {
+          "content": "**今日、新しく参加**
+3
+
+**今日、最初の交流を確認**
+2",
+          "type": 10,
+        },
+        {
+          "content": "**直接返信**
+対象者がいません
+対象: 0 · 計測範囲: 完全",
+          "type": 10,
+        },
+        {
+          "content": "-# 2026-09-02 — 2026-10-02 · 確認できるチャンネル 1 / 1",
+          "type": 10,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:1",
+              "disabled": undefined,
+              "emoji": {
+                "name": "📥",
+              },
+              "label": "対応を見る",
+              "style": 1,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:2",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "新規メンバー",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:3",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "分析",
+              "style": 2,
+              "type": 2,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:4",
+              "options": [
+                {
+                  "default": true,
+                  "label": "ホーム",
+                  "value": "overview",
+                },
+                {
+                  "default": false,
+                  "label": "新しいメンバー",
+                  "value": "newMembers",
+                },
+                {
+                  "default": false,
+                  "label": "対応",
+                  "value": "attention",
+                },
+                {
+                  "default": false,
+                  "label": "分析",
+                  "value": "analysis",
+                },
+                {
+                  "default": false,
+                  "label": "結果",
+                  "value": "results",
+                },
+                {
+                  "default": false,
+                  "label": "設定",
+                  "value": "settings",
+                },
+              ],
+              "placeholder": "ページを選ぶ",
+              "type": 3,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:5",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "コミュニティモデル",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:6",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "更新",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "label": "Dashboard",
+              "style": 5,
+              "type": 2,
+              "url": "https://nexus.example/dashboard",
+            },
+          ],
+          "type": 1,
+        },
+      ],
+      "type": 17,
+    },
+  ],
+  "flags": 32768,
+}
+`;
+
+exports[`Discord Components V2 alpha.5 partial 1`] = `
+{
+  "allowed_mentions": {
+    "parse": [],
+  },
+  "components": [
+    {
+      "accent_color": 3908957,
+      "components": [
+        {
+          "content": "## サーバー概要",
+          "type": 10,
+        },
+        {
+          "content": "**対応待ち**
+0 件",
+          "type": 10,
+        },
+        {
+          "content": "**今日、新しく参加**
+3
+
+**今日、最初の交流を確認**
+2",
+          "type": 10,
+        },
+        {
+          "content": "**直接返信**
+24
+対象: 37 · 計測範囲: 一部",
+          "type": 10,
+        },
+        {
+          "content": "**一定時間のボイス同席**
+24
+対象: 37 · 計測範囲: 一部",
+          "type": 10,
+        },
+        {
+          "content": "-# 2026-09-02 — 2026-10-02 · 確認できるチャンネル 2 / 2",
+          "type": 10,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:1",
+              "disabled": undefined,
+              "emoji": {
+                "name": "📥",
+              },
+              "label": "対応を見る",
+              "style": 1,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:2",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "新規メンバー",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:3",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "分析",
+              "style": 2,
+              "type": 2,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:4",
+              "options": [
+                {
+                  "default": true,
+                  "label": "ホーム",
+                  "value": "overview",
+                },
+                {
+                  "default": false,
+                  "label": "新しいメンバー",
+                  "value": "newMembers",
+                },
+                {
+                  "default": false,
+                  "label": "対応",
+                  "value": "attention",
+                },
+                {
+                  "default": false,
+                  "label": "分析",
+                  "value": "analysis",
+                },
+                {
+                  "default": false,
+                  "label": "結果",
+                  "value": "results",
+                },
+                {
+                  "default": false,
+                  "label": "設定",
+                  "value": "settings",
+                },
+              ],
+              "placeholder": "ページを選ぶ",
+              "type": 3,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:5",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "コミュニティモデル",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:6",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "更新",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "label": "Dashboard",
+              "style": 5,
+              "type": 2,
+              "url": "https://nexus.example/dashboard",
+            },
+          ],
+          "type": 1,
+        },
+      ],
+      "type": 17,
+    },
+  ],
+  "flags": 32768,
+}
+`;
+
+exports[`Discord Components V2 alpha.5 small 1`] = `
+{
+  "allowed_mentions": {
+    "parse": [],
+  },
+  "components": [
+    {
+      "accent_color": 3908957,
+      "components": [
+        {
+          "content": "## サーバー概要",
+          "type": 10,
+        },
+        {
+          "content": "**対応待ち**
+0 件",
+          "type": 10,
+        },
+        {
+          "content": "**今日、新しく参加**
+3
+
+**今日、最初の交流を確認**
+2",
+          "type": 10,
+        },
+        {
+          "content": "**直接返信**
+24
+対象: 37 · 計測範囲: 完全",
+          "type": 10,
+        },
+        {
+          "content": "-# 2026-09-02 — 2026-10-02 · 確認できるチャンネル 1 / 1",
+          "type": 10,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:1",
+              "disabled": undefined,
+              "emoji": {
+                "name": "📥",
+              },
+              "label": "対応を見る",
+              "style": 1,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:2",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "新規メンバー",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:3",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "分析",
+              "style": 2,
+              "type": 2,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:4",
+              "options": [
+                {
+                  "default": true,
+                  "label": "ホーム",
+                  "value": "overview",
+                },
+                {
+                  "default": false,
+                  "label": "新しいメンバー",
+                  "value": "newMembers",
+                },
+                {
+                  "default": false,
+                  "label": "対応",
+                  "value": "attention",
+                },
+                {
+                  "default": false,
+                  "label": "分析",
+                  "value": "analysis",
+                },
+                {
+                  "default": false,
+                  "label": "結果",
+                  "value": "results",
+                },
+                {
+                  "default": false,
+                  "label": "設定",
+                  "value": "settings",
+                },
+              ],
+              "placeholder": "ページを選ぶ",
+              "type": 3,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:5",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "コミュニティモデル",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:6",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "更新",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "label": "Dashboard",
+              "style": 5,
+              "type": 2,
+              "url": "https://nexus.example/dashboard",
+            },
+          ],
+          "type": 1,
+        },
+      ],
+      "type": 17,
+    },
+  ],
+  "flags": 32768,
+}
+`;
+
+exports[`Discord Components V2 alpha.5 support 1`] = `
+{
+  "allowed_mentions": {
+    "parse": [],
+  },
+  "components": [
+    {
+      "accent_color": 5793266,
+      "components": [
+        {
+          "content": "## NEXUS · コミュニティ管理
+-# 対応 · 新しいメンバーの状態を確認します",
+          "type": 10,
+        },
+        {
+          "divider": true,
+          "spacing": 1,
+          "type": 14,
+        },
+        {
+          "content": "**⏳ 対応 · 1 / 1**
+<#944444444444444445> · 41分
+返信待ち",
+          "type": 10,
+        },
+        {
+          "content": "**判定ルール**
+質問の投稿に他の人の応答をまだ確認できません。
+参加後72時間以内のメンバーの投稿に、20分間直接返信を確認できないと対象にします。",
+          "type": 10,
+        },
+        {
+          "content": "**投稿を見る**
+https://discord.com/channels/911111111111111111/944444444444444445/944444444444444446",
+          "type": 10,
+        },
+        {
+          "content": "-# 更新: <t:1790899200:R>",
+          "type": 10,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:1",
+              "options": [
+                {
+                  "default": false,
+                  "emoji": {
+                    "name": "🏠",
+                  },
+                  "label": "ホーム",
+                  "value": "overview",
+                },
+                {
+                  "default": false,
+                  "emoji": {
+                    "name": "👋",
+                  },
+                  "label": "新しいメンバー",
+                  "value": "newMembers",
+                },
+                {
+                  "default": true,
+                  "emoji": {
+                    "name": "📥",
+                  },
+                  "label": "対応",
+                  "value": "attention",
+                },
+                {
+                  "default": false,
+                  "emoji": {
+                    "name": "📊",
+                  },
+                  "label": "分析",
+                  "value": "analysis",
+                },
+                {
+                  "default": false,
+                  "emoji": {
+                    "name": "🧪",
+                  },
+                  "label": "結果",
+                  "value": "results",
+                },
+                {
+                  "default": false,
+                  "emoji": {
+                    "name": "⚙️",
+                  },
+                  "label": "設定",
+                  "value": "settings",
+                },
+              ],
+              "placeholder": "ページを選ぶ",
+              "type": 3,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:2",
+              "disabled": true,
+              "emoji": undefined,
+              "label": "前へ",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:3",
+              "disabled": false,
+              "emoji": undefined,
+              "label": "スタッフ確認済み",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:4",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "後で再確認",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:5",
+              "disabled": undefined,
+              "emoji": {
+                "name": "✅",
+              },
+              "label": "対応済み",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:6",
+              "disabled": true,
+              "emoji": undefined,
+              "label": "次へ",
+              "style": 2,
+              "type": 2,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:7",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "↻ 更新",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "label": "Webで詳しく見る",
+              "style": 5,
+              "type": 2,
+              "url": "https://nexus.example/dashboard",
+            },
+          ],
+          "type": 1,
+        },
+      ],
+      "type": 17,
+    },
+  ],
+  "flags": 32768,
+}
+`;
+
+exports[`Discord Components V2 alpha.5 text 1`] = `
+{
+  "allowed_mentions": {
+    "parse": [],
+  },
+  "components": [
+    {
+      "accent_color": 5793266,
+      "components": [
+        {
+          "content": "## NEXUS · コミュニティ管理
+-# 対応 · 新しいメンバーの状態を確認します",
+          "type": 10,
+        },
+        {
+          "divider": true,
+          "spacing": 1,
+          "type": 14,
+        },
+        {
+          "content": "**⏳ 対応 · 1 / 1**
+<#944444444444444445> · 41分
+返信待ち",
+          "type": 10,
+        },
+        {
+          "content": "**判定ルール**
+設定した時間内に、他の人からの直接返信をまだ確認できません。
+参加後72時間以内のメンバーの投稿に、20分間直接返信を確認できないと対象にします。",
+          "type": 10,
+        },
+        {
+          "content": "**投稿を見る**
+https://discord.com/channels/911111111111111111/944444444444444445/944444444444444446",
+          "type": 10,
+        },
+        {
+          "content": "-# 更新: <t:1790899200:R>",
+          "type": 10,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:1",
+              "options": [
+                {
+                  "default": false,
+                  "emoji": {
+                    "name": "🏠",
+                  },
+                  "label": "ホーム",
+                  "value": "overview",
+                },
+                {
+                  "default": false,
+                  "emoji": {
+                    "name": "👋",
+                  },
+                  "label": "新しいメンバー",
+                  "value": "newMembers",
+                },
+                {
+                  "default": true,
+                  "emoji": {
+                    "name": "📥",
+                  },
+                  "label": "対応",
+                  "value": "attention",
+                },
+                {
+                  "default": false,
+                  "emoji": {
+                    "name": "📊",
+                  },
+                  "label": "分析",
+                  "value": "analysis",
+                },
+                {
+                  "default": false,
+                  "emoji": {
+                    "name": "🧪",
+                  },
+                  "label": "結果",
+                  "value": "results",
+                },
+                {
+                  "default": false,
+                  "emoji": {
+                    "name": "⚙️",
+                  },
+                  "label": "設定",
+                  "value": "settings",
+                },
+              ],
+              "placeholder": "ページを選ぶ",
+              "type": 3,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:2",
+              "disabled": true,
+              "emoji": undefined,
+              "label": "前へ",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:3",
+              "disabled": false,
+              "emoji": undefined,
+              "label": "スタッフ確認済み",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:4",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "後で再確認",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:5",
+              "disabled": undefined,
+              "emoji": {
+                "name": "✅",
+              },
+              "label": "対応済み",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:6",
+              "disabled": true,
+              "emoji": undefined,
+              "label": "次へ",
+              "style": 2,
+              "type": 2,
+            },
+          ],
+          "type": 1,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:7",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "↻ 更新",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "label": "Webで詳しく見る",
+              "style": 5,
+              "type": 2,
+              "url": "https://nexus.example/dashboard",
+            },
+          ],
+          "type": 1,
+        },
+      ],
+      "type": 17,
+    },
+  ],
+  "flags": 32768,
+}
+`;
+
+exports[`error payload describes only the known failure and returns to its context 1`] = `
+{
+  "allowed_mentions": {
+    "parse": [],
+  },
+  "components": [
+    {
+      "accent_color": 15548997,
+      "components": [
+        {
+          "content": "## Discordの応答を確認できませんでした
+-# Discordへのリクエストが時間内に完了しませんでした。少し待って状態を確認してください。",
+          "type": 10,
+        },
+        {
+          "divider": true,
+          "spacing": 1,
+          "type": 14,
+        },
+        {
+          "content": "**操作結果**
+変更が行われたか確認できません。同じ操作を繰り返す前に最新状態を確認してください。",
+          "type": 10,
+        },
+        {
+          "content": "**エラー参照ID**
+**NXS-000000000001**",
+          "type": 10,
+        },
+        {
+          "components": [
+            {
+              "custom_id": "nxs:fixture:error",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "再試行",
+              "style": 1,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:error",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "状態を確認",
+              "style": 2,
+              "type": 2,
+            },
+            {
+              "custom_id": "nxs:fixture:error",
+              "disabled": undefined,
+              "emoji": undefined,
+              "label": "対応に戻る",
+              "style": 2,
+              "type": 2,
+            },
+          ],
+          "type": 1,
+        },
+      ],
+      "type": 17,
+    },
+  ],
+  "flags": 32768,
+}
+`;

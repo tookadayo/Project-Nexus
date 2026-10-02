@@ -138,7 +138,7 @@ for (const [index, fixture] of representativeProfiles.entries())
       previews[`${fixture.name}-${locale}-${view}`] = {
         html,
         discord,
-        expected: [...fixture.metricKeys],
+        expected: [...fixture.metricKeys].slice(0,view===0?adaptive.volume==='HIGH_VOLUME'?3:2:20),
       };
     }
 process.stdout.write(JSON.stringify(previews));

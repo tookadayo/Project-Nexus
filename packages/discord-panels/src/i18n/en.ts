@@ -1,5 +1,10 @@
 import {webEn} from './web';
 export const en={...webEn,
+ 'operations.journeys': 'Journeys',
+ 'operations.model': 'Community Model',
+ 'operations.integration': 'Discord Integration',
+ 'operations.coverage': 'Data Coverage',
+ 'operations.collection': 'Collection Health',
  'control.model':'Community model',
  'polish.team':'Team','polish.goals':'Goals','polish.measurementScope':'Measurement scope','polish.weekIntro':'Results for members who completed the observation window.',
  'control.main':'Settings overview',

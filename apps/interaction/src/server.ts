@@ -43,7 +43,7 @@ export async function handleGatewayInteraction(input:Interaction,opts:{db:Databa
     const roles=input.member&&'roles' in input.member?Array.isArray(input.member.roles)?input.member.roles:[...input.member.roles.cache.keys()]:[];
     if(!canOperatePanel(input.memberPermissions?.bitfield.toString()??'0',roles,[settings.adminRoleId,...settings.managerRoleIds]))throw new Error('ADMIN_REQUIRED');
     if(intent.action==='controlModelEdit'){const id=await opts.components.issue(opts.db,s,{...intent,action:'controlModelSave'},opts.vault.hash(s,userId));return communityModal(id,locale,settings.communityModel);}
-    if(intent.action==='controlNotificationEdit'){const id=await opts.components.issue(opts.db,s,{...intent,action:'controlNotificationSave'},opts.vault.hash(s,userId));return notificationModal(id,locale,settings.firstResponseMinutes,settings.helperEnabled);}
+    if(intent.action==='controlNotificationEdit'){const id=await opts.components.issue(opts.db,s,{...intent,action:'controlNotificationSave'},opts.vault.hash(s,userId));return notificationModal(id,locale,settings.firstResponseMinutes);}
     const id=await opts.components.issue(opts.db,s,{...intent,action:'editNodeSave'},opts.vault.hash(s,userId));
     return {title:t(locale,'modal.title').slice(0,45),custom_id:id,components:[{type:1 as const,components:[{type:4 as const,style:1 as const,custom_id:'question',label:t(locale,'modal.question').slice(0,45),value:String(intent.question),required:true,max_length:500}]},{type:1 as const,components:[{type:4 as const,style:2 as const,custom_id:'options',label:t(locale,'modal.options').slice(0,45),value:String(intent.options),required:true,max_length:2000}]}]};
    })(),1200);
@@ -87,7 +87,7 @@ export function createInteractionServer(opts:{db:Database,vault:IdentityVault,pu
     if(intent.action!=='editNodeOpen'&&intent.action!=='controlNotificationEdit'&&intent.action!=='controlModelEdit')return {type:4,data:{flags:64,content:t(locale,'modal.expired')}};
     if(!canOperatePanel(input.member.permissions,input.member.roles,[settings.adminRoleId,...settings.managerRoleIds]))return {type:4,data:{flags:64,content:t(locale,'modal.admin')}};
     if(intent.action==='controlModelEdit'){const id=await opts.components!.issue(tx,s,{...intent,action:'controlModelSave'},opts.vault.hash(s,input.member.user.id));return {type:9,data:communityModal(id,locale,settings.communityModel)};}
-    if(intent.action==='controlNotificationEdit'){const id=await opts.components!.issue(tx,s,{...intent,action:'controlNotificationSave'},opts.vault.hash(s,input.member.user.id));return {type:9,data:notificationModal(id,locale,settings.firstResponseMinutes,settings.helperEnabled)};}
+    if(intent.action==='controlNotificationEdit'){const id=await opts.components!.issue(tx,s,{...intent,action:'controlNotificationSave'},opts.vault.hash(s,input.member.user.id));return {type:9,data:notificationModal(id,locale,settings.firstResponseMinutes)};}
     const customId=await opts.components!.issue(tx,s,{...intent,action:'editNodeSave'},opts.vault.hash(s,input.member.user.id));
     return {type:9,data:{title:t(locale,'modal.title').slice(0,45),custom_id:customId,components:[
      {type:1,components:[{type:4,style:1,custom_id:'question',label:t(locale,'modal.question').slice(0,45),value:String(intent.question),required:true,max_length:500}]},

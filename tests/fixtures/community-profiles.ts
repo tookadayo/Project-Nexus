@@ -1,3 +1,6 @@
+import { metricEvidence } from "../../packages/shared/src/metric-evidence";
+import { measurementDefinition } from "../../packages/shared/src/measurement-definitions";
+import { recipeDefinition } from "../../packages/shared/src/measurement-recipes";
 import {
   communityModelSchema,
   type CommunityModel,
@@ -79,6 +82,14 @@ export const representativeProfiles = [
     eligible: 15,
     metricKeys: ["directReplies"],
   },
+  {
+    name: "creator-fan",
+    modes: ["CREATOR_FAN"],
+    types: [0, 5],
+    members: 500,
+    eligible: 35,
+    metricKeys: ["activeReactions", "pollParticipants", "eventSubscriptions"],
+  },
 ] as const;
 export function representativeSource(index: number): DiscoverySource {
   const fixture = representativeProfiles[index]!,
@@ -156,7 +167,58 @@ export function representativeUi(index: number): AdaptivePresentation {
       ? { surface: "FORUM_POST", purpose: "SUPPORT" }
       : {}),
   }));
+  for (const metric of metrics) {
+    const definition = measurementDefinition(metric.key);
+    metric.evidence = metricEvidence({
+      metricKey: metric.key,
+      definitionVersion: definition.version,
+      definition: metric.definition,
+      value: metric.count,
+      numerator: metric.count,
+      denominator: metric.denominator,
+      sampleSize: metric.sample,
+      coverageState: "PARTIAL",
+      requiredSurfaces: definition.surfaces,
+      evidenceSources: ["synthetic-fixture"],
+      coverageReasons: ["PRIVATE_THREADS_PARTIAL"],
+      windowStart: "2026-09-02T00:00:00Z",
+      windowEnd: "2026-10-02T00:00:00Z",
+      collectionEpochIds: ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
+    });
+  }
+  const definition = recipeDefinition(
+    profile,
+    { mode: "all", channelIds: [] },
+    { retainedFromDay: 7, retainedThroughDay: 14 },
+  );
   return {
+    recipe: {
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      revision: 1,
+      preset: definition.preset,
+      definitionVersion: definition.definitionVersion,
+      definition,
+      createdAt: "2026-09-01T00:00:00Z",
+    },
+    integration: {
+      gateway: "CONNECTED",
+      lastGatewayAt: "2026-10-02T00:00:00Z",
+      intents: {
+        members: "AVAILABLE",
+        messages: "AVAILABLE",
+        reactions: "AVAILABLE",
+        polls: "AVAILABLE",
+        voice: "AVAILABLE",
+        scheduledEvents: "AVAILABLE",
+        autoMod: "AVAILABLE",
+      },
+      rest: "AVAILABLE",
+      capabilityFresh: true,
+      lastSuccessfulRefresh: "2026-10-02T00:00:00Z",
+      lastRefreshFailure: null,
+      lastErrorCategory: null,
+      severe: false,
+    },
     profile,
     capabilities: snapshot,
     volume:

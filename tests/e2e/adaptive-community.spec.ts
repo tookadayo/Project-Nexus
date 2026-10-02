@@ -83,6 +83,7 @@ test("community settings save multiple purposes with the current revision and qu
   await page.goto("/dashboard");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   const form = page.getByTestId("community-model-settings");
+  await form.locator("summary").filter({hasText:"Advanced purposes"}).click();
   await form.getByRole("checkbox", { name: /Social conversation/ }).check();
   await form.getByRole("checkbox", { name: /Support \/ Q&A/ }).check();
   const saved = page.waitForResponse(

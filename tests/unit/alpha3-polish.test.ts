@@ -98,6 +98,6 @@ it('treats received reactions as weak, private, detailed observations',()=>{
  expect(signalRegistry['reaction.received']).toMatchObject({active:false,retentionCategory:'detailed',source:'projector'});
  expect(()=>validateSignal('reaction.received',{messageId:'111111111111111111',channelId:'222222222222222222',content:'forbidden'})).toThrow();
  expect(Components.kind('private:opaque')).toBe('ephemeral');
- expect(notificationModal('modal','en',20,true).components).toHaveLength(2);
+ expect(notificationModal('modal','en',20,true).components).toHaveLength(1);
  expect(pricingMetadata).toMatchObject({currencyDecision:'pending',publishPrices:false});
 });

@@ -32,7 +32,7 @@ async function setup(){
  await lifecycle.process(normalize({t:'CHANNEL_CREATE',s:1000,d:{guild_id:s.guildId,id:channel,type:0}},0,'polish',vault,now)!);
  await lifecycle.process(normalize({t:'MESSAGE_CREATE',s:1,d:{guild_id:s.guildId,id:messageId,channel_id:channel,author:{id:newcomer},timestamp:joined.toISOString(),type:0,content:'never retain'}},0,'polish',vault)!);
  await lifecycle.process({...s,shardId:0,gatewaySessionId:'health',sequence:1,context:'PRODUCTION',kind:'telemetry.heartbeat',at:now.toISOString(),requestedIntents:['members','messages','reactions','polls','voice','scheduledEvents','autoMod']});
- await sql`DELETE FROM telemetry_health WHERE ${tenant(s)} AND reason='heartbeat missing'`.execute(db);
+ await sql`DELETE FROM telemetry_health WHERE ${tenant(s)} AND reason IN ('heartbeat missing','Gateway observation gap')`.execute(db);
  await sql`INSERT INTO settings_panels VALUES(${s.organizationId}::uuid,${s.guildId},${channel},${root})`.execute(db);
  return {s,settings,discord,tokens,lifecycle,worker,now,joined};
 }
@@ -67,9 +67,9 @@ it('purges received reaction observations using the existing detailed retention 
 it.each(['reply','voice'] as const)('recognizes a strong %s connection while reactions remain weak',async kind=>{
  const ctx=await setup();await ctx.lifecycle.process(reaction(ctx,helper,2));
  if(kind==='reply')await ctx.lifecycle.process(normalize({t:'MESSAGE_CREATE',s:3,d:{guild_id:ctx.s.guildId,id:'744444444444444445',channel_id:channel,author:{id:helper},timestamp:ctx.now.toISOString(),type:19,message_reference:{message_id:messageId}}},0,'polish',vault)!);
- else{await ctx.lifecycle.process(normalize({t:'CHANNEL_CREATE',s:100,d:{guild_id:ctx.s.guildId,id:channel,type:2}},0,'polish',vault,ctx.now)!);await ctx.settings.update(ctx.s,actor,(await ctx.settings.get(ctx.s)).revision,{communityModel:{modes:['VOICE'],confirmed:true,channels:[],forumTags:[],voiceThresholdSeconds:300}});for(const [i,user_id] of [newcomer,helper].entries())await ctx.lifecycle.process(normalize({t:'VOICE_STATE_UPDATE',s:3+i,d:{guild_id:ctx.s.guildId,user_id,channel_id:channel}},0,'polish',vault,ctx.now)!);ctx.now=new Date(ctx.now.getTime()+301000);await db.transaction().execute(async tx=>tickVoice(tx,ctx.s,await ctx.settings.get(ctx.s),ctx.now));}
+ else{await ctx.lifecycle.process(normalize({t:'CHANNEL_CREATE',s:100,d:{guild_id:ctx.s.guildId,id:channel,type:2}},0,'polish',vault,ctx.now)!);await ctx.settings.update(ctx.s,actor,(await ctx.settings.get(ctx.s)).revision,{communityModel:{modes:['VOICE'],confirmed:true,channels:[],forumTags:[],voiceThresholdSeconds:300}});for(const [i,user_id] of [newcomer,helper].entries())await ctx.lifecycle.process(normalize({t:'VOICE_STATE_UPDATE',s:3+i,d:{guild_id:ctx.s.guildId,user_id,channel_id:channel}},0,'polish',vault,ctx.now)!);for(let seconds=0;seconds<=300;seconds+=60)await ctx.lifecycle.process({...ctx.s,shardId:0,gatewaySessionId:'polish-heartbeat',sequence:seconds+200,context:'PRODUCTION',kind:'telemetry.heartbeat',at:new Date(ctx.now.getTime()+seconds*1000).toISOString(),requestedIntents:['members','voice','messages']});ctx.now=new Date(ctx.now.getTime()+301000);await db.transaction().execute(async tx=>tickVoice(tx,ctx.s,await ctx.settings.get(ctx.s),ctx.now));}
  await ctx.lifecycle.process({...ctx.s,shardId:0,gatewaySessionId:'health',sequence:2,context:'PRODUCTION',kind:'telemetry.heartbeat',at:ctx.now.toISOString(),requestedIntents:['members','messages','reactions','polls','voice','scheduledEvents','autoMod']});
- await sql`DELETE FROM telemetry_health WHERE ${tenant(ctx.s)} AND reason='heartbeat missing'`.execute(db);
+ await sql`DELETE FROM telemetry_health WHERE ${tenant(ctx.s)} AND reason IN ('heartbeat missing','Gateway observation gap')`.execute(db);
  const view=await new CommunityService(db,ctx.settings).overview(ctx.s,30,ctx.now);
  expect(view.daily.todayConnected).toBe(1);expect(view.reactionsReceived).toBe(1);
 });
@@ -90,7 +90,7 @@ it('opens private settings, binds follow-up controls to the actor and panel, and
  await expect(ctx.tokens.read(db,ctx.s,controls[0]!,vault.hash(ctx.s,newcomer))).rejects.toThrow('COMPONENT_OWNER');
  const save=await ctx.tokens.issue(db,ctx.s,{action:'controlNotificationSave',privateSettings:true,panelMessageId:root,revision},vault.hash(ctx.s,helper));
  await ctx.worker.dispatch(ctx.s,{...job(),customId:save,fields:{minutes:'35',enabled:'ON'},privateResponse:true});
- expect(await ctx.settings.get(ctx.s)).toMatchObject({firstResponseMinutes:35,helperEnabled:true});
+ expect(await ctx.settings.get(ctx.s)).toMatchObject({firstResponseMinutes:35,helperEnabled:false});
  await expect(ctx.worker.dispatch(ctx.s,{...job(),customId:save,fields:{minutes:'45',enabled:'OFF'},privateResponse:true})).rejects.toThrow('REVISION_CONFLICT');
  await expect(ctx.worker.dispatch(ctx.s,{...job(newcomer),messageId:root,customId:open,privateResponse:true})).rejects.toThrow('ADMIN_REQUIRED');
  await sql`UPDATE settings_panels SET message_id='766666666666666667' WHERE ${tenant(ctx.s)}`.execute(db);
@@ -105,7 +105,7 @@ it('opens notification modals through signed HTTP and defers private settings wi
  }
  const modal=await ctx.tokens.issue(db,ctx.s,{action:'controlNotificationEdit',privateSettings:true,panelMessageId:root,revision:(await ctx.settings.get(ctx.s)).revision},vault.hash(ctx.s,helper));
  const response=await send(modal);expect(response.json()).toMatchObject({type:9,data:{components:expect.any(Array)}});
- expect(response.json().data.components).toHaveLength(2);
+ expect(response.json().data.components).toHaveLength(1);
  const privateToken=await ctx.tokens.issue(db,ctx.s,{action:'controlSettings',section:'goals',privateSettings:true},null);
  expect((await send(privateToken)).json()).toEqual({type:5,data:{flags:64}});
  await new Promise(resolve=>setTimeout(resolve,40));await app.close();
