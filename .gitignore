@@ -12,3 +12,10 @@ coverage/
 *.tsbuildinfo
 
 .pnpm-store/
+
+# Reproducible development outputs (intentional fixtures remain tracked).
+build/
+*.log
+*.tmp
+*.bak
+*.orig

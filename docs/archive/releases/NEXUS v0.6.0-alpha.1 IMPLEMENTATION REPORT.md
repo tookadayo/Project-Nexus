@@ -1,3 +1,5 @@
+> Historical release evidence. Preserved from its original release; current contracts are indexed in [Documentation](../../README.md) and [Stripe readiness](../../billing/stripe-readiness.md).
+
 # NEXUS v0.6.0-alpha.1 Implementation Report
 
 ## Version / Build
@@ -44,15 +46,15 @@
 
 ## Tests / CI / runtime
 
-| Check | Result |
-| --- | --- |
-| Lint / typecheck / unit | PASS。単体 121 件 |
-| Integration | PASS。58 件。Setup、Role、Panel 移動、Attention、改善の確認を含む |
-| Web E2E | PASS。8 件。6ページ導線と ja/en を確認 |
-| Build | PASS。18 ワークスペース |
-| Windows Runtime | PASS。起動・停止・再起動と PostgreSQL orphan 回帰を含む |
-| Performance | PASS。10k: 941 ms、50k: 1,455 ms（最終ローカル測定の API 応答時間。fixture 準備を含むテスト全体は約93秒） |
-| Migration | PASS。既存ローカル DB へ追加 migration を適用 |
+| Check                   | Result                                                                                                    |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- |
+| Lint / typecheck / unit | PASS。単体 121 件                                                                                         |
+| Integration             | PASS。58 件。Setup、Role、Panel 移動、Attention、改善の確認を含む                                         |
+| Web E2E                 | PASS。8 件。6ページ導線と ja/en を確認                                                                    |
+| Build                   | PASS。18 ワークスペース                                                                                   |
+| Windows Runtime         | PASS。起動・停止・再起動と PostgreSQL orphan 回帰を含む                                                   |
+| Performance             | PASS。10k: 941 ms、50k: 1,455 ms（最終ローカル測定の API 応答時間。fixture 準備を含むテスト全体は約93秒） |
+| Migration               | PASS。既存ローカル DB へ追加 migration を適用                                                             |
 
 上記はローカルで実行した CI 相当の結果です。GitHub Actions の実行結果は、このレポート作成時点では未確認です。Windows STATUS では DB、Redis、API、Web、Bot 接続を確認しましたが、既に稼働中のプロセスを本コミットへ再起動していないため、実Discordの新UI動作確認には該当しません。
 

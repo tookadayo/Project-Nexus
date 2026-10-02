@@ -6,7 +6,7 @@ Current commercial behavior supersedes the historical plan gates, immediate
 past-due fallback and operator DB grants below. See [pricing v2](../pricing-entitlements.md),
 [billing architecture](../billing-architecture.md) and [safe migration](../plan-migration.md).
 
-料金・機能の実行時source of truthは`packages/settings/src/entitlements.ts`です。価格は今回の製品仕様の設定値であり、決済を実行したものではありません。
+料金・機能の実行時source of truthは`packages/settings/src/billing/entitlements.ts`です。価格は今回の製品仕様の設定値であり、決済を実行したものではありません。
 
 | Plan       | 月額USD | 含むMTM | Guild上限の定義 |
 | ---------- | ------: | ------: | --------------: |

@@ -23,9 +23,9 @@ authorization and audit. 036 adds campaigns, hashed codes, transactional
 redemptions and persistent attempt limits. 037 adds leased reconciliation jobs and
 immutable custom recipe keys. Existing usage history is not rewritten.
 
-Providers are EXTERNAL, DISCORD and MANUAL. The interface separates checkout,
+Providers are STRIPE, DISCORD and MANUAL. Historical generic references are read-only EXTERNAL_LEGACY. The interface separates checkout,
 preview, cancellation, reconciliation, verified event parsing and subscription
-inspection. EXTERNAL/MANUAL are safe unconfigured adapters. The external webhook
+inspection. STRIPE/MANUAL are safe unconfigured adapters. The Stripe webhook
 route returns 503 and does not accept an unsigned event or invent a successful
 payment. The generic HMAC helper is a building block, not a claimed Stripe or
 Discord webhook implementation.

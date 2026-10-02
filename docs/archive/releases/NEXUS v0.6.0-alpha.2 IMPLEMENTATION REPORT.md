@@ -1,3 +1,5 @@
+> Historical release evidence. Preserved from its original release; current contracts are indexed in [Documentation](../../README.md) and [Stripe readiness](../../billing/stripe-readiness.md).
+
 # NEXUS v0.6.0-alpha.2 implementation report
 
 ## Implemented and fixed

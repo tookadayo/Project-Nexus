@@ -1,3 +1,5 @@
+> Historical release evidence. Preserved from its original release; current contracts are indexed in [Documentation](../../README.md) and [Stripe readiness](../../billing/stripe-readiness.md).
+
 # NEXUS v0.6.0-alpha.5 QUALITY AUDIT
 
 Audit date: 2026-10-02. Environment: Windows, Node.js 24.18.1, pnpm 11.19.0, isolated PostgreSQL and Redis fixtures.
@@ -67,7 +69,7 @@ Refresh priorities, bounded batches/concurrency, revision coalescing, bounded re
 
 No Message Content Intent, Presence, DM analytics, voice recording/transcription, individual engagement score, moderator ranking, cross-server identity/benchmark, emoji sentiment or semantic content classification is added. IdentityVault remains tenant-scoped. New member-linked state, message observations, daily contributions, inbox, attention and retention tracking participate in deletion and detailed retention. Anonymous eligible counters follow the existing aggregate policy without preserving member identity. Guild deletion removes both personal and anonymous scoped data. Rebuilds respect scoped privacy locks.
 
-Tests cover member/guild deletion, retention, late-worker completion, tenant collisions, content exclusion, and rollup propagation. See [privacy inventory](docs/privacy-data-inventory.md) for stored fields and lifetimes.
+Tests cover member/guild deletion, retention, late-worker completion, tenant collisions, content exclusion, and rollup propagation. See [privacy inventory](../../../docs/privacy-data-inventory.md) for stored fields and lifetimes.
 
 ## Security review
 
@@ -92,17 +94,17 @@ Migrations are additive to the master schema convention. Production-like alpha.3
 
 ## Performance results
 
-Final representative measurements and alpha.4 comparison are recorded in [scaling architecture](docs/scaling-architecture.md). The acceptance goal is at most 20% regression, with the existing timeout assertions retained. The 600-participant Voice fixture proves bounded channel/session processing without pair generation. The independent 200,000-fact rollup fixture checks equivalent activity results and compares raw versus compact reads. Planner statistics are explicitly refreshed after synthetic bulk loading; no production latency guarantee is inferred.
+Final representative measurements and alpha.4 comparison are recorded in [scaling architecture](../../../docs/scaling-architecture.md). The acceptance goal is at most 20% regression, with the existing timeout assertions retained. The 600-participant Voice fixture proves bounded channel/session processing without pair generation. The independent 200,000-fact rollup fixture checks equivalent activity results and compares raw versus compact reads. Planner statistics are explicitly refreshed after synthetic bulk loading; no production latency guarantee is inferred.
 
 ## Discord API compatibility and Channel Obfuscation readiness
 
-Official Discord Developer Documentation and the installed library enums/types were checked on 2026-10-02 for references/forwarding, Guild Channels, obfuscation, Gateway/intents, Threads/Forum/Media, Poll, Voice, Stage, Scheduled Events, AutoMod, Components V2, application commands and rate limits. Sources and support boundaries are in the [capability matrix](docs/discord-capability-matrix.md).
+Official Discord Developer Documentation and the installed library enums/types were checked on 2026-10-02 for references/forwarding, Guild Channels, obfuscation, Gateway/intents, Threads/Forum/Media, Poll, Voice, Stage, Scheduled Events, AutoMod, Components V2, application commands and rate limits. Sources and support boundaries are in the [capability matrix](../../../docs/discord-capability-matrix.md).
 
 Automated Channel Obfuscation readiness: **PASS**. After the announced 2026-11-16 change, visible-only channel lists establish a lower bound, not a complete total/percentage. Older snapshots do not reconstruct a current census. Obfuscated payloads retain only officially usable metadata. Both early visible-only fixtures and pre/post-rollout behavior are tested. Real Developer Portal opt-in and post-rollout omission: **NOT RUN**; the controlled acceptance plan is documented.
 
 ## Privileged Intent readiness
 
-Code fallback and operating documentation: **PASS**. Discord approval and annual renewal: **NOT VERIFIED**. The [runbook](docs/privileged-intent-operations.md) documents Guild Members purpose/data/retention/deletion, excluded privileged intents, intent loss, the published 10,000 unique reachable-user threshold, annual reapplication, owners and review evidence. A local code test does not prove app-level review approval.
+Code fallback and operating documentation: **PASS**. Discord approval and annual renewal: **NOT VERIFIED**. The [runbook](../../../docs/privileged-intent-operations.md) documents Guild Members purpose/data/retention/deletion, excluded privileged intents, intent loss, the published 10,000 unique reachable-user threshold, annual reapplication, owners and review evidence. A local code test does not prove app-level review approval.
 
 ## Web visual QA and Discord payload QA
 
@@ -112,11 +114,11 @@ Components V2 payload tests cover small/large Home, text/support/LFG attention, 
 
 ## Live Discord Acceptance
 
-**PARTIAL**. Read-only bot-member and REST capability discovery passed against the configured development guild: three visible channels, known current total, explicitly returned bot screening/flags. No Discord writes were performed and no IDs/secrets are in the public record. Controlled multi-account activity across seven guild scenarios, real Voice/Stage/events, Gateway reconnect/intent loss, live OAuth and Portal obfuscation were **NOT RUN** because the configured environment lacks the controlled participants and full acceptance setup. See [live acceptance](docs/discord-live-acceptance.md).
+**PARTIAL**. Read-only bot-member and REST capability discovery passed against the configured development guild: three visible channels, known current total, explicitly returned bot screening/flags. No Discord writes were performed and no IDs/secrets are in the public record. Controlled multi-account activity across seven guild scenarios, real Voice/Stage/events, Gateway reconnect/intent loss, live OAuth and Portal obfuscation were **NOT RUN** because the configured environment lacks the controlled participants and full acceptance setup. See [live acceptance](../../../docs/discord-live-acceptance.md).
 
 ## Exact test results
 
-The release's final check totals and durations are recorded in [validation](docs/validation.md). No failing test is skipped and no existing CI step or timeout assertion is removed. PostgreSQL/Redis tests run on this Windows host; the Linux Docker/Testcontainers route and remote GitHub Actions are not represented as locally executed.
+The release's final check totals and durations are recorded in [validation](../../../docs/validation.md). No failing test is skipped and no existing CI step or timeout assertion is removed. PostgreSQL/Redis tests run on this Windows host; the Linux Docker/Testcontainers route and remote GitHub Actions are not represented as locally executed.
 
 ## Known limitations and deferred items
 

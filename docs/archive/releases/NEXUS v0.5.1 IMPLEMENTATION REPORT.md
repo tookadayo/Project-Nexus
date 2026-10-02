@@ -1,3 +1,5 @@
+> Historical release evidence. Preserved from its original release; current contracts are indexed in [Documentation](../../README.md) and [Stripe readiness](../../billing/stripe-readiness.md).
+
 # NEXUS v0.5.1 IMPLEMENTATION REPORT
 
 ## 実装内容
@@ -15,13 +17,13 @@
 
 ## 主な変更ファイル
 
-| 領域 | ファイル |
-| --- | --- |
-| 分析と設定 | `packages/presentation/src/community.ts`、`packages/presentation/src/service.ts`、`packages/settings/src/index.ts`、`packages/lifecycle/src/index.ts` |
-| Discord | `apps/gateway/src/index.ts`、`apps/interaction/src/server.ts`、`scripts/dev.ts`、`packages/events/src/registry.ts` |
+| 領域              | ファイル                                                                                                                                                             |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 分析と設定        | `packages/presentation/src/community.ts`、`packages/presentation/src/service.ts`、`packages/settings/src/index.ts`、`packages/lifecycle/src/index.ts`                |
+| Discord           | `apps/gateway/src/index.ts`、`apps/interaction/src/server.ts`、`scripts/dev.ts`、`packages/events/src/registry.ts`                                                   |
 | API / Web / Panel | `apps/api/src/server.ts`、`apps/api/src/v03.ts`、`apps/web/app/page.tsx`、`apps/web/app/console.tsx`、`apps/web/app/control/route.ts`、`packages/discord-panels/src` |
-| Windows | `runtime-common.ps1`、`start-nexus.ps1`、`stop-nexus.ps1`、`setup-nexus.ps1`、`status-nexus.ps1`、`doctor-nexus.ps1`、`scripts/web.ts` と対応する `.cmd` |
-| 設定と検証 | `.env.example`、`README.md`、`package.json` と各 package、`.github/workflows/ci.yml`、`tests/` |
+| Windows           | `runtime-common.ps1`、`start-nexus.ps1`、`stop-nexus.ps1`、`setup-nexus.ps1`、`status-nexus.ps1`、`doctor-nexus.ps1`、`scripts/web.ts` と対応する `.cmd`             |
+| 設定と検証        | `.env.example`、`README.md`、`package.json` と各 package、`.github/workflows/ci.yml`、`tests/`                                                                       |
 
 ## Migration と互換性
 
@@ -29,14 +31,14 @@
 
 ## 検証結果
 
-| 実行 | 結果 |
-| --- | --- |
-| `corepack pnpm check` | lint、typecheck、単体テスト 97 件通過 |
-| `corepack pnpm install --frozen-lockfile` | 19 workspace の依存関係を変更なしで確認 |
-| `corepack pnpm test:integration` | 46 件通過。旧 migration、チャンネルの異なる人数による秘匿、週次送信の結果不明、参加者比較を含む |
-| `corepack pnpm build` | 18 workspace package の build 通過 |
-| `corepack pnpm test:e2e` | Web 8 件通過。分析範囲の保存と比較画面を含む |
-| `corepack pnpm test:runtime` | Windows の起動、再起動、停止、部分起動失敗、無関係なポート所有者の保護を確認 |
+| 実行                                            | 結果                                                                                                   |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `corepack pnpm check`                           | lint、typecheck、単体テスト 97 件通過                                                                  |
+| `corepack pnpm install --frozen-lockfile`       | 19 workspace の依存関係を変更なしで確認                                                                |
+| `corepack pnpm test:integration`                | 46 件通過。旧 migration、チャンネルの異なる人数による秘匿、週次送信の結果不明、参加者比較を含む        |
+| `corepack pnpm build`                           | 18 workspace package の build 通過                                                                     |
+| `corepack pnpm test:e2e`                        | Web 8 件通過。分析範囲の保存と比較画面を含む                                                           |
+| `corepack pnpm test:runtime`                    | Windows の起動、再起動、停止、部分起動失敗、無関係なポート所有者の保護を確認                           |
 | `NEXUS DOCTOR.cmd -Repair` の相当するスクリプト | この作業環境で `.local/pg` に紐づく残留 PostgreSQL worker を検出・回収し、55432 が解放されたことを確認 |
 
 ## 残っている制限事項

@@ -1,3 +1,5 @@
+> Historical release evidence. Preserved from its original release; current contracts are indexed in [Documentation](../../README.md) and [Stripe readiness](../../billing/stripe-readiness.md).
+
 # NEXUS v0.5.2 Implementation Report
 
 作成日: 2026-09-25（JST）
@@ -60,15 +62,15 @@
 
 ## Tests
 
-| 検証 | 結果 |
-| --- | --- |
-| lint / typecheck | ローカル通過 |
-| Unit | 101件通過 |
-| Integration | 53件通過 |
-| Build | 18パッケージ通過 |
-| Web E2E | 8件通過 |
-| Windows Runtime | 通過 |
-| 10,000 / 50,000人の性能テスト | 2件通過 |
+| 検証                          | 結果             |
+| ----------------------------- | ---------------- |
+| lint / typecheck              | ローカル通過     |
+| Unit                          | 101件通過        |
+| Integration                   | 53件通過         |
+| Build                         | 18パッケージ通過 |
+| Web E2E                       | 8件通過          |
+| Windows Runtime               | 通過             |
+| 10,000 / 50,000人の性能テスト | 2件通過          |
 
 初回 ACK、DB 遅延、権限、古いコンポーネント、チャンネル帰属、退会者、期間、異なる交流相手、週次送信の失敗、パネル移動、孤児 PostgreSQL worker を回帰テストに含めています。
 

@@ -1,3 +1,5 @@
+> Historical release evidence. Preserved from its original release; current contracts are indexed in [Documentation](../../README.md) and [Stripe readiness](../../billing/stripe-readiness.md).
+
 # NEXUS v0.6.0-alpha.3 — Quality, language and authentication audit
 
 Date: 2026-09-30. Base: `e80a983d599ae5d7af4c6bd642757ca4729061ad`, fetched from origin/master before work. Work is on master, with no branch or PR. Version remains alpha.3.
@@ -6,14 +8,14 @@ Date: 2026-09-30. Base: `e80a983d599ae5d7af4c6bd642757ca4729061ad`, fetched from
 
 The initial inspection covered the repository inventory, shared dictionaries, hardcoded JA/EN, displayed backend conditions, and the following surfaces. The same surface inventory was searched again after implementation, including files that were not changed.
 
-| Area | Surfaces and implementation inspected |
-|---|---|
-| Discord | Home, New Members, Attention, Analysis including channel/behavior tabs, Results, Settings and its sections, Setup, Diagnostics, Status, Privacy, Billing, Lifecycle, Improvements, Interventions, Experiments, Cohorts, Onboarding, readiness/activation, error panels, context commands, `/nexus link` and `/nexus unlink`; all `discord-panels/src/views` and worker dispatch |
-| Web public/auth | Landing, Product, Pricing, Support, Privacy, Terms, public navigation/footer, Login, OAuth callback/select/logout, expired/problem states, Servers, Link and server connection |
-| Web management | Overview, New Members, Attention, Insights, Improvements, Results, Goals & Rules, Settings; charts, loading/empty/error states, dashboard data fetches and all control/data/link routes |
-| Runtime | START, STATUS, DOCTOR, STOP, RESTART, runtime manager/common/child output and Windows lifecycle tests. Existing service-specific technical CLI wording is retained |
-| Definitions/security | Canonical analytics, CommunityService classifications and measurements, presentation adapters, settings/entitlement registry, Discord REST behavior, shared permission policy, snapshots, challenge/link storage and audits, privacy deletion, session cookies, Origin and redirect validation |
-| Documentation | README, server verification and configuration/setup documents, release/audit reports and historical docs. Historical reports remain historical; current behavior is documented here and in the updated README |
+| Area                 | Surfaces and implementation inspected                                                                                                                                                                                                                                                                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Discord              | Home, New Members, Attention, Analysis including channel/behavior tabs, Results, Settings and its sections, Setup, Diagnostics, Status, Privacy, Billing, Lifecycle, Improvements, Interventions, Experiments, Cohorts, Onboarding, readiness/activation, error panels, context commands, `/nexus link` and `/nexus unlink`; all `discord-panels/src/views` and worker dispatch |
+| Web public/auth      | Landing, Product, Pricing, Support, Privacy, Terms, public navigation/footer, Login, OAuth callback/select/logout, expired/problem states, Servers, Link and server connection                                                                                                                                                                                                  |
+| Web management       | Overview, New Members, Attention, Insights, Improvements, Results, Goals & Rules, Settings; charts, loading/empty/error states, dashboard data fetches and all control/data/link routes                                                                                                                                                                                         |
+| Runtime              | START, STATUS, DOCTOR, STOP, RESTART, runtime manager/common/child output and Windows lifecycle tests. Existing service-specific technical CLI wording is retained                                                                                                                                                                                                              |
+| Definitions/security | Canonical analytics, CommunityService classifications and measurements, presentation adapters, settings/entitlement registry, Discord REST behavior, shared permission policy, snapshots, challenge/link storage and audits, privacy deletion, session cookies, Origin and redirect validation                                                                                  |
+| Documentation        | README, server verification and configuration/setup documents, release/audit reports and historical docs. Historical reports remain historical; current behavior is documented here and in the updated README                                                                                                                                                                   |
 
 ## Findings and changes
 
@@ -62,17 +64,17 @@ Targeted checks preceded the final full validation: auth/snapshot/verification r
 
 The delivery report includes the final pushed head's GitHub Actions result. This table records local execution, not an earlier Actions run.
 
-| Check | Result |
-|---|---|
-| lint / typecheck | Passed |
-| Unit | 187 passed in 21 files |
-| PostgreSQL Integration | 90 passed in 5 files, including authorization outside locks, concurrent redemption, stale snapshots/confirmations, privacy and diagnostic REST metadata |
-| Build | 18 workspace builds successful, including optimized production Next build |
-| Web E2E | 19 passed; final view-context and Discord screenshot checks also passed after production-bundle fixes |
+| Check                  | Result                                                                                                                                                            |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| lint / typecheck       | Passed                                                                                                                                                            |
+| Unit                   | 187 passed in 21 files                                                                                                                                            |
+| PostgreSQL Integration | 90 passed in 5 files, including authorization outside locks, concurrent redemption, stale snapshots/confirmations, privacy and diagnostic REST metadata           |
+| Build                  | 18 workspace builds successful, including optimized production Next build                                                                                         |
+| Web E2E                | 19 passed; final view-context and Discord screenshot checks also passed after production-bundle fixes                                                             |
 | OAuth verification E2E | 6 passed against the production build; issuer denial, generic invalid codes, arbitrary/unverified guilds, disconnect/relink/data preservation and permission loss |
-| Performance | 2 passed; fixture reads for 10,000 members: 581 ms; 50,000 members: 8,868 ms. This is local read-path timing, not a hosted-service SLA |
-| Windows runtime | Manager tests passed |
-| Visual artifacts | `test-results/quality-*.png`, `polish-*.png`, `verification-*.png`; fixture/approximation limitations described above |
+| Performance            | 2 passed; fixture reads for 10,000 members: 581 ms; 50,000 members: 8,868 ms. This is local read-path timing, not a hosted-service SLA                            |
+| Windows runtime        | Manager tests passed                                                                                                                                              |
+| Visual artifacts       | `test-results/quality-*.png`, `polish-*.png`, `verification-*.png`; fixture/approximation limitations described above                                             |
 
 The initial full run exposed a lost command field in diagnostic logs and production bundle exception identity issues. Those were fixed and their affected suites rerun successfully; tests were not weakened to accept the incorrect behavior. Existing copy expectations were updated to match the new definitions and labels. Final CI also caught an old event-signup wording assertion after the screenshot follow-up; it now checks the event/participation/registration meaning across natural Japanese wording. The final view-context check verifies that checking an uncertain save returns to Settings and does not repeat the write.
 

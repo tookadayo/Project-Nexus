@@ -1,3 +1,5 @@
+> Historical release evidence. Preserved from its original release; current contracts are indexed in [Documentation](../../README.md) and [Stripe readiness](../../billing/stripe-readiness.md).
+
 # NEXUS v0.6.0-alpha.3 Implementation Report
 
 ## Implemented
@@ -33,16 +35,16 @@
 
 ## Tests
 
-| Gate | Result |
-| --- | --- |
-| ESLint | Passed |
-| TypeScript | Passed |
-| Unit | 148 passed |
-| Integration | 65 passed, including context permissions and the 72-hour connection boundary |
-| Browser E2E | 12 passed, including public access, responsive layouts, Attention actions, and server-card visual fixture |
-| Performance | 2 passed, including 10,000 and 50,000 member cases |
-| Windows runtime manager | Passed |
-| Next.js production build | Passed |
+| Gate                     | Result                                                                                                    |
+| ------------------------ | --------------------------------------------------------------------------------------------------------- |
+| ESLint                   | Passed                                                                                                    |
+| TypeScript               | Passed                                                                                                    |
+| Unit                     | 148 passed                                                                                                |
+| Integration              | 65 passed, including context permissions and the 72-hour connection boundary                              |
+| Browser E2E              | 12 passed, including public access, responsive layouts, Attention actions, and server-card visual fixture |
+| Performance              | 2 passed, including 10,000 and 50,000 member cases                                                        |
+| Windows runtime manager  | Passed                                                                                                    |
+| Next.js production build | Passed                                                                                                    |
 
 ## Visual QA
 

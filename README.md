@@ -47,9 +47,9 @@ Hosted Web は `NODE_ENV=production`、`NEXUS_WEB_AUTH_MODE=oauth`、`DISCORD_CL
 
 `NODE_ENV=production` と `NEXUS_WEB_AUTH_MODE=development` の組合せは起動時に拒否します。Basic認証は、production以外でdevelopmentを明示し、16文字以上の `NEXUS_WEB_PASSWORD` を設定した場合だけ使用できます。Dashboardは選択したサーバーの現在の権限とWeb接続を確認し、サーバー一覧全体の取得は `/servers` で行います。OAuthの自動更新は未実装で、有効期限後は再ログインが必要です。LogoutはローカルCookieを消し、Discordのトークン失効を試みます。
 
-表示用語と計測の定義は [Product language](docs/product-language.md)、対応範囲・残課題・検証結果は [alpha.5 quality audit](NEXUS%20v0.6.0-alpha.5%20QUALITY%20AUDIT.md) を参照してください。Homeの比較期間はカレンダー週ではなく、観測を完了した参加期間です。
+表示用語と計測の定義は [Product language](docs/product-language.md)、対応範囲・残課題・検証結果は [alpha.5 quality audit](docs/archive/releases/NEXUS%20v0.6.0-alpha.5%20QUALITY%20AUDIT.md) を参照してください。Homeの比較期間はカレンダー週ではなく、観測を完了した参加期間です。
 
-Webも既存のDB・Identity鍵・Bot設定を使用します。起動前に `corepack pnpm migrate` で037までのmigrationを適用してください。確認付きの `/nexus unlink` またはSettingsのサーバー接続解除でWeb接続だけを解除でき、設定・履歴・分析データは保持されます。構成・検証方法は [Server verification](docs/server-verification.md) を参照してください。
+Webも既存のDB・Identity鍵・Bot設定を使用します。起動前に `corepack pnpm migrate` で038までのmigrationを適用してください。確認付きの `/nexus unlink` またはSettingsのサーバー接続解除でWeb接続だけを解除でき、設定・履歴・分析データは保持されます。構成・検証方法は [Server verification](docs/server-verification.md) を参照してください。
 
 ## Pricing & entitlements v2
 
@@ -82,3 +82,5 @@ corepack pnpm test:performance
 ```
 
 性能は既存10k・50k Guildと600人Voiceのfixtureを継続測定し、alpha.4比20%以内を基本の回帰基準とします。raw factとdaily rollupの同じ活動結果も比較します。実測と限界は [Scaling architecture](docs/scaling-architecture.md) を参照してください。migrationは追加方式で、旧データの意味を変更しません。
+
+現行の文書は [Documentation index](docs/README.md)、将来の Stripe 決済契約は [Stripe readiness](docs/billing/stripe-readiness.md) を参照してください。過去のリリースレポートは `docs/archive/releases/` に保存しています。

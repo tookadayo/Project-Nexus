@@ -1,3 +1,5 @@
+> Historical release evidence. Preserved from its original release; current contracts are indexed in [Documentation](../../README.md) and [Stripe readiness](../../billing/stripe-readiness.md).
+
 # NEXUS v0.6.0-alpha.4 — Adaptive Community Model
 
 実装日: 2026-10-02。基点は master `3298f2fa412bfc5e99981466f4311909eabb4634`。既存のサーバー検証・Web認可を維持し、masterへ直接反映する。branch / PRは作成しない。
@@ -11,7 +13,7 @@
 
 ## Discord capabilities audited
 
-実装前にGuild/member、channel、message、Gateway/intents、permissions、Threads、Poll、Voice、Stage、Scheduled Events、AutoMod、Components、Soundboard、Stickerの公式仕様と、Onboarding / Server Guide / Screening / Forum / Legacy Welcome Screenの公式製品説明を確認した。[監査表](docs/discord-capability-matrix.md) に意図・権限・Community要件・観測範囲・保存範囲・代替手段・対応状態を記載。
+実装前にGuild/member、channel、message、Gateway/intents、permissions、Threads、Poll、Voice、Stage、Scheduled Events、AutoMod、Components、Soundboard、Stickerの公式仕様と、Onboarding / Server Guide / Screening / Forum / Legacy Welcome Screenの公式製品説明を確認した。[監査表](../../../docs/discord-capability-matrix.md) に意図・権限・Community要件・観測範囲・保存範囲・代替手段・対応状態を記載。
 
 FULL SUPPORTは表に記載した公開メタデータの対応範囲。Discord機能全体の取得や完全な履歴を保証する意味ではない。7種類の検出状態、チャンネル権限の範囲、取得開始日時、閲覧できるactive Thread数を保存する。定期・変更・手動確認はキューで処理し、Dashboardごとに全構造を取得しない。
 
@@ -51,7 +53,7 @@ Rules Screening pendingを活動の対象から分け、通過を観測した時
 
 ## Scale adaptation
 
-人数だけでなく新規参加、対象人数、イベント量、対応待ち量でLOW / STANDARD / HIGHを判定する。閾値は [設計文書](docs/adaptive-community-model.md) に記載し、テストする。少人数では件数・観測途中を表示し、大人数では対応順・集計・中央値 / p75 / p90を優先する。関係のない指標、未使用Poll等の指標を表示しない。
+人数だけでなく新規参加、対象人数、イベント量、対応待ち量でLOW / STANDARD / HIGHを判定する。閾値は [設計文書](../../../docs/adaptive-community-model.md) に記載し、テストする。少人数では件数・観測途中を表示し、大人数では対応順・集計・中央値 / p75 / p90を優先する。関係のない指標、未使用Poll等の指標を表示しない。
 
 新規メンバーの各段階は同じ観測完了群を使い、観測途中と観測不足を分ける。Screening / Guest / staffを除外する。Text、Forum応答時間、Voice同席を別に表示し、本文や会話から意味を推測しない。既存の公開済み定義・実験・canonical daily metricsを勝手に置き換えない。
 
