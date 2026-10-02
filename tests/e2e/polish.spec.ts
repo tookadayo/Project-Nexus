@@ -49,20 +49,29 @@ for (const locale of ["en", "ja"] as const) {
     await expect(page).toHaveURL(/\/pricing$/);
     for (const plan of ["Scale", "Enterprise"]) {
       const card = page.locator(".price-card").filter({
-        has: page.getByRole("heading", { name: plan, exact: true }),
+        has: page.locator(".site-eyebrow", { hasText: plan.toUpperCase() }),
       });
       await expect(card.locator("li")).not.toHaveCount(0);
       await expect(card).toContainText(
-        locale === "ja" ? "現在利用可能" : "Available now",
+        locale === "ja" ? "現在利用可能" : "Available features",
       );
       await expect(card).toContainText(locale === "ja" ? "準備中" : "Planned");
       await expect(card.locator(".planned-features")).toContainText("API");
       await expect(card).toContainText(
-        locale === "ja" ? "登録枠" : "allowance",
+        plan === "Scale"
+          ? locale === "ja"
+            ? "登録枠"
+            : "allowance"
+          : locale === "ja"
+            ? "個別契約"
+            : "by contract",
       );
-      await expect(card).toContainText(
-        locale === "ja" ? "一括管理は準備中" : "management is planned",
-      );
+      if (plan === "Scale")
+        await expect(card).toContainText(
+          locale === "ja"
+            ? "一括管理・枠の割当"
+            : "Multi-server management, slot assignment",
+        );
       await expect(card).not.toContainText("$149");
     }
     const overflow = await page.evaluate(() =>

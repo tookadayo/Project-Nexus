@@ -237,19 +237,19 @@ export default async function Home() {
                 {plan === "FREE"
                   ? copy(
                       locale,
-                      "NEXUSを試す · 1サーバー",
-                      "Try NEXUS · 1 server",
+                      "すべての主要サーフェスを基本観測 · 1サーバー",
+                      "Observe all core Discord surfaces · 1 server",
                     )
                   : plan === "STARTER"
                     ? copy(
                         locale,
-                        "小さなコミュニティの最初の交流に",
-                        "First connections in smaller communities",
+                        "履歴とサーフェス別の応答・参加を詳しく理解する",
+                        "Understand history, responses and participation by surface",
                       )
                     : copy(
                         locale,
-                        "参加後の活動と改善結果を確認する運営に",
-                        "For teams improving returning activity",
+                        "未返信の通知を自動化し、改善後の変化を追跡する",
+                        "Automate unanswered reminders and track changes after improvements",
                       )}
               </p>
             </article>
@@ -298,8 +298,8 @@ export default async function Home() {
             copy(locale, "無料で使えますか？", "Can I start free?"),
             copy(
               locale,
-              "Freeで1サーバーの基本的な参加時案内と改善アクションを利用できます。有料プランの利用についてはお問い合わせください。",
-              "Free includes basic onboarding and improvement actions for one server. Contact us about paid plan availability.",
+              "Freeで1サーバーのReply・Thread・Forum・Reaction・Poll・Voice・Eventの基本観測と測定根拠を利用できます。有料プランは履歴・分析・運営を深めます。決済は準備中です。",
+              "Free includes core Reply, Thread, Forum, Reaction, Poll, Voice and Event observation with evidence for one server. Paid plans add history, analysis and operations. Checkout is unconfigured.",
             ),
           ],
         ].map(([question, answer]) => (
