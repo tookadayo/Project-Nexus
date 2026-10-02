@@ -70,7 +70,7 @@ export async function unavailableSignals(tx:Tx,s:Scope,episodeId:string,joinedAt
  return cfg.flags.native_snapshot_v2&&snapshot&&snapshot.observed_at.getTime()+90000>=asOf.getTime()?[]:(Object.keys(signalRegistry) as NexusSignal[]).filter(key=>signalRegistry[key].source==='rest');
 }
 export async function projectActivation(tx:Tx,s:Scope,episodeId:string,asOf=new Date()){
- const episode=(await sql<{joined_at:Date}>`SELECT COALESCE(engagement_started_at,joined_at) AS joined_at FROM membership_episodes WHERE ${tenant(s)} AND id=${episodeId}::uuid AND context='PRODUCTION' AND NOT screening_pending AND NOT is_guest FOR UPDATE`.execute(tx)).rows[0];if(!episode)return;
+ const episode=(await sql<{joined_at:Date}>`SELECT COALESCE(engagement_started_at,joined_at) AS joined_at FROM membership_episodes WHERE ${tenant(s)} AND id=${episodeId}::uuid AND context='PRODUCTION' AND screening_observed_at IS NOT NULL AND guest_observed_at IS NOT NULL AND NOT screening_pending AND NOT is_guest FOR UPDATE`.execute(tx)).rows[0];if(!episode)return;
  let pin=(await sql<{revision_id:string}>`SELECT revision_id FROM activation_members WHERE ${tenant(s)} AND episode_id=${episodeId}::uuid`.execute(tx)).rows[0];
  if(!pin){
   // Only a revision published before this membership episode may define its historical metric.

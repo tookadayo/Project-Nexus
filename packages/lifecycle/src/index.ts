@@ -1,6 +1,8 @@
 import {randomUUID} from 'node:crypto';
 import {sql,tenant,json,privacyReadLock,type Database,type Tx} from '../../db/src/index.js';
-import {eventSchema,dedupeKey,type Envelope} from '../../events/src/index.js';
+import {eventSchema,dedupeKey,isDirectReply,type Envelope} from '../../events/src/index.js';
+import {memberEligibility,type MemberObservation} from '../../shared/src/member-observation.js';
+import {GuildMemberFlags} from 'discord-api-types/v10';
 import {IdentityVault} from '../../identity/src/index.js';
 import {SettingsService} from '../../settings/src/index.js';
 import type {DiscordPort} from '../../discord/src/rest.js';
@@ -47,7 +49,8 @@ export class LifecycleService {
    if(observedMember?.bot)return;
    if((await sql`SELECT id FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash=${hash}`.execute(tx)).rows.length)return;
    const previousGuest=(await sql`SELECT state_key FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(tx)).rows.length>0;
-   const guest=Boolean((event.memberFlags??Number(observedMember?.flags??(previousGuest?16:0)))&16);
+   const observedFlags=event.memberFlags??(observedMember?.flags===undefined?undefined:Number(observedMember.flags));
+   const guest=observedFlags===undefined?previousGuest:Boolean(observedFlags&GuildMemberFlags.IsGuest);
    if(guest){if(event.kind==='member.left'){await projectAdaptiveMember(tx,s,{...event,kind:'voice.state',channelId:null},settings,hash,null,true);await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(tx);}else{await sql`INSERT INTO adaptive_states VALUES(${s.organizationId}::uuid,${s.guildId},'guest','membership',${hash},NULL,'{}'::jsonb,${at}) ON CONFLICT(organization_id,guild_id,domain,state_key,subject_hash) DO UPDATE SET observed_at=EXCLUDED.observed_at`.execute(tx);await projectAdaptiveMember(tx,s,event,settings,hash,null,true);}return;}
    if(previousGuest)await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(tx);
    const identityId=await this.vault.resolve(tx,s,userId);
@@ -85,9 +88,9 @@ export class LifecycleService {
    if(!event.roles&&observedMember?.roles?.length){
     await sql`INSERT INTO member_observable_state(organization_id,guild_id,episode_id,roles,roles_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episode.id}::uuid,${observedMember.roles}::text[],${at}) ON CONFLICT DO NOTHING`.execute(tx);
    }
-   await projectMemberFlags(tx,s,{...event,memberFlags:event.memberFlags??(observedMember?.flags===undefined?undefined:Number(observedMember.flags)),pending:event.pending??observedMember?.pending??undefined},episode.id,hash);
-   const eligibility=(await sql<{screening_pending:boolean;is_guest:boolean}>`SELECT screening_pending,is_guest FROM membership_episodes WHERE ${tenant(s)} AND id=${episode.id}::uuid`.execute(tx)).rows[0]!;
-   if(eligibility.screening_pending||eligibility.is_guest)return;
+   await projectMemberFlags(tx,s,{...event,memberFlags:observedFlags,pending:event.pending??observedMember?.pending??undefined,observationSource:observedMember?'REST':'GATEWAY'},episode.id,hash);
+   const eligibility=(await sql<MemberObservation>`SELECT screening_pending,is_guest,screening_observed_at,guest_observed_at FROM membership_episodes WHERE ${tenant(s)} AND id=${episode.id}::uuid`.execute(tx)).rows[0]!;
+   if(memberEligibility(eligibility)!=='ELIGIBLE')return;
    if(await projectAdaptiveMember(tx,s,event,settings,hash,episode.id))return;
    if(settings.flags.activation_dsl_v2)await projectActivation(tx,s,episode.id,at);
    if(settings.flags.native_snapshot_v2&&event.kind!=='member.joined')await requestNativeRefresh(tx,s,episode.id,at);
@@ -127,11 +130,11 @@ export class LifecycleService {
    if(event.kind==='message.sent'){
     if(!channelAllowed(event.channelId))return;
     if((await sql`SELECT id FROM lifecycle_events WHERE ${tenant(s)} AND kind='message.sent' AND context='PRODUCTION' AND data->>'messageId'=${event.messageId??''}`.execute(tx)).rows.length)return;
-    if(event.referenceId){
+    if(isDirectReply(event)){
      const reciprocal=(await sql`SELECT reply_message_id FROM reply_receipts WHERE ${tenant(s)} AND reply_message_id=${event.referenceId} AND episode_id=${episode.id}::uuid AND expires_at>${at}`.execute(tx)).rows.length;
      if(reciprocal)await this.record(tx,s,episode.id,'reply.established',at,{});
      const target=(await sql<{id:string,episode_id:string,occurred_at:Date,data:Record<string,unknown>,identity_id:string,joined_at:Date}>`SELECT e.id,e.episode_id,e.occurred_at,e.data,m.identity_id,m.joined_at FROM lifecycle_events e JOIN membership_episodes m
-      ON m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.episode_id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND e.context='PRODUCTION' AND e.kind='message.sent' AND e.data->>'messageId'=${event.referenceId}`.execute(tx)).rows[0];
+      ON m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.episode_id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND e.context='PRODUCTION' AND e.kind='message.sent' AND e.data->>'messageId'=${event.referenceId} AND e.data->>'channelId'=${event.channelId??''} AND m.screening_observed_at IS NOT NULL AND m.guest_observed_at IS NOT NULL AND NOT m.screening_pending AND NOT m.is_guest`.execute(tx)).rows[0];
      if(!target&&Date.now()-at.getTime()<86400000)throw new AwaitingReference('Referenced metadata has not arrived');
      if(target&&target.identity_id!==identityId&&at>=target.occurred_at){
       const latency=(at.getTime()-target.occurred_at.getTime())/1000;

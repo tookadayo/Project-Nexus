@@ -51,7 +51,8 @@ export class NativeMemberSnapshotWorker {
    await this.db.transaction().execute(async tx=>{
     await privacyReadLock(tx,s);
     const exists=(await sql`SELECT id FROM membership_episodes WHERE ${tenant(s)} AND id=${job.episode_id}::uuid AND left_at IS NULL FOR UPDATE`.execute(tx)).rows.length;if(!exists)return;
-    await projectNativeSnapshot(tx,s,job.episode_id,BigInt(member.flags!),member.pending??null,observedAt);
+    const {projectMemberFlags}=await import('./adaptive-projector.js');
+    await projectMemberFlags(tx,s,{...s,shardId:0,gatewaySessionId:'native-snapshot',sequence:0,kind:'member.roles_updated',context:'PRODUCTION',at:observedAt.toISOString(),observedAt:observedAt.toISOString(),memberFlags:Number(member.flags!),pending:member.pending??undefined,observationSource:'REST'},job.episode_id,this.vault.hash(s,userId));
     if(cfg.flags.activation_dsl_v2)await projectActivation(tx,s,job.episode_id,observedAt);
     await sql`UPDATE native_snapshot_jobs SET state='succeeded',lease_until=NULL WHERE ${tenant(s)} AND episode_id=${job.episode_id}::uuid AND checkpoint=${job.checkpoint}`.execute(tx);
    });

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { GuildMemberFlags } from "discord-api-types/v10";
 import { sql, tenant, json, type Tx } from "../../db/src/index";
 import type { Scope } from "../../shared/src/index";
 import {
@@ -8,6 +9,7 @@ import {
   strongResponseAllowed,
 } from "../../shared/src/community-model";
 import type { Envelope } from "../../events/src/index";
+import {isDirectReply} from "../../events/src/index";
 import type { Settings } from "../../settings/src/index";
 import { latestCapability, requestCapabilityRefresh } from "./discovery";
 import { projectNativeSnapshot } from "./native";
@@ -352,28 +354,33 @@ export async function projectMemberFlags(
       member_flags: number;
       screening_pending: boolean;
       flags_observed_at: Date | null;
-    }>`SELECT member_flags,screening_pending,flags_observed_at FROM membership_episodes WHERE ${tenant(s)} AND id=${episodeId}::uuid FOR UPDATE`.execute(
+      screening_observed_at: Date | null;
+      guest_observed_at: Date | null;
+    }>`SELECT member_flags,screening_pending,flags_observed_at,screening_observed_at,guest_observed_at FROM membership_episodes WHERE ${tenant(s)} AND id=${episodeId}::uuid FOR UPDATE`.execute(
       tx,
     )
   ).rows[0]!;
   const at = new Date(e.observedAt ?? e.at);
-  if (prior.flags_observed_at && prior.flags_observed_at > at) return;
-  const flags = e.memberFlags ?? prior.member_flags,
-    pending = e.pending ?? prior.screening_pending;
-  if (prior.member_flags !== flags || prior.screening_pending !== pending)
-    await projectNativeSnapshot(tx, s, episodeId, BigInt(flags), pending, at);
+  const flagsFresh=e.memberFlags!==undefined&&(!prior.flags_observed_at||prior.flags_observed_at<=at);
+  const pendingFresh=e.pending!==undefined&&(!prior.screening_observed_at||prior.screening_observed_at<=at);
+  if(!flagsFresh&&!pendingFresh)return;
+  const flags=flagsFresh?e.memberFlags!:prior.member_flags;
+  const pending=pendingFresh?e.pending!:prior.screening_pending;
+  // A partial pending packet must never stamp the flags clock or synthesize flags=0.
+  if(flagsFresh)await projectNativeSnapshot(tx,s,episodeId,BigInt(flags),pendingFresh?pending:prior.screening_observed_at?pending:null,at);
   const flagKinds = [
-    [8, "native_onboarding.started"],
-    [2, "native_onboarding.completed"],
-    [32, "server_guide.started"],
-    [64, "server_guide.completed"],
+    [GuildMemberFlags.StartedOnboarding, "native_onboarding.started"],
+    [GuildMemberFlags.CompletedOnboarding, "native_onboarding.completed"],
+    [GuildMemberFlags.StartedHomeActions, "server_guide.started"],
+    [GuildMemberFlags.CompletedHomeActions, "server_guide.completed"],
   ] as const;
   for (const [bit, kind] of flagKinds)
-    if (flags & bit && !(prior.member_flags & bit))
+    if (flagsFresh && flags & bit && (!prior.guest_observed_at || !(prior.member_flags & bit)))
       await adaptiveFact(tx, s, kind, at, {}, hash, episodeId);
-  if (prior.screening_pending && !pending)
+  const passed=pendingFresh&&prior.screening_observed_at!==null&&prior.screening_pending&&!pending;
+  if (passed)
     await adaptiveFact(tx, s, "screening.passed", at, {}, hash, episodeId);
-  await sql`UPDATE membership_episodes SET flags_observed_at=${at},member_flags=${flags},screening_pending=${pending},is_guest=${Boolean(flags & 16)},engagement_started_at=CASE WHEN ${prior.screening_pending && !pending} THEN ${at} WHEN ${pending} THEN NULL ELSE engagement_started_at END WHERE ${tenant(s)} AND id=${episodeId}::uuid`.execute(
+  await sql`UPDATE membership_episodes SET flags_observed_at=CASE WHEN ${flagsFresh} THEN ${at} ELSE flags_observed_at END,guest_observed_at=CASE WHEN ${flagsFresh} THEN ${at} ELSE guest_observed_at END,screening_observed_at=CASE WHEN ${pendingFresh} THEN ${at} ELSE screening_observed_at END,observation_source=${e.observationSource??'GATEWAY'},member_flags=${flags},screening_pending=${pending},is_guest=CASE WHEN ${flagsFresh} THEN ${Boolean(flags & GuildMemberFlags.IsGuest)} ELSE is_guest END,engagement_started_at=CASE WHEN ${passed} THEN ${at} WHEN ${pendingFresh&&pending} THEN NULL ELSE engagement_started_at END WHERE ${tenant(s)} AND id=${episodeId}::uuid`.execute(
     tx,
   );
 }
@@ -488,7 +495,7 @@ export async function projectAdaptiveMember(
         const recipient = (
           await sql<{
             id: string;
-          }>`SELECT ep.id FROM membership_episodes ep JOIN member_identity_map m ON m.organization_id=ep.organization_id AND m.guild_id=ep.guild_id AND m.id=ep.identity_id WHERE ep.organization_id=${s.organizationId}::uuid AND ep.guild_id=${s.guildId} AND m.lookup_hash=${String(target)} AND ep.left_at IS NULL AND NOT ep.screening_pending AND NOT ep.is_guest LIMIT 1`.execute(
+          }>`SELECT ep.id FROM membership_episodes ep JOIN member_identity_map m ON m.organization_id=ep.organization_id AND m.guild_id=ep.guild_id AND m.id=ep.identity_id WHERE ep.organization_id=${s.organizationId}::uuid AND ep.guild_id=${s.guildId} AND m.lookup_hash=${String(target)} AND ep.left_at IS NULL AND ep.screening_observed_at IS NOT NULL AND ep.guest_observed_at IS NOT NULL AND NOT ep.screening_pending AND NOT ep.is_guest LIMIT 1`.execute(
             tx,
           )
         ).rows[0];
@@ -591,7 +598,7 @@ export async function projectAdaptiveMember(
       hash,
       episodeId,
     );
-    if (e.referenceId)
+    if (isDirectReply(e))
       await adaptiveFact(
         tx,
         s,
@@ -656,7 +663,7 @@ export async function projectAdaptiveMember(
       const owner = (
         await sql<{
           id: string;
-        }>`SELECT ep.id FROM membership_episodes ep JOIN member_identity_map m ON m.organization_id=ep.organization_id AND m.guild_id=ep.guild_id AND m.id=ep.identity_id WHERE ep.organization_id=${s.organizationId}::uuid AND ep.guild_id=${s.guildId} AND m.lookup_hash=${surface.ownerHash} AND ep.left_at IS NULL AND NOT ep.screening_pending AND NOT ep.is_guest LIMIT 1`.execute(
+        }>`SELECT ep.id FROM membership_episodes ep JOIN member_identity_map m ON m.organization_id=ep.organization_id AND m.guild_id=ep.guild_id AND m.id=ep.identity_id WHERE ep.organization_id=${s.organizationId}::uuid AND ep.guild_id=${s.guildId} AND m.lookup_hash=${surface.ownerHash} AND ep.left_at IS NULL AND ep.screening_observed_at IS NOT NULL AND ep.guest_observed_at IS NOT NULL AND NOT ep.screening_pending AND NOT ep.is_guest LIMIT 1`.execute(
           tx,
         )
       ).rows[0];
