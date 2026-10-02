@@ -1,41 +1,139 @@
-import {createHmac,createPublicKey,verify,timingSafeEqual,randomUUID} from 'node:crypto';
-import {PermissionFlagsBits} from 'discord-api-types/v10';
-import {sql,tenant,json,type Tx} from '../../db/src/index';
-import {assert,type Scope} from '../../shared/src/index';
-export {scopeForGuild,apiToken,validApiToken} from './scoping';
-export function verifyInteraction(publicKey:string,signature:string,timestamp:string,body:Buffer,now=Date.now()){
- if(!/^[a-f\d]{128}$/i.test(signature)||!/^\d{10}$/.test(timestamp)||Math.abs(now-Number(timestamp)*1000)>300000) return false;
- try{
-  const key=createPublicKey({key:Buffer.concat([Buffer.from('302a300506032b6570032100','hex'),Buffer.from(publicKey,'hex')]),format:'der',type:'spki'});
-  return verify(null,Buffer.concat([Buffer.from(timestamp),body]),key,Buffer.from(signature,'hex'));
- }catch{return false;}
+import {
+  createHmac,
+  createPublicKey,
+  verify,
+  timingSafeEqual,
+  randomUUID,
+} from "node:crypto";
+import { PermissionFlagsBits } from "discord-api-types/v10";
+import { sql, tenant, json, type Tx } from "../../db/src/index";
+import { assert, type Scope } from "../../shared/src/index";
+export { scopeForGuild, apiToken, validApiToken } from "./scoping";
+export function verifyInteraction(
+  publicKey: string,
+  signature: string,
+  timestamp: string,
+  body: Buffer,
+  now = Date.now(),
+) {
+  if (
+    !/^[a-f\d]{128}$/i.test(signature) ||
+    !/^\d{10}$/.test(timestamp) ||
+    Math.abs(now - Number(timestamp) * 1000) > 300000
+  )
+    return false;
+  try {
+    const key = createPublicKey({
+      key: Buffer.concat([
+        Buffer.from("302a300506032b6570032100", "hex"),
+        Buffer.from(publicKey, "hex"),
+      ]),
+      format: "der",
+      type: "spki",
+    });
+    return verify(
+      null,
+      Buffer.concat([Buffer.from(timestamp), body]),
+      key,
+      Buffer.from(signature, "hex"),
+    );
+  } catch {
+    return false;
+  }
 }
-export function canOperatePanel(permissions:string,roles:string[],adminRole:string|null|Array<string|null>){
- const bits=BigInt(permissions);
- const allowed=Array.isArray(adminRole)?adminRole:[adminRole];
- return (bits&PermissionFlagsBits.Administrator)!==0n || (bits&PermissionFlagsBits.ManageGuild)!==0n || allowed.some(role=>role!==null&&roles.includes(role));
+export function canOperatePanel(
+  permissions: string,
+  roles: string[],
+  adminRole: string | null | Array<string | null>,
+) {
+  const bits = BigInt(permissions);
+  const allowed = Array.isArray(adminRole) ? adminRole : [adminRole];
+  return (
+    (bits & PermissionFlagsBits.Administrator) !== 0n ||
+    (bits & PermissionFlagsBits.ManageGuild) !== 0n ||
+    allowed.some((role) => role !== null && roles.includes(role))
+  );
 }
-export function canAdmin(permissions:string,roles:string[],adminRole:string|null|Array<string|null>){
- return canOperatePanel(permissions,roles,adminRole)||(BigInt(permissions)&PermissionFlagsBits.ManageGuild)!==0n;
+export function canAdmin(
+  permissions: string,
+  roles: string[],
+  adminRole: string | null | Array<string | null>,
+) {
+  return (
+    canOperatePanel(permissions, roles, adminRole) ||
+    (BigInt(permissions) & PermissionFlagsBits.ManageGuild) !== 0n
+  );
 }
 export class Components {
- constructor(private readonly key:string){}
- private mac(id:string){return createHmac('sha256',this.key).update(id).digest('base64url').slice(0,22);}
- static kind(token:string):'modal'|'navigation'|'ephemeral'|'ordinary'{return token.startsWith('modal:')?'modal':token.startsWith('nav:')?'navigation':token.startsWith('private:')?'ephemeral':'ordinary';}
- async issue(tx:Tx,s:Scope,intent:Record<string,unknown>,actorHash:string|null=null,ttl=900){
-  const id=randomUUID();
-  await sql`INSERT INTO component_tokens(organization_id,guild_id,id,actor_hash,intent,expires_at)
-    VALUES(${s.organizationId}::uuid,${s.guildId},${id}::uuid,${actorHash},${json(intent)},${new Date(Date.now()+ttl*1000)})`.execute(tx);
-  const prefix=['editNodeOpen','controlNotificationEdit','controlModelEdit'].includes(String(intent.action))?'modal:':intent.privateSettings===true?'private:':intent.action==='controlNavigate'?'nav:':'';
-  return `${prefix}${id}.${this.mac(id)}`;
- }
- async read(tx:Tx,s:Scope,token:string,actorHash:string){
-  const [id,mac]=token.replace(/^(modal:|nav:|private:)/,'').split('.');assert(id&&mac&&/^[a-f\d-]{36}$/.test(id),'INVALID_COMPONENT');
-  const expected=Buffer.from(this.mac(id));const supplied=Buffer.from(mac);
-  assert(supplied.length===expected.length&&timingSafeEqual(supplied,expected),'INVALID_COMPONENT');
-  const {rows}=await sql<{actor_hash:string|null,intent:Record<string,unknown>}>`SELECT actor_hash,intent FROM component_tokens
+  constructor(private readonly key: string) {}
+  private mac(id: string) {
+    return createHmac("sha256", this.key)
+      .update(id)
+      .digest("base64url")
+      .slice(0, 22);
+  }
+  static kind(
+    token: string,
+  ): "modal" | "navigation" | "ephemeral" | "ordinary" {
+    return token.startsWith("modal:")
+      ? "modal"
+      : token.startsWith("nav:")
+        ? "navigation"
+        : token.startsWith("private:")
+          ? "ephemeral"
+          : "ordinary";
+  }
+  async issue(
+    tx: Tx,
+    s: Scope,
+    intent: Record<string, unknown>,
+    actorHash: string | null = null,
+    ttl = 900,
+  ) {
+    const id = randomUUID();
+    await sql`INSERT INTO component_tokens(organization_id,guild_id,id,actor_hash,intent,expires_at)
+    VALUES(${s.organizationId}::uuid,${s.guildId},${id}::uuid,${actorHash},${json(intent)},${new Date(Date.now() + ttl * 1000)})`.execute(
+      tx,
+    );
+    const prefix = [
+      "editNodeOpen",
+      "controlNotificationEdit",
+      "controlModelEdit",
+      "billingPromotionOpen",
+    ].includes(String(intent.action))
+      ? "modal:"
+      : intent.privateSettings === true ||
+          ["billing", "plan", "billingPromotionRedeem"].includes(
+            String(intent.action),
+          )
+        ? "private:"
+        : intent.action === "controlNavigate"
+          ? "nav:"
+          : "";
+    return `${prefix}${id}.${this.mac(id)}`;
+  }
+  async read(tx: Tx, s: Scope, token: string, actorHash: string) {
+    const [id, mac] = token.replace(/^(modal:|nav:|private:)/, "").split(".");
+    assert(id && mac && /^[a-f\d-]{36}$/.test(id), "INVALID_COMPONENT");
+    const expected = Buffer.from(this.mac(id));
+    const supplied = Buffer.from(mac);
+    assert(
+      supplied.length === expected.length &&
+        timingSafeEqual(supplied, expected),
+      "INVALID_COMPONENT",
+    );
+    const { rows } = await sql<{
+      actor_hash: string | null;
+      intent: Record<string, unknown>;
+    }>`SELECT actor_hash,intent FROM component_tokens
    WHERE ${tenant(s)} AND id=${id}::uuid AND expires_at>now()`.execute(tx);
-  const row=rows[0];assert(row,'COMPONENT_EXPIRED');assert(row.actor_hash===null||row.actor_hash===actorHash,'COMPONENT_OWNER',403);
-  return row.intent;
- }
+    const row = rows[0];
+    assert(row, "COMPONENT_EXPIRED");
+    assert(
+      row.actor_hash === null || row.actor_hash === actorHash,
+      "COMPONENT_OWNER",
+      403,
+    );
+    return row.intent;
+  }
 }

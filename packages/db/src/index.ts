@@ -65,6 +65,9 @@ export async function migrate(
       "032_worker_leases",
       "033_message_observations",
       "034_eligible_retention",
+      "035_billing_foundation",
+      "036_promotions",
+      "037_billing_operations",
     ].entries()) {
       const version = index + 1;
       if (

@@ -10,6 +10,8 @@ import { canAdmin, canOperatePanel } from "./index.js";
 import type { IdentityVault } from "../../identity/src/index.js";
 import { assert, type Scope } from "../../shared/src/index.js";
 import { productGuildHash } from "../../shared/src/product-telemetry.js";
+import { deleteBillingCommunity, deleteBillingActor } from "./billing-privacy";
+import { EntitlementService } from "../../settings/src/entitlements";
 export class PrivacyService {
   constructor(
     private readonly db: Database,
@@ -48,6 +50,7 @@ export class PrivacyService {
           await sql`DELETE FROM server_web_links WHERE ${tenant(s)}`.execute(
             tx,
           );
+          await deleteBillingCommunity(tx, s);
           for (const table of [
             "message_observations",
             "reaction_state",
@@ -222,6 +225,7 @@ export class PrivacyService {
       await sql`DELETE FROM member_identity_map WHERE ${tenant(s)} AND lookup_hash=${hash}`.execute(
         tx,
       );
+      await deleteBillingActor(tx, s, userId, this.vault);
       await sql`DELETE FROM usage_counters WHERE ${tenant(s)} AND member_hash=${hash}`.execute(
         tx,
       );
@@ -247,6 +251,7 @@ export class PrivacyService {
   }
   async purge(s: Scope) {
     const cfg = await this.settings.get(s);
+    const entitlement = await new EntitlementService(this.db).effective(s);
     const cutoff = new Date(Date.now() - cfg.detailedRetentionDays * 86400000);
     await this.db.transaction().execute(async (tx) => {
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"privacy:" + s.organizationId + ":" + s.guildId},0))`.execute(
@@ -373,7 +378,22 @@ export class PrivacyService {
       await sql`DELETE FROM data_coverage_snapshots WHERE ${tenant(s)} AND observed_at<${cutoff}`.execute(
         tx,
       );
-      await sql`DELETE FROM daily_guild_metrics WHERE ${tenant(s)} AND day<(now()-make_interval(months=>${cfg.aggregateRetentionMonths}))::date`.execute(
+      const recovery = (
+        await sql<{
+          recovery_until: Date | null;
+          recovery_history_days: number | null;
+        }>`SELECT recovery_until,recovery_history_days FROM billing_guild_state WHERE ${tenant(s)}`.execute(
+          tx,
+        )
+      ).rows[0];
+      const visible =
+        entitlement.limits.historyDays ?? cfg.aggregateRetentionMonths * 31;
+      const retained =
+        recovery?.recovery_until && recovery.recovery_until > new Date()
+          ? Math.max(visible, recovery.recovery_history_days ?? visible)
+          : visible;
+      // Aggregate privacy retention still caps paid history. Member-linked detail uses cutoff above.
+      await sql`DELETE FROM daily_guild_metrics WHERE ${tenant(s)} AND day<greatest((now()-make_interval(months=>${cfg.aggregateRetentionMonths}))::date,(now()-make_interval(days=>${retained}))::date)`.execute(
         tx,
       );
       await sql`DELETE FROM suggestion_feedback WHERE ${tenant(s)} AND dismissed_at<now()-make_interval(months=>${cfg.aggregateRetentionMonths})`.execute(
