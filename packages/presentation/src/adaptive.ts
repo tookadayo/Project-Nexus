@@ -1,6 +1,8 @@
 import { sql, tenant, type Database } from "../../db/src/index";
 import { GuildScheduledEventEntityType } from "discord-api-types/v10";
 import type { Scope } from "../../shared/src/index";
+import { EntitlementService } from "../../settings/src/entitlements";
+import { featureDecision } from "../../settings/src/billing-domain";
 import {
   volumeMode,
   type CapabilitySnapshot,
@@ -128,6 +130,9 @@ export async function adaptivePresentation(
         ...(cfg.adminRoleId ? [cfg.adminRoleId] : []),
       ]),
     ];
+  const evidence = contractContext
+    ? evidenceWindow(contractContext, from, now)
+    : await evidenceContext(db, s, from, now);
   const members = (
     await sql<{
       eligible: number;
@@ -361,7 +366,7 @@ export async function adaptivePresentation(
       "voiceCopresence",
       counts.get("voice.copresence")?.sample ?? 0,
       counts.get("voice.copresence")?.sample ?? 0,
-      `Observed human co-presence for at least ${cfg.communityModel.voiceThresholdSeconds / 60} minutes; excludes bots, AFK, guests, Stage audience. This does not prove conversation.`,
+      `Observed human co-presence for at least ${(evidence.recipe?.definition?.voiceThresholdSeconds ?? cfg.communityModel.voiceThresholdSeconds) / 60} minutes; excludes bots, AFK, guests, Stage audience. This does not prove conversation.`,
     );
   }
   if (modes.includes("LFG_PLAY") && (has("threads") || has("text"))) {
@@ -459,9 +464,6 @@ export async function adaptivePresentation(
     UNION ALL SELECT 1 FROM adaptive_states WHERE ${tenant(s)} AND domain='event' AND COALESCE((data->>'entityType')::integer,-1) NOT IN (${GuildScheduledEventEntityType.StageInstance},${GuildScheduledEventEntityType.Voice}) AND observed_at<=${now} AND (observed_at>=${from} OR data->>'status'='2')
   ) AS unknown`.execute(db)
     ).rows[0]!.unknown;
-  const evidence = contractContext
-    ? evidenceWindow(contractContext, from, now)
-    : await evidenceContext(db, s, from, now);
   for (const metric of metrics) {
     metric.evidence = buildMetricEvidence(
       metric.key,
@@ -497,14 +499,13 @@ export async function adaptivePresentation(
     }
     if (metric.key === "eventAttendance" && unknownAttendance) {
       Object.assign(metric.evidence, {
-        value: null,
-        numerator: null,
-        observationState: "UNKNOWN",
-        coverageState: "UNKNOWN",
+        // Preserve independently observed Voice/Stage attendance; no all-event ratio.
+        denominator: null,
+        coverageState: metric.evidence.value === null ? "UNKNOWN" : "PARTIAL",
         comparable: false,
       });
       metric.evidence.coverageReasons.push(
-        "EXTERNAL_OR_UNKNOWN_EVENT_ATTENDANCE",
+        "EXTERNAL_EVENT_ATTENDANCE_UNOBSERVABLE",
       );
       metric.evidence.comparisonBlockers.push("ATTENDANCE_UNOBSERVABLE");
     }
@@ -523,6 +524,23 @@ export async function adaptivePresentation(
       metric.p90Minutes = null;
     }
   }
+  const entitlements = await new EntitlementService(db).effective(s, now);
+  if (!featureDecision(entitlements, "percentile_metrics").allowed)
+    for (const metric of metrics) {
+      metric.medianMinutes = null;
+      metric.p75Minutes = null;
+      metric.p90Minutes = null;
+    }
+  const journeys = await journeyAnalysis(
+    db,
+    s,
+    cfg,
+    snapshot,
+    evidence,
+    preparedJourney,
+  );
+  if (!featureDecision(entitlements, "advanced_journeys").allowed)
+    journeys.transitions = journeys.transitions.slice(0, 1);
   const volume = volumeMode({
     members: snapshot?.memberCount ?? members.eligible,
     joined30d: members.joined,
@@ -533,14 +551,7 @@ export async function adaptivePresentation(
   return {
     profile: cfg.communityModel,
     recipe: evidence.recipe,
-    journeys: await journeyAnalysis(
-      db,
-      s,
-      cfg,
-      snapshot,
-      evidence,
-      preparedJourney,
-    ),
+    journeys,
     recommendations: await responseRecommendations(
       db,
       s,

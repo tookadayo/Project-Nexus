@@ -10,6 +10,7 @@ import {
 } from "../../db/src/index";
 import type { Scope } from "../../shared/src/index";
 import type { CapabilitySnapshot } from "../../shared/src/community-model";
+import { observedSurfaceUsage } from "../../shared/src/community-model";
 import type { IdentityVault } from "../../identity/src/index";
 import type { DiscordPort } from "../../discord/src/rest";
 import { buildCapabilitySnapshot } from "../../discord/src/discovery";
@@ -130,22 +131,12 @@ export class DiscoveryWorker {
           this.db,
         )
       ).rows;
-      for (const row of surfaceUsage) {
-        const key = (
-          {
-            TEXT: "text",
-            ANNOUNCEMENT: "announcements",
-            VOICE_TEXT: "voiceText",
-            STAGE_TEXT: "stageText",
-            FORUM_POST: "forum",
-            MEDIA_POST: "media",
-            THREAD: "threads",
-          } as Record<string, string>
-        )[row.surface];
-        if (key)
-          usage[key] = (key === "text" ? 0 : (usage[key] ?? 0)) + row.count;
-      }
-      const snapshot = buildCapabilitySnapshot(source, now, prior, usage);
+      const snapshot = buildCapabilitySnapshot(
+        source,
+        now,
+        prior,
+        observedSurfaceUsage(surfaceUsage, usage),
+      );
       await this.db.transaction().execute(async (tx) => {
         await privacyReadLock(tx, s);
         if (

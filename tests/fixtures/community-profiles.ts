@@ -90,6 +90,14 @@ export const representativeProfiles = [
     eligible: 35,
     metricKeys: ["activeReactions", "pollParticipants", "eventSubscriptions"],
   },
+  {
+    name: "thread-heavy",
+    modes: ["SOCIAL"],
+    types: [0, 11],
+    members: 500,
+    eligible: 40,
+    metricKeys: ["directReplies", "postResponse"],
+  },
 ] as const;
 export function representativeSource(index: number): DiscoverySource {
   const fixture = representativeProfiles[index]!,

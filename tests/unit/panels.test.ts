@@ -330,6 +330,7 @@ describe("NEXUS Discord design system", () => {
       "personalize",
       "privacy",
       "status",
+      "plan",
       "link",
       "unlink",
     ]);

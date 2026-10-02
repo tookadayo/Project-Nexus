@@ -61,7 +61,7 @@ afterAll(async () => {
   await db?.destroy();
   await infra?.stop();
 });
-async function fixture() {
+async function fixture(recipePreset?: "EVENT_STAGE") {
   const s = scopeForGuild(String(111111111111110000n + BigInt(++counter))),
     settings = new SettingsService(db),
     discord = new FakeDiscord(),
@@ -69,6 +69,7 @@ async function fixture() {
   await ensureGuild(db, s);
   await settings.update(s, actor, 0, {
     communityModel: {
+      ...(recipePreset ? { recipePreset } : {}),
       modes: ["SUPPORT_QA", "LFG_PLAY", "VOICE", "EVENTS", "CREATOR_FAN"],
       confirmed: true,
       channels: [{ channelId: channel, purpose: "SUPPORT" }],
@@ -582,7 +583,9 @@ it("qualifies sustained human voice co-presence without pairs, excludes AFK/gues
   ).toHaveLength(2);
 });
 it("separates event subscription from known-active Voice/Stage attendance and external unknown", async () => {
-  const f = await fixture();
+  const f = await fixture("EVENT_STAGE");
+  // These observations occur after confirmation of this recipe version.
+  f.now.setTime(Date.now() + 100);
   await f.health(f.now);
   await f.send("GUILD_SCHEDULED_EVENT_USER_ADD", {
     user_id: user,
@@ -619,14 +622,45 @@ it("separates event subscription from known-active Voice/Stage attendance and ex
     entity_type: 3,
     status: 2,
   });
+  await f.send("GUILD_SCHEDULED_EVENT_USER_ADD", {
+    user_id: other,
+    guild_scheduled_event_id: "777777777777777779",
+  });
+  await f.send("GUILD_SCHEDULED_EVENT_USER_ADD", {
+    user_id: user,
+    guild_scheduled_event_id: "777777777777777778",
+  });
+  await f.send("GUILD_SCHEDULED_EVENT_UPDATE", {
+    id: "777777777777777779",
+    channel_id: voice,
+    entity_type: 2,
+    status: 2,
+  });
+  await f.send("VOICE_STATE_UPDATE", {
+    user_id: other,
+    channel_id: voice,
+    member: { user: { bot: false } },
+  });
   expect(
     (
       await sql`SELECT * FROM adaptive_facts WHERE ${tenant(f.s)} AND kind='scheduled_event.attended'`.execute(
         db,
       )
     ).rows,
-  ).toHaveLength(1);
-  await sql`INSERT INTO guild_capability_snapshots VALUES(${f.s.organizationId}::uuid,${f.s.guildId},gen_random_uuid(),${json(buildCapabilitySnapshot(representativeSource(3), f.now))},${f.now})`.execute(
+  ).toHaveLength(2);
+  const source = {
+    ...representativeSource(3),
+    channels: [
+      { id: voice, type: 2, parentId: null, observable: true, tagIds: [] },
+      { id: stage, type: 13, parentId: null, observable: true, tagIds: [] },
+    ],
+    scheduledEvents: [
+      { id: event, channelId: stage, entityType: 1, status: 2 },
+      { id: "777777777777777779", channelId: voice, entityType: 2, status: 2 },
+      { id: "777777777777777778", channelId: null, entityType: 3, status: 2 },
+    ],
+  };
+  await sql`INSERT INTO guild_capability_snapshots VALUES(${f.s.organizationId}::uuid,${f.s.guildId},gen_random_uuid(),${json(buildCapabilitySnapshot(source, f.now))},${f.now})`.execute(
     db,
   );
   await sql`UPDATE discord_integration_health SET rest_state='AVAILABLE',last_refresh_at=${f.now} WHERE ${tenant(f.s)}`.execute(
@@ -639,10 +673,31 @@ it("separates event subscription from known-active Voice/Stage attendance and ex
       new Date(f.now.getTime() + 1000),
     )
   ).adaptive!.metrics.find((m) => m.key === "eventAttendance")!;
-  expect(attendance.count).toBeNull();
-  expect(attendance.evidence!.observationState).toBe("UNKNOWN");
+  expect(attendance.count).toBe(2);
+  expect(attendance.evidence!.coverageState).toBe("PARTIAL");
+  expect(attendance.evidence!.numerator).toBe(2);
+  expect(attendance.evidence!.denominator).toBeNull();
   expect(attendance.evidence!.coverageReasons).toContain(
-    "EXTERNAL_OR_UNKNOWN_EVENT_ATTENDANCE",
+    "EXTERNAL_EVENT_ATTENDANCE_UNOBSERVABLE",
+  );
+  const through = new Date(f.now.getTime() + 1000),
+    cfg = await f.settings.get(f.s),
+    snapshot = await latestCapability(db, f.s),
+    context = await evidenceContext(db, f.s, f.now, through);
+  expect(context.recipeVersions).toEqual([context.recipe!.id]);
+  const journeys = await journeyAnalysis(db, f.s, cfg, snapshot, context),
+    transition = journeys.transitions.find((item) => item.to === "attendance")!;
+  expect(
+    transition.evidence,
+    JSON.stringify(transition.evidence.coverageReasons),
+  ).toMatchObject({
+    value: null,
+    numerator: 2,
+    denominator: null,
+    coverageState: "PARTIAL",
+  });
+  expect(transition.evidence.coverageReasons).toContain(
+    "EXTERNAL_EVENT_ATTENDANCE_UNOBSERVABLE",
   );
 });
 it("persists partial capability detection, manual refresh and truthful adaptive definitions without content", async () => {
@@ -950,13 +1005,13 @@ it.each(representativeProfiles.map((profile, index) => ({ profile, index })))(
     await sql`INSERT INTO guild_capability_snapshots VALUES(${f.s.organizationId}::uuid,${f.s.guildId},gen_random_uuid(),${json(buildCapabilitySnapshot(representativeSource(index), f.now))},${f.now})`.execute(
       db,
     );
-    const model = (
-      await new CommunityService(db, f.settings).overview(
-        f.s,
-        30,
-        new Date(f.now.getTime() + 1000),
-      )
-    ).adaptive!;
+    const overview = await new CommunityService(db, f.settings).overview(
+      f.s,
+      30,
+      new Date(f.now.getTime() + 1000),
+    );
+    expect(overview.entitlements.plan).toBe("FREE");
+    const model = overview.adaptive!;
     expect(model.profile.modes).toEqual(profile.modes);
     expect(model.metrics.some((m) => m.key === "voiceCopresence")).toBe(
       profile.modes.some((m) => m === "VOICE" || m === "LFG_PLAY"),
@@ -1010,6 +1065,9 @@ it("does not turn structural posts from an unknown or bot owner into human suppo
 it("counts each newcomer's first post once and excludes replies after a historical window", async () => {
   const f = await fixture(),
     at = (seconds: number) => new Date(f.now.getTime() + seconds * 1000);
+  await sql`INSERT INTO guild_subscriptions(organization_id,guild_id,plan_key) VALUES(${f.s.organizationId}::uuid,${f.s.guildId},'STARTER')`.execute(
+    db,
+  );
   await f.health(f.now);
   await sql`INSERT INTO guild_capability_snapshots VALUES(${f.s.organizationId}::uuid,${f.s.guildId},gen_random_uuid(),${json(buildCapabilitySnapshot(representativeSource(4), f.now))},${f.now})`.execute(
     db,

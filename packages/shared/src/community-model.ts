@@ -1,5 +1,5 @@
 import { z } from "zod";
-import {recipePresets,operationsContextSchema} from './measurement-recipes';
+import { recipePresets, operationsContextSchema } from "./measurement-recipes";
 export const communityModes = [
   "SOCIAL",
   "LFG_PLAY",
@@ -42,6 +42,28 @@ export const surfaces = [
   "UNKNOWN",
 ] as const;
 export type Surface = (typeof surfaces)[number];
+export const surfaceUsageKey = {
+  TEXT: "text",
+  ANNOUNCEMENT: "announcement",
+  VOICE_TEXT: "voiceText",
+  STAGE_TEXT: "stageText",
+  FORUM_POST: "forum",
+  MEDIA_POST: "media",
+  THREAD: "threads",
+} as const satisfies Record<Exclude<Surface, "UNKNOWN">, string>;
+export function observedSurfaceUsage(
+  rows: { surface: string; count: number }[],
+  usage: Record<string, number> = {},
+) {
+  const result = { ...usage };
+  for (const row of rows) {
+    const key = surfaceUsageKey[row.surface as keyof typeof surfaceUsageKey];
+    if (key)
+      result[key] =
+        (key === surfaceUsageKey.TEXT ? 0 : (result[key] ?? 0)) + row.count;
+  }
+  return result;
+}
 export const capabilityStatuses = [
   "AVAILABLE",
   "ENABLED",

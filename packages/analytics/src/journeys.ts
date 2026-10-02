@@ -313,7 +313,23 @@ export async function journeyAnalysis(
                   context.to.getTime(),
             )
           : observations;
-      const count = transitionCounts(definition, transitionObservations, t),
+      const attendanceTransition = ["attendance", "repeat_attendance"].includes(
+        t.to,
+      );
+      const unobservableAttendance =
+        attendanceTransition &&
+        observations.some(
+          (o) =>
+            o.kind === "scheduled_event.subscribed" &&
+            (!o.eventId || ![1, 2].includes(eventTypes.get(o.eventId) ?? -1)),
+        );
+      const observableTransitions = unobservableAttendance
+        ? transitionObservations.filter(
+            (o) =>
+              !o.eventId || [1, 2].includes(eventTypes.get(o.eventId) ?? -1),
+          )
+        : transitionObservations;
+      const count = transitionCounts(definition, observableTransitions, t),
         evidence = buildMetricEvidence(
           "journey:" + t.from + ":" + t.to,
           {
@@ -340,19 +356,18 @@ export async function journeyAnalysis(
           cfg,
           context,
         );
-      if (
-        ["attendance", "repeat_attendance"].includes(t.to) &&
-        observations.some(
-          (o) =>
-            o.kind === "scheduled_event.subscribed" &&
-            (!o.eventId || ![1, 2].includes(eventTypes.get(o.eventId) ?? -1)),
-        )
-      ) {
+      if (unobservableAttendance) {
         evidence.value = null;
-        evidence.numerator = null;
-        evidence.observationState = "UNKNOWN";
-        evidence.coverageState = "UNKNOWN";
-        evidence.coverageReasons.push("EXTERNAL_OR_UNKNOWN_EVENT_ATTENDANCE");
+        evidence.denominator = null;
+        if (
+          count.denominator === 0 ||
+          evidence.observationState === "UNKNOWN"
+        ) {
+          evidence.numerator = null;
+          evidence.observationState = "UNKNOWN";
+          evidence.coverageState = "UNKNOWN";
+        } else evidence.coverageState = "PARTIAL";
+        evidence.coverageReasons.push("EXTERNAL_EVENT_ATTENDANCE_UNOBSERVABLE");
         evidence.comparable = false;
         evidence.comparisonBlockers.push("ATTENDANCE_UNOBSERVABLE");
       }

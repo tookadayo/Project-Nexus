@@ -1,4 +1,5 @@
 import { PermissionFlagsBits, ChannelFlags } from "discord-api-types/v10";
+import { surfaceUsageKey } from "../../shared/src/community-model";
 import type {
   CapabilitySnapshot,
   ChannelMetadata,
@@ -112,12 +113,12 @@ export function buildCapabilitySnapshot(
   ] as const)
     put(key, features.includes(feature) ? "ENABLED" : "UNAVAILABLE");
   for (const [key, type] of [
-    ["text", 0],
-    ["announcement", 5],
+    [surfaceUsageKey.TEXT, 0],
+    [surfaceUsageKey.ANNOUNCEMENT, 5],
     ["voice", 2],
     ["stage", 13],
-    ["forum", 15],
-    ["media", 16],
+    [surfaceUsageKey.FORUM_POST, 15],
+    [surfaceUsageKey.MEDIA_POST, 16],
     ["category", 4],
   ] as const)
     put(

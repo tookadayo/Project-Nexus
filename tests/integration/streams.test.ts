@@ -54,6 +54,10 @@ it("runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
     role = "531111111111111115";
   const vault = new IdentityVault("aa".repeat(32), "bb".repeat(32)),
     tokens = new Components("slice-component-key");
+  await ensureGuild(db, s);
+  await sql`INSERT INTO guild_subscriptions(organization_id,guild_id,plan_key) VALUES(${s.organizationId}::uuid,${s.guildId},'GROWTH')`.execute(
+    db,
+  );
   const settings = new SettingsService(db),
     onboarding = new OnboardingService(db, settings, vault),
     discord = new FakeDiscord();

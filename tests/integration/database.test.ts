@@ -1011,6 +1011,9 @@ it("distinguishes setup approval from safe skip during a legacy guild review", a
   const s = scopeForGuild("656666666666666666");
   await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);
   await ensureGuild(db, s);
+  await sql`INSERT INTO guild_subscriptions(organization_id,guild_id,plan_key) VALUES(${s.organizationId}::uuid,${s.guildId},'GROWTH')`.execute(
+    db,
+  );
   const vault = new IdentityVault("aa".repeat(32), "bb".repeat(32)),
     settings = new SettingsService(db),
     discord = new FakeDiscord(),
@@ -1117,6 +1120,9 @@ it("previews an improvement without saving, cancels cleanly, and applies on conf
   const s = scopeForGuild("666666666666666661");
   await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);
   await ensureGuild(db, s);
+  await sql`INSERT INTO guild_subscriptions(organization_id,guild_id,plan_key) VALUES(${s.organizationId}::uuid,${s.guildId},'GROWTH')`.execute(
+    db,
+  );
   const vault = new IdentityVault("aa".repeat(32), "bb".repeat(32)),
     settings = new SettingsService(db),
     discord = new FakeDiscord(),
@@ -1202,6 +1208,9 @@ it("snoozes an attention item, shows it after expiry, and suppresses it when res
   );
   await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);
   await ensureGuild(db, s);
+  await sql`INSERT INTO guild_subscriptions(organization_id,guild_id,plan_key) VALUES(${s.organizationId}::uuid,${s.guildId},'GROWTH')`.execute(
+    db,
+  );
   const identity = randomUUID(),
     episode = randomUUID(),
     channelId = "677777777777777772",

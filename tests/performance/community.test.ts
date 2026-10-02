@@ -62,6 +62,10 @@ for (const size of [10000, 50000])
   it(`serves overview, comparison and channels for ${size.toLocaleString()} members`, async () => {
     const s = scopeForGuild(String(901000000000000000n + BigInt(size)));
     await ensureGuild(db, s);
+    // Measure the complete analysis path; Free intentionally omits paid breakdowns.
+    await sql`INSERT INTO guild_subscriptions(organization_id,guild_id,plan_key) VALUES(${s.organizationId}::uuid,${s.guildId},'STARTER')`.execute(
+      db,
+    );
     if (size === 50000) {
       await new SettingsService(db).update(
         s,
