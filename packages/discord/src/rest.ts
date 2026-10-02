@@ -1,3 +1,4 @@
+import {traceStep} from '../../shared/src/observability';
 import {PermissionFlagsBits,type RESTPostAPIChannelMessageJSONBody} from 'discord-api-types/v10';
 import {createHash} from 'node:crypto';
 import {assert} from '../../shared/src/index';
@@ -66,7 +67,8 @@ export class DiscordRest implements DiscordPort {
   const matches=(found:unknown,expected:unknown):boolean=>{if(Array.isArray(expected))return Array.isArray(found)&&found.length===expected.length&&expected.every((item,index)=>matches(found[index],item));if(expected&&typeof expected==='object'){if(!found||typeof found!=='object')return false;return Object.entries(expected).filter(([key])=>['type','name','name_localizations','description','description_localizations','required','options','choices','min_value','max_value','min_length','max_length'].includes(key)).every(([key,value])=>matches((found as Record<string,unknown>)[key],value));}return found===expected;};
   return actual.length===commands.length&&commands.every(expected=>{const item=expected as Record<string,unknown>,found=actual.find(row=>row.name===item.name);return found&&matches(found,expected);});
  }
- private async request<T>(path:string,method='GET',body?:unknown):Promise<T>{
+ private async request<T>(path:string,method='GET',body?:unknown):Promise<T>{return traceStep('discord.rest',{'stage':method},()=>this.requestInternal<T>(path,method,body));}
+ private async requestInternal<T>(path:string,method='GET',body?:unknown):Promise<T>{
   const route=this.route(path,method),signal=AbortSignal.timeout(20000);
   const retrySafe=method==='GET'||method==='PUT'||method==='DELETE'||method==='PATCH'||method==='POST'&&typeof body==='object'&&body!==null&&'enforce_nonce' in body&&(body as {enforce_nonce?:unknown}).enforce_nonce===true;
   // Serialize each route, including the discovery request before Discord sends a bucket.

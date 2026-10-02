@@ -1,6 +1,6 @@
 import {beforeAll,afterAll,expect,it,vi} from 'vitest';
 import {infrastructure} from '../fixtures/infrastructure.js';
-import {migrate,ensureGuild,sql} from '../../packages/db/src/index.js';
+import {migrate,ensureGuild,sql,tenant} from '../../packages/db/src/index.js';
 import {Kysely,PostgresDialect} from 'kysely';
 import pg from 'pg';
 import {randomUUID,generateKeyPairSync,sign} from 'node:crypto';
@@ -24,14 +24,14 @@ beforeAll(async()=>{infra=await infrastructure();const pool=new pg.Pool({connect
 // fixture alive until the clients emit end, so shutdown cannot send a FATAL
 // administrator-termination error to a still-closing idle connection.
 afterAll(async()=>{await db?.destroy();await Promise.all(closingClients);await infra?.stop();});
-it('runs migrations idempotently and enforces guild ownership',async()=>{
+it('runs migrations idempotently and enforces composite tenant ownership',async()=>{
  await migrate(db);
  const scope={organizationId:randomUUID(),guildId:'123456789012345678'};
  await db.transaction().execute(async tx=>{
   await sql`DELETE FROM guilds WHERE guild_id=${scope.guildId}`.execute(tx);
   await ensureGuild(tx,scope);
  });
- await expect(ensureGuild(db,{...scope,organizationId:randomUUID()})).rejects.toThrow('Tenant mismatch');
+ const other={...scope,organizationId:randomUUID()};await ensureGuild(db,other);expect((await sql`SELECT * FROM guild_settings WHERE ${tenant(other)}`.execute(db)).rows).toEqual([]);
  await expect(sql`INSERT INTO guild_settings VALUES(${randomUUID()}::uuid,${scope.guildId},0,'{}')`.execute(db)).rejects.toThrow();
 });
 it('preserves completed setup for existing v0.5.2 settings rows',async()=>{
@@ -237,9 +237,11 @@ it('snoozes an attention item, shows it after expiry, and suppresses it when res
  const s=scopeForGuild('677777777777777771');await sql`DELETE FROM attention_items WHERE guild_id=${s.guildId}`.execute(db);await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
  const identity=randomUUID(),episode=randomUUID(),channelId='677777777777777772',messageId='677777777777777773';
  await sql`INSERT INTO member_identity_map(organization_id,guild_id,id,lookup_hash,encrypted_id) VALUES(${s.organizationId}::uuid,${s.guildId},${identity}::uuid,'attention-test','cipher')`.execute(db);
- await sql`INSERT INTO membership_episodes(organization_id,guild_id,id,identity_id,joined_at,context) VALUES(${s.organizationId}::uuid,${s.guildId},${episode}::uuid,${identity}::uuid,now()-interval '2 days','PRODUCTION')`.execute(db);
+ await sql`INSERT INTO membership_episodes(organization_id,guild_id,id,identity_id,joined_at,context,screening_observed_at,guest_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episode}::uuid,${identity}::uuid,now()-interval '2 days','PRODUCTION',now(),now())`.execute(db);
  await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',now()-interval '1 hour','PRODUCTION',jsonb_build_object('channelId',${channelId}::text,'messageId',${messageId}::text))`.execute(db);
  await sql`INSERT INTO telemetry_cursor(organization_id,guild_id,first_seen,last_seen) VALUES(${s.organizationId}::uuid,${s.guildId},now()-interval '3 days',now())`.execute(db);
+ await sql`INSERT INTO discord_integration_health(organization_id,guild_id,gateway_state,last_gateway_at,intents,updated_at) VALUES(${s.organizationId}::uuid,${s.guildId},'CONNECTED',now(),' {"members":"AVAILABLE","messages":"AVAILABLE"}'::jsonb,now())`.execute(db);
+ await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,observed_at,visibility_state) VALUES(${s.organizationId}::uuid,${s.guildId},${channelId},0,now(),'VISIBLE')`.execute(db);
  const vault=new IdentityVault('aa'.repeat(32),'bb'.repeat(32)),settings=new SettingsService(db),discord=new FakeDiscord(),tokens=new Components('test'),onboarding=new OnboardingService(db,settings,vault),userId='677777777777777774';discord.members.set(userId,{roles:[],permissions:'8',joinedAt:'2026-09-01T00:00:00Z',bot:false});
  const worker=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,async()=>{}),base={applicationId:'677777777777777775',token:'test',userId,channelId,command:''};
  const issue=async(action:string,extra:Record<string,unknown>={})=>tokens.issue(db,s,{action,channelId,messageId,...extra},null,900);
@@ -252,7 +254,7 @@ it('snoozes an attention item, shows it after expiry, and suppresses it when res
   await sql`UPDATE attention_items SET snooze_until=now()-interval '1 minute' WHERE guild_id=${s.guildId}`.execute(db);
   expect((await new CommunityService(db).overview(s)).attention.map(item=>item.messageId)).toContain(messageId);
  }
- await sql`UPDATE attention_items SET snooze_until=NULL WHERE guild_id=${s.guildId}`.execute(db);
+ await sql`UPDATE attention_items SET status='SNOOZED',snooze_until=NULL WHERE guild_id=${s.guildId}`.execute(db);
  expect((await new CommunityService(db).overview(s)).attention).toHaveLength(0);
  expect(await helpers.tick(s)).toBe(false);
  await sql`UPDATE attention_items SET snooze_until=now()-interval '1 minute' WHERE guild_id=${s.guildId}`.execute(db);
@@ -271,7 +273,7 @@ it('gates context commands and explains only observed newcomer messages',async()
  discord.members.set(adminId,{roles:[],permissions:'8',joinedAt:'2026-09-01T00:00:00Z',bot:false});discord.members.set(guestId,{roles:[],permissions:'0',joinedAt:'2026-09-01T00:00:00Z',bot:false});
  const identity=randomUUID(),episode=randomUUID();
  await sql`INSERT INTO member_identity_map(organization_id,guild_id,id,lookup_hash,encrypted_id) VALUES(${s.organizationId}::uuid,${s.guildId},${identity}::uuid,${vault.hash(s,targetId)},${vault.seal(s,targetId)})`.execute(db);
- await sql`INSERT INTO membership_episodes(organization_id,guild_id,id,identity_id,joined_at,context) VALUES(${s.organizationId}::uuid,${s.guildId},${episode}::uuid,${identity}::uuid,now()-interval '2 days','PRODUCTION')`.execute(db);
+ await sql`INSERT INTO membership_episodes(organization_id,guild_id,id,identity_id,joined_at,context,screening_observed_at,guest_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episode}::uuid,${identity}::uuid,now()-interval '2 days','PRODUCTION',now(),now())`.execute(db);
  await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',now()-interval '1 hour','PRODUCTION',jsonb_build_object('channelId',${channelId}::text,'messageId',${messageId}::text))`.execute(db);
  const worker=new InteractionWorker(db,vault,tokens,discord,settings,onboarding,async()=>{}),base={applicationId:'688888888888888887',token:'test',channelId,command:'contextAdd',targetMessageId:messageId};
  await expect(worker.dispatch(s,{...base,id:'688888888888888888',userId:guestId})).rejects.toThrow('ADMIN_REQUIRED');
@@ -287,7 +289,7 @@ it('counts first connection only inside the first 72 hours',async()=>{
  const s=scopeForGuild('699999999999999991');await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);await ensureGuild(db,s);
  const identity=randomUUID(),episode=randomUUID(),joined=new Date(Date.now()-16*86400000);
  await sql`INSERT INTO member_identity_map(organization_id,guild_id,id,lookup_hash,encrypted_id) VALUES(${s.organizationId}::uuid,${s.guildId},${identity}::uuid,'window-test','cipher')`.execute(db);
- await sql`INSERT INTO membership_episodes(organization_id,guild_id,id,identity_id,joined_at,context) VALUES(${s.organizationId}::uuid,${s.guildId},${episode}::uuid,${identity}::uuid,${joined},'PRODUCTION')`.execute(db);
+ await sql`INSERT INTO membership_episodes(organization_id,guild_id,id,identity_id,joined_at,context,screening_observed_at,guest_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episode}::uuid,${identity}::uuid,${joined},'PRODUCTION',now(),now())`.execute(db);
  await sql`INSERT INTO telemetry_cursor(organization_id,guild_id,first_seen,last_seen) VALUES(${s.organizationId}::uuid,${s.guildId},${new Date(joined.getTime()-60000)},now())`.execute(db);
  await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',${new Date(joined.getTime()+3600000)},'PRODUCTION','{}'::jsonb)`.execute(db);
  await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episode}::uuid,'voice.connected',${new Date(joined.getTime()+4*86400000)},'PRODUCTION','{}'::jsonb)`.execute(db);

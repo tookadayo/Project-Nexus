@@ -1,3 +1,4 @@
+import {traceSync} from '../../shared/src/observability';
 import {z} from 'zod';
 import {MessageReferenceType,MessageType,ChannelFlags} from 'discord-api-types/v10';
 import {scopeForGuild} from '../../security/src/index.js';
@@ -12,7 +13,8 @@ export type Envelope=z.infer<typeof eventSchema>;
 export function isDirectReply(e:Envelope){return e.kind==='message.sent'&&e.messageType===MessageType.Reply&&e.referenceType!==MessageReferenceType.Forward&&Boolean(e.referenceId);}
 export type Dispatch={t:string|null,s:number|null,d:unknown};
 export function normalize(packet:Dispatch,shardId:number,sessionId:string,vault:IdentityVault,now=new Date()):Envelope|null {return normalizeMany(packet,shardId,sessionId,vault,now)[0]??null;}
-export function normalizeMany(packet:Dispatch,shardId:number,sessionId:string,vault:IdentityVault,now=new Date()):Envelope[]{
+export function normalizeMany(packet:Dispatch,shardId:number,sessionId:string,vault:IdentityVault,now=new Date()){return traceSync('event.normalize',{'signal.kind':packet.t??'UNKNOWN'},()=>normalizeManyInternal(packet,shardId,sessionId,vault,now));}
+function normalizeManyInternal(packet:Dispatch,shardId:number,sessionId:string,vault:IdentityVault,now=new Date()):Envelope[]{
  if(packet.s===null||!packet.d||typeof packet.d!=='object')return [];
  const raw=packet.d as Record<string,unknown>,guildId=raw.guild_id??(packet.t==='GUILD_CREATE'||packet.t==='GUILD_UPDATE'?raw.id:undefined);if(!id.safeParse(guildId).success)return [];
  const s=scopeForGuild(String(guildId)),base={...s,shardId,gatewaySessionId:sessionId,sequence:packet.s,context:'PRODUCTION' as const,schemaVersion:2 as const,at:now.toISOString(),observedAt:now.toISOString()},events:Envelope[]=[];

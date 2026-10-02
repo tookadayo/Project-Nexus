@@ -1,3 +1,4 @@
+import {traceStep} from '../../shared/src/observability.js';
 import {randomUUID} from 'node:crypto';
 import {sql,tenant,json,privacyReadLock,type Database,type Tx} from '../../db/src/index.js';
 import {eventSchema,dedupeKey,isDirectReply,type Envelope} from '../../events/src/index.js';
@@ -27,7 +28,8 @@ export class LifecycleService {
   const now=new Date();await sql`INSERT INTO telemetry_health(organization_id,guild_id,id,started_at,ended_at,reason)
    SELECT organization_id,guild_id,${randomUUID()}::uuid,last_seen,${now},'Redis stream reset' FROM telemetry_cursor WHERE ${tenant(s)}`.execute(this.db);
  }
- async process(input:Envelope){
+ async process(input:Envelope){return traceStep('event.project',{'signal.kind':input.kind},()=>this.processInternal(input));}
+ private async processInternal(input:Envelope){
   const event=eventSchema.parse(input);const s:Scope={organizationId:event.organizationId,guildId:event.guildId};const at=new Date(event.at);
   let observedMember:Awaited<ReturnType<DiscordPort['member']>>|undefined;
   if(event.encryptedUserId&&event.kind!=='member.left'&&(await this.settings.get(s)).enabled){

@@ -1,3 +1,4 @@
+import {traceCorrelation} from './observability';
 import {randomBytes} from 'node:crypto';
 import {isDiscordFailure} from '../../discord/src/rest';
 
@@ -11,7 +12,7 @@ export function redactSecrets(value:string,extra:string[]=[]){
  safe=safe.replace(/\bNX(?:[-\s]?[23456789ABCDEFGHJKMNPQRSTUVWXYZ]){12}\b/gi,'[REDACTED]');
  const environment=Object.entries(process.env).filter(([name])=>/(TOKEN|SECRET|PASSWORD|API_KEY|DATABASE_URL|REDIS_URL|IDENTITY_KEY|LOOKUP_KEY|COMPONENT_KEY|COOKIE)/i.test(name)).map(([,secret])=>secret);
  for(const secret of [...environment,...extra])if(secret&&secret.length>=4)safe=safe.replaceAll(secret,'[REDACTED]');
- return safe;
+ return safe.replace(/\b\d{17,20}\b/g,'[DISCORD_ID]').replace(/\b[a-f0-9]{64}\b/gi,'[PSEUDONYM]');
 }
 
 export function failureSummary(error:unknown){
@@ -21,7 +22,7 @@ export function failureSummary(error:unknown){
 
 export function logFailure(context:{reference?:string;action:string;command?:string;stage:string;error:unknown;secrets?:string[]}){
  const {error,secrets=[],...fields}=context;
- const record={timestamp:new Date().toISOString(),...fields,...failureSummary(error),stack:error instanceof Error?error.stack:undefined};
+ const record={...traceCorrelation(),timestamp:new Date().toISOString(),...fields,...failureSummary(error),stack:error instanceof Error?error.stack:undefined};
  const safe=Object.fromEntries(Object.entries(record).map(([key,value])=>[key,typeof value==='string'?redactSecrets(value,secrets):value]));
  process.stderr.write(JSON.stringify(safe)+'\n');
 }

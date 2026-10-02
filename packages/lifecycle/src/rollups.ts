@@ -1,3 +1,4 @@
+import {traceStep} from '../../shared/src/observability';
 import { sql, type Tx, tenant } from "../../db/src/index";
 import type { Scope } from "../../shared/src/index";
 export type ActivityFact = {

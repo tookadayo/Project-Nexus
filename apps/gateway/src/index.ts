@@ -1,3 +1,4 @@
+import {traceStep} from '../../../packages/shared/src/observability.js';
 import {Client,GatewayIntentBits,Events,type Interaction} from 'discord.js';
 import {Redis} from 'ioredis';
 import {randomUUID} from 'node:crypto';
@@ -10,7 +11,8 @@ export const STREAM='nexus:events';
 export class GatewayPublisher {
  private lost=new Map<string,Envelope>();
  constructor(private readonly redis:Redis,private readonly db?:Database,private readonly vault?:IdentityVault){}
- async publish(event:Envelope){
+ async publish(event:Envelope){return traceStep('event.persist',{'signal.kind':event.kind},()=>this.persist(event));}
+ private async persist(event:Envelope){
   event=eventSchema.parse(event);
   if(!this.db)return this.publishOnce(event);
   await this.db.connection().execute(async db=>{
@@ -29,10 +31,10 @@ export class GatewayPublisher {
    if(!(await sql`SELECT dedupe_key FROM gateway_ingest WHERE ${tenant(s)} AND dedupe_key=${dedupeKey(event)}`.execute(db)).rows.length)return;
   }
   try{
-   for(const [guildId,missing] of this.lost){await this.redis.xadd(STREAM,'*','event',JSON.stringify({organizationId:missing.organizationId,guildId,shardId:missing.shardId,gatewaySessionId:missing.gatewaySessionId,sequence:missing.sequence,kind:'telemetry.gap',context:'PRODUCTION',at:new Date().toISOString(),gapStart:missing.at}));this.lost.delete(guildId);}
+   for(const [scopeKey,missing] of this.lost){await this.redis.xadd(STREAM,'*','event',JSON.stringify({organizationId:missing.organizationId,guildId:missing.guildId,shardId:missing.shardId,gatewaySessionId:missing.gatewaySessionId,sequence:missing.sequence,kind:'telemetry.gap',context:'PRODUCTION',at:new Date().toISOString(),gapStart:missing.at}));this.lost.delete(scopeKey);}
    await this.redis.xadd(STREAM,'*','event',JSON.stringify(event));
    if(db)await sql`UPDATE gateway_ingest SET published_at=now() WHERE ${tenant(s)} AND dedupe_key=${dedupeKey(event)}`.execute(db);
-  }catch{if(!db&&!this.lost.has(event.guildId))this.lost.set(event.guildId,event);throw new Error('Gateway stream unavailable');}
+  }catch{if(!db&&!this.lost.has(event.organizationId+':'+event.guildId))this.lost.set(event.organizationId+':'+event.guildId,event);throw new Error('Gateway stream unavailable');}
  }
  async recover(){
   if(!this.db)return 0;
