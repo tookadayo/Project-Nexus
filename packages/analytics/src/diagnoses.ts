@@ -1,4 +1,5 @@
 import type {MetricKey,MetricResult} from './registry.js';
+import {comparisonEligibility} from '../../shared/src/metric-evidence.js';
 export const diagnosisRules=[
  {type:'ACTIVATION_DROP',key:'activation_rate',direction:'drop',threshold:.1},
  {type:'TTFV_SPIKE',key:'ttfv_median',direction:'spike',threshold:.5},
@@ -13,6 +14,7 @@ export function diagnose(current:Partial<Record<MetricKey,MetricResult>>,baselin
  const result:Diagnosis[]=[];
  for(const rule of diagnosisRules){
   const c=current[rule.key],b=baseline[rule.key];
+  if(c?.evidence&&b?.evidence&&!comparisonEligibility(c.evidence,b.evidence).comparable)continue;
   if(!c||!b||c.metricVersion!==b.metricVersion||JSON.stringify(c.definitionIds)!==JSON.stringify(b.definitionIds)||c.value===null||b.value===null||Math.min(c.sampleSize,b.sampleSize)<20||c.dataCoverage.status!=='healthy'||b.dataCoverage.status!=='healthy')continue;
   if(rule.direction==='drop'?b.value-c.value>=rule.threshold:b.value>0&&c.value>=b.value*(1+rule.threshold))result.push({type:rule.type,severity:'warning',cohort,facts:{metric:rule.key,current:c.value,baseline:b.value},comparison:{current:c.value,baseline:b.value},sampleSize:c.sampleSize,confidenceLabel:'observational',causality:'not_established'});
  }

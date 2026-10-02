@@ -42,13 +42,13 @@ export class GatewayPublisher {
 }
 export function createGateway(redis:Redis,vault:IdentityVault,onError:()=>void=()=>{},db?:Database,onInteraction?:(interaction:Interaction)=>Promise<void>){
  const client=new Client({intents:gatewayIntents});const publisher=new GatewayPublisher(redis,db,vault);const sessions=new Map<number,string>(),pending=new Map<string,Promise<void>>();let healthSequence=0;
- const healthSession=randomUUID();const disconnected=new Set<number>();
+ const healthSession=randomUUID();const disconnected=new Set<number>(),intentDenied=new Set<number>();
  const registerGuild=async(guildId:string)=>{if(!db)return;const scope=scopeForGuild(guildId);await db.transaction().execute(tx=>ensureGuild(tx,scope));};
- const health=async(kind:Envelope['kind'],shardId?:number)=>{
+ const health=async(kind:Envelope['kind'],shardId?:number,reason:Envelope['healthReason']='GATEWAY_CONNECTED')=>{
   for(const guild of client.guilds.cache.values())if(shardId===undefined||guild.shardId===shardId){
    if(kind==='telemetry.heartbeat'&&disconnected.has(guild.shardId))continue;
    await registerGuild(guild.id);
-   const event:Envelope={...scopeForGuild(guild.id),shardId:guild.shardId,gatewaySessionId:healthSession,sequence:healthSequence++,kind,at:new Date().toISOString(),context:'PRODUCTION'};
+   const event:Envelope={...scopeForGuild(guild.id),shardId:guild.shardId,gatewaySessionId:healthSession,sequence:healthSequence++,kind,healthReason:reason,requestedIntents:intentDenied.has(guild.shardId)?['messages','reactions','polls','voice','scheduledEvents','autoMod']:['members','messages','reactions','polls','voice','scheduledEvents','autoMod'],at:new Date().toISOString(),context:'PRODUCTION'};
    await publisher.publish(event).catch(onError);
   }
  };
@@ -57,11 +57,11 @@ export function createGateway(redis:Redis,vault:IdentityVault,onError:()=>void=(
   const session=sessions.get(shardId);if(!session)return;
   try{const events=normalizeMany(packet,shardId,session,vault);if(events.length){const guildId=events[0]!.guildId,next=(pending.get(guildId)??Promise.resolve()).then(()=>registerGuild(guildId)).then(async()=>{for(const event of events)await publisher.publish(event);}).catch(onError);pending.set(guildId,next);void next.finally(()=>{if(pending.get(guildId)===next)pending.delete(guildId);});}}catch{onError();}
  });
- client.on(Events.GuildCreate,guild=>{void registerGuild(guild.id).then(()=>health('telemetry.connected',guild.shardId)).catch(onError);});
- client.on(Events.ClientReady,()=>{void health('telemetry.connected');});
- client.on(Events.ShardReady,shardId=>{disconnected.delete(shardId);void health('telemetry.connected',shardId);});
- client.on(Events.ShardResume,shardId=>{disconnected.delete(shardId);void health('telemetry.connected',shardId);});
- client.on(Events.ShardDisconnect,(_close,shardId)=>{disconnected.add(shardId);void health('telemetry.disconnected',shardId);});
+ client.on(Events.GuildCreate,guild=>{void registerGuild(guild.id).then(()=>health('telemetry.connected',guild.shardId,'BOT_INSTALLED')).catch(onError);});
+ client.on(Events.ClientReady,()=>{void health('telemetry.connected',undefined,'PROCESS_RESTART');});
+ client.on(Events.ShardReady,shardId=>{disconnected.delete(shardId);const restored=intentDenied.delete(shardId);void health('telemetry.connected',shardId,restored?'INTENT_RESTORED':'GATEWAY_CONNECTED');});
+ client.on(Events.ShardResume,shardId=>{disconnected.delete(shardId);void health('telemetry.connected',shardId,'GATEWAY_RESUMED');});
+ client.on(Events.ShardDisconnect,(close,shardId)=>{disconnected.add(shardId);if(close.code===4014)intentDenied.add(shardId);void health('telemetry.disconnected',shardId,close.code===4014?'INTENT_UNAVAILABLE':'GATEWAY_CONNECTED');});
  if(onInteraction)client.on(Events.InteractionCreate,interaction=>{void onInteraction(interaction).catch(onError);});
  const heartbeat=setInterval(()=>{void health('telemetry.heartbeat');},30000);heartbeat.unref();
  return {client,publisher,stop:async()=>{clearInterval(heartbeat);await client.destroy();}};

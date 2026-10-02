@@ -134,6 +134,10 @@ export type CapabilitySnapshot = {
   capabilities: Record<string, CapabilityEntry>;
   channels: ChannelMetadata[];
   coverage: {
+    totalState?: "KNOWN" | "LOWER_BOUND" | "UNKNOWN";
+    knownTotalChannels?: number | null;
+    coverageState?: "COMPLETE" | "PARTIAL" | "LOWER_BOUND" | "UNKNOWN";
+    reasons?: string[];
     observableChannels: number;
     totalRelevantChannels: number;
     ratio: number | null;

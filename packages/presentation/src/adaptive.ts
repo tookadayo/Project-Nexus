@@ -7,6 +7,9 @@ import {
 } from "../../shared/src/community-model";
 import type { Settings } from "../../settings/src/index";
 import { latestCapability } from "../../lifecycle/src/discovery";
+import {buildMetricEvidence,evidenceContext} from '../../analytics/src/evidence';
+import type {MetricEvidence} from '../../shared/src/metric-evidence';
+import type {IntegrationHealth,CollectionEpoch} from '../../shared/src/integration-health';
 export type AdaptiveMetric = {
   key: string;
   count: number | null;
@@ -19,6 +22,7 @@ export type AdaptiveMetric = {
   state: "OBSERVED" | "PENDING" | "PARTIAL" | "UNKNOWN";
   surface?: string;
   purpose?: string;
+  evidence?: MetricEvidence;
 };
 export type AdaptivePresentation = {
   progress?: {
@@ -48,6 +52,9 @@ export type AdaptivePresentation = {
     totalRelevantChannels: number;
   };
   eligible: number;
+  unknownMembers?: number;
+  integration?: IntegrationHealth;
+  epochs?: CollectionEpoch[];
   pending: number;
   guests: number;
   journey: {
@@ -87,7 +94,8 @@ export async function adaptivePresentation(
       pending: number;
       guests: number;
       joined: number;
-    }>`SELECT count(*) FILTER(WHERE e.screening_observed_at IS NOT NULL AND e.guest_observed_at IS NOT NULL AND NOT e.screening_pending AND NOT e.is_guest)::integer AS eligible,count(*) FILTER(WHERE e.screening_pending)::integer AS pending,count(*) FILTER(WHERE e.is_guest)::integer AS guests,count(*) FILTER(WHERE e.joined_at>=${new Date(now.getTime() - 30 * 86400000)})::integer AS joined FROM membership_episodes e LEFT JOIN member_observable_state st ON st.organization_id=e.organization_id AND st.guild_id=e.guild_id AND st.episode_id=e.id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND e.context='PRODUCTION' AND e.left_at IS NULL AND NOT(COALESCE(st.roles,'{}'::text[])&&${roles}::text[])`.execute(
+      unknown: number;
+    }>`SELECT count(*) FILTER(WHERE e.screening_observed_at IS NOT NULL AND e.guest_observed_at IS NOT NULL AND NOT e.screening_pending AND NOT e.is_guest)::integer AS eligible,count(*) FILTER(WHERE e.screening_observed_at IS NOT NULL AND e.screening_pending)::integer AS pending,count(*) FILTER(WHERE e.guest_observed_at IS NOT NULL AND e.is_guest)::integer AS guests,count(*) FILTER(WHERE e.screening_observed_at IS NULL OR e.guest_observed_at IS NULL)::integer AS unknown,count(*) FILTER(WHERE e.joined_at>=${new Date(now.getTime() - 30 * 86400000)})::integer AS joined FROM membership_episodes e LEFT JOIN member_observable_state st ON st.organization_id=e.organization_id AND st.guild_id=e.guild_id AND st.episode_id=e.id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND e.context='PRODUCTION' AND e.left_at IS NULL AND NOT(COALESCE(st.roles,'{}'::text[])&&${roles}::text[])`.execute(
       db,
     )
   ).rows[0]!;
@@ -153,8 +161,7 @@ export async function adaptivePresentation(
   ).rows[0]!;
   const partial =
       !snapshot ||
-      snapshot.coverage.ratio !== 1 ||
-      snapshot.coverage.privateThreads === "PARTIAL",
+      snapshot.coverage.coverageState !== "COMPLETE",
     metrics: AdaptiveMetric[] = [],
     modes = cfg.communityModel.confirmed ? cfg.communityModel.modes : [],
     has = (key: string) =>
@@ -167,7 +174,7 @@ export async function adaptivePresentation(
     value: number,
     sample: number,
     definition: string,
-    denominator: number | null = members.eligible,
+    denominator: number | null = null,
   ) =>
     metrics.push({
       key,
@@ -396,6 +403,13 @@ export async function adaptivePresentation(
     caveats.push(
       "A Discord safety incident flag overlaps the observed context; period comparisons need review.",
     );
+  const evidence=await evidenceContext(db,s,from,now);
+  for(const metric of metrics){
+    metric.evidence=buildMetricEvidence(metric.key,{value:metric.count,numerator:metric.count,denominator:metric.denominator,sample:metric.sample,definition:metric.definition,requiredSurfaces:metric.purpose==='LFG'&&['postResponse','postsAwaitingResponse'].includes(metric.key)?['members','messages','threadVisibility']:undefined},snapshot,cfg,evidence);
+    metric.count=metric.evidence.value;
+    metric.state=metric.evidence.observationState==='UNKNOWN'?'UNKNOWN':metric.evidence.coverageState!=='COMPLETE'?'PARTIAL':metric.evidence.observationState==='OBSERVED'?'OBSERVED':'PENDING';
+    if(metric.evidence.observationState==='UNKNOWN'){metric.medianMinutes=null;metric.p75Minutes=null;metric.p90Minutes=null;}
+  }
   return {
     profile: cfg.communityModel,
     capabilities: snapshot,
@@ -414,6 +428,9 @@ export async function adaptivePresentation(
       totalRelevantChannels: snapshot?.coverage.totalRelevantChannels ?? 0,
     },
     eligible: members.eligible,
+    unknownMembers:members.unknown,
+    integration:evidence.health,
+    epochs:evidence.epochs,
     pending: members.pending,
     guests: members.guests + guestSessions,
     journey: {

@@ -126,6 +126,7 @@ async function fixture() {
         sequence: ++sequence,
         context: "PRODUCTION",
         kind: "telemetry.connected",
+        requestedIntents: ["members", "messages", "reactions", "polls", "voice", "scheduledEvents", "autoMod"],
         at: at.toISOString(),
       }),
     s,
@@ -631,7 +632,7 @@ it("persists partial capability detection, manual refresh and truthful adaptive 
     false,
   );
   expect(
-    view.adaptive?.metrics.every((m) => m.definition && m.state === "PARTIAL"),
+    view.adaptive?.metrics.every((m) => m.definition && m.state === "UNKNOWN" && m.evidence?.coverageReasons.includes("GATEWAY_UNKNOWN")),
   ).toBe(true);
   const encoded = JSON.stringify(
     (
@@ -733,6 +734,8 @@ it("inherits parent analysis scope, counts poll activity once, and omits exclude
   await sql`INSERT INTO guild_capability_snapshots VALUES(${f.s.organizationId}::uuid,${f.s.guildId},gen_random_uuid(),${json(buildCapabilitySnapshot(representativeSource(4), f.now, null, { poll: 1 }))},${f.now})`.execute(
     db,
   );
+  await f.health(f.now);
+  await sql`UPDATE discord_integration_health SET rest_state='AVAILABLE',last_refresh_at=${f.now} WHERE ${tenant(f.s)}`.execute(db);
   const view = await new CommunityService(db, f.settings).overview(
     f.s,
     30,

@@ -16,7 +16,7 @@ export class PrivacyService {
     await sql`SELECT pg_advisory_xact_lock(hashtextextended(${'privacy:'+s.organizationId+':'+s.guildId},0))`.execute(tx);
     await sql`DELETE FROM server_verification_challenges WHERE ${tenant(s)}`.execute(tx);
     await sql`DELETE FROM server_web_links WHERE ${tenant(s)}`.execute(tx);
-    for(const table of ['adaptive_states','adaptive_facts','discord_surface_state','guild_capability_snapshots','capability_refresh_jobs'])await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)}`.execute(tx);
+    for(const table of ['adaptive_states','adaptive_facts','discord_surface_state','collection_epochs','discord_integration_health','guild_capability_snapshots','capability_refresh_jobs'])await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)}`.execute(tx);
     // Only an audit tombstone and disabled settings remain. Published flows can be deleted, never mutated.
     for(const table of ['suggestion_feedback','weekly_summary_deliveries','helper_alerts','attention_items','retention_tracking','retention_cohorts','gateway_ingest','usage_counters','guild_subscriptions','guild_capabilities','guild_config_heads','guild_config_revisions','data_coverage_snapshots','action_outbox','interaction_jobs','interaction_diagnostics','component_tokens','settings_panels','guild_command_sync','event_inbox','telemetry_health','telemetry_cursor','daily_guild_metrics','member_interaction_pairs','member_identity_map','flow_versions','audit_logs','deletion_requests'])
      await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)}`.execute(tx);
@@ -94,6 +94,7 @@ export class PrivacyService {
    for(const table of ['adaptive_states','adaptive_facts'])await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)} AND ${sql.ref(table==='adaptive_states'?'observed_at':'occurred_at')}<${cutoff}`.execute(tx);
    await sql`DELETE FROM discord_surface_state WHERE ${tenant(s)} AND archived AND observed_at<${cutoff}`.execute(tx);
    await sql`DELETE FROM guild_capability_snapshots WHERE ${tenant(s)} AND checked_at<${cutoff} AND id<>(SELECT id FROM guild_capability_snapshots WHERE ${tenant(s)} ORDER BY checked_at DESC LIMIT 1)`.execute(tx);
+   await sql`DELETE FROM collection_epochs WHERE ${tenant(s)} AND ended_at<${cutoff}`.execute(tx);
    await sql`DELETE FROM data_coverage_snapshots WHERE ${tenant(s)} AND observed_at<${cutoff}`.execute(tx);
    await sql`DELETE FROM daily_guild_metrics WHERE ${tenant(s)} AND day<(now()-make_interval(months=>${cfg.aggregateRetentionMonths}))::date`.execute(tx);
    await sql`DELETE FROM suggestion_feedback WHERE ${tenant(s)} AND dismissed_at<now()-make_interval(months=>${cfg.aggregateRetentionMonths})`.execute(tx);

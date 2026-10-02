@@ -1,4 +1,5 @@
 import type {Diagnosis} from '../../analytics/src/diagnoses.js';
+import {comparisonEligibility} from '../../shared/src/metric-evidence.js';
 import type {MetricKey,MetricResult} from '../../analytics/src/registry.js';
 import type {ExperimentDefinition} from '../../lifecycle/src/experiments.js';
 import type {InterventionDefinition} from '../../lifecycle/src/interventions.js';
@@ -19,7 +20,8 @@ export const maturity=(metric?:MetricResult):Maturity=>!metric||metric.value===n
 export function toTrendPoint(bucket:string,metric?:MetricResult):TrendPoint{return {bucket,value:metric?.value??null,sampleSize:metric?.sampleSize??0,maturity:maturity(metric),coverage:dataHealth(metric)};}
 export function retentionMaturity(value:number|null,cohortStart:number,day:number,asOf:number,available=true):Maturity{return value!==null?'mature':asOf<cohortStart+(day+1)*86400000?'provisional':available?'unavailable':'unavailable';}
 export function toKpi(key:KPI['key'],current?:MetricResult,previous?:MetricResult):KPI{
- const a=current?.value??null,b=previous?.value??null;
+ const comparable=current?.evidence&&previous?.evidence?comparisonEligibility(current.evidence,previous.evidence).comparable:true;
+ const a=current?.value??null,b=comparable?previous?.value??null:null;
  return {key,current:a,previous:b,delta:a!==null&&b!==null?a-b:null,sampleSize:current?.sampleSize??0,maturity:maturity(current),coverage:dataHealth(current)};
 }
 const stageMetric:Record<Exclude<JourneyStage['key'],'joined'>,PresentationMetricKey>={onboarded:'onboarding_completion',first_value:'activation_rate',connected:'direct_reply_connection_rate',d7_active:'d7_active_retention'};

@@ -18,6 +18,7 @@ import {recordProductEvent} from '../../../packages/shared/src/product-telemetry
 import {nextZonedDayStart} from '../../../packages/shared/src/timezones.js';
 import {latestCapability,requestCapabilityRefresh} from '../../../packages/lifecycle/src/discovery.js';
 
+import {integrationHealth,collectionEpochs} from '../../../packages/lifecycle/src/observation.js';
 export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:DiscordPort,vault?:IdentityVault){
  const base='/v3/organizations/:organizationId/guilds/:guildId',presentation=new PresentationService(db);
  const optionsCache=new Map<string,{at:number;value:Awaited<ReturnType<NonNullable<DiscordPort['options']>>>}>();
@@ -25,6 +26,7 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
  const automaticStaffRoles=async(guildId:string)=>{const cached=roleCache.get(guildId);if(cached&&Date.now()-cached.at<1800000)return cached.ids;if(!discord)return [];try{const roles=await discord.roles(guildId),flags=PermissionFlagsBits.Administrator|PermissionFlagsBits.ManageGuild|PermissionFlagsBits.ManageMessages|PermissionFlagsBits.ModerateMembers,ids=roles.filter(role=>(BigInt(role.permissions)&flags)!==0n).map(role=>role.id);roleCache.set(guildId,{at:Date.now(),ids});return ids;}catch{return cached?.ids??[];}};
  const auth=(params:unknown,header:unknown)=>{const scope=scopeSchema.parse(params);assert(validApiToken(key,scope,String(header??'').replace(/^Bearer /,'')),'FORBIDDEN',403);return scope;};
  const getScope=(req:{params:unknown;headers:{authorization?:unknown}},reply:{header:(name:string,value:string)=>unknown})=>{const scope=auth(req.params,req.headers.authorization);reply.header('Cache-Control','no-store');return scope;};
+ app.get(base+'/integration-health',async(req,reply)=>{const s=getScope(req,reply);return {health:await integrationHealth(db,s),epochs:await collectionEpochs(db,s,new Date(Date.now()-30*86400000),new Date())};});
  app.get(base+'/community-model',async(req,reply)=>{const s=getScope(req,reply),current=await new SettingsService(db).get(s);return {profile:current.communityModel,revision:current.revision,capabilities:await latestCapability(db,s)};});
  app.post(base+'/community-model/refresh',async(req,reply)=>{const s=getScope(req,reply);await requestCapabilityRefresh(db,s,'manual');return {state:'PENDING'};});
  app.post(base+'/settings/community-model',async(req,reply)=>{const s=getScope(req,reply),input=z.object({profile:settingsSchema.shape.communityModel,revision:z.number().int().nonnegative()}).strict().parse(req.body);return new SettingsService(db).update(s,{key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id},input.revision,{communityModel:input.profile});});

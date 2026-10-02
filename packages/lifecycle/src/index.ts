@@ -12,6 +12,7 @@ import {validateSignal} from '../../events/src/registry.js';
 import {projectActivation} from './activation.js';
 import {recordUsage} from '../../settings/src/entitlements.js';
 import {projectStructure,projectMemberFlags,projectAdaptiveMember,resolveSurface} from './adaptive-projector.js';
+import {projectObservation} from './observation.js';
 export class AwaitingReference extends Error{}
 export class LifecycleService {
  constructor(private readonly db:Database,private readonly vault:IdentityVault,private readonly settings:SettingsService,private readonly discord:DiscordPort){}
@@ -43,15 +44,18 @@ export class LifecycleService {
    await sql`UPDATE gateway_ingest SET projected_at=now() WHERE ${tenant(s)} AND dedupe_key=${dedupeKey(event)}`.execute(tx);
    const inserted=await sql`INSERT INTO event_inbox(organization_id,guild_id,dedupe_key) VALUES(${s.organizationId}::uuid,${s.guildId},${dedupeKey(event)}) ON CONFLICT DO NOTHING RETURNING dedupe_key`.execute(tx);if(!inserted.rows.length)return;
    const settings=await this.settings.get(s,tx);if(!settings.enabled)return;
-   if(event.kind.startsWith('telemetry.')){await projectStructure(tx,s,event,settings);await this.health(tx,s,event);return;}
+   await projectObservation(tx,s,event);
+   if(event.kind.startsWith('telemetry.')){const health=(await sql<{last_gateway_at:Date|null}>`SELECT last_gateway_at FROM discord_integration_health WHERE ${tenant(s)}`.execute(tx)).rows[0];if(!health?.last_gateway_at||health.last_gateway_at<=at)await projectStructure(tx,s,event,settings);await this.health(tx,s,event);return;}
    if(await projectStructure(tx,s,event,settings)||!event.encryptedUserId)return;
    const userId=this.vault.open(s,event.encryptedUserId);const hash=this.vault.hash(s,userId);
    if(observedMember?.bot)return;
    if((await sql`SELECT id FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash=${hash}`.execute(tx)).rows.length)return;
-   const previousGuest=(await sql`SELECT state_key FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(tx)).rows.length>0;
+   const guestObservation=(await sql<{observed_at:Date}>`SELECT observed_at FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(tx)).rows[0];
+   const previousGuest=Boolean(guestObservation), observationAt=new Date(event.observedAt??event.at);
    const observedFlags=event.memberFlags??(observedMember?.flags===undefined?undefined:Number(observedMember.flags));
-   const guest=observedFlags===undefined?previousGuest:Boolean(observedFlags&GuildMemberFlags.IsGuest);
-   if(guest){if(event.kind==='member.left'){await projectAdaptiveMember(tx,s,{...event,kind:'voice.state',channelId:null},settings,hash,null,true);await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(tx);}else{await sql`INSERT INTO adaptive_states VALUES(${s.organizationId}::uuid,${s.guildId},'guest','membership',${hash},NULL,'{}'::jsonb,${at}) ON CONFLICT(organization_id,guild_id,domain,state_key,subject_hash) DO UPDATE SET observed_at=EXCLUDED.observed_at`.execute(tx);await projectAdaptiveMember(tx,s,event,settings,hash,null,true);}return;}
+   const guest=observedFlags===undefined||(guestObservation&&guestObservation.observed_at>observationAt)?previousGuest:Boolean(observedFlags&GuildMemberFlags.IsGuest);
+   if(guest&&observedFlags!==undefined){const known=(await sql<{id:string}>`SELECT e.id FROM membership_episodes e JOIN member_identity_map m ON m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.identity_id WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND m.lookup_hash=${hash} AND e.joined_at<=${at} AND (e.left_at IS NULL OR e.left_at>${at}) AND e.context='PRODUCTION' LIMIT 1`.execute(tx)).rows[0];if(known)await projectMemberFlags(tx,s,{...event,memberFlags:observedFlags,observationSource:observedMember?'REST':'GATEWAY'},known.id,hash);}
+   if(guest){if(event.kind==='member.left'){await projectAdaptiveMember(tx,s,{...event,kind:'voice.state',channelId:null},settings,hash,null,true);await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(tx);}else{await sql`INSERT INTO adaptive_states VALUES(${s.organizationId}::uuid,${s.guildId},'guest','membership',${hash},NULL,'{}'::jsonb,${at}) ON CONFLICT(organization_id,guild_id,domain,state_key,subject_hash) DO UPDATE SET observed_at=EXCLUDED.observed_at WHERE adaptive_states.observed_at<=EXCLUDED.observed_at`.execute(tx);await projectAdaptiveMember(tx,s,event,settings,hash,null,true);}return;}
    if(previousGuest)await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND domain='guest' AND subject_hash=${hash}`.execute(tx);
    const identityId=await this.vault.resolve(tx,s,userId);
    await recordUsage(tx,s,hash,at);
@@ -91,7 +95,7 @@ export class LifecycleService {
    await projectMemberFlags(tx,s,{...event,memberFlags:observedFlags,pending:event.pending??observedMember?.pending??undefined,observationSource:observedMember?'REST':'GATEWAY'},episode.id,hash);
    const eligibility=(await sql<MemberObservation>`SELECT screening_pending,is_guest,screening_observed_at,guest_observed_at FROM membership_episodes WHERE ${tenant(s)} AND id=${episode.id}::uuid`.execute(tx)).rows[0]!;
    if(memberEligibility(eligibility)!=='ELIGIBLE')return;
-   if(await projectAdaptiveMember(tx,s,event,settings,hash,episode.id))return;
+   if(await projectAdaptiveMember(tx,s,event.kind==='voice.started'||event.kind==='voice.ended'?{...event,kind:'voice.state',channelId:event.kind==='voice.ended'?null:event.channelId}:event,settings,hash,episode.id))return;
    if(settings.flags.activation_dsl_v2)await projectActivation(tx,s,episode.id,at);
    if(settings.flags.native_snapshot_v2&&event.kind!=='member.joined')await requestNativeRefresh(tx,s,episode.id,at);
    if(event.kind==='member.roles_updated'&&event.roles){
@@ -111,22 +115,6 @@ export class LifecycleService {
     }
    }
    if(event.kind==='scheduled_event.subscribed'||event.kind==='scheduled_event.unsubscribed')await this.record(tx,s,episode.id,event.kind,at,{eventId:event.eventId});
-   if((event.kind==='voice.started'||event.kind==='voice.ended')&&channelAllowed(event.channelId)){
-    const previous=(await sql<{voice_channel_id:string|null,voice_started_at:Date|null}>`SELECT voice_channel_id,voice_started_at FROM member_observable_state WHERE ${tenant(s)} AND episode_id=${episode.id}::uuid FOR UPDATE`.execute(tx)).rows[0];
-    if(!previous?.voice_started_at||at>=previous.voice_started_at){
-     if(previous?.voice_started_at&&previous.voice_channel_id!==event.channelId){
-      const seconds=(at.getTime()-previous.voice_started_at.getTime())/1000;
-      const gaps=(await sql`SELECT id FROM telemetry_health WHERE ${tenant(s)} AND started_at<${at} AND (ended_at IS NULL OR ended_at>${previous.voice_started_at})`.execute(tx)).rows;
-      if(!gaps.length&&seconds<=86400)await this.record(tx,s,episode.id,'voice.duration',at,{channelId:previous.voice_channel_id,seconds});
-     }
-     if(previous?.voice_channel_id!==event.channelId)await sql`INSERT INTO member_observable_state(organization_id,guild_id,episode_id,voice_channel_id,voice_started_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episode.id}::uuid,${event.channelId??null},${event.channelId?at:null}) ON CONFLICT(organization_id,guild_id,episode_id) DO UPDATE SET voice_channel_id=EXCLUDED.voice_channel_id,voice_started_at=EXCLUDED.voice_started_at`.execute(tx);
-     await this.record(tx,s,episode.id,event.kind,at,{channelId:event.channelId});
-     if(event.kind==='voice.started'&&event.channelId){
-      const peers=(await sql<{episode_id:string;identity_id:string}>`SELECT state.episode_id,member.identity_id FROM member_observable_state state JOIN membership_episodes member ON member.organization_id=state.organization_id AND member.guild_id=state.guild_id AND member.id=state.episode_id WHERE state.organization_id=${s.organizationId}::uuid AND state.guild_id=${s.guildId} AND state.episode_id<>${episode.id}::uuid AND state.voice_channel_id=${event.channelId} AND state.voice_started_at IS NOT NULL AND state.voice_started_at<=${at} AND member.left_at IS NULL LIMIT 100`.execute(tx)).rows;
-      if(peers.length){await this.record(tx,s,episode.id,'voice.connected',at,{channelId:event.channelId});for(const peer of peers){await this.record(tx,s,peer.episode_id,'voice.connected',at,{channelId:event.channelId});await this.pair(tx,s,episode.id,peer.identity_id,at);await this.pair(tx,s,peer.episode_id,identityId,at);}}
-     }
-    }
-   }
    if(event.kind==='message.sent'){
     if(!channelAllowed(event.channelId))return;
     if((await sql`SELECT id FROM lifecycle_events WHERE ${tenant(s)} AND kind='message.sent' AND context='PRODUCTION' AND data->>'messageId'=${event.messageId??''}`.execute(tx)).rows.length)return;
@@ -170,7 +158,7 @@ export class LifecycleService {
  private async gap(tx:Tx,s:Scope,start:Date,end:Date|null,reason:string){await sql`INSERT INTO telemetry_health VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${start},${end},${reason})`.execute(tx);}
  private async health(tx:Tx,s:Scope,e:Envelope){
   const at=new Date(e.at);const cursor=(await sql<{last_seen:Date}>`SELECT last_seen FROM telemetry_cursor WHERE ${tenant(s)} FOR UPDATE`.execute(tx)).rows[0];
-  if(e.kind==='telemetry.disconnected'){await this.gap(tx,s,at,null,'gateway disconnected');return;}
+  if(e.kind==='telemetry.disconnected'){await this.gap(tx,s,at,cursor&&cursor.last_seen>at?cursor.last_seen:null,'gateway disconnected');return;}
   if(e.kind==='telemetry.gap'){await this.gap(tx,s,new Date(e.gapStart??e.at),at,'Redis publication lost');return;}
   if(cursor&&at.getTime()-cursor.last_seen.getTime()>90000)await this.gap(tx,s,cursor.last_seen,at,'heartbeat missing');
   await sql`UPDATE telemetry_health SET ended_at=${at} WHERE ${tenant(s)} AND ended_at IS NULL AND started_at<=${at} AND reason='gateway disconnected'`.execute(tx);

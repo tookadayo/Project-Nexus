@@ -1,11 +1,13 @@
 import {sql,tenant,json,type Database} from '../../db/src/index.js';
 import type {Scope} from '../../shared/src/index.js';
 import {SettingsService} from '../../settings/src/index.js';
-import {canonicalMetrics,inputCoverage,type CoverageMetric} from './registry.js';
+import {canonicalMetrics,inputCoverage,metricRegistry,type CoverageMetric} from './registry.js';
 export type MetricValue={value:number|null,sampleSize:number,coverage:'COMPLETE'|'PARTIAL'|'UNAVAILABLE',coverageRatio:number};
 export type MetricEpisode={id:string,joinedAt:number,context:string};
 export type MetricEvent={episodeId:string,kind:string,at:number,context:string,data:Record<string,unknown>};
 export type Overview=Record<string,MetricValue>;
+import {latestCapability} from '../../lifecycle/src/discovery.js';
+import {buildMetricEvidence,evidenceContext} from './evidence.js';
 const day=86400000;
 function quantile(values:number[],p:number){if(!values.length)return null;const sorted=[...values].sort((a,b)=>a-b);const i=(sorted.length-1)*p;return sorted[Math.floor(i)]!+(sorted[Math.ceil(i)]!-sorted[Math.floor(i)]!)*(i%1);}
 export function computeOverview(episodes:MetricEpisode[],events:MetricEvent[],from:number,to:number,asOf:number,coverageRatio:number,activationHours=168):Overview {
@@ -68,6 +70,16 @@ export class AnalyticsService {
   }
   const metrics=canonicalMetrics(episodes.map(e=>({id:e.id,joinedAt:e.joined_at.getTime(),context:e.context})),events.map(e=>({episodeId:e.episode_id,kind:e.kind,at:e.occurred_at.getTime(),context:e.context,data:e.data})),from.getTime(),to.getTime(),asOf.getTime(),coverageMap,cfg.activationWindowHours*3600,Object.fromEntries(pins.map(p=>[p.episode_id,{id:p.revision_id,windowSeconds:p.definition.windowSeconds}])),true);
   if(defaultWindow)metrics.d30_active_retention=await this.matureD30(s,asOf);
+  const context=await evidenceContext(this.db,s,from,to),snapshot=await latestCapability(this.db,s);
+  for(const [key,metric] of Object.entries(metrics)){
+   const input=metricRegistry[key as keyof typeof metricRegistry]?.input;
+   const required=input==='members'?['members']:input==='native'||input==='onboarding'?['members']:['members','messages','textVisibility'];
+   const evidence=buildMetricEvidence(key,{value:metric.value,numerator:metric.numerator??(key==='new_members'?metric.sampleSize:null),denominator:metric.denominator??null,sample:metric.sampleSize,definition:key,definitionVersion:'eligible-v3:'+key+':'+metric.metricVersion,requiredSurfaces:required,collecting:metric.provisional&&metric.sampleSize===0,minimumSample:key==='new_members'?0:5},snapshot,cfg,context);
+   if(metric.definitionIds&&metric.definitionIds.length>1){evidence.comparable=false;evidence.comparisonBlockers.push('DEFINITION_MISMATCH');}
+   metric.evidence=evidence;metric.value=evidence.value;
+   if(evidence.coverageState==='UNKNOWN'){metric.dataCoverage={...metric.dataCoverage,status:'unavailable'};delete metric.numerator;delete metric.denominator;}
+   else if(evidence.coverageState!=='COMPLETE'&&metric.dataCoverage.status==='healthy')metric.dataCoverage={...metric.dataCoverage,status:'degraded'};
+  }
   return metrics;
  }
  async matureD30(s:Scope,asOf=new Date()){

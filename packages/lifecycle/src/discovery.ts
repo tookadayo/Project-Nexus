@@ -12,6 +12,7 @@ import type { CapabilitySnapshot } from "../../shared/src/community-model";
 import type { IdentityVault } from "../../identity/src/index";
 import type { DiscordPort } from "../../discord/src/rest";
 import { buildCapabilitySnapshot } from "../../discord/src/discovery";
+import {integrationHealth,openCollectionEpoch} from './observation';
 export async function requestCapabilityRefresh(
   tx: Tx,
   s: Scope,
@@ -135,16 +136,14 @@ export class DiscoveryWorker {
         for (const thread of source.threads)
           if (thread.ownerHash && suppressed.has(thread.ownerHash))
             thread.ownerHash = null;
-        await sql`INSERT INTO guild_capability_snapshots VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${json(snapshot)},${now})`.execute(
+        const snapshotId=randomUUID();
+        await sql`INSERT INTO guild_capability_snapshots VALUES(${s.organizationId}::uuid,${s.guildId},${snapshotId}::uuid,${json(snapshot)},${now})`.execute(
           tx,
         );
         // Keep alpha.3 setup readers aligned with native Onboarding, without repeating its REST reads.
-        const gatewayLive =
-          (
-            await sql`SELECT last_seen FROM telemetry_cursor WHERE ${tenant(s)} AND last_seen>=${new Date(now.getTime() - 90000)} AND NOT EXISTS(SELECT id FROM telemetry_health WHERE ${tenant(s)} AND ended_at IS NULL)`.execute(
-              tx,
-            )
-          ).rows.length > 0;
+        const health=await integrationHealth(tx,s,now);
+        await sql`INSERT INTO discord_integration_health(organization_id,guild_id,rest_state,last_refresh_at,last_error_category,updated_at) VALUES(${s.organizationId}::uuid,${s.guildId},'AVAILABLE',${now},NULL,${now}) ON CONFLICT(organization_id,guild_id) DO UPDATE SET rest_state='AVAILABLE',last_refresh_at=EXCLUDED.last_refresh_at,last_error_category=NULL,updated_at=EXCLUDED.updated_at`.execute(tx);
+        if(prior&&JSON.stringify([prior.channels,prior.capabilities])!==JSON.stringify([snapshot.channels,snapshot.capabilities]))await openCollectionEpoch(tx,s,now,'CAPABILITY_CHANGED',true,snapshotId);
         const legacy = {
           guildId: s.guildId,
           communityEnabled: source.features.includes("COMMUNITY"),
@@ -156,11 +155,11 @@ export class DiscoveryWorker {
           ),
           serverGuideSignalsAvailable: usage.serverGuide ? true : null,
           intents: {
-            members: gatewayLive ? true : null,
-            messages: gatewayLive ? true : null,
-            reactions: gatewayLive ? true : null,
-            voice: gatewayLive ? true : null,
-            scheduledEvents: gatewayLive ? true : null,
+            members: health.intents.members==='UNKNOWN'?null:health.intents.members==='AVAILABLE',
+            messages: health.intents.messages==='UNKNOWN'?null:health.intents.messages==='AVAILABLE',
+            reactions: health.intents.reactions==='UNKNOWN'?null:health.intents.reactions==='AVAILABLE',
+            voice: health.intents.voice==='UNKNOWN'?null:health.intents.voice==='AVAILABLE',
+            scheduledEvents: health.intents.scheduledEvents==='UNKNOWN'?null:health.intents.scheduledEvents==='AVAILABLE',
           },
           manageGuild: source.botPermissions?.manageGuild ?? false,
           manageRoles: source.botPermissions?.manageRoles ?? false,
@@ -192,7 +191,7 @@ export class DiscoveryWorker {
           })),
           ...source.threads,
         ])
-          await sql`INSERT INTO discord_surface_state VALUES(${s.organizationId}::uuid,${s.guildId},${c.id},${c.parentId},${c.type},${c.ownerHash},${c.archived},${c.locked},${c.createdAt ? new Date(c.createdAt) : null},${c.tagIds}::text[],${now}) ON CONFLICT(organization_id,guild_id,channel_id) DO UPDATE SET parent_id=EXCLUDED.parent_id,channel_type=EXCLUDED.channel_type,owner_hash=EXCLUDED.owner_hash,archived=EXCLUDED.archived,locked=EXCLUDED.locked,tag_ids=EXCLUDED.tag_ids,observed_at=EXCLUDED.observed_at`.execute(
+          await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,parent_id,channel_type,owner_hash,archived,locked,created_at,tag_ids,observed_at,visibility_state,visibility_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${c.id},${c.parentId},${c.type},${c.ownerHash},${c.archived},${c.locked},${c.createdAt ? new Date(c.createdAt) : null},${c.tagIds}::text[],${now},${source.channels.find(ch=>ch.id===c.id)?.observable===false?'UNOBSERVABLE':'VISIBLE'},${now}) ON CONFLICT(organization_id,guild_id,channel_id) DO UPDATE SET parent_id=EXCLUDED.parent_id,channel_type=EXCLUDED.channel_type,owner_hash=EXCLUDED.owner_hash,archived=EXCLUDED.archived,locked=EXCLUDED.locked,tag_ids=EXCLUDED.tag_ids,visibility_state=EXCLUDED.visibility_state,visibility_observed_at=EXCLUDED.visibility_observed_at,observed_at=EXCLUDED.observed_at WHERE discord_surface_state.observed_at<=EXCLUDED.observed_at`.execute(
             tx,
           );
         // REST-discovered ACTIVE events have no observed start: attendance remains unknown until a Gateway ACTIVE observation.
@@ -206,6 +205,7 @@ export class DiscoveryWorker {
       });
       return true;
     } catch {
+      await sql`INSERT INTO discord_integration_health(organization_id,guild_id,rest_state,last_refresh_failure_at,last_error_category,updated_at) VALUES(${s.organizationId}::uuid,${s.guildId},'UNKNOWN',${now},'DISCORD_UNAVAILABLE',${now}) ON CONFLICT(organization_id,guild_id) DO UPDATE SET rest_state='UNKNOWN',last_refresh_failure_at=EXCLUDED.last_refresh_failure_at,last_error_category=EXCLUDED.last_error_category,updated_at=EXCLUDED.updated_at`.execute(this.db);
       await sql`UPDATE capability_refresh_jobs SET attempts=attempts+1,due_at=${new Date(now.getTime() + Math.min(1800000, 30000 * 2 ** Math.min(job.attempts, 6)))} WHERE ${tenant(s)}`.execute(
         this.db,
       );

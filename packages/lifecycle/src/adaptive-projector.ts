@@ -95,12 +95,13 @@ export async function resolveSurface(tx: Tx, s: Scope, channelId: string) {
       tag_ids: string[];
       parent_type: number | null;
       creation_observed: boolean;
+      visibility_state: string;
     }>`SELECT c.*,p.channel_type AS parent_type FROM discord_surface_state c LEFT JOIN discord_surface_state p ON p.organization_id=c.organization_id AND p.guild_id=c.guild_id AND p.channel_id=c.parent_id WHERE c.organization_id=${s.organizationId}::uuid AND c.guild_id=${s.guildId} AND c.channel_id=${channelId}`.execute(
       tx,
     )
   ).rows[0];
   return {
-    surface: surfaceFor(c?.channel_type, c?.parent_type ?? undefined),
+    surface: c?.visibility_state === "VISIBLE" ? surfaceFor(c.channel_type, c.parent_type ?? undefined) : "UNKNOWN" as const,
     parentId: c?.parent_id ?? null,
     ownerHash: c?.owner_hash ?? null,
     createdAt: c?.created_at ?? null,
@@ -151,12 +152,16 @@ export async function projectStructure(
     ].includes(e.kind)
   ) {
     if (!e.channelId) return true;
+    if(e.channelObfuscated){
+      await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,observed_at,visibility_state,visibility_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${e.channelId},${e.channelType??-1},${at},'OBFUSCATED',${at}) ON CONFLICT(organization_id,guild_id,channel_id) DO UPDATE SET visibility_state='OBFUSCATED',visibility_observed_at=EXCLUDED.visibility_observed_at,owner_hash=NULL,tag_ids='{}',creation_observed=false,observed_at=EXCLUDED.observed_at WHERE discord_surface_state.observed_at<=EXCLUDED.observed_at`.execute(tx);
+      await requestCapabilityRefresh(tx,s,'permission',at);return true;
+    }
     if (e.kind.endsWith("deleted"))
       await sql`DELETE FROM discord_surface_state WHERE ${tenant(s)} AND channel_id=${e.channelId} AND observed_at<=${at}`.execute(
         tx,
       );
     else
-      await sql`INSERT INTO discord_surface_state VALUES(${s.organizationId}::uuid,${s.guildId},${e.channelId},${e.parentId ?? null},${e.channelType ?? -1},${e.ownerHash ?? null},${e.archived ?? false},${e.locked ?? false},${e.createdAt ? new Date(e.createdAt) : e.kind === "thread.created" ? at : null},${e.tagIds ?? []}::text[],${at},${e.kind === "thread.created"}) ON CONFLICT(organization_id,guild_id,channel_id) DO UPDATE SET creation_observed=discord_surface_state.creation_observed OR EXCLUDED.creation_observed,channel_type=EXCLUDED.channel_type,parent_id=EXCLUDED.parent_id,owner_hash=COALESCE(EXCLUDED.owner_hash,discord_surface_state.owner_hash),archived=EXCLUDED.archived,locked=EXCLUDED.locked,created_at=COALESCE(discord_surface_state.created_at,EXCLUDED.created_at),tag_ids=EXCLUDED.tag_ids,observed_at=EXCLUDED.observed_at WHERE discord_surface_state.observed_at<=EXCLUDED.observed_at`.execute(
+      await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,parent_id,channel_type,owner_hash,archived,locked,created_at,tag_ids,observed_at,creation_observed,visibility_state,visibility_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${e.channelId},${e.parentId ?? null},${e.channelType ?? -1},${e.ownerHash ?? null},${e.archived ?? false},${e.locked ?? false},${e.createdAt ? new Date(e.createdAt) : e.kind === "thread.created" ? at : null},${e.tagIds ?? []}::text[],${at},${e.kind === "thread.created"},'VISIBLE',${at}) ON CONFLICT(organization_id,guild_id,channel_id) DO UPDATE SET visibility_state=EXCLUDED.visibility_state,visibility_observed_at=EXCLUDED.visibility_observed_at,creation_observed=discord_surface_state.creation_observed OR EXCLUDED.creation_observed,channel_type=EXCLUDED.channel_type,parent_id=EXCLUDED.parent_id,owner_hash=COALESCE(EXCLUDED.owner_hash,discord_surface_state.owner_hash),archived=EXCLUDED.archived,locked=EXCLUDED.locked,created_at=COALESCE(discord_surface_state.created_at,EXCLUDED.created_at),tag_ids=EXCLUDED.tag_ids,observed_at=EXCLUDED.observed_at WHERE discord_surface_state.observed_at<=EXCLUDED.observed_at`.execute(
         tx,
       );
     const parent = e.parentId ?? e.channelId,

@@ -46,7 +46,7 @@ it.each([
 ])('separates direct reply from forward and same-channel posts', (type,reference,direct)=>{
  const e=packet(type as number,reference as Record<string,unknown>|undefined);expect(isDirectReply(e)).toBe(direct);expect(JSON.stringify(e)).not.toMatch(/SECRET|DO NOT PERSIST|snapshots|content/);
 });
-it('discards obfuscated metadata instead of trusting old names or types',()=>{
+it('retains only the official usable obfuscated fields',()=>{
  const e=normalizeMany({t:'CHANNEL_UPDATE',s:1,d:{guild_id:guild,id:channel,type:0,flags:ChannelFlags.ChannelObfuscated,name:'hidden'}},0,'obfuscation',vault)[0]!;
- expect(e.channelObfuscated).toBe(true);expect(e.channelType).toBeUndefined();expect(JSON.stringify(e)).not.toContain('hidden');
+ expect(e.channelObfuscated).toBe(true);expect(e.channelType).toBe(0);expect(JSON.stringify(e)).not.toContain('hidden');
 });
