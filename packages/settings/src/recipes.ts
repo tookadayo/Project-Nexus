@@ -65,7 +65,7 @@ export async function recipeWindowVersions(
   return (
     await sql<{
       id: string | null;
-    }>`SELECT DISTINCT recipe_version_id AS id FROM lifecycle_events WHERE ${tenant(s)} AND occurred_at>=${from} AND occurred_at<${to} UNION SELECT DISTINCT recipe_version_id FROM adaptive_facts WHERE ${tenant(s)} AND occurred_at>=${from} AND occurred_at<${to}`.execute(
+    }>`SELECT DISTINCT NULLIF(recipe_key,'')::uuid AS id FROM lifecycle_daily_rollups WHERE ${tenant(s)} AND day>=(${from}::timestamptz AT TIME ZONE 'UTC')::date AND day<=(${to}::timestamptz AT TIME ZONE 'UTC')::date UNION SELECT DISTINCT recipe_version_id FROM adaptive_facts WHERE ${tenant(s)} AND occurred_at>=${from} AND occurred_at<${to}`.execute(
       tx,
     )
   ).rows.map((r) => r.id);

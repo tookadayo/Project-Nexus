@@ -153,7 +153,7 @@ export class LifecycleService {
    (${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episodeId}::uuid,${kind},${at},'PRODUCTION',${json(data)}) ON CONFLICT DO NOTHING`.execute(tx);
  }
  private async pair(tx:Tx,s:Scope,episodeId:string,peerIdentityId:string,at:Date){
-  await sql`INSERT INTO member_interaction_pairs(organization_id,guild_id,episode_id,peer_identity_id,first_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episodeId}::uuid,${peerIdentityId}::uuid,${at}) ON CONFLICT(organization_id,guild_id,episode_id,peer_identity_id) DO UPDATE SET first_at=LEAST(member_interaction_pairs.first_at,EXCLUDED.first_at)`.execute(tx);
+  await sql`INSERT INTO member_interaction_pairs(organization_id,guild_id,episode_id,peer_identity_id,first_at,source) VALUES(${s.organizationId}::uuid,${s.guildId},${episodeId}::uuid,${peerIdentityId}::uuid,${at},'DIRECT_REPLY') ON CONFLICT(organization_id,guild_id,episode_id,peer_identity_id) DO UPDATE SET first_at=LEAST(member_interaction_pairs.first_at,EXCLUDED.first_at),source='DIRECT_REPLY'`.execute(tx);
  }
  private async gap(tx:Tx,s:Scope,start:Date,end:Date|null,reason:string){await sql`INSERT INTO telemetry_health VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${start},${end},${reason})`.execute(tx);}
  private async health(tx:Tx,s:Scope,e:Envelope){

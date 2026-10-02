@@ -56,41 +56,39 @@ it("keeps 600 voice participants in linear state, processes a bounded tick and c
   );
   const cfg = await settings.get(s),
     members: Array<{ hash: string; episode: string }> = [];
-  await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${channel},2,${now})`.execute(
+  await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,observed_at,visibility_state) VALUES(${s.organizationId}::uuid,${s.guildId},${channel},2,${now},'VISIBLE')`.execute(
     db,
   );
   for (let i = 0; i < 600; i++) {
     const user = String(922222222222220000n + BigInt(i)),
       id = await vault.resolve(db, s, user),
       episode = randomUUID();
-    await sql`INSERT INTO membership_episodes(organization_id,guild_id,id,identity_id,joined_at,context) VALUES(${s.organizationId}::uuid,${s.guildId},${episode}::uuid,${id}::uuid,${now},'PRODUCTION')`.execute(
+    await sql`INSERT INTO membership_episodes(organization_id,guild_id,id,identity_id,joined_at,context,screening_observed_at,guest_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${episode}::uuid,${id}::uuid,${now},'PRODUCTION',${now},${now})`.execute(
       db,
     );
     members.push({ hash: vault.hash(s, user), episode });
   }
   const started = performance.now();
   for (const [sequence, member] of members.entries())
-    await db
-      .transaction()
-      .execute((tx) =>
-        projectAdaptiveMember(
-          tx,
-          s,
-          {
-            ...s,
-            shardId: 0,
-            gatewaySessionId: "voice-perf",
-            sequence,
-            context: "PRODUCTION",
-            at: now.toISOString(),
-            kind: "voice.state",
-            channelId: channel,
-          } satisfies Envelope,
-          cfg,
-          member.hash,
-          member.episode,
-        ),
-      );
+    await db.transaction().execute((tx) =>
+      projectAdaptiveMember(
+        tx,
+        s,
+        {
+          ...s,
+          shardId: 0,
+          gatewaySessionId: "voice-perf",
+          sequence,
+          context: "PRODUCTION",
+          at: now.toISOString(),
+          kind: "voice.state",
+          channelId: channel,
+        } satisfies Envelope,
+        cfg,
+        member.hash,
+        member.episode,
+      ),
+    );
   const qualifiedAt = new Date(now.getTime() + 301000);
   await db.transaction().execute((tx) => tickVoice(tx, s, cfg, qualifiedAt));
   expect(

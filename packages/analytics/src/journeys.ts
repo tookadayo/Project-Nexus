@@ -1,3 +1,4 @@
+import { activityRollupQuery } from "../../lifecycle/src/rollups";
 import { sql, type Tx } from "../../db/src/index";
 import type { Scope } from "../../shared/src/index";
 import type { Settings } from "../../settings/src/index";
@@ -267,8 +268,8 @@ export async function journeyAnalysis(
   SELECT e.id,m.lookup_hash AS member,COALESCE(e.engagement_started_at,e.joined_at) AS joined_at FROM membership_episodes e JOIN member_identity_map m ON m.organization_id=e.organization_id AND m.guild_id=e.guild_id AND m.id=e.identity_id LEFT JOIN member_observable_state st ON st.organization_id=e.organization_id AND st.guild_id=e.guild_id AND st.episode_id=e.id
   WHERE e.organization_id=${s.organizationId}::uuid AND e.guild_id=${s.guildId} AND e.context='PRODUCTION' AND e.screening_observed_at IS NOT NULL AND e.guest_observed_at IS NOT NULL AND NOT e.screening_pending AND NOT e.is_guest AND NOT(COALESCE(st.roles,'{}'::text[])&&${roles}::text[])
  ), facts AS (
-  SELECT e.member,f.kind,f.occurred_at AS at,e.joined_at,f.data->>'channelId' AS channel_id,f.data->>'eventId' AS event_id,COALESCE(f.data->>'purpose',mapping->>'purpose') AS purpose,COALESCE(f.data->>'resolved'='true',false) AS resolved FROM lifecycle_events f JOIN eligible e ON e.id=f.episode_id LEFT JOIN discord_surface_state ch ON ch.organization_id=f.organization_id AND ch.guild_id=f.guild_id AND ch.channel_id=f.data->>'channelId' LEFT JOIN jsonb_array_elements(${JSON.stringify(definition.channels)}::jsonb) mapping ON mapping->>'channelId'=COALESCE(ch.parent_id,ch.channel_id)
-  WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.context='PRODUCTION' AND f.occurred_at>=${context.from} AND f.occurred_at<${context.to}
+  SELECT e.member,f.kind,f.occurred_at AS at,e.joined_at,f.data->>'channelId' AS channel_id,f.data->>'eventId' AS event_id,COALESCE(f.data->>'purpose',mapping->>'purpose') AS purpose,COALESCE(f.data->>'resolved'='true',false) AS resolved FROM (${activityRollupQuery(s, context.from, new Date(context.to.getTime() - 1))}) f JOIN eligible e ON e.id=f.episode_id LEFT JOIN discord_surface_state ch ON ch.organization_id=${s.organizationId}::uuid AND ch.guild_id=${s.guildId} AND ch.channel_id=f.data->>'channelId' LEFT JOIN jsonb_array_elements(${JSON.stringify(definition.channels)}::jsonb) mapping ON mapping->>'channelId'=COALESCE(ch.parent_id,ch.channel_id)
+  WHERE f.occurred_at>=${context.from} AND f.occurred_at<${context.to}
   UNION ALL SELECT e.member,f.kind,f.occurred_at,e.joined_at,f.data->>'channelId',f.data->>'eventId',f.data->>'purpose',COALESCE(f.data->>'resolved'='true',false) FROM adaptive_facts f JOIN eligible e ON e.member=f.subject_hash WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.occurred_at>=${context.from} AND f.occurred_at<${context.to}
   UNION ALL SELECT member,'member.joined',joined_at,joined_at,NULL,NULL,NULL,false FROM eligible WHERE joined_at>=${context.from} AND joined_at<${context.to}
  ) SELECT member,kind,min(at) AS at,max(at) AS last_at,joined_at,channel_id,event_id,purpose,resolved FROM facts WHERE channel_id IS NULL OR ${definition.scope.mode}='all' OR (${definition.scope.mode}='include')=(COALESCE((SELECT parent_id FROM discord_surface_state WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId} AND channel_id=facts.channel_id),channel_id)=ANY(${definition.scope.channelIds}::text[])) GROUP BY member,kind,joined_at,channel_id,event_id,purpose,resolved,date_trunc('day',at)`.execute(
@@ -301,7 +302,16 @@ export async function journeyAnalysis(
   return {
     recipeId: recipe!.id,
     transitions: definition.transitions.map((t) => {
-      const count = transitionCounts(definition, observations, t),
+      const transitionObservations =
+        t.to === "later_activity"
+          ? observations.filter(
+              (o) =>
+                o.joinedAt !== undefined &&
+                o.joinedAt + definition.returnThroughDay * 86400000 <=
+                  context.to.getTime(),
+            )
+          : observations;
+      const count = transitionCounts(definition, transitionObservations, t),
         evidence = buildMetricEvidence(
           "journey:" + t.from + ":" + t.to,
           {
@@ -311,6 +321,15 @@ export async function journeyAnalysis(
             numerator: count.numerator,
             denominator: count.denominator,
             sample: count.denominator,
+            collecting:
+              t.to === "later_activity" &&
+              count.denominator === 0 &&
+              observations.some(
+                (o) =>
+                  o.joinedAt !== undefined &&
+                  o.joinedAt + definition.returnThroughDay * 86400000 >
+                    context.to.getTime(),
+              ),
             definition: t.from + " -> " + t.to,
             definitionVersion: definition.definitionVersion,
             requiredSurfaces: requiredSurfaces(t, definition),
@@ -338,7 +357,13 @@ export async function journeyAnalysis(
       return {
         ...t,
         fromLabel: journeyNames[t.from],
-        toLabel: journeyNames[t.to],
+        toLabel:
+          t.to === "later_activity"
+            ? ([
+                `参加後${definition.returnFromDay}〜${definition.returnThroughDay}日目にも活動`,
+                `Activity on days ${definition.returnFromDay}–${definition.returnThroughDay} after joining`,
+              ] as const)
+            : journeyNames[t.to],
         evidence,
       };
     }),

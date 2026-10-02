@@ -50,6 +50,27 @@ export async function closeCollectionEpoch(
 }
 export async function projectObservation(tx: Tx, s: Scope, e: Envelope) {
   const at = new Date(e.observedAt ?? e.at);
+  const previous = (
+    await sql<{
+      last_gateway_at: Date | null;
+    }>`SELECT last_gateway_at FROM discord_integration_health WHERE ${tenant(s)} FOR UPDATE`.execute(
+      tx,
+    )
+  ).rows[0]?.last_gateway_at;
+  const missing = previous && at.getTime() - previous.getTime() > 90000;
+  if (missing) {
+    await closeCollectionEpoch(tx, s, previous, "GATEWAY_GAP");
+    await openCollectionEpoch(tx, s, at, "GATEWAY_GAP");
+    await sql`INSERT INTO telemetry_health(organization_id,guild_id,id,started_at,ended_at,reason) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${previous},${at},'Gateway observation gap')`.execute(
+      tx,
+    );
+    await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND domain IN ('voice','voice-channel')`.execute(
+      tx,
+    );
+    await sql`UPDATE voice_sessions SET channel_id=NULL,joined_at=NULL,observed_at=GREATEST(observed_at,${at}) WHERE ${tenant(s)}`.execute(
+      tx,
+    );
+  }
   const connected = e.kind === "telemetry.connected",
     disconnected = e.kind === "telemetry.disconnected";
   if (disconnected) {

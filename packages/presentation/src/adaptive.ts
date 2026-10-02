@@ -7,13 +7,28 @@ import {
 } from "../../shared/src/community-model";
 import type { Settings } from "../../settings/src/index";
 import { latestCapability } from "../../lifecycle/src/discovery";
-import {buildMetricEvidence,evidenceContext} from '../../analytics/src/evidence';
-import type {MetricEvidence} from '../../shared/src/metric-evidence';
-import type {IntegrationHealth,CollectionEpoch} from '../../shared/src/integration-health';
-import {type RecipeVersion} from '../../settings/src/recipes';
-import {recipeCandidates,type ModelCandidate} from '../../shared/src/measurement-recipes';
-import {journeyAnalysis,type JourneyTransition} from '../../analytics/src/journeys';
-import {responseRecommendations,type Recommendation} from '../../operations/src/recommendations';
+import {
+  buildMetricEvidence,
+  evidenceContext,
+} from "../../analytics/src/evidence";
+import type { MetricEvidence } from "../../shared/src/metric-evidence";
+import type {
+  IntegrationHealth,
+  CollectionEpoch,
+} from "../../shared/src/integration-health";
+import { type RecipeVersion } from "../../settings/src/recipes";
+import {
+  recipeCandidates,
+  type ModelCandidate,
+} from "../../shared/src/measurement-recipes";
+import {
+  journeyAnalysis,
+  type JourneyTransition,
+} from "../../analytics/src/journeys";
+import {
+  responseRecommendations,
+  type Recommendation,
+} from "../../operations/src/recommendations";
 export type AdaptiveMetric = {
   key: string;
   count: number | null;
@@ -46,10 +61,21 @@ export type AdaptivePresentation = {
     returnThroughDay: number;
   };
   profile: CommunityModel;
-  recipe?: RecipeVersion|null;
-  journeys?:{recipeId:string|null;transitions:JourneyTransition[]};
-  recommendations?:Recommendation[];
-  modelV2?:{capability:CapabilitySnapshot['capabilities'];observedUsage:Record<string,number>;adminIntent:CommunityModel;inferredPattern:{scale:string;trafficPerDay:number;newcomerVolume:number};candidates:ModelCandidate[];activeSurfaces:string[]};
+  recipe?: RecipeVersion | null;
+  journeys?: { recipeId: string | null; transitions: JourneyTransition[] };
+  recommendations?: Recommendation[];
+  modelV2?: {
+    capability: CapabilitySnapshot["capabilities"];
+    observedUsage: Record<string, number>;
+    adminIntent: CommunityModel;
+    inferredPattern: {
+      scale: string;
+      trafficPerDay: number;
+      newcomerVolume: number;
+    };
+    candidates: ModelCandidate[];
+    activeSurfaces: string[];
+  };
   capabilities: CapabilitySnapshot | null;
   volume: "LOW_VOLUME" | "STANDARD" | "HIGH_VOLUME";
   window: { from: string; through: string };
@@ -132,7 +158,7 @@ export async function adaptivePresentation(
         domain: string;
         count: number;
         sample: number;
-      }>`SELECT domain,count(DISTINCT (subject_hash,data->>'messageId'))::integer AS count,count(DISTINCT subject_hash)::integer AS sample FROM adaptive_states a WHERE ${tenant(s)} AND domain IN ('reaction','poll') AND (domain='poll' OR target_hash IS NOT NULL) AND data->>'active'='true' AND observed_at>=${from} AND observed_at<=${now} AND ${scopeFilter("a.data")} AND ${staffFilter("a.subject_hash")} GROUP BY domain`.execute(
+      }>`SELECT domain,count(DISTINCT (subject_hash,message_id))::integer AS count,count(DISTINCT subject_hash)::integer AS sample FROM (SELECT 'reaction' AS domain,subject_hash,message_id,jsonb_build_object('channelId',channel_id) AS data,observed_at,ambiguous FROM reaction_state WHERE ${tenant(s)} AND active AND target_hash IS NOT NULL UNION ALL SELECT 'poll',subject_hash,message_id,jsonb_build_object('channelId',channel_id),observed_at,ambiguous FROM poll_participant_state WHERE ${tenant(s)} AND answer_count>0) a WHERE NOT ambiguous AND observed_at>=${from} AND observed_at<=${now} AND ${scopeFilter("a.data")} AND ${staffFilter("a.subject_hash")} GROUP BY domain`.execute(
         db,
       )
     ).rows,
@@ -167,9 +193,7 @@ export async function adaptivePresentation(
       db,
     )
   ).rows[0]!;
-  const partial =
-      !snapshot ||
-      snapshot.coverage.coverageState !== "COMPLETE",
+  const partial = !snapshot || snapshot.coverage.coverageState !== "COMPLETE",
     metrics: AdaptiveMetric[] = [],
     modes = cfg.communityModel.confirmed ? cfg.communityModel.modes : [],
     has = (key: string) =>
@@ -411,20 +435,98 @@ export async function adaptivePresentation(
     caveats.push(
       "A Discord safety incident flag overlaps the observed context; period comparisons need review.",
     );
-  const evidence=await evidenceContext(db,s,from,now);
-  for(const metric of metrics){
-    metric.evidence=buildMetricEvidence(metric.key,{value:metric.count,numerator:metric.count,denominator:metric.denominator,sample:metric.sample,definition:metric.definition,requiredSurfaces:metric.purpose==='LFG'&&['postResponse','postsAwaitingResponse'].includes(metric.key)?['members','messages','threadVisibility']:undefined},snapshot,cfg,evidence);
-    metric.count=metric.evidence.value;
-    metric.state=metric.evidence.observationState==='UNKNOWN'?'UNKNOWN':metric.evidence.coverageState!=='COMPLETE'?'PARTIAL':metric.evidence.observationState==='OBSERVED'?'OBSERVED':'PENDING';
-    if(metric.evidence.observationState==='UNKNOWN'){metric.medianMinutes=null;metric.p75Minutes=null;metric.p90Minutes=null;}
+  const ambiguousStates = (
+    await sql<{
+      domain: string;
+    }>`SELECT 'reaction' AS domain FROM reaction_state WHERE ${tenant(s)} AND ambiguous AND observed_at>=${from} UNION SELECT 'poll' FROM poll_participant_state WHERE ${tenant(s)} AND ambiguous AND observed_at>=${from}`.execute(
+      db,
+    )
+  ).rows;
+  const evidence = await evidenceContext(db, s, from, now);
+  for (const metric of metrics) {
+    metric.evidence = buildMetricEvidence(
+      metric.key,
+      {
+        value: metric.count,
+        numerator: metric.count,
+        denominator: metric.denominator,
+        sample: metric.sample,
+        definition: metric.definition,
+        requiredSurfaces:
+          metric.purpose === "LFG" &&
+          ["postResponse", "postsAwaitingResponse"].includes(metric.key)
+            ? ["members", "messages", "threadVisibility"]
+            : undefined,
+      },
+      snapshot,
+      cfg,
+      evidence,
+    );
+    if (
+      (metric.key === "activeReactions" &&
+        ambiguousStates.some((r) => r.domain === "reaction")) ||
+      (metric.key === "pollParticipants" &&
+        ambiguousStates.some((r) => r.domain === "poll"))
+    ) {
+      metric.evidence.value = null;
+      metric.evidence.numerator = null;
+      metric.evidence.observationState = "UNKNOWN";
+      metric.evidence.coverageState = "UNKNOWN";
+      metric.evidence.coverageReasons.push("STATE_ORDER_UNKNOWN");
+      metric.evidence.comparable = false;
+      metric.evidence.comparisonBlockers.push("STATE_ORDER_UNKNOWN");
+    }
+    metric.count = metric.evidence.value;
+    metric.state =
+      metric.evidence.observationState === "UNKNOWN"
+        ? "UNKNOWN"
+        : metric.evidence.coverageState !== "COMPLETE"
+          ? "PARTIAL"
+          : metric.evidence.observationState === "OBSERVED"
+            ? "OBSERVED"
+            : "PENDING";
+    if (metric.evidence.observationState === "UNKNOWN") {
+      metric.medianMinutes = null;
+      metric.p75Minutes = null;
+      metric.p90Minutes = null;
+    }
   }
-  const volume=volumeMode({members:snapshot?.memberCount??members.eligible,joined30d:members.joined,eligible:members.eligible,eventsPerDay:facts.reduce((n,f)=>n+f.count,0)/range,attention});
+  const volume = volumeMode({
+    members: snapshot?.memberCount ?? members.eligible,
+    joined30d: members.joined,
+    eligible: members.eligible,
+    eventsPerDay: facts.reduce((n, f) => n + f.count, 0) / range,
+    attention,
+  });
   return {
     profile: cfg.communityModel,
-    recipe:evidence.recipe,
-    journeys:await journeyAnalysis(db,s,cfg,snapshot,evidence),
-    recommendations:await responseRecommendations(db,s,cfg,snapshot,evidence),
-    modelV2:{capability:snapshot?.capabilities??{},observedUsage:snapshot?.observedUsage??{},adminIntent:cfg.communityModel,inferredPattern:{scale:volume,trafficPerDay:facts.reduce((n,f)=>n+f.count,0)/range,newcomerVolume:members.joined},candidates:recipeCandidates(snapshot,volume),activeSurfaces:[...new Set(snapshot?.channels.filter(c=>c.observable).map(c=>String(c.type))??[])]},
+    recipe: evidence.recipe,
+    journeys: await journeyAnalysis(db, s, cfg, snapshot, evidence),
+    recommendations: await responseRecommendations(
+      db,
+      s,
+      cfg,
+      snapshot,
+      evidence,
+    ),
+    modelV2: {
+      capability: snapshot?.capabilities ?? {},
+      observedUsage: snapshot?.observedUsage ?? {},
+      adminIntent: cfg.communityModel,
+      inferredPattern: {
+        scale: volume,
+        trafficPerDay: facts.reduce((n, f) => n + f.count, 0) / range,
+        newcomerVolume: members.joined,
+      },
+      candidates: recipeCandidates(snapshot, volume),
+      activeSurfaces: [
+        ...new Set(
+          snapshot?.channels
+            .filter((c) => c.observable)
+            .map((c) => String(c.type)) ?? [],
+        ),
+      ],
+    },
     capabilities: snapshot,
     volume: volumeMode({
       members: snapshot?.memberCount ?? members.eligible,
@@ -441,9 +543,9 @@ export async function adaptivePresentation(
       totalRelevantChannels: snapshot?.coverage.totalRelevantChannels ?? 0,
     },
     eligible: members.eligible,
-    unknownMembers:members.unknown,
-    integration:evidence.health,
-    epochs:evidence.epochs,
+    unknownMembers: members.unknown,
+    integration: evidence.health,
+    epochs: evidence.epochs,
     pending: members.pending,
     guests: members.guests + guestSessions,
     journey: {

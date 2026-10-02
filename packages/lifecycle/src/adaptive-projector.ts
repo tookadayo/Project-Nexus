@@ -9,7 +9,14 @@ import {
   strongResponseAllowed,
 } from "../../shared/src/community-model";
 import type { Envelope } from "../../events/src/index";
-import {isDirectReply} from "../../events/src/index";
+import {
+  projectReactionState,
+  resetReactionState,
+  projectPollState,
+  compareClock,
+  type StateClock,
+} from "./typed-state";
+import { isDirectReply } from "../../events/src/index";
 import type { Settings } from "../../settings/src/index";
 import { latestCapability, requestCapabilityRefresh } from "./discovery";
 import { projectNativeSnapshot } from "./native";
@@ -101,7 +108,10 @@ export async function resolveSurface(tx: Tx, s: Scope, channelId: string) {
     )
   ).rows[0];
   return {
-    surface: c?.visibility_state === "VISIBLE" ? surfaceFor(c.channel_type, c.parent_type ?? undefined) : "UNKNOWN" as const,
+    surface:
+      c?.visibility_state === "VISIBLE"
+        ? surfaceFor(c.channel_type, c.parent_type ?? undefined)
+        : ("UNKNOWN" as const),
     parentId: c?.parent_id ?? null,
     ownerHash: c?.owner_hash ?? null,
     createdAt: c?.created_at ?? null,
@@ -152,9 +162,12 @@ export async function projectStructure(
     ].includes(e.kind)
   ) {
     if (!e.channelId) return true;
-    if(e.channelObfuscated){
-      await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,observed_at,visibility_state,visibility_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${e.channelId},${e.channelType??-1},${at},'OBFUSCATED',${at}) ON CONFLICT(organization_id,guild_id,channel_id) DO UPDATE SET visibility_state='OBFUSCATED',visibility_observed_at=EXCLUDED.visibility_observed_at,owner_hash=NULL,tag_ids='{}',creation_observed=false,observed_at=EXCLUDED.observed_at WHERE discord_surface_state.observed_at<=EXCLUDED.observed_at`.execute(tx);
-      await requestCapabilityRefresh(tx,s,'permission',at);return true;
+    if (e.channelObfuscated) {
+      await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,observed_at,visibility_state,visibility_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${e.channelId},${e.channelType ?? -1},${at},'OBFUSCATED',${at}) ON CONFLICT(organization_id,guild_id,channel_id) DO UPDATE SET visibility_state='OBFUSCATED',visibility_observed_at=EXCLUDED.visibility_observed_at,owner_hash=NULL,tag_ids='{}',creation_observed=false,observed_at=EXCLUDED.observed_at WHERE discord_surface_state.observed_at<=EXCLUDED.observed_at`.execute(
+        tx,
+      );
+      await requestCapabilityRefresh(tx, s, "permission", at);
+      return true;
     }
     if (e.kind.endsWith("deleted"))
       await sql`DELETE FROM discord_surface_state WHERE ${tenant(s)} AND channel_id=${e.channelId} AND observed_at<=${at}`.execute(
@@ -327,9 +340,7 @@ export async function projectStructure(
     e.kind === "reaction.removed_all" ||
     e.kind === "reaction.removed_emoji"
   ) {
-    await sql`UPDATE adaptive_states SET data=jsonb_set(data,'{active}','false'::jsonb),observed_at=${at} WHERE ${tenant(s)} AND domain='reaction' AND data->>'messageId'=${e.messageId ?? ""} AND data->>'channelId'=${e.channelId ?? ""} AND observed_at<=${at} AND (${e.kind}='reaction.removed_all' OR data->>'emojiHash'=${e.emojiHash ?? ""})`.execute(
-      tx,
-    );
+    await resetReactionState(tx, s, e);
     return true;
   }
   return false;
@@ -366,13 +377,25 @@ export async function projectMemberFlags(
     )
   ).rows[0]!;
   const at = new Date(e.observedAt ?? e.at);
-  const flagsFresh=e.memberFlags!==undefined&&(!prior.flags_observed_at||prior.flags_observed_at<=at);
-  const pendingFresh=e.pending!==undefined&&(!prior.screening_observed_at||prior.screening_observed_at<=at);
-  if(!flagsFresh&&!pendingFresh)return;
-  const flags=flagsFresh?e.memberFlags!:prior.member_flags;
-  const pending=pendingFresh?e.pending!:prior.screening_pending;
+  const flagsFresh =
+    e.memberFlags !== undefined &&
+    (!prior.flags_observed_at || prior.flags_observed_at <= at);
+  const pendingFresh =
+    e.pending !== undefined &&
+    (!prior.screening_observed_at || prior.screening_observed_at <= at);
+  if (!flagsFresh && !pendingFresh) return;
+  const flags = flagsFresh ? e.memberFlags! : prior.member_flags;
+  const pending = pendingFresh ? e.pending! : prior.screening_pending;
   // A partial pending packet must never stamp the flags clock or synthesize flags=0.
-  if(flagsFresh)await projectNativeSnapshot(tx,s,episodeId,BigInt(flags),pendingFresh?pending:prior.screening_observed_at?pending:null,at);
+  if (flagsFresh)
+    await projectNativeSnapshot(
+      tx,
+      s,
+      episodeId,
+      BigInt(flags),
+      pendingFresh ? pending : prior.screening_observed_at ? pending : null,
+      at,
+    );
   const flagKinds = [
     [GuildMemberFlags.StartedOnboarding, "native_onboarding.started"],
     [GuildMemberFlags.CompletedOnboarding, "native_onboarding.completed"],
@@ -380,12 +403,20 @@ export async function projectMemberFlags(
     [GuildMemberFlags.CompletedHomeActions, "server_guide.completed"],
   ] as const;
   for (const [bit, kind] of flagKinds)
-    if (flagsFresh && flags & bit && (!prior.guest_observed_at || !(prior.member_flags & bit)))
+    if (
+      flagsFresh &&
+      flags & bit &&
+      (!prior.guest_observed_at || !(prior.member_flags & bit))
+    )
       await adaptiveFact(tx, s, kind, at, {}, hash, episodeId);
-  const passed=pendingFresh&&prior.screening_observed_at!==null&&prior.screening_pending&&!pending;
+  const passed =
+    pendingFresh &&
+    prior.screening_observed_at !== null &&
+    prior.screening_pending &&
+    !pending;
   if (passed)
     await adaptiveFact(tx, s, "screening.passed", at, {}, hash, episodeId);
-  await sql`UPDATE membership_episodes SET flags_observed_at=CASE WHEN ${flagsFresh} THEN ${at} ELSE flags_observed_at END,guest_observed_at=CASE WHEN ${flagsFresh} THEN ${at} ELSE guest_observed_at END,screening_observed_at=CASE WHEN ${pendingFresh} THEN ${at} ELSE screening_observed_at END,observation_source=${e.observationSource??'GATEWAY'},member_flags=${flags},screening_pending=${pending},is_guest=CASE WHEN ${flagsFresh} THEN ${Boolean(flags & GuildMemberFlags.IsGuest)} ELSE is_guest END,engagement_started_at=CASE WHEN ${passed} THEN ${at} WHEN ${pendingFresh&&pending} THEN NULL ELSE engagement_started_at END WHERE ${tenant(s)} AND id=${episodeId}::uuid`.execute(
+  await sql`UPDATE membership_episodes SET flags_observed_at=CASE WHEN ${flagsFresh} THEN ${at} ELSE flags_observed_at END,guest_observed_at=CASE WHEN ${flagsFresh} THEN ${at} ELSE guest_observed_at END,screening_observed_at=CASE WHEN ${pendingFresh} THEN ${at} ELSE screening_observed_at END,observation_source=${e.observationSource ?? "GATEWAY"},member_flags=${flags},screening_pending=${pending},is_guest=CASE WHEN ${flagsFresh} THEN ${Boolean(flags & GuildMemberFlags.IsGuest)} ELSE is_guest END,engagement_started_at=CASE WHEN ${passed} THEN ${at} WHEN ${pendingFresh && pending} THEN NULL ELSE engagement_started_at END WHERE ${tenant(s)} AND id=${episodeId}::uuid`.execute(
     tx,
   );
 }
@@ -434,7 +465,6 @@ export async function projectAdaptiveMember(
   ) {
     const key = `${e.channelId}:${e.messageId}:${e.emojiHash}:${e.reactionType ?? 0}`,
       prior = await state(tx, s, "reaction", key, hash);
-    if (prior && prior.observed_at > at) return true;
     const target =
       e.targetHash ??
       prior?.data.targetHash ??
@@ -456,6 +486,14 @@ export async function projectAdaptiveMember(
         ).rows.length)
     )
       return true;
+    const projection = await projectReactionState(
+      tx,
+      s,
+      e,
+      hash,
+      target ? String(target) : null,
+    );
+    if (!projection.accepted) return true;
     const active = e.kind === "reaction.added";
     await setState(
       tx,
@@ -474,7 +512,7 @@ export async function projectAdaptiveMember(
       at,
       target ? String(target) : null,
     );
-    if (active && !prior?.data.active && target) {
+    if (active && !projection.wasActive && !projection.ambiguous && target) {
       const previouslyReceived = target
         ? (
             await sql`SELECT id FROM adaptive_facts WHERE ${tenant(s)} AND kind='reaction.added' AND subject_hash=${hash} AND target_hash=${String(target)} AND data->>'messageId'=${e.messageId ?? ""} LIMIT 1`.execute(
@@ -514,18 +552,10 @@ export async function projectAdaptiveMember(
     return true;
   }
   if (e.kind === "poll.vote_added" || e.kind === "poll.vote_removed") {
-    const key = `${e.channelId}:${e.messageId}`,
-      prior = await state(tx, s, "poll", key, hash);
-    if (prior && prior.observed_at > at) return true;
-    const answers = new Set(
-      Array.isArray(prior?.data.answers)
-        ? (prior.data.answers as string[])
-        : [],
-    );
-    if (e.answerHash) {
-      if (e.kind === "poll.vote_added") answers.add(e.answerHash);
-      else answers.delete(e.answerHash);
-    }
+    const key = `${e.channelId}:${e.messageId}`;
+    const projection = await projectPollState(tx, s, e, hash);
+    if (!projection) return true;
+    const answers = new Set(projection.answers);
     await setState(
       tx,
       s,
@@ -538,9 +568,15 @@ export async function projectAdaptiveMember(
         answers: [...answers],
         active: answers.size > 0,
       },
-      at,
+      projection.observed_at,
     );
-    if (answers.size) {
+    const alreadyParticipated =
+      (
+        await sql`SELECT id FROM adaptive_facts WHERE ${tenant(s)} AND kind='poll.participated' AND subject_hash=${hash} AND data->>'messageId'=${e.messageId ?? ""} LIMIT 1`.execute(
+          tx,
+        )
+      ).rows.length > 0;
+    if (answers.size && !projection.ambiguous && !alreadyParticipated) {
       await adaptiveFact(
         tx,
         s,
@@ -793,7 +829,30 @@ async function projectVoice(
     tx,
   );
   const prior = await state(tx, s, "voice", "current", hash);
-  if (prior && prior.observed_at > at) return;
+  const clockRow = (
+    await sql<StateClock>`SELECT * FROM voice_sessions WHERE ${tenant(s)} AND subject_hash=${hash}`.execute(
+      tx,
+    )
+  ).rows[0];
+  const order = clockRow ? compareClock(e, clockRow) : 1;
+  if (order !== null && order <= 0) return;
+  if (order === null) {
+    await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND domain='voice' AND subject_hash=${hash}`.execute(
+      tx,
+    );
+    return;
+  }
+  const epoch = (
+    await sql<{
+      started_at: Date;
+    }>`SELECT started_at FROM collection_epochs WHERE ${tenant(s)} AND source='GATEWAY' AND ended_at IS NULL`.execute(
+      tx,
+    )
+  ).rows[0];
+  if (epoch && epoch.started_at > at) return;
+  await sql`UPDATE voice_sessions SET observed_at=${at},source_session=${e.gatewaySessionId},source_sequence=${e.sequence},source_ordinal=${e.ordinal ?? 0} WHERE ${tenant(s)} AND subject_hash=${hash}`.execute(
+    tx,
+  );
   const surface = e.channelId ? await resolveSurface(tx, s, e.channelId) : null,
     afk =
       (await state(tx, s, "guild", "afk"))?.data.channelId ??
@@ -870,7 +929,12 @@ async function projectVoice(
       tx,
     );
   }
-  if (!channelId) return;
+  if (!channelId) {
+    await sql`INSERT INTO voice_sessions(organization_id,guild_id,subject_hash,episode_id,observed_at,is_guest,voice_known,is_stage,qualified,source_session,source_sequence,source_ordinal) VALUES(${s.organizationId}::uuid,${s.guildId},${hash},${episodeId}::uuid,${at},${guest},false,false,false,${e.gatewaySessionId},${e.sequence},${e.ordinal ?? 0}) ON CONFLICT(organization_id,guild_id,subject_hash) DO UPDATE SET channel_id=NULL,joined_at=NULL,observed_at=EXCLUDED.observed_at,source_session=EXCLUDED.source_session,source_sequence=EXCLUDED.source_sequence,source_ordinal=EXCLUDED.source_ordinal`.execute(
+      tx,
+    );
+    return;
+  }
   const clock = await state(tx, s, "voice-channel", channelId),
     baseline = channelClock(clock?.data, at);
   if (voiceKnown && !guest)
@@ -905,6 +969,9 @@ async function projectVoice(
       connected: false,
     },
     at,
+  );
+  await sql`UPDATE voice_sessions SET source_session=${e.gatewaySessionId},source_sequence=${e.sequence},source_ordinal=${e.ordinal ?? 0} WHERE ${tenant(s)} AND subject_hash=${hash}`.execute(
+    tx,
   );
   await adaptiveFact(
     tx,
