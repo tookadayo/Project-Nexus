@@ -11,6 +11,7 @@ import { assert, type Scope } from "../../shared/src/index";
 import { errorReference, logFailure } from "../../shared/src/diagnostics";
 import type { IdentityVault } from "../../identity/src/index";
 import { EntitlementService } from "./entitlements";
+import { billingViewModel } from "./billing-view";
 import {
   planRegistry,
   planRank,
@@ -403,6 +404,9 @@ export class BillingService {
       recoveryUntil: recovery?.recovery_until?.toISOString() ?? null,
       pausedRules,
     };
+  }
+  async view(s: Scope) {
+    return billingViewModel(await this.status(s));
   }
   async reconcile(s: Scope, provider: BillingProvider) {
     const events = await provider.reconcile(s);

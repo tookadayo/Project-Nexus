@@ -7,6 +7,7 @@ export type DiscountPolicyInput = {
   discordFinalPriceMinor: number | null;
   discordOfferingSupported: boolean;
   parityReviewed: boolean;
+  parityObligation?: boolean | null;
   baseCurrency?: string | null;
   discordCurrency?: string | null;
 };
@@ -39,8 +40,19 @@ export function discountCompatibility(input: DiscountPolicyInput) {
       reason: "DISCORD_DISCOUNT_NOT_IMPLEMENTED",
       finalPriceMinor,
     };
+  const parity = input.discordOfferingSupported
+    ? true
+    : input.parityObligation === undefined
+      ? false
+      : input.parityObligation;
+  if (parity === null)
+    return {
+      allowed: false,
+      reason: "DISCOUNT_POLICY_REVIEW_REQUIRED",
+      finalPriceMinor,
+    };
   if (
-    input.discordOfferingSupported &&
+    parity &&
     (!input.parityReviewed || input.discordFinalPriceMinor === null)
   )
     return {
@@ -49,7 +61,7 @@ export function discountCompatibility(input: DiscountPolicyInput) {
       finalPriceMinor,
     };
   if (
-    input.discordOfferingSupported &&
+    parity &&
     (!input.baseCurrency || input.baseCurrency !== input.discordCurrency)
   )
     return {
@@ -57,10 +69,7 @@ export function discountCompatibility(input: DiscountPolicyInput) {
       reason: "DISCORD_PRICE_CURRENCY_UNVERIFIED",
       finalPriceMinor,
     };
-  if (
-    input.discordOfferingSupported &&
-    input.discordFinalPriceMinor! > finalPriceMinor
-  )
+  if (parity && input.discordFinalPriceMinor! > finalPriceMinor)
     return {
       allowed: false,
       reason: "DISCORD_PRICE_PARITY_REJECTED",

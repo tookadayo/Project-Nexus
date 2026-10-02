@@ -1,4 +1,4 @@
-import { beforeAll, afterAll, it, expect } from "vitest";
+import { beforeAll, afterAll, it, expect, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { infrastructure } from "../fixtures/infrastructure";
 import {
@@ -331,7 +331,7 @@ it("discount benefit remains unavailable without a real configured provider", as
       }),
     );
   await expect(f.promotions.activateCampaign(admin, c.id)).rejects.toThrow(
-    "DISCOUNT_POLICY_REVIEW_REQUIRED",
+    "OFFERING_PRICE_UNVERIFIED",
   );
 });
 it("promotion job replay returns the original grant exactly once", async () => {
@@ -519,6 +519,19 @@ it("Free denies paid settings and workers preserve configured rules after downgr
   const discord = new FakeDiscord();
   expect(await new HelperWorker(db, discord, settings).tick(f.s)).toBe(false);
   expect(discord.calls).toEqual([]);
+  await f.billing.storeVerified(event(f.s, { version: 3 }));
+  await f.billing.projectOne();
+  expect((await f.billing.status(f.s)).pausedRules).toEqual([]);
+  expect((await settings.get(f.s)).helperEnabled).toBe(true);
+  expect(
+    (
+      await sql<{
+        state: string;
+      }>`SELECT state FROM billing_rule_states WHERE ${tenant(f.s)} AND rule_key='helper'`.execute(
+        db,
+      )
+    ).rows[0]?.state,
+  ).toBe("ACTIVE");
   expect(
     (await f.billing.preview(f.s, "STARTER", "EXTERNAL"))
       .historyVisibilityChange.toDays,
@@ -686,4 +699,150 @@ it("privacy deletion does not recycle lifetime campaign or code redemption caps"
       "PROMOTION_UNAVAILABLE",
     );
   }
+});
+
+it.each([
+  {
+    enabled: "false",
+    country: "JP",
+    discord: false,
+    reviewed: false,
+    price: 4900,
+    currency: "USD",
+    expected: null,
+  },
+  {
+    enabled: "true",
+    country: "JP",
+    discord: false,
+    reviewed: false,
+    price: 4900,
+    currency: "USD",
+    expected: null,
+  },
+  {
+    enabled: "false",
+    country: "US",
+    discord: true,
+    reviewed: true,
+    price: 3920,
+    currency: "USD",
+    expected: null,
+  },
+  {
+    enabled: "false",
+    country: "US",
+    discord: true,
+    reviewed: true,
+    price: 4900,
+    currency: "USD",
+    expected: "DISCORD_PRICE_PARITY_REJECTED",
+  },
+  {
+    enabled: "false",
+    country: "US",
+    discord: true,
+    reviewed: false,
+    price: 3920,
+    currency: "USD",
+    expected: "DISCORD_PRICE_PARITY_UNVERIFIED",
+  },
+  {
+    enabled: "false",
+    country: "US",
+    discord: true,
+    reviewed: true,
+    price: 3920,
+    currency: "JPY",
+    expected: "DISCORD_PRICE_CURRENCY_UNVERIFIED",
+  },
+  {
+    enabled: "false",
+    country: "",
+    discord: false,
+    reviewed: false,
+    price: 4900,
+    currency: "USD",
+    expected: "DISCOUNT_POLICY_REVIEW_REQUIRED",
+  },
+])(
+  "activates discounts from offering policy, independent of button visibility: %j",
+  async (input) => {
+    vi.stubEnv("NEXUS_DISCORD_BILLING_ENABLED", input.enabled);
+    vi.stubEnv("NEXUS_BILLING_DEVELOPER_COUNTRY", input.country || undefined);
+    const externalId = randomUUID(),
+      discordId = randomUUID();
+    try {
+      await sql`INSERT INTO billing_offerings(id,plan_key,plan_revision,provider,enabled,currency,final_price_minor) VALUES(${externalId}::uuid,'GROWTH',2,'EXTERNAL',true,'USD',4900)`.execute(
+        db,
+      );
+      if (input.discord)
+        await sql`INSERT INTO billing_offerings(id,plan_key,plan_revision,provider,enabled,currency,final_price_minor,parity_reviewed_at) VALUES(${discordId}::uuid,'GROWTH',2,'DISCORD',true,${input.currency},${input.price},${input.reviewed ? new Date() : null})`.execute(
+          db,
+        );
+      const f = await fixture(),
+        c = await f.promotions.createCampaign(
+          admin,
+          campaign({
+            benefitType: "DISCOUNT",
+            discountType: "PERCENT",
+            discountValue: 20,
+            allowedProviders: ["EXTERNAL"],
+          }),
+        );
+      if (input.expected)
+        await expect(
+          f.promotions.activateCampaign(admin, c.id),
+        ).rejects.toThrow(input.expected);
+      else {
+        await expect(
+          f.promotions.activateCampaign(admin, c.id),
+        ).resolves.toEqual({ id: c.id });
+        const code = await f.promotions.generateCode(admin, c.id);
+        await expect(
+          f.promotions.redeem(
+            f.s,
+            vault.hash(f.s, user),
+            code.code,
+            "EXTERNAL",
+          ),
+        ).rejects.toThrow("DISCOUNT_PROVIDER_NOT_CONFIGURED");
+        expect(await f.entitlements.plan(f.s)).toBe("FREE");
+      }
+    } finally {
+      await sql`DELETE FROM billing_offerings WHERE id IN (${externalId}::uuid,${discordId}::uuid)`.execute(
+        db,
+      );
+      vi.unstubAllEnvs();
+    }
+  },
+);
+it("Enterprise contract history above Scale remains scoped and privacy fences history reads", async () => {
+  const f = await fixture(),
+    unrelated = await fixture();
+  await f.promotions.issueGrant(f.s, admin, {
+    source: "CONTRACT",
+    plan: "ENTERPRISE",
+    untilRevoked: true,
+    limits: { historyDays: 1460 },
+  });
+  expect(await f.entitlements.visibleHistoryDays(f.s, 1800)).toBe(1460);
+  expect(
+    await unrelated.entitlements.visibleHistoryDays(unrelated.s, 1800),
+  ).toBe(30);
+  await new PrivacyService(db, vault, new SettingsService(db)).delete(
+    f.s,
+    user,
+    {
+      key: vault.hash(f.s, user),
+      permissions: "32",
+      roles: [],
+      source: "WEB_DASHBOARD",
+      requestId: "history-privacy",
+    },
+    true,
+  );
+  await expect(f.entitlements.visibleHistoryDays(f.s, 30)).rejects.toThrow(
+    "PRIVACY_DELETED",
+  );
 });

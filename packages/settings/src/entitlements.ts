@@ -19,6 +19,23 @@ export {
   planRegistry,
 } from "./plan-registry";
 export type { Feature, Plan } from "./plan-registry";
+// Query/export safety bound, independent of plan visibility and physical retention.
+export const SYSTEM_MAX_HISTORY_DAYS = 3650;
+export function visibleHistoryDays(
+  state: Awaited<ReturnType<EntitlementService["effective"]>>,
+  requested: number,
+) {
+  assert(
+    Number.isInteger(requested) &&
+      requested > 0 &&
+      requested <= SYSTEM_MAX_HISTORY_DAYS,
+    "INVALID_HISTORY_RANGE",
+  );
+  assert(!state.privacyDeleted, "PRIVACY_DELETED", 403);
+  return state.limits.historyDays === null
+    ? requested
+    : Math.min(requested, state.limits.historyDays);
+}
 export class EntitlementService {
   constructor(private readonly db: Tx) {}
   async effective(s: Scope, now = new Date()) {
@@ -123,12 +140,7 @@ export class EntitlementService {
     };
   }
   async visibleHistoryDays(s: Scope, requested: number) {
-    assert(
-      Number.isInteger(requested) && requested > 0 && requested <= 730,
-      "INVALID_HISTORY_RANGE",
-    );
-    const limit = (await this.effective(s)).limits.historyDays;
-    return limit === null ? requested : Math.min(requested, limit);
+    return visibleHistoryDays(await this.effective(s), requested);
   }
   async canDefineActivation(s: Scope, definition: unknown) {
     if (await this.can(s, "custom_activation")) return true;

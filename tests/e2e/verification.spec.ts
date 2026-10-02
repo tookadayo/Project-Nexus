@@ -224,6 +224,21 @@ for (const locale of ["en", "ja"])
     ]);
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto("/billing/manage");
+    const statusResponse = await page.request.get("/billing/status");
+    expect(statusResponse.status()).toBe(200);
+    expect(statusResponse.headers()["cache-control"]).toBe("no-store");
+    const model = await statusResponse.json();
+    expect(model.canManage).toBe(false);
+    expect(model.presentation.revision).toBe(1);
+    expect(model.presentation.nativeCapability).toBe("DISABLED");
+    expect(model.presentation.nativePurchaseUrl).toBeNull();
+    expect(model.presentation.availableFeatures).toContain("voice_metrics");
+    expect(model.presentation.featureDecisions.scheduled_reports.allowed).toBe(
+      false,
+    );
+    expect(
+      (await page.request.get("/billing/history?days=3651")).status(),
+    ).toBe(400);
     await expect(
       page.getByText(
         locale === "ja"
@@ -316,6 +331,7 @@ for (const locale of ["en", "ja"])
         data: { action: "redeem", code: "invalid" },
       });
       expect(stale.status()).toBe(403);
+      expect((await page.request.get("/billing/status")).status()).toBe(403);
     } finally {
       await request.post(`${fixture}/fixture/permission`, {
         data: { guildId: ids[0], allowed: true },

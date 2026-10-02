@@ -2,12 +2,6 @@ import { SiteShell, siteLocale, copy } from "../public-ui";
 import { billingContext } from "./context";
 import { BillingControls } from "./controls";
 import { planCopy } from "../../../../packages/settings/src/plan-copy";
-import {
-  discordBillingConfiguration,
-  nativeBillingCapability,
-  discordStoreUrl,
-} from "../../../../packages/settings/src/billing-provider";
-import { featureDecision } from "../../../../packages/settings/src/billing-domain";
 import { currentRecipe } from "../../../../packages/settings/src/recipes";
 import { RecipeControls } from "./recipe-controls";
 export async function BillingView({
@@ -38,9 +32,8 @@ export async function BillingView({
       </SiteShell>
     );
   }
-  const status = await context.billing.status(context.scope),
-    native = nativeBillingCapability(discordBillingConfiguration()),
-    store = discordStoreUrl(discordBillingConfiguration());
+  const status = await context.billing.view(context.scope),
+    store = status.presentation.nativePurchaseUrl;
   return (
     <SiteShell locale={locale}>
       <section className="site-section">
@@ -175,7 +168,7 @@ export async function BillingView({
                 "External checkout is unconfigured. You can review a plan change preview.",
               )}
             </p>
-            {native === "AVAILABLE" && store && (
+            {context.canManage && store && (
               <a className="button button-primary" href={store}>
                 {copy(
                   locale,
@@ -187,11 +180,11 @@ export async function BillingView({
             <BillingControls locale={locale} mode="preview" />
           </>
         )}
-        {section === "promotions" && (
+        {section === "promotions" && context.canManage && (
           <BillingControls locale={locale} mode="promotion" />
         )}
         {section === "manage" &&
-          featureDecision(status, "custom_recipe").allowed && (
+          status.presentation.featureDecisions.custom_recipe.allowed && (
             <RecipeControls
               locale={locale}
               recipe={await currentRecipe(context.services.db, context.scope)}

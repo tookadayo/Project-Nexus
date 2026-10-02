@@ -18,7 +18,10 @@ import type {
   EntitlementFeature,
 } from "../../../settings/src/plan-registry";
 import type { NativeBillingCapability } from "../../../settings/src/billing-provider";
-import type { EntitlementDecision } from "../../../settings/src/billing-domain";
+import type {
+  EntitlementDecision,
+  EntitlementSubscription,
+} from "../../../settings/src/billing-domain";
 export type BillingView = {
   plan: string;
   used: number;
@@ -27,6 +30,7 @@ export type BillingView = {
   projected: number;
   automaticOverageCharge: boolean;
   source?: string;
+  subscriptions?: Pick<EntitlementSubscription, "provider" | "status">[];
   periodEnd?: string | null;
   grants?: { source: string; endsAt: string | null }[];
   features?: EntitlementFeature[];
@@ -133,6 +137,14 @@ export async function billingPanel(
       divider(),
       metricGrid([
         { label: l("現在のプラン", "Current plan"), value: view.plan },
+        {
+          label: l("支払い状態", "Billing state"),
+          value:
+            view.subscriptions
+              ?.slice(0, 5)
+              .map((row) => `${row.provider} · ${row.status}`)
+              .join(" / ") || l("契約なし", "No subscription"),
+        },
         {
           label: l("次回更新／終了", "Renewal / end"),
           value: view.periodEnd

@@ -172,6 +172,15 @@ export function discordBillingConfiguration(
     skus,
   };
 }
+// Policy applicability is independent of checkout visibility and approval configuration.
+export function discordMonetizationApplicable(
+  country: string | null,
+  plan: Plan,
+): boolean | null {
+  if (!country) return null;
+  if (!supportedCountries.has(country.toUpperCase())) return false;
+  return ["STARTER", "GROWTH", "SCALE"].includes(plan) ? true : null;
+}
 export function nativeBillingCapability(
   config: DiscordBillingConfiguration,
 ): NativeBillingCapability {

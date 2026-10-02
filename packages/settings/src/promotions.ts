@@ -16,7 +16,7 @@ import { EntitlementService } from "./entitlements";
 import { BillingService, billingAudit, billingScopeLock } from "./billing";
 import {
   discordBillingConfiguration,
-  nativeBillingCapability,
+  discordMonetizationApplicable,
 } from "./billing-provider";
 import { discountCompatibility } from "./billing-policy";
 export const promotionTypes = [
@@ -157,13 +157,7 @@ export class PromotionService {
       ).rows[0];
       assert(c && !c.revoked_at, "CAMPAIGN_UNAVAILABLE");
       if (c.benefit_type === "DISCOUNT") {
-        const capability = nativeBillingCapability(
-          discordBillingConfiguration(),
-        );
-        assert(
-          capability !== "DISABLED" && capability !== "NOT_CONFIGURED",
-          "DISCOUNT_POLICY_REVIEW_REQUIRED",
-        );
+        const config = discordBillingConfiguration();
         for (const provider of c.allowed_providers) {
           const offers = (
             await sql<{
@@ -175,6 +169,12 @@ export class PromotionService {
               tx,
             )
           ).rows;
+          assert(
+            offers.filter((offer) => offer.provider === provider).length <= 1 &&
+              offers.filter((offer) => offer.provider === "DISCORD").length <=
+                1,
+            "OFFERING_POLICY_AMBIGUOUS",
+          );
           const external = offers.find((offer) => offer.provider === provider),
             discord = offers.find((offer) => offer.provider === "DISCORD");
           const decision = discountCompatibility({
@@ -183,7 +183,13 @@ export class PromotionService {
             discountValue: c.discount_value!,
             basePriceMinor: external?.final_price_minor ?? null,
             discordFinalPriceMinor: discord?.final_price_minor ?? null,
-            discordOfferingSupported: capability === "AVAILABLE",
+            discordOfferingSupported: Boolean(discord),
+            parityObligation: discord
+              ? true
+              : discordMonetizationApplicable(
+                  config.developerCountry,
+                  c.target_plan!,
+                ),
             parityReviewed: Boolean(discord?.parity_reviewed_at),
             baseCurrency: external?.currency,
             discordCurrency: discord?.currency,

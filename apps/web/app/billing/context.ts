@@ -31,8 +31,19 @@ export async function billingContext(action: BillingAction = "VIEW") {
     "SERVER_VERIFICATION_REQUIRED",
     403,
   );
+  let canManage = true;
+  try {
+    await new BillingAuthorization(
+      services.authority,
+      services.db,
+      services.vault,
+    ).require(snapshot, "UPGRADE");
+  } catch {
+    canManage = false;
+  }
   return {
     scope,
+    canManage,
     snapshot,
     services,
     billing: new BillingService(services.db, services.vault),

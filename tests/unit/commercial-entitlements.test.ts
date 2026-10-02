@@ -22,6 +22,12 @@ import {
 } from "../../packages/settings/src/billing-provider";
 import { discountCompatibility } from "../../packages/settings/src/billing-policy";
 import { EntitlementType } from "discord-api-types/v10";
+import {
+  visibleHistoryDays,
+  SYSTEM_MAX_HISTORY_DAYS,
+} from "../../packages/settings/src/entitlements";
+import { billingViewModel } from "../../packages/settings/src/billing-view";
+import { discordMonetizationApplicable } from "../../packages/settings/src/billing-provider";
 const now = new Date("2026-10-02T00:00:00Z");
 const subscription = (
   plan: EntitlementSubscription["plan"] = "GROWTH",
@@ -106,6 +112,14 @@ for (const source of ["PROMOTION", "PARTNER", "DEBUG", "TRIAL"] as const)
     expect(state.plan).toBe("GROWTH");
     expect(state.source).toBe(source);
     expect(original.plan).toBe("STARTER");
+    for (const ended of [
+      { ...grant(source), endsAt: now.toISOString() },
+      { ...grant(source), revokedAt: now.toISOString() },
+    ])
+      expect(
+        resolveEntitlements({ subscriptions: [original], grants: [ended] }, now)
+          .plan,
+      ).toBe("STARTER");
     expect(
       resolveEntitlements({ subscriptions: [], grants: [grant(source)] }, now)
         .plan,
@@ -334,4 +348,160 @@ it("an unconfigured adapter never invents successful payment", async () => {
       "GROWTH",
     ),
   ).rejects.toThrow("BILLING_PROVIDER_NOT_CONFIGURED");
+});
+
+it.each([
+  ["FREE", 90, 30],
+  ["STARTER", 120, 90],
+  ["GROWTH", 365, 365],
+  ["SCALE", 730, 730],
+  ["ENTERPRISE", 1095, 1095],
+] as const)(
+  "%s history visibility respects plan depth independently of query safety",
+  (plan, requested, expected) => {
+    const state = resolveEntitlements(
+      { subscriptions: [subscription(plan)], grants: [] },
+      now,
+    );
+    expect(visibleHistoryDays(state, requested)).toBe(expected);
+    expect(() =>
+      visibleHistoryDays(state, SYSTEM_MAX_HISTORY_DAYS + 1),
+    ).toThrow("INVALID_HISTORY_RANGE");
+  },
+);
+it("contract history is scoped, bounded and never overrides privacy", () => {
+  const contract = {
+    ...grant("CONTRACT"),
+    plan: "ENTERPRISE" as const,
+    limits: { historyDays: 1460 },
+  };
+  const state = resolveEntitlements(
+    { subscriptions: [], grants: [contract] },
+    now,
+  );
+  expect(visibleHistoryDays(state, 1800)).toBe(1460);
+  expect(
+    visibleHistoryDays(
+      resolveEntitlements({ subscriptions: [], grants: [] }, now),
+      1800,
+    ),
+  ).toBe(30);
+  expect(() =>
+    visibleHistoryDays({ ...state, privacyDeleted: true }, 30),
+  ).toThrow("PRIVACY_DELETED");
+  for (const invalid of [0, -1, 1.5, NaN, Infinity])
+    expect(() => visibleHistoryDays(state, invalid)).toThrow(
+      "INVALID_HISTORY_RANGE",
+    );
+});
+it("discount policy is independent of native checkout capability and fails closed on unknown applicability", () => {
+  const input = {
+    provider: "EXTERNAL" as const,
+    discountType: "PERCENT" as const,
+    discountValue: 20,
+    basePriceMinor: 4900,
+    discordFinalPriceMinor: null,
+    discordOfferingSupported: false,
+    parityReviewed: false,
+  };
+  expect(
+    discountCompatibility({ ...input, parityObligation: false }).allowed,
+  ).toBe(true);
+  expect(
+    discountCompatibility({
+      ...input,
+      discordOfferingSupported: true,
+      parityObligation: false,
+    }).reason,
+  ).toBe("DISCORD_PRICE_PARITY_UNVERIFIED");
+  expect(
+    discountCompatibility({ ...input, parityObligation: null }).reason,
+  ).toBe("DISCOUNT_POLICY_REVIEW_REQUIRED");
+  expect(
+    discountCompatibility({ ...input, parityObligation: true }).reason,
+  ).toBe("DISCORD_PRICE_PARITY_UNVERIFIED");
+  expect(
+    discountCompatibility({
+      ...input,
+      parityObligation: true,
+      parityReviewed: true,
+      discordFinalPriceMinor: 3920,
+      baseCurrency: "USD",
+      discordCurrency: "JPY",
+    }).reason,
+  ).toBe("DISCORD_PRICE_CURRENCY_UNVERIFIED");
+  expect(discordMonetizationApplicable("JP", "GROWTH")).toBe(false);
+  expect(discordMonetizationApplicable("US", "GROWTH")).toBe(true);
+  expect(discordMonetizationApplicable(null, "GROWTH")).toBeNull();
+  expect(discordMonetizationApplicable("US", "ENTERPRISE")).toBeNull();
+});
+it.each(["UNKNOWN", "PAST_DUE", "GRACE", "CONFLICT"] as const)(
+  "%s retains only bounded confirmed access",
+  (status) => {
+    const sub = subscription("GROWTH", status);
+    expect(
+      resolveEntitlements({ subscriptions: [sub], grants: [] }, now).plan,
+    ).toBe("GROWTH");
+    expect(
+      resolveEntitlements(
+        {
+          subscriptions: [{ ...sub, lastGoodUntil: now.toISOString() }],
+          grants: [],
+        },
+        now,
+      ).plan,
+    ).toBe("FREE");
+    expect(
+      resolveEntitlements(
+        { subscriptions: [{ ...sub, confirmedAt: null }], grants: [] },
+        now,
+      ).plan,
+    ).toBe("FREE");
+  },
+);
+it("shared billing presentation denies planned workflows and exposes only scoped benefits", () => {
+  const state = resolveEntitlements(
+    { subscriptions: [subscription("SCALE")], grants: [grant()] },
+    now,
+  );
+  const model = billingViewModel(
+    {
+      ...state,
+      usage: {
+        plan: state.plan,
+        used: 2,
+        included: 25000,
+        softLimit: 30000,
+        projected: 2,
+        automaticOverageCharge: false,
+      },
+      recoveryUntil: null,
+      pausedRules: [],
+    },
+    {
+      enabled: false,
+      approved: false,
+      developerCountry: null,
+      applicationId: null,
+      skus: {},
+    },
+  );
+  expect(model.plan).toBe("SCALE");
+  expect(model.presentation.nativeCapability).toBe("DISABLED");
+  expect(model.presentation.nativePurchaseUrl).toBeNull();
+  for (const key of [
+    "scheduled_reports",
+    "webhooks",
+    "multi_guild",
+    "rbac",
+    "api",
+    "audit_export",
+    "ai_explanation",
+  ] as const) {
+    expect(model.presentation.featureDecisions[key].allowed).toBe(false);
+    expect(model.presentation.availableFeatures).not.toContain(key);
+    expect(model.presentation.plannedFeatures).toContain(key);
+  }
+  expect(model.presentation.promotions.activeBenefits).toEqual(state.grants);
+  expect(model.presentation.promotions.paymentDiscountAvailable).toBe(false);
 });

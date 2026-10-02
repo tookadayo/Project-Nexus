@@ -68,6 +68,7 @@ for (const locale of ["en", "ja"] as const)
           webUrl: "https://nexus.example",
           native: "NOT_CONFIGURED",
           canManage: true,
+          subscriptions: [{ provider: "EXTERNAL", status: "PAST_DUE" }],
         },
         locale,
       );
@@ -75,6 +76,7 @@ for (const locale of ["en", "ja"] as const)
       expect(checkLimits(view)).toBeLessThanOrEqual(40);
       const text = JSON.stringify(view);
       expect(text).toContain(plan);
+      expect(text).toContain("EXTERNAL · PAST_DUE");
       expect(text).toContain(
         locale === "ja" ? "プロモーションコード" : "Promotion code",
       );

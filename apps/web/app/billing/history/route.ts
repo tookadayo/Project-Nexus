@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { billingContext } from "../context";
 import { sql, tenant } from "../../../../../packages/db/src/index";
-import { EntitlementService } from "../../../../../packages/settings/src/entitlements";
+import {
+  EntitlementService,
+  SYSTEM_MAX_HISTORY_DAYS,
+} from "../../../../../packages/settings/src/entitlements";
 import {
   assert,
   isDomainError,
@@ -15,7 +18,7 @@ export async function GET(request: NextRequest) {
         .number()
         .int()
         .min(1)
-        .max(730)
+        .max(SYSTEM_MAX_HISTORY_DAYS)
         .parse(request.nextUrl.searchParams.get("days") ?? 30),
       days = await new EntitlementService(
         context.services.db,
@@ -24,7 +27,7 @@ export async function GET(request: NextRequest) {
       await sql<{
         day: string;
         metrics: unknown;
-      }>`SELECT day::text,metrics FROM daily_guild_metrics WHERE ${tenant(context.scope)} AND day>=(current_date-${days}) ORDER BY day`.execute(
+      }>`SELECT day::text,metrics FROM daily_guild_metrics WHERE ${tenant(context.scope)} AND day>=(current_date-${days}) AND day<=current_date ORDER BY day LIMIT ${SYSTEM_MAX_HISTORY_DAYS + 1}`.execute(
         context.services.db,
       )
     ).rows;
@@ -33,7 +36,7 @@ export async function GET(request: NextRequest) {
         context.scope,
         "csv_export",
       );
-      assert(rows.length <= 731, "EXPORT_TOO_LARGE");
+      assert(rows.length <= SYSTEM_MAX_HISTORY_DAYS + 1, "EXPORT_TOO_LARGE");
       const safe = (value: unknown) => {
         const text = String(value ?? "");
         return (
@@ -110,9 +113,19 @@ export async function GET(request: NextRequest) {
     );
   } catch (error) {
     return NextResponse.json(
-      { error: isDomainError(error) ? error.code : "HISTORY_UNAVAILABLE" },
       {
-        status: isDomainError(error) ? error.status : 503,
+        error: isDomainError(error)
+          ? error.code
+          : error instanceof z.ZodError
+            ? "INVALID_HISTORY_RANGE"
+            : "HISTORY_UNAVAILABLE",
+      },
+      {
+        status: isDomainError(error)
+          ? error.status
+          : error instanceof z.ZodError
+            ? 400
+            : 503,
         headers: { "Cache-Control": "no-store" },
       },
     );

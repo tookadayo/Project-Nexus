@@ -93,15 +93,7 @@ import { visibleMetrics } from "../../../packages/settings/src/metric-visibility
 import { BillingService } from "../../../packages/settings/src/billing";
 import { PromotionService } from "../../../packages/settings/src/promotions";
 import { BillingAuthorization } from "../../../packages/security/src/billing-authorization";
-import {
-  discordBillingConfiguration,
-  nativeBillingCapability,
-  discordStoreUrl,
-} from "../../../packages/settings/src/billing-provider";
-import {
-  featureAvailability,
-  type EntitlementFeature,
-} from "../../../packages/settings/src/plan-registry";
+import type { EntitlementFeature } from "../../../packages/settings/src/plan-registry";
 import {
   promotionResultPanel,
   lockedFeaturePanel,
@@ -1179,8 +1171,7 @@ export class InteractionWorker {
     );
     if (action === "billing" || action === "plan") {
       await billingAuthority.require(authorization, "VIEW");
-      const status = await new BillingService(this.db, this.vault).status(s),
-        config = discordBillingConfiguration();
+      const status = await new BillingService(this.db, this.vault).view(s);
       let canManage = true;
       try {
         await billingAuthority.require(authorization, "UPGRADE");
@@ -1207,14 +1198,13 @@ export class InteractionWorker {
           ...status.usage,
           source: status.source,
           grants: status.grants,
-          features: status.features.filter(
-            (feature) => featureAvailability[feature] === "available",
-          ),
+          features: status.presentation.availableFeatures,
+          subscriptions: status.subscriptions,
           conflict: status.conflict,
           grace: status.grace,
           periodEnd: status.subscriptions[0]?.periodEnd ?? null,
-          native: nativeBillingCapability(config),
-          nativeUrl: discordStoreUrl(config),
+          native: status.presentation.nativeCapability,
+          nativeUrl: status.presentation.nativePurchaseUrl,
           webUrl,
           canManage,
         },
