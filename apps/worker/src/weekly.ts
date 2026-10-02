@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { sql, tenant, type Database } from "../../../packages/db/src/index.js";
 import type { Scope } from "../../../packages/shared/src/index.js";
 import { SettingsService } from "../../../packages/settings/src/index.js";
+import { EntitlementService } from "../../../packages/settings/src/entitlements";
 import { AnalyticsService } from "../../../packages/analytics/src/index.js";
 import { diagnose } from "../../../packages/analytics/src/diagnoses.js";
 import type { DiscordPort } from "../../../packages/discord/src/rest.js";
@@ -77,6 +78,8 @@ export class WeeklySummaryWorker {
   async tick(s: Scope, now = new Date()) {
     const cfg = await this.settings.get(s);
     if (!cfg.weeklySummaryEnabled || !cfg.weeklySummaryChannelId) return false;
+    if (!(await new EntitlementService(this.db).can(s, "scheduled_digest")))
+      return false;
     const local = zoned(now, cfg.timezone),
       weekday =
         (new Date(
@@ -187,6 +190,12 @@ export class WeeklySummaryWorker {
       await sql`UPDATE weekly_summary_deliveries SET state='sending',attempted_at=${now} WHERE ${tenant(s)} AND week_start=${week}::date AND state='ready'`.execute(
         this.db,
       );
+      if (!(await new EntitlementService(this.db).can(s, "scheduled_digest"))) {
+        await sql`UPDATE weekly_summary_deliveries SET state='ready' WHERE ${tenant(s)} AND week_start=${week}::date`.execute(
+          this.db,
+        );
+        return false;
+      }
       sendStarted = true;
       const messageId = await this.discord.sendPanel(
         cfg.weeklySummaryChannelId,

@@ -8,6 +8,7 @@ export type MeasurementState =
 import type { MetricEvidence } from "../../shared/src/metric-evidence";
 import { percentile } from "../../analytics/src/registry";
 export type Measurement = {
+  visibility?: "PLAN_RESTRICTED";
   state: MeasurementState;
   value: number | null;
   numerator: number;

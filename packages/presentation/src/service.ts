@@ -13,6 +13,8 @@ import {
 import { diagnose } from "../../analytics/src/diagnoses.js";
 import type { MetricKey } from "../../analytics/src/registry.js";
 import { SettingsService } from "../../settings/src/index.js";
+import { EntitlementService } from "../../settings/src/entitlements";
+import { featureDecision } from "../../settings/src/billing-domain";
 import { domainRevisions } from "../../settings/src/domain-config.js";
 import { activationSchema } from "../../lifecycle/src/activation.js";
 import {
@@ -237,14 +239,18 @@ export class PresentationService {
       "direct_reply_connection_rate",
       "d7_active_retention",
     ] as const;
+    const state = await new EntitlementService(this.db).effective(s, now),
+      depth = featureDecision(state, "comparable_periods").allowed;
     return {
       generatedAt: now.toISOString(),
-      kpis: keys.map((key) => toKpi(key, current[key], previous[key])),
+      kpis: keys.map((key) =>
+        toKpi(key, current[key], depth ? previous[key] : undefined),
+      ),
       journey: toJourney(current),
-      communityOpportunity: ranked[0] ?? null,
+      communityOpportunity: depth ? (ranked[0] ?? null) : null,
       measurementWarning,
       actionWarning,
-      suggestedAction: ranked[0]?.suggestedAction ?? null,
+      suggestedAction: depth ? (ranked[0]?.suggestedAction ?? null) : null,
       dataHealth: aggregateHealth(keys.map((k) => current[k])),
       setup,
     };
@@ -253,6 +259,7 @@ export class PresentationService {
     s: Scope,
     now = new Date(),
   ): Promise<OpportunitiesPresentation> {
+    const state = await new EntitlementService(this.db).effective(s, now);
     const w = await this.windows(s, now),
       [current, previous] = await Promise.all([
         this.analytics.canonical(s, ...w.current, now),
@@ -263,9 +270,11 @@ export class PresentationService {
       );
     return {
       generatedAt: now.toISOString(),
-      items: rankOpportunities(
-        items.filter((o) => o.stage !== "data" && o.stage !== "delivery"),
-      ),
+      items: featureDecision(state, "comparable_periods").allowed
+        ? rankOpportunities(
+            items.filter((o) => o.stage !== "data" && o.stage !== "delivery"),
+          )
+        : [],
       measurementWarnings: items.filter((o) => o.stage === "data"),
       dataHealth: aggregateHealth(Object.values(current)),
     };
@@ -722,6 +731,8 @@ export class PresentationService {
     range: 7 | 30 | 90 = 30,
     now = new Date(),
   ): Promise<JourneyPresentation> {
+    const state = await new EntitlementService(this.db).effective(s, now);
+    range = Math.min(range, state.limits.historyDays ?? range) as typeof range;
     const from = new Date(now.getTime() - range * DAY),
       [metrics, trends, retention, firstReplyDistribution, channelData] =
         await Promise.all([
@@ -735,10 +746,20 @@ export class PresentationService {
       generatedAt: now.toISOString(),
       range,
       funnel: toJourney(metrics),
-      trends,
-      retention,
-      firstReplyDistribution,
-      ...channelData,
+      trends: featureDecision(state, "advanced_journeys").allowed
+        ? trends
+        : { activation: [], connection: [], d7_retention: [] },
+      retention: featureDecision(state, "advanced_journeys").allowed
+        ? retention
+        : [],
+      firstReplyDistribution: featureDecision(state, "percentile_metrics")
+        .allowed
+        ? firstReplyDistribution
+        : [],
+      channels: featureDecision(state, "surface_breakdowns").allowed
+        ? channelData.channels
+        : [],
+      hiddenChannelCount: channelData.hiddenChannelCount,
       dataHealth: aggregateHealth(Object.values(metrics)),
     };
   }
@@ -782,6 +803,9 @@ export class PresentationService {
     };
   }
   async results(s: Scope, now = new Date()): Promise<ResultsPresentation> {
+    const state = await new EntitlementService(this.db).effective(s, now),
+      full = featureDecision(state, "improvement_tracking").allowed,
+      basic = featureDecision(state, "basic_improvement_tracking").allowed;
     const rows = (
       await sql<{
         id: string;
@@ -792,7 +816,7 @@ export class PresentationService {
       )
     ).rows;
     const items = [];
-    for (const row of rows) {
+    for (const row of full ? rows : []) {
       const result = await new ExperimentService(this.db).result(
         s,
         row.id,
@@ -836,7 +860,7 @@ export class PresentationService {
         ? (await this.home(s, now)).dataHealth.status === "healthy"
         : false;
     const simple = [];
-    for (const action of actions) {
+    for (const action of basic ? actions : []) {
       const length = Math.max(
           0,
           Math.min(7 * DAY, now.getTime() - action.published_at.getTime()),

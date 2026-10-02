@@ -141,7 +141,12 @@ export class InterventionWorker {
         ),
         member = await this.discord.member(s.guildId, userId);
       assert(!member.bot, "BOT_IGNORED");
-      const requireLive = async () =>
+      const requireLive = async () => {
+        if (definition.safetyMode === "auto")
+          await new EntitlementService(this.db).require(
+            s,
+            "attention_automation",
+          );
         assert(
           (
             await sql`SELECT id FROM intervention_runs WHERE ${tenant(s)} AND id=${run.id}::uuid AND state='running' AND attempts=${run.attempts + 1} AND lease_until>now()`.execute(
@@ -150,6 +155,7 @@ export class InterventionWorker {
           ).rows.length > 0,
           "DELIVERY_NO_LONGER_AVAILABLE",
         );
+      };
       // All Discord calls run after database locks have been released.
 
       if (

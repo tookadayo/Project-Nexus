@@ -22,6 +22,7 @@ import { latestCapability, requestCapabilityRefresh } from "./discovery";
 import { projectNativeSnapshot } from "./native";
 import { projectActivation } from "./activation";
 import { integrationHealth } from "./observation";
+import { currentRecipe } from "../../settings/src/recipes";
 const id = z.string().regex(/^\d{17,20}$/),
   hashSchema = z.string().regex(/^[a-f\d]{64}$/);
 const factData = z
@@ -834,6 +835,15 @@ async function projectVoice(
   guest: boolean,
 ) {
   const at = new Date(e.at);
+  const recipe = await currentRecipe(tx, s);
+  if (recipe?.definition)
+    cfg = {
+      ...cfg,
+      communityModel: {
+        ...cfg.communityModel,
+        voiceThresholdSeconds: recipe.definition.voiceThresholdSeconds,
+      },
+    };
   await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"voice:" + s.organizationId + ":" + s.guildId},0))`.execute(
     tx,
   );
@@ -1056,6 +1066,16 @@ export async function tickVoice(
   cfg: Settings,
   now = new Date(),
 ) {
+  // One recipe lookup per batch, independent of participant count.
+  const recipe = await currentRecipe(tx, s);
+  if (recipe?.definition)
+    cfg = {
+      ...cfg,
+      communityModel: {
+        ...cfg.communityModel,
+        voiceThresholdSeconds: recipe.definition.voiceThresholdSeconds,
+      },
+    };
   const health = await integrationHealth(tx, s, now);
   if (
     health.gateway !== "CONNECTED" ||

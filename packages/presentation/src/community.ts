@@ -12,6 +12,8 @@ import { sql, tenant, type Database } from "../../db/src/index.js";
 import type { Scope } from "../../shared/src/index.js";
 import { zonedDayStart } from "../../shared/src/timezones.js";
 import { SettingsService } from "../../settings/src/index.js";
+import { EntitlementService } from "../../settings/src/entitlements";
+import { featureDecision } from "../../settings/src/billing-domain";
 
 import { weeklyMeasurements } from "./measurement.js";
 import { adaptivePresentation, type AdaptivePresentation } from "./adaptive.js";
@@ -67,6 +69,11 @@ export class CommunityService {
     attentionOffset = 0,
     attentionLimit = 1,
   ) {
+    const entitlement = await new EntitlementService(this.db).effective(s, now);
+    range = Math.min(
+      range,
+      entitlement.limits.historyDays ?? range,
+    ) as typeof range;
     const cfg = await this.settings.get(s),
       from = new Date(
         now.getTime() -
@@ -818,7 +825,49 @@ export class CommunityService {
       returnThroughDay: cfg.memberStages.retainedThroughDay,
     };
     const adaptation: { adaptive?: AdaptivePresentation } = { adaptive };
+    const depth = featureDecision(entitlement, "surface_breakdowns").allowed,
+      percentiles = featureDecision(entitlement, "percentile_metrics").allowed,
+      journeys = featureDecision(entitlement, "advanced_journeys").allowed;
+    if (!depth) {
+      compare.available = false;
+      compare.newcomers = null;
+      compare.continuing = null;
+      outcomes.patterns = null;
+      channelSummary.length = 0;
+      helperCoverage.length = 0;
+      operations.surfaceBreakdown = [];
+      analysis.retention.previous = null;
+      analysis.retention.previousMeasurement = undefined;
+      analysis.retention.previousEvidence = undefined;
+      for (const key of ["reply", "connection", "retention"] as const) {
+        weekly[key].previous = null;
+        weekly[key].previousMeasurement = undefined;
+        weekly[key].previousEvidence = undefined;
+      }
+    }
+    if (!percentiles) {
+      weekly.reply.visibility = "PLAN_RESTRICTED";
+      weekly.reply.value = null;
+      if (weekly.reply.evidence) weekly.reply.evidence.value = null;
+      operations.medianAcknowledgementSeconds = null;
+      operations.medianResolutionSeconds = null;
+      operations.p75ResolutionSeconds = null;
+      for (const key of [
+        "medianAcknowledgementSeconds",
+        "medianResolutionSeconds",
+        "p75ResolutionSeconds",
+      ])
+        if (operations.evidence?.[key]) operations.evidence[key]!.value = null;
+    }
+    if (!journeys) transitions.length = Math.min(1, transitions.length);
     return {
+      entitlements: {
+        plan: entitlement.plan,
+        source: entitlement.source,
+        depth: featureDecision(entitlement, "surface_breakdowns"),
+        percentiles: featureDecision(entitlement, "percentile_metrics"),
+        journeys: featureDecision(entitlement, "advanced_journeys"),
+      },
       ...adaptation,
       operations,
       weekly,
