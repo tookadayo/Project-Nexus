@@ -9,7 +9,7 @@ import {
   type BillingAction,
 } from "../../../../packages/security/src/billing-authorization";
 import { BillingService } from "../../../../packages/settings/src/billing";
-import { PromotionService } from "../../../../packages/settings/src/promotions";
+import { PromotionService } from "../../../../packages/settings/src/billing";
 import { assert } from "../../../../packages/shared/src/index";
 export async function billingContext(action: BillingAction = "VIEW") {
   const cookie = await cookies(),

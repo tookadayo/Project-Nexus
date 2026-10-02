@@ -6,24 +6,25 @@ import {
   privacyReadLock,
   type Database,
   type Tx,
-} from "../../db/src/index";
-import { assert, type Scope } from "../../shared/src/index";
-import { errorReference, logFailure } from "../../shared/src/diagnostics";
-import type { IdentityVault } from "../../identity/src/index";
+} from "../../../db/src/index";
+import { assert, type Scope } from "../../../shared/src/index";
+import { errorReference, logFailure } from "../../../shared/src/diagnostics";
+import type { IdentityVault } from "../../../identity/src/index";
 import { EntitlementService } from "./entitlements";
-import { billingViewModel } from "./billing-view";
+import { billingViewModel } from "./view";
 import {
   planRegistry,
   planRank,
   type Plan,
   type EntitlementFeature,
-} from "./plan-registry";
-import { planChangePreview, type BillingProviderKind } from "./billing-domain";
+} from "../plan-registry";
+import { planChangePreview, type BillingProviderKind } from "./domain";
 import {
   normalizedBillingEventSchema,
   type BillingProvider,
   type NormalizedBillingEvent,
-} from "./billing-provider";
+  type ProviderSignal,
+} from "./providers/types";
 type StoredEvent = Omit<
   NormalizedBillingEvent,
   "eventId" | "subscriptionRef"
@@ -71,6 +72,14 @@ export class BillingService {
   ) {
     assert(body.length <= 65536, "BILLING_EVENT_TOO_LARGE", 413);
     // Only the provider adapter's verified parser may cross the HTTP inbox boundary.
+    if (provider.ordering === "RECONCILE_LATEST") {
+      const signals = await provider.verifyWebhook(body, headers);
+      for (const signal of signals) {
+        assert(signal.provider === provider.kind, "BILLING_PROVIDER_MISMATCH");
+        await this.storeSignal(signal);
+      }
+      return { accepted: signals.length };
+    }
     const events = await provider.parseEvent(body, headers);
     for (const event of events) {
       assert(event.provider === provider.kind, "BILLING_PROVIDER_MISMATCH");
@@ -79,6 +88,17 @@ export class BillingService {
     return { accepted: events.length };
   }
   async storeVerified(input: NormalizedBillingEvent) {
+    assert(
+      input.provider !== "STRIPE" && input.provider !== "EXTERNAL_LEGACY",
+      "BILLING_SNAPSHOT_RECONCILIATION_REQUIRED",
+      403,
+    );
+    return this.persistSnapshot(input);
+  }
+  private async persistSnapshot(
+    input: NormalizedBillingEvent,
+    transaction?: Tx,
+  ) {
     const event = normalizedBillingEventSchema.parse(input);
     assert(event.authoritative, "BILLING_EVENT_UNVERIFIED", 403);
     assert(
@@ -98,7 +118,7 @@ export class BillingService {
       ),
       referenceCiphertext: this.vault.seal(event.scope, subscriptionRef),
     };
-    return this.db.transaction().execute(async (tx) => {
+    const persist = async (tx: Tx) => {
       await billingScopeLock(tx, event.scope);
       const row = (
         await sql<{
@@ -108,14 +128,136 @@ export class BillingService {
         )
       ).rows[0];
       return { duplicate: !row, id: row?.id ?? null };
+    };
+    return transaction
+      ? persist(transaction)
+      : this.db.transaction().execute(persist);
+  }
+  async storeSignal(signal: ProviderSignal) {
+    assert(signal.provider === "STRIPE", "BILLING_PROVIDER_MISMATCH");
+    assert(
+      signal.eventId.length > 0 &&
+        signal.eventId.length <= 200 &&
+        signal.subscriptionRef.length > 0 &&
+        signal.subscriptionRef.length <= 200,
+      "BILLING_SIGNAL_INVALID",
+    );
+    return this.db.transaction().execute(async (tx) => {
+      await billingScopeLock(tx, signal.scope);
+      const digest = this.vault.digest("billing-signal:STRIPE", signal.eventId);
+      const result =
+        await sql`INSERT INTO billing_provider_signals(id,provider,event_digest,organization_id,guild_id,reference_ciphertext) VALUES(${randomUUID()}::uuid,'STRIPE',${digest},${signal.scope.organizationId}::uuid,${signal.scope.guildId},${this.vault.seal(signal.scope, signal.subscriptionRef)}) ON CONFLICT(provider,event_digest) DO NOTHING RETURNING id`.execute(
+          tx,
+        );
+      return { duplicate: result.rows.length === 0 };
     });
+  }
+  async reconcileLatest(
+    s: Scope,
+    provider: BillingProvider,
+    subscriptionRef?: string,
+  ) {
+    assert(
+      provider.kind === "STRIPE" && provider.ordering === "RECONCILE_LATEST",
+      "BILLING_ORDERING_INVALID",
+    );
+    const token = randomUUID();
+    const claim = await this.db.transaction().execute(async (tx) => {
+      await billingScopeLock(tx, s);
+      await sql`INSERT INTO billing_snapshot_sequences(organization_id,provider) VALUES(${s.organizationId}::uuid,'STRIPE') ON CONFLICT DO NOTHING`.execute(
+        tx,
+      );
+      return (
+        await sql<{
+          revision: string;
+        }>`UPDATE billing_snapshot_sequences SET revision=revision+1,lease_token=${token}::uuid,lease_until=now()+interval '2 minutes' WHERE organization_id=${s.organizationId}::uuid AND provider='STRIPE' AND (lease_until IS NULL OR lease_until<now()) RETURNING revision`.execute(
+          tx,
+        )
+      ).rows[0];
+    });
+    if (!claim) return false;
+    try {
+      // Network retrieval takes place outside all PostgreSQL transactions.
+      const snapshots = await provider.reconcile(s, { subscriptionRef });
+      assert(
+        !subscriptionRef || snapshots.length > 0,
+        "BILLING_RECONCILIATION_EMPTY",
+      );
+      return await this.db.transaction().execute(async (tx) => {
+        await billingScopeLock(tx, s);
+        const valid =
+          await sql`SELECT revision FROM billing_snapshot_sequences WHERE organization_id=${s.organizationId}::uuid AND provider='STRIPE' AND lease_token=${token}::uuid AND lease_until>now() FOR UPDATE`.execute(
+            tx,
+          );
+        assert(valid.rows.length, "BILLING_RECONCILIATION_LEASE_EXPIRED", 409);
+        for (const snapshot of snapshots) {
+          assert(
+            snapshot.provider === "STRIPE" &&
+              snapshot.scope.organizationId === s.organizationId &&
+              snapshot.scope.guildId === s.guildId &&
+              (!subscriptionRef ||
+                snapshot.subscriptionRef === subscriptionRef),
+            "BILLING_PROVIDER_MISMATCH",
+          );
+          await this.persistSnapshot(
+            {
+              ...snapshot,
+              eventId: "snapshot:" + token + ":" + snapshot.subscriptionRef,
+              ordering: "RECONCILE_LATEST",
+              version: Number(claim.revision),
+              occurredAt: new Date().toISOString(),
+            },
+            tx,
+          );
+        }
+        return true;
+      });
+    } finally {
+      await sql`UPDATE billing_snapshot_sequences SET lease_token=NULL,lease_until=NULL WHERE organization_id=${s.organizationId}::uuid AND provider='STRIPE' AND lease_token=${token}::uuid`.execute(
+        this.db,
+      );
+    }
+  }
+  async processSignal(provider: BillingProvider) {
+    const token = randomUUID();
+    const row = (
+      await sql<{
+        id: string;
+        organization_id: string;
+        guild_id: string;
+        reference_ciphertext: string;
+      }>`UPDATE billing_provider_signals SET lease_token=${token}::uuid,lease_until=now()+interval '3 minutes' WHERE id=(SELECT id FROM billing_provider_signals WHERE provider=${provider.kind} AND projected_at IS NULL AND dead_lettered_at IS NULL AND available_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY received_at,id FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *`.execute(
+        this.db,
+      )
+    ).rows[0];
+    if (!row) return false;
+    const scope = {
+      organizationId: row.organization_id,
+      guildId: row.guild_id,
+    };
+    try {
+      const completed = await this.reconcileLatest(
+        scope,
+        provider,
+        this.vault.open(scope, row.reference_ciphertext),
+      );
+      assert(completed, "BILLING_RECONCILIATION_BUSY", 409);
+      await sql`UPDATE billing_provider_signals SET projected_at=now(),error_category=NULL,lease_token=NULL,lease_until=NULL WHERE id=${row.id}::uuid AND lease_token=${token}::uuid`.execute(
+        this.db,
+      );
+    } catch {
+      await sql`UPDATE billing_provider_signals SET attempts=attempts+1,error_category='BILLING_RECONCILIATION_FAILED',available_at=now()+make_interval(secs=>LEAST(3600,30*power(2,LEAST(attempts,7))::integer)),dead_lettered_at=CASE WHEN attempts>=7 THEN now() ELSE NULL END,lease_token=NULL,lease_until=NULL WHERE id=${row.id}::uuid AND lease_token=${token}::uuid`.execute(
+        this.db,
+      );
+    }
+    return true;
   }
   async projectOne() {
     const candidate = (
       await sql<{
         id: string;
         normalized: StoredEvent;
-      }>`SELECT id,normalized FROM billing_provider_events WHERE projected_at IS NULL AND available_at<=now() ORDER BY received_at,id LIMIT 1`.execute(
+      }>`SELECT id,normalized FROM billing_provider_events WHERE projected_at IS NULL AND dead_lettered_at IS NULL AND available_at<=now() ORDER BY received_at,id LIMIT 1`.execute(
         this.db,
       )
     ).rows[0];
@@ -129,7 +271,7 @@ export class BillingService {
           await sql<{
             id: string;
             normalized: StoredEvent;
-          }>`SELECT id,normalized FROM billing_provider_events WHERE id=${candidate.id}::uuid AND projected_at IS NULL AND available_at<=now() FOR UPDATE SKIP LOCKED`.execute(
+          }>`SELECT id,normalized FROM billing_provider_events WHERE id=${candidate.id}::uuid AND projected_at IS NULL AND dead_lettered_at IS NULL AND available_at<=now() FOR UPDATE SKIP LOCKED`.execute(
             tx,
           )
         ).rows[0];
@@ -147,7 +289,8 @@ export class BillingService {
           await sql<{
             id: string;
             provider_grace_hours: number;
-          }>`SELECT id,provider_grace_hours FROM billing_accounts WHERE organization_id=${s.organizationId}::uuid AND deleted_at IS NULL FOR UPDATE`.execute(
+            trial_allowed: boolean;
+          }>`SELECT id,provider_grace_hours,trial_allowed FROM billing_accounts WHERE organization_id=${s.organizationId}::uuid AND deleted_at IS NULL FOR UPDATE`.execute(
             tx,
           )
         ).rows[0];
@@ -197,11 +340,11 @@ export class BillingService {
             (existing.scheduled_at?.toISOString() !== event.scheduledAt &&
               !(existing.scheduled_at === null && event.scheduledAt === null)));
         if (contradictory) {
-          const confirmed = [
-            "ACTIVE",
-            "TRIALING",
-            "CANCEL_AT_PERIOD_END",
-          ].includes(event.status);
+          const confirmed =
+            ["ACTIVE", "TRIALING", "CANCEL_AT_PERIOD_END"].includes(
+              event.status,
+            ) &&
+            (event.status !== "TRIALING" || account.trial_allowed);
           const goodUntil = confirmed
             ? new Date(
                 Math.max(
@@ -218,11 +361,11 @@ export class BillingService {
             provider: event.provider,
           });
         } else if (!older) {
-          const confirmed = [
-            "ACTIVE",
-            "TRIALING",
-            "CANCEL_AT_PERIOD_END",
-          ].includes(event.status);
+          const confirmed =
+            ["ACTIVE", "TRIALING", "CANCEL_AT_PERIOD_END"].includes(
+              event.status,
+            ) &&
+            (event.status !== "TRIALING" || account.trial_allowed);
           const goodUntil = confirmed
             ? new Date(
                 Math.max(
@@ -234,7 +377,7 @@ export class BillingService {
             : null;
           const id = existing?.id ?? randomUUID();
           await sql`INSERT INTO billing_subscriptions(id,account_id,organization_id,provider,reference_digest,reference_ciphertext,plan_key,status,current_period_end,scheduled_plan,scheduled_at,confirmed_at,last_good_plan,last_good_until,provider_event_at,provider_event_version,provider_event_key)
-    VALUES(${id}::uuid,${account.id}::uuid,${s.organizationId}::uuid,${event.provider},${event.referenceDigest},${event.referenceCiphertext},${event.plan},${event.status},${event.periodEnd}::timestamptz,${event.scheduledPlan},${event.scheduledAt}::timestamptz,${confirmed ? event.occurredAt : null}::timestamptz,${confirmed ? event.plan : null},${goodUntil},${event.occurredAt}::timestamptz,${event.version},${event.eventDigest})
+    VALUES(${id}::uuid,${account.id}::uuid,${s.organizationId}::uuid,${event.provider},${event.referenceDigest},${event.referenceCiphertext},${event.plan},${event.status},${event.periodEnd}::timestamptz,${event.scheduledPlan},${event.scheduledAt}::timestamptz,${confirmed || (event.provider === "STRIPE" && event.status === "CANCELED" && event.periodEnd && new Date(event.periodEnd) > new Date()) ? event.occurredAt : null}::timestamptz,${confirmed ? event.plan : null},${goodUntil},${event.occurredAt}::timestamptz,${event.version},${event.eventDigest})
     ON CONFLICT(provider,reference_digest) DO UPDATE SET plan_key=CASE WHEN ${confirmed || event.status === "CANCELED"} THEN EXCLUDED.plan_key ELSE billing_subscriptions.plan_key END,status=EXCLUDED.status,current_period_end=EXCLUDED.current_period_end,scheduled_plan=EXCLUDED.scheduled_plan,scheduled_at=EXCLUDED.scheduled_at,confirmed_at=COALESCE(EXCLUDED.confirmed_at,billing_subscriptions.confirmed_at),last_good_plan=COALESCE(EXCLUDED.last_good_plan,billing_subscriptions.last_good_plan),last_good_until=COALESCE(EXCLUDED.last_good_until,billing_subscriptions.last_good_until),provider_event_at=EXCLUDED.provider_event_at,provider_event_version=EXCLUDED.provider_event_version,provider_event_key=EXCLUDED.provider_event_key`.execute(
             tx,
           );
@@ -272,7 +415,7 @@ export class BillingService {
       // Persist retry scheduling outside the rolled-back projection transaction.
       // Poison events must not monopolize the queue after a worker restart.
       const reference = errorReference();
-      await sql`UPDATE billing_provider_events SET attempts=attempts+1,available_at=now()+make_interval(secs=>LEAST(3600,30*power(2,LEAST(attempts,7))::integer)),error_category=${"BILLING_PROJECTION_FAILED:" + reference} WHERE id=${candidate.id}::uuid AND projected_at IS NULL`.execute(
+      await sql`UPDATE billing_provider_events SET attempts=attempts+1,dead_lettered_at=CASE WHEN attempts>=7 THEN now() ELSE NULL END,available_at=now()+make_interval(secs=>LEAST(3600,30*power(2,LEAST(attempts,7))::integer)),error_category=${"BILLING_PROJECTION_FAILED:" + reference} WHERE id=${candidate.id}::uuid AND projected_at IS NULL`.execute(
         this.db,
       );
       logFailure({
@@ -409,6 +552,7 @@ export class BillingService {
     return billingViewModel(await this.status(s));
   }
   async reconcile(s: Scope, provider: BillingProvider) {
+    if (provider.kind === "STRIPE") return this.reconcileLatest(s, provider);
     const events = await provider.reconcile(s);
     for (const event of events) await this.storeVerified(event);
     // Empty authoritative Discord census ends only previously normalized Discord entitlements.

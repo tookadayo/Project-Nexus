@@ -11,8 +11,13 @@ import {
   type EntitlementFeature,
   type PlanLimits,
   type LimitKey,
-} from "./plan-registry";
-export const providers = ["EXTERNAL", "DISCORD", "MANUAL"] as const;
+} from "../plan-registry";
+export const providers = [
+  "STRIPE",
+  "EXTERNAL_LEGACY",
+  "DISCORD",
+  "MANUAL",
+] as const;
 export type BillingProviderKind = (typeof providers)[number];
 export const subscriptionStates = [
   "TRIALING",
@@ -22,6 +27,8 @@ export const subscriptionStates = [
   "CANCEL_AT_PERIOD_END",
   "CANCELED",
   "INCOMPLETE",
+  "SUSPENDED",
+  "EXPIRED",
   "UNKNOWN",
   "CONFLICT",
 ] as const;
@@ -31,6 +38,7 @@ export type EntitlementSubscription = {
   provider: BillingProviderKind;
   plan: Plan;
   status: SubscriptionState;
+  trialAllowed?: boolean;
   periodEnd: string | null;
   scheduledPlan: Plan | null;
   scheduledAt: string | null;
@@ -78,9 +86,15 @@ export function subscriptionPlan(
   if (
     !subscription.confirmedAt ||
     subscription.status === "INCOMPLETE" ||
-    subscription.status === "CANCELED"
+    subscription.status === "SUSPENDED" ||
+    subscription.status === "EXPIRED" ||
+    (subscription.status === "TRIALING" && subscription.trialAllowed === false)
   )
     return null;
+  if (subscription.status === "CANCELED")
+    return subscription.provider === "STRIPE" && end !== null && end > at
+      ? { plan: subscription.plan, grace: false }
+      : null;
   if (
     ["UNKNOWN", "PAST_DUE", "GRACE", "CONFLICT"].includes(subscription.status)
   ) {

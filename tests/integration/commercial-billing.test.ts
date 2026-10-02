@@ -11,15 +11,15 @@ import {
 } from "../../packages/db/src/index";
 import { IdentityVault } from "../../packages/identity/src/index";
 import { BillingService } from "../../packages/settings/src/billing";
-import { EntitlementService } from "../../packages/settings/src/entitlements";
+import { EntitlementService } from "../../packages/settings/src/billing";
 import {
   PromotionService,
   campaignSchema,
   type PromotionCampaign,
-} from "../../packages/settings/src/promotions";
+} from "../../packages/settings/src/billing";
 import { internalBillingActor } from "../../packages/security/src/billing-authorization";
 import { plans, planRegistry } from "../../packages/settings/src/plan-registry";
-import type { NormalizedBillingEvent } from "../../packages/settings/src/billing-provider";
+import type { NormalizedBillingEvent } from "../../packages/settings/src/billing";
 import { SettingsService } from "../../packages/settings/src/index";
 import { BillingAuthorization } from "../../packages/security/src/billing-authorization";
 import { ServerAuthorization } from "../../packages/security/src/server-authorization";
@@ -78,7 +78,7 @@ function event(
   return {
     scope: s,
     eventId: randomUUID(),
-    provider: "EXTERNAL",
+    provider: "MANUAL",
     subscriptionRef: "fixture-reference-" + s.guildId,
     plan: "GROWTH",
     status: "ACTIVE",
@@ -99,7 +99,7 @@ function campaign(patch: Partial<PromotionCampaign> = {}) {
     durationDays: 90,
     validFrom: new Date(Date.now() - 60000).toISOString(),
     allowedPlans: plans,
-    allowedProviders: ["MANUAL", "EXTERNAL", "DISCORD"],
+    allowedProviders: ["MANUAL", "STRIPE", "DISCORD"],
     stackingPolicy: "MAX",
     ...patch,
   });
@@ -123,7 +123,7 @@ it("seeds every immutable catalog revision without altering legacy usage or pric
         n: number;
       }>`SELECT count(*)::integer AS n FROM schema_migrations`.execute(db)
     ).rows[0]!.n,
-  ).toBe(37);
+  ).toBe(38);
   await expect(
     sql`UPDATE billing_plan_versions SET limits='{}' WHERE plan_key='FREE'`.execute(
       db,
@@ -172,7 +172,7 @@ it("keeps known-good access during provider outage and surfaces paid-provider co
   const f = await fixture();
   await f.billing.storeVerified(event(f.s));
   await f.billing.projectOne();
-  await f.billing.markProviderUnavailable(f.s, "EXTERNAL");
+  await f.billing.markProviderUnavailable(f.s, "MANUAL");
   expect(await f.entitlements.plan(f.s)).toBe("GROWTH");
   expect((await f.billing.status(f.s)).grace).toBe(true);
   await f.billing.storeVerified(
@@ -533,8 +533,8 @@ it("Free denies paid settings and workers preserve configured rules after downgr
     ).rows[0]?.state,
   ).toBe("ACTIVE");
   expect(
-    (await f.billing.preview(f.s, "STARTER", "EXTERNAL"))
-      .historyVisibilityChange.toDays,
+    (await f.billing.preview(f.s, "STARTER", "MANUAL")).historyVisibilityChange
+      .toDays,
   ).toBe(90);
 });
 it("custom recipes enforce Growth, count distinct recipes and preserve immutable heads across unrelated settings", async () => {
@@ -610,7 +610,7 @@ it("member and guild privacy deletion scrub commerce identities and block provid
       campaign({ targetGuildId: f.s.guildId }),
     ),
     code = await f.promotions.generateCode(admin, c.id);
-  await f.promotions.redeem(f.s, actor.key, code.code, "EXTERNAL");
+  await f.promotions.redeem(f.s, actor.key, code.code, "MANUAL");
   const privacy = new PrivacyService(db, vault, settings);
   await privacy.delete(f.s, user, actor);
   expect(
@@ -773,7 +773,7 @@ it.each([
     const externalId = randomUUID(),
       discordId = randomUUID();
     try {
-      await sql`INSERT INTO billing_offerings(id,plan_key,plan_revision,provider,enabled,currency,final_price_minor) VALUES(${externalId}::uuid,'GROWTH',2,'EXTERNAL',true,'USD',4900)`.execute(
+      await sql`INSERT INTO billing_offerings(id,plan_key,plan_revision,provider,enabled,currency,final_price_minor) VALUES(${externalId}::uuid,'GROWTH',2,'STRIPE',true,'USD',4900)`.execute(
         db,
       );
       if (input.discord)
@@ -787,7 +787,7 @@ it.each([
             benefitType: "DISCOUNT",
             discountType: "PERCENT",
             discountValue: 20,
-            allowedProviders: ["EXTERNAL"],
+            allowedProviders: ["STRIPE"],
           }),
         );
       if (input.expected)
@@ -800,12 +800,7 @@ it.each([
         ).resolves.toEqual({ id: c.id });
         const code = await f.promotions.generateCode(admin, c.id);
         await expect(
-          f.promotions.redeem(
-            f.s,
-            vault.hash(f.s, user),
-            code.code,
-            "EXTERNAL",
-          ),
+          f.promotions.redeem(f.s, vault.hash(f.s, user), code.code, "STRIPE"),
         ).rejects.toThrow("DISCOUNT_PROVIDER_NOT_CONFIGURED");
         expect(await f.entitlements.plan(f.s)).toBe("FREE");
       }

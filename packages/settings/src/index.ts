@@ -1,3 +1,4 @@
+export * from "./billing/index";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { sql, tenant, json, type Database, type Tx } from "../../db/src/index";
@@ -7,7 +8,7 @@ import { saveRecipe, currentRecipe } from "./recipes";
 import { recipeDefinition } from "../../shared/src/measurement-recipes";
 import { communityModelSchema } from "../../shared/src/community-model";
 import type { CapabilitySnapshot } from "../../shared/src/community-model";
-import { EntitlementService } from "./entitlements";
+import { EntitlementService } from "./billing/entitlements";
 export const templates = [
   "Gaming",
   "Creator",

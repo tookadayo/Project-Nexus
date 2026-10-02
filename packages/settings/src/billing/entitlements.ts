@@ -1,24 +1,24 @@
-import { sql, tenant, type Tx } from "../../db/src/index";
-import { assert, type Scope } from "../../shared/src/index";
+import { sql, tenant, type Tx } from "../../../db/src/index";
+import { assert, type Scope } from "../../../shared/src/index";
 import {
   planRegistry,
   type Feature,
   type Plan,
   type LimitKey,
-} from "./plan-registry";
+} from "../plan-registry";
 import {
   resolveEntitlements,
   featureDecision,
   type EntitlementGrant,
   type EntitlementSubscription,
-} from "./billing-domain";
+} from "./domain";
 export {
   features,
   featureAvailability,
   planCurrency,
   planRegistry,
-} from "./plan-registry";
-export type { Feature, Plan } from "./plan-registry";
+} from "../plan-registry";
+export type { Feature, Plan } from "../plan-registry";
 // Query/export safety bound, independent of plan visibility and physical retention.
 export const SYSTEM_MAX_HISTORY_DAYS = 3650;
 export function visibleHistoryDays(
@@ -40,7 +40,7 @@ export class EntitlementService {
   constructor(private readonly db: Tx) {}
   async effective(s: Scope, now = new Date()) {
     const subscriptions = (
-      await sql<EntitlementSubscription>`SELECT b.id,b.provider,b.plan_key AS plan,b.status,b.current_period_end::text AS "periodEnd",b.scheduled_plan AS "scheduledPlan",b.scheduled_at::text AS "scheduledAt",b.confirmed_at::text AS "confirmedAt",b.last_good_plan AS "lastGoodPlan",b.last_good_until::text AS "lastGoodUntil" FROM billing_subscriptions b JOIN billing_subscription_assignments a ON a.subscription_id=b.id AND a.organization_id=b.organization_id JOIN billing_accounts account ON account.id=b.account_id AND account.deleted_at IS NULL WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId}`.execute(
+      await sql<EntitlementSubscription>`SELECT b.id,b.provider,b.plan_key AS plan,b.status,account.trial_allowed AS "trialAllowed",b.current_period_end::text AS "periodEnd",b.scheduled_plan AS "scheduledPlan",b.scheduled_at::text AS "scheduledAt",b.confirmed_at::text AS "confirmedAt",b.last_good_plan AS "lastGoodPlan",b.last_good_until::text AS "lastGoodUntil" FROM billing_subscriptions b JOIN billing_subscription_assignments a ON a.subscription_id=b.id AND a.organization_id=b.organization_id JOIN billing_accounts account ON account.id=b.account_id AND account.deleted_at IS NULL WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId}`.execute(
         this.db,
       )
     ).rows;
@@ -198,5 +198,5 @@ export async function recordUsage(
     tx,
   );
 }
-export { UnconfiguredBillingProvider } from "./billing-provider";
-export type { BillingProvider } from "./billing-provider";
+export { UnconfiguredBillingProvider } from "./providers/types";
+export type { BillingProvider } from "./providers/types";

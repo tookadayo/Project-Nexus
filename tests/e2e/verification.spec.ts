@@ -279,18 +279,39 @@ for (const locale of ["en", "ja"])
         headers,
         data: {
           action: "checkout",
-          targetPlan: "GROWTH",
-          provider: "EXTERNAL",
+          offeringId: "11111111-1111-4111-8111-111111111111",
+          idempotencyKey: "11111111-1111-4111-8111-111111111112",
         },
       });
       expect(checkout.status()).toBe(503);
-      expect(await checkout.text()).toContain("BILLING_UNAVAILABLE");
+      expect(await checkout.text()).toContain(
+        "BILLING_PROVIDER_NOT_CONFIGURED",
+      );
+      const portal = await page.request.post("/billing/actions", {
+        headers,
+        data: {
+          action: "portal",
+          idempotencyKey: "11111111-1111-4111-8111-111111111113",
+        },
+      });
+      expect(portal.status()).toBe(503);
+      expect(await portal.text()).toContain("BILLING_PROVIDER_NOT_CONFIGURED");
+      const webhook = await page.request.post("/billing/webhooks/stripe", {
+        data: { unverified: true },
+      });
+      expect(webhook.status()).toBe(503);
+      const after = await page.request.get("/billing/status");
+      expect((await after.json()).plan).toBe(model.plan);
       const cross = await page.request.post("/billing/actions", {
         headers: {
           origin: "https://attacker.example",
           "sec-fetch-site": "cross-site",
         },
-        data: { action: "preview", targetPlan: "GROWTH", provider: "EXTERNAL" },
+        data: {
+          action: "preview",
+          targetPlan: "GROWTH",
+          provider: "EXTERNAL_LEGACY",
+        },
       });
       expect(cross.status()).toBe(403);
       const { code } = (await (

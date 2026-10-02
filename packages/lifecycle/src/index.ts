@@ -26,7 +26,7 @@ import type { Scope } from "../../shared/src/index.js";
 import { scheduleNativeSnapshots, requestNativeRefresh } from "./native.js";
 import { validateSignal } from "../../events/src/registry.js";
 import { projectActivation } from "./activation.js";
-import { recordUsage } from "../../settings/src/entitlements.js";
+import { recordUsage } from "../../settings/src/billing/index.js";
 import {
   projectStructure,
   projectMemberFlags,

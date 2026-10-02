@@ -10,7 +10,7 @@ import {
 import { assert, type Scope } from "../../shared/src/index.js";
 import { canAdmin, canOperatePanel } from "../../security/src/index.js";
 import { audit, SettingsService, settingsSchema, type Actor } from "./index.js";
-import { EntitlementService } from "./entitlements.js";
+import { EntitlementService } from "./billing/entitlements.js";
 
 export type ConfigDomain =
   | "onboarding"

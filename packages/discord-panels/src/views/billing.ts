@@ -17,11 +17,11 @@ import type {
   Plan,
   EntitlementFeature,
 } from "../../../settings/src/plan-registry";
-import type { NativeBillingCapability } from "../../../settings/src/billing-provider";
+import type { NativeBillingCapability } from "../../../settings/src/billing";
 import type {
   EntitlementDecision,
   EntitlementSubscription,
-} from "../../../settings/src/billing-domain";
+} from "../../../settings/src/billing";
 export type BillingView = {
   plan: string;
   used: number;

@@ -4,7 +4,7 @@ import {sql,tenant,json,type Database} from '../../db/src/index.js';
 import {assert,type Scope} from '../../shared/src/index.js';
 import {conditionSchema,evaluateCondition} from './activation.js';
 import {evidence,InterventionService} from './interventions.js';
-import {EntitlementService} from '../../settings/src/entitlements.js';
+import {EntitlementService} from '../../settings/src/billing/index.js';
 import {SettingsService,audit,type Actor} from '../../settings/src/index.js';
 import {canAdmin,canOperatePanel} from '../../security/src/index.js';
 import {coverage} from '../../analytics/src/index.js';

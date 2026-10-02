@@ -8,7 +8,7 @@ import {validApiToken} from '../../../packages/security/src/index.js';
 import {PresentationService,compileActionTemplate,type ActionTemplateKey} from '../../../packages/presentation/src/index.js';
 import {domainRevisions} from '../../../packages/settings/src/domain-config.js';
 import {SettingsService,settingsSchema,type Actor} from '../../../packages/settings/src/index.js';
-import {EntitlementService} from '../../../packages/settings/src/entitlements.js';
+import {EntitlementService} from '../../../packages/settings/src/billing/index.js';
 import type {DiscordPort} from '../../../packages/discord/src/rest.js';
 import {AttentionOperations} from '../../../packages/operations/src/attention.js';
 import {randomUUID} from 'node:crypto';

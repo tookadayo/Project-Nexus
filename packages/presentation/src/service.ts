@@ -13,8 +13,8 @@ import {
 import { diagnose } from "../../analytics/src/diagnoses.js";
 import type { MetricKey } from "../../analytics/src/registry.js";
 import { SettingsService } from "../../settings/src/index.js";
-import { EntitlementService } from "../../settings/src/entitlements";
-import { featureDecision } from "../../settings/src/billing-domain";
+import { EntitlementService } from "../../settings/src/billing";
+import { featureDecision } from "../../settings/src/billing";
 import { domainRevisions } from "../../settings/src/domain-config.js";
 import { activationSchema } from "../../lifecycle/src/activation.js";
 import {
@@ -853,7 +853,7 @@ export class PresentationService {
         )
       ).rows[0]?.count ?? 0;
     const entitlement = await new (
-      await import("../../settings/src/entitlements.js")
+      await import("../../settings/src/billing/index.js")
     ).EntitlementService(this.db).can(s, "experiments");
     const readiness =
       entitlement && eligibleCount >= 40

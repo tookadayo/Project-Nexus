@@ -88,10 +88,10 @@ import {
 import type { InteractionJob } from "../../interaction/src/server.js";
 import { CapabilityService } from "../../../packages/lifecycle/src/capabilities.js";
 import { AnalyticsService } from "../../../packages/analytics/src/index.js";
-import { EntitlementService } from "../../../packages/settings/src/entitlements.js";
+import { EntitlementService } from "../../../packages/settings/src/billing/index.js";
 import { visibleMetrics } from "../../../packages/settings/src/metric-visibility";
 import { BillingService } from "../../../packages/settings/src/billing";
-import { PromotionService } from "../../../packages/settings/src/promotions";
+import { PromotionService } from "../../../packages/settings/src/billing";
 import { BillingAuthorization } from "../../../packages/security/src/billing-authorization";
 import type { EntitlementFeature } from "../../../packages/settings/src/plan-registry";
 import {

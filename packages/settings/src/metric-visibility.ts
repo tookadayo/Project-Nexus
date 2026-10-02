@@ -1,4 +1,4 @@
-import { featureDecision, type EffectiveEntitlement } from "./billing-domain";
+import { featureDecision, type EffectiveEntitlement } from "./billing/domain";
 
 // Presentation boundary only: computation and coverage remain independent of billing.
 // Keep sample counts, definitions and UNKNOWN/PARTIAL evidence when hiding a value.

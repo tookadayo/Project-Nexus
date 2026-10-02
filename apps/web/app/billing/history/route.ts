@@ -5,7 +5,7 @@ import { sql, tenant } from "../../../../../packages/db/src/index";
 import {
   EntitlementService,
   SYSTEM_MAX_HISTORY_DAYS,
-} from "../../../../../packages/settings/src/entitlements";
+} from "../../../../../packages/settings/src/billing";
 import {
   assert,
   isDomainError,

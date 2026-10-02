@@ -1,24 +1,20 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { sql, tenant, json, type Database } from "../../db/src/index";
-import { assert, type Scope } from "../../shared/src/index";
-import type { IdentityVault } from "../../identity/src/index";
-import type { InternalBillingActor } from "../../security/src/billing-authorization";
+import { sql, tenant, json, type Database } from "../../../db/src/index";
+import { assert, type Scope } from "../../../shared/src/index";
+import type { IdentityVault } from "../../../identity/src/index";
+import type { InternalBillingActor } from "../../../security/src/billing-authorization";
 import {
   plans,
   canonicalFeatures,
   limitKeys,
   type Plan,
   type PlanLimits,
-} from "./plan-registry";
-import { providers, type BillingProviderKind } from "./billing-domain";
+} from "../plan-registry";
+import { providers, type BillingProviderKind } from "./domain";
 import { EntitlementService } from "./entitlements";
-import { BillingService, billingAudit, billingScopeLock } from "./billing";
-import {
-  discordBillingConfiguration,
-  discordMonetizationApplicable,
-} from "./billing-provider";
-import { discountCompatibility } from "./billing-policy";
+import { BillingService, billingAudit, billingScopeLock } from "./service";
+import { reviewDiscountOffering } from "./reservations";
 export const promotionTypes = [
   "DISCOUNT",
   "TRIAL",
@@ -51,7 +47,18 @@ export const campaignSchema = z
     targetGuildId: guildId.nullable().default(null),
     targetOrganizationId: z.uuid().nullable().default(null),
     allowedPlans: z.array(z.enum(plans)).min(1).max(5),
-    allowedProviders: z.array(z.enum(providers)).min(1).max(3),
+    allowedProviders: z
+      .array(
+        z.enum(
+          providers.filter((p) => p !== "EXTERNAL_LEGACY") as [
+            "STRIPE",
+            "DISCORD",
+            "MANUAL",
+          ],
+        ),
+      )
+      .min(1)
+      .max(3),
     stackingPolicy: z.enum(["DENY", "MAX"]).default("DENY"),
   })
   .strict()
@@ -157,47 +164,26 @@ export class PromotionService {
       ).rows[0];
       assert(c && !c.revoked_at, "CAMPAIGN_UNAVAILABLE");
       if (c.benefit_type === "DISCOUNT") {
-        const config = discordBillingConfiguration();
         for (const provider of c.allowed_providers) {
+          assert(
+            provider !== "EXTERNAL_LEGACY",
+            "BILLING_LEGACY_PROVIDER_READ_ONLY",
+          );
           const offers = (
-            await sql<{
-              provider: BillingProviderKind;
-              final_price_minor: number | null;
-              currency: string | null;
-              parity_reviewed_at: Date | null;
-            }>`SELECT provider,final_price_minor,currency,parity_reviewed_at FROM billing_offerings WHERE plan_key=${c.target_plan} AND enabled`.execute(
+            await sql<
+              Parameters<typeof reviewDiscountOffering>[1]
+            >`SELECT * FROM billing_offerings WHERE plan_key=${c.target_plan} AND provider=${provider} AND enabled`.execute(
               tx,
             )
           ).rows;
-          assert(
-            offers.filter((offer) => offer.provider === provider).length <= 1 &&
-              offers.filter((offer) => offer.provider === "DISCORD").length <=
-                1,
-            "OFFERING_POLICY_AMBIGUOUS",
-          );
-          const external = offers.find((offer) => offer.provider === provider),
-            discord = offers.find((offer) => offer.provider === "DISCORD");
-          const decision = discountCompatibility({
-            provider,
-            discountType: c.discount_type!,
-            discountValue: c.discount_value!,
-            basePriceMinor: external?.final_price_minor ?? null,
-            discordFinalPriceMinor: discord?.final_price_minor ?? null,
-            discordOfferingSupported: Boolean(discord),
-            parityObligation: discord
-              ? true
-              : discordMonetizationApplicable(
-                  config.developerCountry,
-                  c.target_plan!,
-                ),
-            parityReviewed: Boolean(discord?.parity_reviewed_at),
-            baseCurrency: external?.currency,
-            discordCurrency: discord?.currency,
-          });
-          assert(
-            decision.allowed,
-            decision.reason ?? "DISCOUNT_PROVIDER_INCOMPATIBLE",
-          );
+          assert(offers.length, "OFFERING_PRICE_UNVERIFIED");
+          for (const offering of offers)
+            await reviewDiscountOffering(
+              tx,
+              offering,
+              c.discount_type!,
+              c.discount_value!,
+            );
         }
       }
       await sql`UPDATE promotion_campaigns SET activated_at=now() WHERE id=${id}::uuid`.execute(

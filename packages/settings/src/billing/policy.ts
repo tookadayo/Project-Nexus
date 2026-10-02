@@ -1,4 +1,4 @@
-import type { BillingProviderKind } from "./billing-domain";
+import type { BillingProviderKind } from "./domain";
 export type DiscountPolicyInput = {
   provider: BillingProviderKind;
   discountType: "PERCENT" | "FIXED";

@@ -13,7 +13,7 @@ import type { DiscordPort } from "../../../packages/discord/src/rest.js";
 import type { IdentityVault } from "../../../packages/identity/src/index.js";
 import type { InteractionHealthSnapshot } from "../../interaction/src/health.js";
 import { runtimeInfo } from "../../../packages/shared/src/runtime-info.js";
-import { EntitlementService } from "../../../packages/settings/src/entitlements.js";
+import { EntitlementService } from "../../../packages/settings/src/billing/index.js";
 import { visibleMetrics } from "../../../packages/settings/src/metric-visibility.js";
 export function createApi(
   analytics: AnalyticsService,

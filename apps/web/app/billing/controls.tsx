@@ -5,7 +5,7 @@ import {
   featureCopy,
   limitCopy,
 } from "../../../../packages/settings/src/plan-copy";
-import type { PlanChangePreview } from "../../../../packages/settings/src/billing-domain";
+import type { PlanChangePreview } from "../../../../packages/settings/src/billing";
 export function BillingControls({
   locale,
   mode,
@@ -92,7 +92,7 @@ export function BillingControls({
             <label>
               {ja ? "支払い元" : "Provider"}
               <select name="provider">
-                <option value="EXTERNAL">{ja ? "Web" : "Web"}</option>
+                <option value="STRIPE">{ja ? "Web" : "Web"}</option>
                 <option value="DISCORD">Discord</option>
               </select>
             </label>

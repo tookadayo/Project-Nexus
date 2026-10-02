@@ -4,7 +4,7 @@ import {SettingsService} from '../../../packages/settings/src/index.js';
 import {experimentSchema,ExperimentService} from '../../../packages/lifecycle/src/experiments.js';
 import {InterventionService} from '../../../packages/lifecycle/src/interventions.js';
 import {projectActivation} from '../../../packages/lifecycle/src/activation.js';
-import {EntitlementService} from '../../../packages/settings/src/entitlements.js';
+import {EntitlementService} from '../../../packages/settings/src/billing/index.js';
 export class OptimizationWorker {
  constructor(private readonly db:Database){}
  async tick(s:Scope){

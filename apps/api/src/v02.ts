@@ -12,7 +12,7 @@ import {
 import {
   EntitlementService,
   type Feature,
-} from "../../../packages/settings/src/entitlements.js";
+} from "../../../packages/settings/src/billing/index.js";
 import { domainRevisions } from "../../../packages/settings/src/domain-config.js";
 import type { ConfigDomain } from "../../../packages/settings/src/revisions.js";
 import { ExperimentService } from "../../../packages/lifecycle/src/experiments.js";
@@ -22,7 +22,7 @@ import {
 } from "../../../packages/lifecycle/src/interventions.js";
 import type { DiscordPort } from "../../../packages/discord/src/rest.js";
 import { visibleMetrics } from "../../../packages/settings/src/metric-visibility.js";
-import { featureDecision } from "../../../packages/settings/src/billing-domain.js";
+import { featureDecision } from "../../../packages/settings/src/billing/index.js";
 export function registerV02(
   app: FastifyInstance,
   db: Database,

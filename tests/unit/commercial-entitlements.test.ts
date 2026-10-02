@@ -12,29 +12,29 @@ import {
   planChangePreview,
   type EntitlementSubscription,
   type EntitlementGrant,
-} from "../../packages/settings/src/billing-domain";
+} from "../../packages/settings/src/billing";
 import {
   nativeBillingCapability,
   discordStoreUrl,
   discordEntitlementEvent,
   UnconfiguredBillingProvider,
   type DiscordBillingConfiguration,
-} from "../../packages/settings/src/billing-provider";
-import { discountCompatibility } from "../../packages/settings/src/billing-policy";
+} from "../../packages/settings/src/billing";
+import { discountCompatibility } from "../../packages/settings/src/billing";
 import { EntitlementType } from "discord-api-types/v10";
 import {
   visibleHistoryDays,
   SYSTEM_MAX_HISTORY_DAYS,
-} from "../../packages/settings/src/entitlements";
-import { billingViewModel } from "../../packages/settings/src/billing-view";
-import { discordMonetizationApplicable } from "../../packages/settings/src/billing-provider";
+} from "../../packages/settings/src/billing";
+import { billingViewModel } from "../../packages/settings/src/billing";
+import { discordMonetizationApplicable } from "../../packages/settings/src/billing";
 const now = new Date("2026-10-02T00:00:00Z");
 const subscription = (
   plan: EntitlementSubscription["plan"] = "GROWTH",
   status: EntitlementSubscription["status"] = "ACTIVE",
 ): EntitlementSubscription => ({
   id: "sub-a",
-  provider: "EXTERNAL",
+  provider: "MANUAL",
   plan,
   status,
   periodEnd: "2026-11-01T00:00:00Z",
@@ -228,7 +228,7 @@ it("a downgrade to Starter pauses helper automation while retaining the weekly d
     { subscriptions: [subscription()], grants: [] },
     now,
   );
-  const preview = planChangePreview(state, "STARTER", "EXTERNAL", {
+  const preview = planChangePreview(state, "STARTER", "MANUAL", {
     automationRules: [
       { id: "helper", feature: "attention_automation" },
       { id: "weekly-digest", feature: "scheduled_digest" },
@@ -314,7 +314,7 @@ it("requires authoritative guild subscription entitlements, rejecting personal a
 });
 it("rejects external-only equivalent discounts and unsupported Discord coupon actions", () => {
   const input = {
-    provider: "EXTERNAL" as const,
+    provider: "MANUAL" as const,
     discountType: "PERCENT" as const,
     discountValue: 20,
     basePriceMinor: 4900,
@@ -338,7 +338,7 @@ it("rejects external-only equivalent discounts and unsupported Discord coupon ac
   ).toBe(false);
 });
 it("an unconfigured adapter never invents successful payment", async () => {
-  const provider = new UnconfiguredBillingProvider("EXTERNAL");
+  const provider = new UnconfiguredBillingProvider("MANUAL");
   await expect(
     provider.createCheckout(
       {
@@ -396,7 +396,7 @@ it("contract history is scoped, bounded and never overrides privacy", () => {
 });
 it("discount policy is independent of native checkout capability and fails closed on unknown applicability", () => {
   const input = {
-    provider: "EXTERNAL" as const,
+    provider: "MANUAL" as const,
     discountType: "PERCENT" as const,
     discountValue: 20,
     basePriceMinor: 4900,

@@ -12,8 +12,8 @@ import { sql, tenant, type Database } from "../../db/src/index.js";
 import type { Scope } from "../../shared/src/index.js";
 import { zonedDayStart } from "../../shared/src/timezones.js";
 import { SettingsService } from "../../settings/src/index.js";
-import { EntitlementService } from "../../settings/src/entitlements";
-import { featureDecision } from "../../settings/src/billing-domain";
+import { EntitlementService } from "../../settings/src/billing";
+import { featureDecision } from "../../settings/src/billing";
 
 import { weeklyMeasurements } from "./measurement.js";
 import { adaptivePresentation, type AdaptivePresentation } from "./adaptive.js";

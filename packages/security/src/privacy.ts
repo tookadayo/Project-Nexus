@@ -11,7 +11,7 @@ import type { IdentityVault } from "../../identity/src/index.js";
 import { assert, type Scope } from "../../shared/src/index.js";
 import { productGuildHash } from "../../shared/src/product-telemetry.js";
 import { deleteBillingCommunity, deleteBillingActor } from "./billing-privacy";
-import { EntitlementService } from "../../settings/src/entitlements";
+import { EntitlementService } from "../../settings/src/billing";
 export class PrivacyService {
   constructor(
     private readonly db: Database,

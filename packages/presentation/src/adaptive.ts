@@ -1,8 +1,8 @@
 import { sql, tenant, type Database } from "../../db/src/index";
 import { GuildScheduledEventEntityType } from "discord-api-types/v10";
 import type { Scope } from "../../shared/src/index";
-import { EntitlementService } from "../../settings/src/entitlements";
-import { featureDecision } from "../../settings/src/billing-domain";
+import { EntitlementService } from "../../settings/src/billing";
+import { featureDecision } from "../../settings/src/billing";
 import {
   volumeMode,
   type CapabilitySnapshot,

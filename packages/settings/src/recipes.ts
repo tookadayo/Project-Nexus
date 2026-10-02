@@ -9,8 +9,8 @@ import {
 } from "../../shared/src/measurement-recipes";
 import { z } from "zod";
 import { assert } from "../../shared/src/index";
-import { EntitlementService } from "./entitlements";
-import { billingScopeLock, billingAudit } from "./billing";
+import { EntitlementService } from "./billing/entitlements";
+import { billingScopeLock, billingAudit } from "./billing/service";
 import { settingsSchema } from "./index";
 export type RecipeVersion = {
   id: string;

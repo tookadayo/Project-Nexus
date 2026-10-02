@@ -1,119 +1,13 @@
-import { z } from "zod";
 import { EntitlementType, type APIEntitlement } from "discord-api-types/v10";
-import { assert, type Scope } from "../../shared/src/index";
-import type { DiscordPort } from "../../discord/src/rest";
-import { plans } from "./plan-registry";
+import { assert, type Scope } from "../../../../shared/src/index";
+import type { DiscordPort } from "../../../../discord/src/rest";
+import type { Plan } from "../../plan-registry";
 import {
-  providers,
-  subscriptionStates,
-  type BillingProviderKind,
-  type EntitlementSubscription,
-  type PlanChangePreview,
-} from "./billing-domain";
-import type { Plan } from "./plan-registry";
-const providerTime = z.iso
-  .datetime({ offset: true })
-  .transform((value) => new Date(value).toISOString());
-export const normalizedBillingEventSchema = z
-  .object({
-    eventId: z.string().min(1).max(200),
-    provider: z.enum(providers),
-    scope: z
-      .object({
-        organizationId: z.uuid(),
-        guildId: z.string().regex(/^\d{17,20}$/),
-      })
-      .strict(),
-    subscriptionRef: z.string().min(1).max(200),
-    plan: z.enum(plans),
-    status: z.enum(subscriptionStates),
-    occurredAt: providerTime,
-    version: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-    periodEnd: providerTime.nullable(),
-    scheduledPlan: z.enum(plans).nullable().default(null),
-    scheduledAt: providerTime.nullable().default(null),
-    authoritative: z.boolean(),
-  })
-  .strict();
-export type NormalizedBillingEvent = z.infer<
-  typeof normalizedBillingEventSchema
->;
-export interface BillingProvider {
-  readonly kind: BillingProviderKind;
-  createCheckout(
-    scope: Scope,
-    plan: Plan,
-    idempotencyKey: string,
-  ): Promise<{ url: string }>;
-  previewPlanChange(
-    scope: Scope,
-    preview: PlanChangePreview,
-  ): Promise<PlanChangePreview>;
-  cancel(
-    scope: Scope,
-    idempotencyKey: string,
-  ): Promise<{ scheduledAt: string | null }>;
-  reconcile(scope: Scope): Promise<NormalizedBillingEvent[]>;
-  parseEvent(
-    body: Buffer,
-    headers: Record<string, string>,
-  ): Promise<NormalizedBillingEvent[]>;
-  currentSubscription(scope: Scope): Promise<EntitlementSubscription | null>;
-}
-export class UnconfiguredBillingProvider implements BillingProvider {
-  readonly kind: BillingProviderKind;
-  constructor(
-    readonly name:
-      BillingProviderKind | "stripe" | "discord-premium-apps" = "EXTERNAL",
-  ) {
-    this.kind =
-      name === "discord-premium-apps"
-        ? "DISCORD"
-        : name === "stripe"
-          ? "EXTERNAL"
-          : name;
-  }
-  async createCheckout(
-    _scope: Scope,
-    _plan: Plan,
-    _idempotencyKey = "",
-  ): Promise<{ url: string }> {
-    throw new Error("BILLING_PROVIDER_NOT_CONFIGURED");
-  }
-  async previewPlanChange(_scope: Scope, preview: PlanChangePreview) {
-    return preview;
-  }
-  async cancel(
-    _scope: Scope,
-    _idempotencyKey = "",
-  ): Promise<{ scheduledAt: string | null }> {
-    throw new Error("BILLING_PROVIDER_NOT_CONFIGURED");
-  }
-  async reconcile(_scope: Scope): Promise<NormalizedBillingEvent[]> {
-    throw new Error("BILLING_PROVIDER_NOT_CONFIGURED");
-  }
-  async parseEvent(
-    _body: Buffer,
-    _headers: Record<string, string>,
-  ): Promise<NormalizedBillingEvent[]> {
-    throw new Error("BILLING_PROVIDER_NOT_CONFIGURED");
-  }
-  async currentSubscription(
-    _scope: Scope,
-  ): Promise<EntitlementSubscription | null> {
-    throw new Error("BILLING_PROVIDER_NOT_CONFIGURED");
-  }
-  // Compatibility names for alpha.5 callers; still fail closed.
-  async getSubscription(scope: Scope) {
-    return this.currentSubscription(scope);
-  }
-  async cancelSubscription(scope: Scope) {
-    await this.cancel(scope);
-  }
-  async verifyEntitlement(scope: Scope) {
-    return this.currentSubscription(scope);
-  }
-}
+  normalizedBillingEventSchema,
+  UnconfiguredBillingProvider,
+  type NormalizedBillingEvent,
+  type CheckoutRequest,
+} from "./types";
 export type NativeBillingCapability =
   "AVAILABLE" | "UNSUPPORTED_DEVELOPER_LOCALE" | "NOT_CONFIGURED" | "DISABLED";
 export type DiscordBillingConfiguration = {
@@ -260,7 +154,12 @@ export class DiscordBillingProvider extends UnconfiguredBillingProvider {
   ) {
     super("DISCORD");
   }
-  override async createCheckout(_scope: Scope, plan: Plan, _key = "") {
+  override async createCheckout(input: CheckoutRequest) {
+    const plan = input.offering.planKey;
+    assert(
+      input.offering.provider === "DISCORD" && input.offering.enabled,
+      "BILLING_OFFERING_UNAVAILABLE",
+    );
     assert(
       ["STARTER", "GROWTH", "SCALE"].includes(plan),
       "BILLING_OFFERING_UNAVAILABLE",

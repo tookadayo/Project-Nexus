@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { sql, tenant, type Database } from "../../../packages/db/src/index.js";
 import type { Scope } from "../../../packages/shared/src/index.js";
 import { SettingsService } from "../../../packages/settings/src/index.js";
-import { EntitlementService } from "../../../packages/settings/src/entitlements";
+import { EntitlementService } from "../../../packages/settings/src/billing";
 import { AnalyticsService } from "../../../packages/analytics/src/index.js";
 import { diagnose } from "../../../packages/analytics/src/diagnoses.js";
 import type { DiscordPort } from "../../../packages/discord/src/rest.js";

@@ -19,7 +19,7 @@ import { scopeForGuild } from "../../packages/security/src/scoping.js";
 import { createApi } from "../../apps/api/src/server.js";
 import { DiscordFailure } from "../../packages/discord/src/rest.js";
 import { FakeDiscord } from "../fixtures/discord.js";
-import { PromotionService } from "../../packages/settings/src/promotions.js";
+import { PromotionService } from "../../packages/settings/src/billing/index.js";
 import { internalBillingActor } from "../../packages/security/src/billing-authorization.js";
 const port = Number(process.env.NEXUS_VERIFICATION_API_PORT ?? 3151),
   user = "911111111111111111",
@@ -66,6 +66,9 @@ await pg.start();
 const databaseUrl = `postgresql://nexus:nexus@127.0.0.1:${pgPort}/postgres`,
   db = connect(databaseUrl);
 await migrate(db);
+await sql`INSERT INTO billing_offerings(id,plan_key,plan_revision,provider,enabled,currency,final_price_minor) VALUES('11111111-1111-4111-8111-111111111111','GROWTH',2,'STRIPE',true,'JPY',4900)`.execute(
+  db,
+);
 class VerificationDiscord extends FakeDiscord {
   async options() {
     return { channels: [], roles: [], events: [] };
@@ -213,7 +216,7 @@ fixture.post("/fixture/promotion", async (request) => {
     validFrom: new Date(Date.now() - 1000).toISOString(),
     targetGuildId: guildId,
     allowedPlans: ["FREE", "STARTER", "GROWTH", "SCALE", "ENTERPRISE"],
-    allowedProviders: ["MANUAL", "DISCORD", "EXTERNAL"],
+    allowedProviders: ["MANUAL", "DISCORD", "STRIPE"],
     stackingPolicy: "MAX",
   });
   return promotions.generateCode(actor, campaign.id);

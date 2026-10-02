@@ -17,7 +17,7 @@ import {
   interventionEligible,
 } from "../../../packages/lifecycle/src/interventions.js";
 import { SettingsService } from "../../../packages/settings/src/index.js";
-import { EntitlementService } from "../../../packages/settings/src/entitlements.js";
+import { EntitlementService } from "../../../packages/settings/src/billing/index.js";
 type Run = {
   id: string;
   episode_id: string;

@@ -35,7 +35,7 @@ import { ExperimentService } from "../../packages/lifecycle/src/experiments.js";
 import {
   EntitlementService,
   recordUsage,
-} from "../../packages/settings/src/entitlements.js";
+} from "../../packages/settings/src/billing/index.js";
 import { PrivacyService } from "../../packages/security/src/privacy.js";
 import { AnalyticsService } from "../../packages/analytics/src/index.js";
 import { createApi } from "../../apps/api/src/server.js";

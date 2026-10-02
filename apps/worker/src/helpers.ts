@@ -10,7 +10,7 @@ import {
   resolveLocale,
   t,
 } from "../../../packages/discord-panels/src/i18n/index.js";
-import { EntitlementService } from "../../../packages/settings/src/entitlements";
+import { EntitlementService } from "../../../packages/settings/src/billing";
 
 const DAY = 86400000;
 type Candidate = { message_id: string; channel_id: string; occurred_at: Date };

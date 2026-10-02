@@ -1,12 +1,12 @@
-import type { BillingService } from "./billing";
-import { canonicalFeatures } from "./plan-registry";
-import { featureDecision } from "./billing-domain";
+import type { BillingService } from "./service";
+import { canonicalFeatures } from "../plan-registry";
+import { featureDecision } from "./domain";
 import {
   discordBillingConfiguration,
   nativeBillingCapability,
   discordStoreUrl,
   type DiscordBillingConfiguration,
-} from "./billing-provider";
+} from "./providers/discord";
 import { SYSTEM_MAX_HISTORY_DAYS } from "./entitlements";
 
 // Shared server presentation contract. No provider references, codes, campaign internals or actor identities.
@@ -33,6 +33,27 @@ export function billingViewModel(
           status.features.includes(key) &&
           decisions[key].availability === "planned",
       ),
+      billingActions: {
+        purchase: [
+          {
+            provider: "STRIPE",
+            available: false,
+            method: "CHECKOUT",
+            requiresOffering: true,
+          },
+          {
+            provider: "DISCORD",
+            available:
+              !status.privacyDeleted &&
+              nativeBillingCapability(config) === "AVAILABLE",
+            method: "STORE",
+            requiresOffering: true,
+          },
+        ],
+        manage: [
+          { provider: "STRIPE", available: false, method: "CUSTOMER_PORTAL" },
+        ],
+      },
       nativeCapability: nativeBillingCapability(config),
       nativePurchaseUrl: status.privacyDeleted ? null : discordStoreUrl(config),
       historyRequestMaxDays: SYSTEM_MAX_HISTORY_DAYS,

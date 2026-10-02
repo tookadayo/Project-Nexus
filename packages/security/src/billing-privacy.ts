@@ -4,6 +4,9 @@ import type { IdentityVault } from "../../identity/src/index";
 // Caller holds the existing exclusive privacy fence. No billing grace can postpone this.
 export async function deleteBillingCommunity(tx: Tx, s: Scope) {
   for (const table of [
+    "billing_provider_signals",
+    "promotion_redemption_reservations",
+    "billing_operations",
     "billing_provider_events",
     "promotion_redemptions",
     "promotion_attempt_limits",

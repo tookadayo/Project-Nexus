@@ -11,7 +11,8 @@ import {
   DiscordBillingProvider,
   discordBillingConfiguration,
   nativeBillingCapability,
-} from "../../../packages/settings/src/billing-provider";
+  StripeBillingProvider,
+} from "../../../packages/settings/src/billing";
 export class BillingWorker {
   constructor(
     private readonly db: Database,
@@ -19,6 +20,11 @@ export class BillingWorker {
     private readonly discord: DiscordPort,
   ) {}
   async project() {
+    const billing = new BillingService(this.db, this.vault);
+    // Disabled adapter never grants access; persisted verified signals retain bounded failures.
+    for (let i = 0; i < 20; i++) {
+      if (!(await billing.processSignal(new StripeBillingProvider()))) break;
+    }
     for (let i = 0; i < 20; i++) {
       if (!(await new BillingService(this.db, this.vault).projectOne())) break;
     }

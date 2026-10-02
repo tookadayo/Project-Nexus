@@ -101,7 +101,7 @@ export function AdminBillingControls({ locale }: { locale: "ja" | "en" }) {
                   durationDays: 90,
                   validFrom: "2026-10-02T00:00:00Z",
                   allowedPlans: ["FREE", "STARTER"],
-                  allowedProviders: ["MANUAL", "EXTERNAL", "DISCORD"],
+                  allowedProviders: ["MANUAL", "STRIPE", "DISCORD"],
                   stackingPolicy: "DENY",
                   maxRedemptions: 10,
                 },

@@ -5,7 +5,7 @@ import {assert,type Scope} from '../../shared/src/index.js';
 import {SettingsService,audit,type Actor} from '../../settings/src/index.js';
 import {canAdmin,canOperatePanel} from '../../security/src/index.js';
 import {conditionSchema,evaluateCondition,unavailableSignals,type Evidence} from './activation.js';
-import {EntitlementService} from '../../settings/src/entitlements.js';
+import {EntitlementService} from '../../settings/src/billing/index.js';
 import {signalSchema} from '../../events/src/registry.js';
 import {enqueue} from '../../discord/src/outbox.js';
 const id=z.string().regex(/^\d{17,20}$/);

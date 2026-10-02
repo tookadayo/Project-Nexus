@@ -10,7 +10,7 @@ import {POST as webControl} from '../../apps/web/app/control/route';
 import {previousCompleteWeek} from '../../apps/worker/src/weekly.js';
 import {settingsSchema} from '../../packages/settings/src/index.js';
 import {actionTemplates} from '../../packages/presentation/src/templates.js';
-import {planRegistry} from '../../packages/settings/src/entitlements.js';
+import {planRegistry} from '../../packages/settings/src/billing/index.js';
 import {toOpportunity} from '../../packages/presentation/src/adapters.js';
 import {en} from '../../packages/discord-panels/src/i18n/en.js';
 import {ja} from '../../packages/discord-panels/src/i18n/ja.js';

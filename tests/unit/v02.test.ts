@@ -9,7 +9,7 @@ import {activationSchema,evaluateCondition,type Evidence} from '../../packages/l
 import {canonicalMetrics,inputCoverage} from '../../packages/analytics/src/registry.js';
 import {interventionSchema,interventionEligible} from '../../packages/lifecycle/src/interventions.js';
 import {assignVariant,analyzeBinary,analyzeTimeBlocks} from '../../packages/lifecycle/src/experiments.js';
-import {planRegistry,UnconfiguredBillingProvider} from '../../packages/settings/src/entitlements.js';
+import {planRegistry,UnconfiguredBillingProvider} from '../../packages/settings/src/billing/index.js';
 import {configHash} from '../../packages/settings/src/revisions.js';
 import {validateFlow,initialFlowState,answerFlow,selectedOptions} from '../../packages/onboarding/src/flow.js';
 import {gatewayIntents} from '../../apps/gateway/src/index.js';

@@ -16,7 +16,7 @@ import {
 import {
   resolveEntitlements,
   featureDecision,
-} from "../../packages/settings/src/billing-domain";
+} from "../../packages/settings/src/billing";
 import { verifyBillingHmac } from "../../packages/security/src/billing-signature";
 import { visibleMetrics } from "../../packages/settings/src/metric-visibility";
 import {
@@ -68,7 +68,7 @@ for (const locale of ["en", "ja"] as const)
           webUrl: "https://nexus.example",
           native: "NOT_CONFIGURED",
           canManage: true,
-          subscriptions: [{ provider: "EXTERNAL", status: "PAST_DUE" }],
+          subscriptions: [{ provider: "EXTERNAL_LEGACY", status: "PAST_DUE" }],
         },
         locale,
       );
@@ -76,7 +76,7 @@ for (const locale of ["en", "ja"] as const)
       expect(checkLimits(view)).toBeLessThanOrEqual(40);
       const text = JSON.stringify(view);
       expect(text).toContain(plan);
-      expect(text).toContain("EXTERNAL · PAST_DUE");
+      expect(text).toContain("EXTERNAL_LEGACY · PAST_DUE");
       expect(text).toContain(
         locale === "ja" ? "プロモーションコード" : "Promotion code",
       );
