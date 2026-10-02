@@ -3,6 +3,8 @@ import {randomUUID} from 'node:crypto';
 import {sql,tenant,json,type Database,type Tx} from '../../db/src/index';
 import {canAdmin,canOperatePanel} from '../../security/src/index';
 import {assert,type Scope} from '../../shared/src/index';
+import {saveRecipe} from './recipes';
+import {recipeDefinition} from '../../shared/src/measurement-recipes';
 import {communityModelSchema} from '../../shared/src/community-model';
 import type {CapabilitySnapshot} from '../../shared/src/community-model';
 export const templates=['Gaming','Creator','Developer / OSS','Product / SaaS','Education','General Community'] as const;
@@ -54,6 +56,7 @@ export class SettingsService {
     const snapshot=(await sql<{snapshot:CapabilitySnapshot}>`SELECT snapshot FROM guild_capability_snapshots WHERE ${tenant(s)} ORDER BY checked_at DESC LIMIT 1`.execute(tx)).rows[0]?.snapshot;
     if(snapshot){assert(next.communityModel.channels.every(c=>snapshot.channels.some(known=>known.id===c.channelId)),'CHANNEL_NOT_FOUND');assert(next.communityModel.forumTags.every(t=>snapshot.channels.some(c=>c.id===t.channelId&&[15,16].includes(c.type)&&c.tagIds.includes(t.tagId))),'FORUM_TAG_NOT_FOUND');}
    }
+   if(next.communityModel.confirmed)await saveRecipe(tx,s,recipeDefinition(next.communityModel,next.analysisScope,next.memberStages));
    if(next.enabled&&!before.enabled)await sql`DELETE FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash IS NULL`.execute(tx);
    assert(!next.onboardingEnabled||next.startChannelId&&next.flowVersionId,'ONBOARDING_NOT_CONFIGURED');
    await sql`INSERT INTO guild_settings(organization_id,guild_id,revision,settings) VALUES(${s.organizationId}::uuid,${s.guildId},${revision+1},${json(next)})

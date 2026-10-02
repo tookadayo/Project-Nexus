@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import {RecipeWizard} from './recipe-wizard';
 import {
   communityModes,
   channelPurposes,
@@ -391,6 +392,8 @@ export function CommunityModelEditor({
       data-testid="community-model-settings"
     >
       <h2>{ja ? "コミュニティモデル" : "Community model"}</h2>
+      <RecipeWizard profile={profile} snapshot={snapshot} locale={locale} onChange={setProfile} onConfirm={submit} busy={busy} channels={channels}/>
+      <details><summary>{ja?'目的・チャンネル・タグを詳しく設定':'Advanced purposes, channels and tags'}</summary>
       <p>
         {ja
           ? "運営目的は複数選択できます。チャンネル名・タグ名だけで用途を決めません。"
@@ -538,6 +541,7 @@ export function CommunityModelEditor({
       <button disabled={busy || !profile.modes.length} onClick={submit}>
         {ja ? "目的と用途を保存" : "Save purposes and mappings"}
       </button>
+      </details>
       <button
         disabled={busy}
         onClick={async () => {

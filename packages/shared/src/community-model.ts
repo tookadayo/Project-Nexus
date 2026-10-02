@@ -1,4 +1,5 @@
 import { z } from "zod";
+import {recipePresets,operationsContextSchema} from './measurement-recipes';
 export const communityModes = [
   "SOCIAL",
   "LFG_PLAY",
@@ -54,6 +55,8 @@ export type CapabilityStatus = (typeof capabilityStatuses)[number];
 const id = z.string().regex(/^\d{17,20}$/);
 export const communityModelSchema = z
   .object({
+    recipePreset: z.enum(recipePresets).optional(),
+    operations: operationsContextSchema.optional(),
     modes: z
       .array(z.enum(communityModes))
       .max(8)

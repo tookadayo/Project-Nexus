@@ -10,6 +10,9 @@ import { latestCapability } from "../../lifecycle/src/discovery";
 import {buildMetricEvidence,evidenceContext} from '../../analytics/src/evidence';
 import type {MetricEvidence} from '../../shared/src/metric-evidence';
 import type {IntegrationHealth,CollectionEpoch} from '../../shared/src/integration-health';
+import {type RecipeVersion} from '../../settings/src/recipes';
+import {recipeCandidates,type ModelCandidate} from '../../shared/src/measurement-recipes';
+import {journeyAnalysis,type JourneyTransition} from '../../analytics/src/journeys';
 export type AdaptiveMetric = {
   key: string;
   count: number | null;
@@ -42,6 +45,9 @@ export type AdaptivePresentation = {
     returnThroughDay: number;
   };
   profile: CommunityModel;
+  recipe?: RecipeVersion|null;
+  journeys?:{recipeId:string|null;transitions:JourneyTransition[]};
+  modelV2?:{capability:CapabilitySnapshot['capabilities'];observedUsage:Record<string,number>;adminIntent:CommunityModel;inferredPattern:{scale:string;trafficPerDay:number;newcomerVolume:number};candidates:ModelCandidate[];activeSurfaces:string[]};
   capabilities: CapabilitySnapshot | null;
   volume: "LOW_VOLUME" | "STANDARD" | "HIGH_VOLUME";
   window: { from: string; through: string };
@@ -410,8 +416,12 @@ export async function adaptivePresentation(
     metric.state=metric.evidence.observationState==='UNKNOWN'?'UNKNOWN':metric.evidence.coverageState!=='COMPLETE'?'PARTIAL':metric.evidence.observationState==='OBSERVED'?'OBSERVED':'PENDING';
     if(metric.evidence.observationState==='UNKNOWN'){metric.medianMinutes=null;metric.p75Minutes=null;metric.p90Minutes=null;}
   }
+  const volume=volumeMode({members:snapshot?.memberCount??members.eligible,joined30d:members.joined,eligible:members.eligible,eventsPerDay:facts.reduce((n,f)=>n+f.count,0)/range,attention});
   return {
     profile: cfg.communityModel,
+    recipe:evidence.recipe,
+    journeys:await journeyAnalysis(db,s,cfg,snapshot,evidence),
+    modelV2:{capability:snapshot?.capabilities??{},observedUsage:snapshot?.observedUsage??{},adminIntent:cfg.communityModel,inferredPattern:{scale:volume,trafficPerDay:facts.reduce((n,f)=>n+f.count,0)/range,newcomerVolume:members.joined},candidates:recipeCandidates(snapshot,volume),activeSurfaces:[...new Set(snapshot?.channels.filter(c=>c.observable).map(c=>String(c.type))??[])]},
     capabilities: snapshot,
     volume: volumeMode({
       members: snapshot?.memberCount ?? members.eligible,

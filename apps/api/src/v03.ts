@@ -18,16 +18,18 @@ import {recordProductEvent} from '../../../packages/shared/src/product-telemetry
 import {nextZonedDayStart} from '../../../packages/shared/src/timezones.js';
 import {latestCapability,requestCapabilityRefresh} from '../../../packages/lifecycle/src/discovery.js';
 
+import {currentRecipe} from '../../../packages/settings/src/recipes.js';
+import {recipeCandidates} from '../../../packages/shared/src/measurement-recipes.js';
 import {integrationHealth,collectionEpochs} from '../../../packages/lifecycle/src/observation.js';
 export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:DiscordPort,vault?:IdentityVault){
  const base='/v3/organizations/:organizationId/guilds/:guildId',presentation=new PresentationService(db);
  const optionsCache=new Map<string,{at:number;value:Awaited<ReturnType<NonNullable<DiscordPort['options']>>>}>();
  const roleCache=new Map<string,{at:number;ids:string[]}>();
- const automaticStaffRoles=async(guildId:string)=>{const cached=roleCache.get(guildId);if(cached&&Date.now()-cached.at<1800000)return cached.ids;if(!discord)return [];try{const roles=await discord.roles(guildId),flags=PermissionFlagsBits.Administrator|PermissionFlagsBits.ManageGuild|PermissionFlagsBits.ManageMessages|PermissionFlagsBits.ModerateMembers,ids=roles.filter(role=>(BigInt(role.permissions)&flags)!==0n).map(role=>role.id);roleCache.set(guildId,{at:Date.now(),ids});return ids;}catch{return cached?.ids??[];}};
+ const automaticStaffRoles=async(scope:{organizationId:string;guildId:string})=>{const guildId=scope.guildId,cacheKey=scope.organizationId+':'+guildId,cached=roleCache.get(cacheKey);if(cached&&Date.now()-cached.at<1800000)return cached.ids;if(!discord)return [];try{const roles=await discord.roles(guildId),flags=PermissionFlagsBits.Administrator|PermissionFlagsBits.ManageGuild|PermissionFlagsBits.ManageMessages|PermissionFlagsBits.ModerateMembers,ids=roles.filter(role=>(BigInt(role.permissions)&flags)!==0n).map(role=>role.id);roleCache.set(cacheKey,{at:Date.now(),ids});return ids;}catch{return cached?.ids??[];}};
  const auth=(params:unknown,header:unknown)=>{const scope=scopeSchema.parse(params);assert(validApiToken(key,scope,String(header??'').replace(/^Bearer /,'')),'FORBIDDEN',403);return scope;};
  const getScope=(req:{params:unknown;headers:{authorization?:unknown}},reply:{header:(name:string,value:string)=>unknown})=>{const scope=auth(req.params,req.headers.authorization);reply.header('Cache-Control','no-store');return scope;};
  app.get(base+'/integration-health',async(req,reply)=>{const s=getScope(req,reply);return {health:await integrationHealth(db,s),epochs:await collectionEpochs(db,s,new Date(Date.now()-30*86400000),new Date())};});
- app.get(base+'/community-model',async(req,reply)=>{const s=getScope(req,reply),current=await new SettingsService(db).get(s);return {profile:current.communityModel,revision:current.revision,capabilities:await latestCapability(db,s)};});
+ app.get(base+'/community-model',async(req,reply)=>{const s=getScope(req,reply),current=await new SettingsService(db).get(s);const capabilities=await latestCapability(db,s);return {profile:current.communityModel,revision:current.revision,capabilities,recipe:await currentRecipe(db,s),candidates:recipeCandidates(capabilities,capabilities?.memberCount&&capabilities.memberCount>=10000?'HIGH_VOLUME':'STANDARD')};});
  app.post(base+'/community-model/refresh',async(req,reply)=>{const s=getScope(req,reply);await requestCapabilityRefresh(db,s,'manual');return {state:'PENDING'};});
  app.post(base+'/settings/community-model',async(req,reply)=>{const s=getScope(req,reply),input=z.object({profile:settingsSchema.shape.communityModel,revision:z.number().int().nonnegative()}).strict().parse(req.body);return new SettingsService(db).update(s,{key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id},input.revision,{communityModel:input.profile});});
  const actionInput=z.object({templateKey:z.enum(['reply_rescue','welcome_helper','inactive_follow_up','channel_recommendation','event_recommendation']),channelId:z.string().optional(),eventId:z.string().optional(),recommendedChannelIds:z.array(z.string()).optional(),safetyMode:z.enum(['suggest','approval','auto']).optional()}).strict();
@@ -46,10 +48,10 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
   return {status:'ready' as const,fix:null};
  };
  app.get(base+'/home',async(req,reply)=>presentation.home(getScope(req,reply)));
- app.get(base+'/community',async(req,reply)=>{const s=getScope(req,reply),query=req.query as {range?:unknown;limit?:unknown},range=z.coerce.number().pipe(z.union([z.literal(7),z.literal(30),z.literal(90)])).catch(30).parse(query.range),limit=z.coerce.number().int().min(1).max(50).catch(1).parse(query.limit);return new CommunityService(db).overview(s,range,new Date(),await automaticStaffRoles(s.guildId),0,limit);});
+ app.get(base+'/community',async(req,reply)=>{const s=getScope(req,reply),query=req.query as {range?:unknown;limit?:unknown},range=z.coerce.number().pipe(z.union([z.literal(7),z.literal(30),z.literal(90)])).catch(30).parse(query.range),limit=z.coerce.number().int().min(1).max(50).catch(1).parse(query.limit);return new CommunityService(db).overview(s,range,new Date(),await automaticStaffRoles(s),0,limit);});
  app.post(base+'/attention/action',async(req,reply)=>{
   const s=getScope(req,reply),input=z.object({channelId:z.string().regex(/^\d{17,20}$/),messageId:z.string().regex(/^\d{17,20}$/),status:z.enum(['ACKNOWLEDGED','SNOOZED','RESOLVED']),minutes:z.union([z.literal(30),z.literal(60)]).optional(),untilToday:z.boolean().optional()}).strict().parse(req.body);
-  const queue=await new CommunityService(db).overview(s,30,new Date(),await automaticStaffRoles(s.guildId),0,50);
+  const queue=await new CommunityService(db).overview(s,30,new Date(),await automaticStaffRoles(s),0,50);
   assert(queue.attention.some(item=>item.messageId===input.messageId&&item.channelId===input.channelId),'ATTENTION_NOT_ACTIVE',409);
   const source=(await sql<{occurred_at:Date}>`SELECT occurred_at FROM lifecycle_events WHERE ${tenant(s)} AND context='PRODUCTION' AND kind='message.sent' AND data->>'messageId'=${input.messageId} AND data->>'channelId'=${input.channelId} LIMIT 1`.execute(db)).rows[0];assert(source,'ATTENTION_NOT_FOUND',404);
   const prior=(await sql<{status:string}>`SELECT status FROM attention_items WHERE ${tenant(s)} AND message_id=${input.messageId}`.execute(db)).rows[0];assert(prior?.status!=='RESOLVED','ATTENTION_NOT_ACTIVE',409);
@@ -74,7 +76,7 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
  });
  app.get(base+'/actions',async(req,reply)=>presentation.actions(getScope(req,reply)));
  app.get(base+'/results',async(req,reply)=>presentation.results(getScope(req,reply)));
- app.get(base+'/options',async(req,reply)=>{const s=getScope(req,reply);if(!discord?.options)return {channels:[],roles:[],events:[],available:false};try{const cached=optionsCache.get(s.guildId);if(cached&&Date.now()-cached.at<300000)return {...cached.value,available:true};const value=await discord.options(s.guildId);optionsCache.set(s.guildId,{at:Date.now(),value});return {...value,available:true};}catch{return {channels:[],roles:[],events:[],available:false};}});
+ app.get(base+'/options',async(req,reply)=>{const s=getScope(req,reply);if(!discord?.options)return {channels:[],roles:[],events:[],available:false};try{const cached=optionsCache.get(s.organizationId+':'+s.guildId);if(cached&&Date.now()-cached.at<300000)return {...cached.value,available:true};const value=await discord.options(s.guildId);optionsCache.set(s.organizationId+':'+s.guildId,{at:Date.now(),value});return {...value,available:true};}catch{return {channels:[],roles:[],events:[],available:false};}});
  app.post(base+'/setup/activation',async(req,reply)=>{
   const s=getScope(req,reply),input=z.object({preset:z.enum(['reply','event','message'])}).strict().parse(req.body),event={reply:'reply.received',event:'scheduled_event.subscribed',message:'message.sent'}[input.preset],definition={name:`${event} within 7d`,windowSeconds:604800,rule:{op:'event',event,withinSeconds:604800}},actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
   assert(await new EntitlementService(db).canDefineActivation(s,definition),'ENTITLEMENT_REQUIRED',403);

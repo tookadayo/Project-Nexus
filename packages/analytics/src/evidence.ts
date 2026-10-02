@@ -9,20 +9,28 @@ import {
 } from "../../shared/src/metric-evidence";
 import { measurementDefinition } from "../../shared/src/measurement-definitions";
 import {
+  currentRecipe,
+  recipeWindowVersions,
+  type RecipeVersion,
+} from "../../settings/src/recipes";
+import {
   integrationHealth,
   collectionEpochs,
 } from "../../lifecycle/src/observation";
 export async function evidenceContext(tx: Tx, s: Scope, from: Date, to: Date) {
-  const [health, epochs, gaps, safety] = await Promise.all([
-    integrationHealth(tx, s, to),
-    collectionEpochs(tx, s, from, to),
-    sql`SELECT id FROM telemetry_health WHERE ${tenant(s)} AND started_at<${to} AND (ended_at IS NULL OR ended_at>${from}) LIMIT 1`.execute(
-      tx,
-    ),
-    sql`SELECT id FROM adaptive_facts WHERE ${tenant(s)} AND kind='safety.context' AND occurred_at>=${from} AND occurred_at<${to} LIMIT 1`.execute(
-      tx,
-    ),
-  ]);
+  const [health, epochs, gaps, safety, recipe, recipeVersions] =
+    await Promise.all([
+      integrationHealth(tx, s, to),
+      collectionEpochs(tx, s, from, to),
+      sql`SELECT id FROM telemetry_health WHERE ${tenant(s)} AND started_at<${to} AND (ended_at IS NULL OR ended_at>${from}) LIMIT 1`.execute(
+        tx,
+      ),
+      sql`SELECT id FROM adaptive_facts WHERE ${tenant(s)} AND kind='safety.context' AND occurred_at>=${from} AND occurred_at<${to} LIMIT 1`.execute(
+        tx,
+      ),
+      currentRecipe(tx, s),
+      recipeWindowVersions(tx, s, from, to),
+    ]);
   return {
     health,
     epochs,
@@ -30,9 +38,14 @@ export async function evidenceContext(tx: Tx, s: Scope, from: Date, to: Date) {
     safety: safety.rows.length > 0,
     from,
     to,
+    recipe,
+    recipeVersions,
   };
 }
-export type EvidenceContext = Awaited<ReturnType<typeof evidenceContext>>;
+export type EvidenceContext = Omit<
+  Awaited<ReturnType<typeof evidenceContext>>,
+  "recipe" | "recipeVersions"
+> & { recipe?: RecipeVersion | null; recipeVersions?: (string | null)[] };
 export function metricCoverage(
   required: string[],
   snapshot: CapabilitySnapshot | null,
@@ -175,7 +188,9 @@ export function buildMetricEvidence(
     );
   return metricEvidence({
     metricKey: key,
-    definitionVersion: input.definitionVersion ?? definition.version,
+    definitionVersion:
+      (input.definitionVersion ?? definition.version) +
+      (context.recipe?.definition ? "@" + context.recipe.id : ""),
     definition: input.definition,
     value: input.value,
     numerator: input.numerator,
@@ -196,6 +211,13 @@ export function buildMetricEvidence(
         : []),
       ...(context.safety ? ["SAFETY_CONTEXT"] : []),
       ...(capabilityChanges ? ["OBSERVATION_SCOPE_CHANGED"] : []),
+      ...("recipe" in context && !context.recipe?.definition
+        ? ["RECIPE_CONFIRMATION_REQUIRED"]
+        : []),
+      ...(context.recipe &&
+      context.recipeVersions?.some((id) => id !== context.recipe!.id)
+        ? ["RECIPE_CHANGED_OR_LEGACY"]
+        : []),
     ],
   });
 }
