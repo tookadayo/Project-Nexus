@@ -75,3 +75,21 @@ All paid workers recheck immediately before a side effect. Downgrade preserves
 rule definitions, labels them PAUSED_PLAN_LIMIT and suppresses queued paid writes.
 Upgrade allows future eligible runs; old suppressed sends are not replayed blindly.
 History recovery is distinct from payment grace and never delays privacy deletion.
+
+## Presentation contract for Web Experience v2
+
+`BillingService.view(scope)` adds one versioned server presentation model to the
+canonical billing status. Web and Discord consume its feature decisions, available
+and planned feature lists, native capability/purchase URL, history request bound
+and current scoped benefits. `/billing/status` exposes this model after current
+OAuth, server verification and billing VIEW authorization, with `no-store`.
+`canManage` is separately checked against current billing mutation authority.
+The existing same-origin POST `/billing/actions` preview returns
+`PlanChangePreview`; it never changes entitlements. Codes, provider references,
+private campaign definitions and actor identities are absent from the view.
+
+History query safety (3,650 days) is distinct from catalog/contract visibility and
+physical retention. Downgrade recovery preserves eligible retained aggregates,
+while the lower current visibility applies immediately. Privacy deletion rejects
+history reads even during recovery. CSV row bounds use the same system constant;
+invalid Web history ranges return HTTP 400 rather than a provider outage error.

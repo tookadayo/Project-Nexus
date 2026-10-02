@@ -61,3 +61,24 @@ their documented term until their grants are separately revoked; explicit grant
 revocation removes the overlay and refreshes rule/history state. Privacy deletion
 can remove benefits immediately regardless of their expiry or billing grace.
 See [security](billing-security.md) and [migration](plan-migration.md).
+
+## Discount activation policy correction (2026-10-03)
+
+DISABLED/NOT_CONFIGURED are checkout capability states, not blanket prohibitions
+on external payment discount campaigns. Activation evaluates enabled plan
+offerings, developer location and supported standard guild subscription plans.
+An existing equivalent Discord offering always requires reviewed final prices.
+Supported developer locations also require parity for supported offerings even
+if checkout is disabled or incomplete; disabling the button cannot bypass policy.
+Unknown applicability fails with DISCOUNT_POLICY_REVIEW_REQUIRED. Missing price
+review, currency comparisons, or multiple ambiguous enabled offerings fail closed.
+An unsupported developer location with no equivalent Discord offering permits a
+verified external offering discount. Matching final prices pass; an external
+price below Discord's equivalent final pre-tax price is rejected.
+
+Partner/Debug/Trial/Plan/Feature grants are benefits, not payment discounts, and
+remain independent of checkout capability. Activation does not make a payment:
+DISCOUNT redemption still fails safely until a real provider discount adapter is
+configured. No Discord coupon API is claimed. Policy was rechecked against
+[Discord's official required support and discount guidance](https://support-dev.discord.com/hc/en-us/articles/23810643331735-Premium-Apps-Required-Support-for-Monetizing-Apps)
+on 2026-10-03; unsupported time-delimited discount exceptions are not automated.

@@ -54,3 +54,12 @@ aggregate history for a default 30-day recovery period, then allow compaction.
 Privacy deletion always wins. Rules remain stored as PAUSED_PLAN_LIMIT and are
 checked again before worker side effects. See [architecture](billing-architecture.md),
 [migration](plan-migration.md) and [hosted blockers](hosted-beta-blockers.md).
+
+## Final focused hardening (2026-10-03)
+
+History reads validate against `SYSTEM_MAX_HISTORY_DAYS = 3650` before applying
+plan visibility and scoped contract overrides. Free/Starter/Growth/Scale still
+clamp to 30/90/365/730 days. Enterprise `null` means no catalog visibility limit,
+not infinite storage retention: requests remain bounded and only retained data
+can be returned. A contract may allow more than 730 days within the system bound.
+This change does not extend physical retention or the public retention promise.

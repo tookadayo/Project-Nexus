@@ -60,3 +60,11 @@ atomic with PostgreSQL deletion. Unknown delivery is not a safe automatic resend
 
 See [privacy inventory](privacy-data-inventory.md), [promotions](promotion-system.md)
 and [hosted blockers](hosted-beta-blockers.md).
+
+Final hardening keeps the billing presentation read endpoint private and uncached,
+requires fresh authorization for every mutation, and hides redemption controls
+from viewers without billing management rights. It exposes active scoped grants,
+not promotion code inventories or internal campaigns. Discord plan views now show
+provider/subscription state; their existing ephemeral interaction flow is retained.
+History reads explicitly reject privacy-deleted scopes. A contract visibility
+limit and billing recovery cannot authorize access to privacy-deleted data.

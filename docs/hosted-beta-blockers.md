@@ -22,3 +22,16 @@ custom contracts do not imply SSO/SAML or dedicated infrastructure exists.
 The alpha.5 quality audit remains historical evidence. This file records current
 commercial blockers; see [architecture](billing-architecture.md),
 [native policy review](discord-premium-apps.md) and [security](billing-security.md).
+
+## Web Experience v2 handoff
+
+The server billing view, feature decisions and plan-change preview are ready for
+a future Web presentation redesign. The visual redesign is outside this change.
+Real external payment and live Discord SKU purchases have **not** been tested.
+Native capability still follows actual configuration (default DISABLED; incomplete
+configuration NOT_CONFIGURED; unsupported developer location remains unsupported).
+The 3,650-day query safety bound does not deliver longer physical retention;
+contract retention provisioning must be reviewed before promising it to customers.
+Scheduled reports, Webhooks, multi-guild allocation, RBAC, API, audit export and
+AI explanation remain PLANNED and denied centrally. Existing hosted commercial
+blockers above remain release gates for live payment operations.

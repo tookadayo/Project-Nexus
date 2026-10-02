@@ -112,3 +112,50 @@ See [repository audit](commercial-repository-audit.md),
 [promotion system](promotion-system.md), [migration](plan-migration.md),
 [security](billing-security.md), [privacy inventory](privacy-data-inventory.md) and
 [Hosted Beta blockers](hosted-beta-blockers.md).
+
+## Focused final hardening handoff (2026-10-03)
+
+Base SHA: `a723633b466409636cd5f8253c339ea063ff830e`. Its existing GitHub
+[NEXUS CI run](https://github.com/tookadayo/Project-Nexus/actions/runs/37065221975)
+was successful before changes. This follow-up stays on master at alpha.5 and
+adds no payment provider, planned workflow, migration, or visual redesign.
+
+- Discount activation uses offering-specific parity applicability rather than
+  native checkout availability. Existing equivalents require reviewed matching
+  final prices/currencies; unknown applicability and ambiguous offerings fail
+  closed. Non-payment benefits are unaffected and payment redemption stays a stub.
+- Plan history visibility and contract overrides are separate from a 3,650-day
+  query/export safety bound. Enterprise null does not promise infinite retention;
+  privacy deletion rejects history access and recovery does not restore visibility.
+- One billing presentation contract supplies Web/Discord feature decisions,
+  native capability, benefits and operational state. Authorized, uncached
+  `/billing/status` and the existing preview action support the next Web redesign.
+  Discord displays provider state and keeps private billing interactions.
+- Focused regressions cover parity cases, contract scope, privacy, planned-feature
+  denial, all provider grace states and automation pause/resume. Existing alpha.5,
+  Free surface and promotion race/security regressions remain unchanged.
+
+Real payment: NOT RUN. Live SKU purchase: NOT RUN. Native default: DISABLED.
+Web Experience v2 architecture handoff: READY. Validation is recorded below;
+hosted payment blockers remain separately documented.
+
+Focused targeted validation: 47 commercial unit/UI tests, 39 selected alpha.5
+coverage/evidence/Journey tests (86 combined), and 26 commerce integration tests.
+The final complete local CI-equivalent pass ran once, with no skipped failures:
+
+| Check                                  | Result                                                                |
+| -------------------------------------- | --------------------------------------------------------------------- |
+| Lint / changed-file format / typecheck | PASS                                                                  |
+| Unit                                   | 349 passed, 31 files                                                  |
+| Integration                            | 173 passed, 14 files                                                  |
+| Build                                  | 19/19 successful, cache bypassed                                      |
+| Browser E2E                            | 22 passed                                                             |
+| Verification / billing E2E             | 8 passed, including private status contract and current authorization |
+| Performance                            | 4 passed, 3 files; original thresholds retained                       |
+| Windows runtime                        | Runtime manager tests passed                                          |
+
+Performance fixtures: 10k-member reads 449 ms; 50k-member reads 2,413 ms;
+600 Voice participants 2,537 ms, 600 sessions, one channel clock and zero pairs.
+No storage retention promise or service performance guarantee is inferred.
+Remote CI for the new pushed master is checked separately and identified by SHA
+and run URL in the delivery report. The baseline CI link above remains historical.
