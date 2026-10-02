@@ -78,7 +78,15 @@ Coverage remains independent: COMPLETE is the declared observable scope, PARTIAL
 
 「ボイスで会話した」「参加登録したから出席した」「リアクションで交流が成立した」「アーカイブされたから解決した」「投票が特定の意見を示した」とは表現しない。公開APIで観測できた同席、登録、応答、対応付け済みタグ、投票参加をそれぞれ説明する。Server Guideの設定、外部イベント出席、private/archived Thread全体、過去の投票・リアクション履歴は未確認であることを明示する。
 
-共通辞書は `packages/shared/src/community-copy.ts`。7つの代表ProfileとJA/ENのWeb・Discord表示をテストする。Discord画像はComponents V2のレイアウト近似であり、実クライアント受け入れの証明ではない。
+共通辞書は `packages/shared/src/community-copy.ts`。Reply、Thread、Forum、Creator、LFG+Voice、Voice、Event/Stage、混在を含む代表ProfileとJA/ENのWeb・Discord表示をテストする。Discord画像はComponents V2のレイアウト近似であり、実クライアント受け入れの証明ではない。
+
+## Commercial language
+
+Freeは観測、Starterは理解、Growthは運営と改善、Scaleはチームと自動化、Enterpriseは管理と連携。コミュニティが使うDiscordサーフェス自体を有料にしない。料金ページは「未返信の通知」「Forumの最初の応答」「LFG→応答→Voice同席」のように具体的な運営を説明する。月間観測人数は二次的な運用上の目安で、販売の主題にしない。
+
+UNKNOWN・PARTIAL・測定根拠・観測範囲・接続障害・プライバシー・削除を有料価値として表現しない。プランで非表示の応答分布は「Starterで利用可能 / Available on Starter」と説明し、データ欠落やUNKNOWNと混同しない。履歴の表示範囲とプライバシー保持期間を区別する。
+
+Partner grantは「パートナー特典」、Debug grantは「開発用の期限付き特典」。内部entitlement名・payment ID・campaign内部条件を通常画面に出さない。購入や認証の確認不能は成功扱いにしない。未設定の決済は「準備中 / Unconfigured」、未実装機能は「準備中 / Planned」。Scaleの枠定義を一括管理の提供済みという意味で使わない。
 
 ## Alpha.5 operational evidence
 

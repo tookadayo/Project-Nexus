@@ -1,5 +1,24 @@
 # Privacy data inventory — alpha.5
 
+Commercial hardening adds a separate billing domain. Billing providers receive no
+community activity or message data. These operational records do not imply an
+invoice archive or established legal financial retention policy.
+
+| Billing domain                             | Persisted data                                                                                                     | Deletion / retention                                                                                                               |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Accounts / subscriptions / offerings       | Internal organization UUID, plan/state/clocks, encrypted minimal customer/subscription references and lookup HMACs | Guild allocations removed; unused provider references removed and account tombstoned; no card data                                 |
+| Verified provider inbox / reconcile leases | Safe normalized plan/state/order, protected provider references, projection/retry/lease clocks                     | Guild deletion; no provider raw payload, activity metadata or message bodies                                                       |
+| Grants / recovery / rule state             | Scoped plan/features/limits, start/end/revoke, recovery deadline and paused rule keys                              | Guild deletion overrides all paid/recovery grace; member creator provenance scrubbed                                               |
+| Campaigns / codes / redemptions            | Campaign conditions, one-time code prefix/HMAC, grant/redemption UUIDs and scoped actor HMAC                       | No persisted plaintext codes; guild bindings revoked/scrubbed and redemptions deleted on guild deletion; member actor HMAC removed |
+| Billing authorization / audit              | Organization-scoped actor HMAC, role/revoke, safe action categories/counts/UUIDs                                   | Member authorization/provenance removed; guild/actor/reason audit fields scrubbed; unrelated assigned organization roles preserved |
+| Usage                                      | Existing guild/month member HMAC counters plus billing monthly aggregate snapshot                                  | Existing accounting semantics retained; member/guild deletion remains applied                                                      |
+
+Paid aggregate **visibility** limits and a default 30-day downgrade recovery period
+do not extend member-linked detailed retention or defeat configured aggregate
+retention. Already deleted data cannot be restored by upgrading. The provider-side
+financial/legal record exception requires explicit policy and implementation before
+live checkout; see [billing security](billing-security.md).
+
 NEXUS observes Discord metadata for community operations. It requests Guild Members for membership lifecycle and eligibility, Guild Messages for message IDs/times/references, Guild Message Reactions, Guild Message Polls, Guild Voice States, Guild Scheduled Events, Guilds and Auto Moderation Execution where enabled. It does **not** request Message Content, Guild Presences or Direct Messages intents.
 
 | Domain                         | Persisted data                                                                                 | Purpose                                                             | Deletion / retention                                                                                                                                           |

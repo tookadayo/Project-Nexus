@@ -49,7 +49,17 @@ Hosted Web は `NODE_ENV=production`、`NEXUS_WEB_AUTH_MODE=oauth`、`DISCORD_CL
 
 表示用語と計測の定義は [Product language](docs/product-language.md)、対応範囲・残課題・検証結果は [alpha.5 quality audit](NEXUS%20v0.6.0-alpha.5%20QUALITY%20AUDIT.md) を参照してください。Homeの比較期間はカレンダー週ではなく、観測を完了した参加期間です。
 
-Webも既存のDB・Identity鍵・Bot設定を使用します。起動前に `corepack pnpm migrate` で034までのmigrationを適用してください。確認付きの `/nexus unlink` またはSettingsのサーバー接続解除でWeb接続だけを解除でき、設定・履歴・分析データは保持されます。構成・検証方法は [Server verification](docs/server-verification.md) を参照してください。
+Webも既存のDB・Identity鍵・Bot設定を使用します。起動前に `corepack pnpm migrate` で037までのmigrationを適用してください。確認付きの `/nexus unlink` またはSettingsのサーバー接続解除でWeb接続だけを解除でき、設定・履歴・分析データは保持されます。構成・検証方法は [Server verification](docs/server-verification.md) を参照してください。
+
+## Pricing & entitlements v2
+
+実装と全検証の記録: [alpha.5 commercial hardening report](docs/commercial-hardening-report.md)。
+
+FreeはReply・Thread・Forum・Reaction・Poll・Voice・Eventの基本観測、最初の交流、基本Attention・Journeyと測定根拠を含みます。Starterは履歴と分析の深さ、Growthは独自の測定ルールと運営自動化・改善追跡を追加します。Scaleの5サーバー枠は定義済みですが、一括管理・枠割当・RBAC・API・監査出力は準備中です。公開価格は承認まで非表示で、外部決済は未設定です。
+
+`/nexus plan` は非公開のプラン画面とプロモーションModalを開きます。Webの `/billing`、`/billing/manage`、`/billing/promotions` はOAuth・接続済みサーバー・現在の権限を確認します。`/billing/admin` のキャンペーン・Partner/Debug特典はNEXUS内部管理者だけが操作できます。Discordの管理者権限は内部権限ではありません。
+
+[プランと提供範囲](docs/pricing-entitlements.md)、[請求アーキテクチャ](docs/billing-architecture.md)、[移行](docs/plan-migration.md)、[プロモーション](docs/promotion-system.md)、[セキュリティ](docs/billing-security.md)、[Discord公式要件の確認](docs/discord-premium-apps.md)、[Hosted Beta blockers](docs/hosted-beta-blockers.md) を参照してください。実決済・Premium Apps承認・live SKU購入を完了したという意味ではありません。バージョンはalpha.5のままです。
 
 ## Privacy とサポート
 
