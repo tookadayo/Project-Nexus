@@ -4,6 +4,12 @@ NEXUS は Discord Community Operations 製品です。サーバーの運営目�
 
 現在のリリースは **0.6.0-alpha.5** です。バージョンはルートの `package.json` を唯一のリリース版ソースとし、`MAJOR.MINOR.PATCH-prerelease` の SemVer に従います。例: `0.6.0-alpha.2`、`0.6.0-beta.1`、`0.6.0-rc.1`、`0.6.0`。Build は Git の短縮 SHA です。パッケージ環境では `NEXUS_BUILD_SHA` を指定できます。
 
+## Project Nexus 製品サイト
+
+Web の `/` は、実装済みの Discord Community Operations 製品を紹介する日本語・英語のホームページです。新規メンバーの活動、未返信への対応、測定根拠を説明し、製品画面の表示例にはサンプルデータであることを明記します。未実装の機能は、構想や準備中としても製品紹介に掲載しません。詳細は `/product`、利用可能な機能の比較は `/pricing`、ログインは `/auth/login` から確認できます。有料決済は未設定で、有料価格は公開していません。
+
+掲載内容の根拠と設計方針は [Website design](docs/design/nexus-website.md)、画面レビューと検証結果は [Website QA](docs/design/nexus-website-qa.md) を参照してください。
+
 ## Development self-host
 
 1. Node.js 24 を用意します。Discord Developer Portal で Bot の **Server Members Intent** を有効にします。Message Content Intent は不要です。
@@ -55,7 +61,7 @@ Webも既存のDB・Identity鍵・Bot設定を使用します。起動前に `co
 
 実装と全検証の記録: [alpha.5 commercial hardening report](docs/commercial-hardening-report.md)。
 
-FreeはReply・Thread・Forum・Reaction・Poll・Voice・Eventの基本観測、最初の交流、基本Attention・Journeyと測定根拠を含みます。Starterは履歴と分析の深さ、Growthは独自の測定ルールと運営自動化・改善追跡を追加します。Scaleの5サーバー枠は定義済みですが、一括管理・枠割当・RBAC・API・監査出力は準備中です。公開価格は承認まで非表示で、外部決済は未設定です。
+FreeはReply・Thread・Forum・Reaction・Poll・Voice・Eventの基本観測、最初の交流、基本Attention・Journeyと測定根拠を含みます。Starterは履歴と分析の深さ、Growthは独自の測定ルールと運営自動化・改善追跡を追加します。Scaleは集計履歴と運用上限を拡大し、Enterpriseの利用条件は個別に確認します。公開価格は承認まで非表示で、外部決済は未設定です。
 
 `/nexus plan` は非公開のプラン画面とプロモーションModalを開きます。Webの `/billing`、`/billing/manage`、`/billing/promotions` はOAuth・接続済みサーバー・現在の権限を確認します。`/billing/admin` のキャンペーン・Partner/Debug特典はNEXUS内部管理者だけが操作できます。Discordの管理者権限は内部権限ではありません。
 

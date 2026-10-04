@@ -16,22 +16,20 @@ for (const locale of ["en", "ja"] as const) {
     ]);
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto("/");
-    await expect(page.locator(".pricing-teaser-grid article")).toHaveCount(3);
-    await expect(page.locator(".faq details")).toHaveCount(4);
-    const menu = page.locator(".mobile-site-menu");
-    await menu.locator("summary").click();
+    await expect(page.locator(".nx-faq details")).toHaveCount(4);
+    const menu = page.locator(".nx-mobile-menu");
+    await page
+      .getByRole("button", {
+        name: locale === "ja" ? "メニューを開く" : "Open menu",
+        exact: true,
+      })
+      .click();
     await expect(
       menu.getByRole("link", {
         name: locale === "ja" ? "ログイン" : "Log in",
         exact: true,
       }),
     ).toBeVisible();
-    await expect(
-      menu.getByRole("link", {
-        name: locale === "ja" ? "Discordに追加" : "Add NEXUS to Discord",
-        exact: true,
-      }),
-    ).toHaveAttribute("href", /client_id=321111111111111119/);
     await expect(
       menu.getByRole("button", { name: "English", exact: true }),
     ).toBeVisible();
@@ -42,11 +40,20 @@ for (const locale of ["en", "ja"] as const) {
     });
     await menu
       .getByRole("link", {
-        name: locale === "ja" ? "料金" : "Pricing",
+        name: locale === "ja" ? "プラン" : "Pricing",
         exact: true,
       })
       .click();
     await expect(page).toHaveURL(/\/pricing$/);
+    await expect(page.locator(".planned-features")).toHaveCount(0);
+    await expect(page.getByRole("table")).not.toContainText(
+      /Planned|準備中|API|Role-based access|役割ごとのアクセス管理|AI explanations|AIによる説明|Scheduled reports|定期レポート|Webhook integrations|外部への通知連携|Multi-server overview|複数サーバーの一括管理|Audit export|監査記録の出力/,
+    );
+    await expect(page.locator("main")).toContainText(
+      locale === "ja"
+        ? "有料決済は準備中。価格は承認後に公開。"
+        : "Paid checkout is being prepared. Prices await approval.",
+    );
     for (const plan of ["Scale", "Enterprise"]) {
       const card = page.locator(".price-card").filter({
         has: page.locator(".site-eyebrow", { hasText: plan.toUpperCase() }),
@@ -55,23 +62,18 @@ for (const locale of ["en", "ja"] as const) {
       await expect(card).toContainText(
         locale === "ja" ? "現在利用可能" : "Available features",
       );
-      await expect(card).toContainText(locale === "ja" ? "準備中" : "Planned");
-      await expect(card.locator(".planned-features")).toContainText("API");
       await expect(card).toContainText(
         plan === "Scale"
           ? locale === "ja"
-            ? "登録枠"
-            : "allowance"
+            ? "730日の集計履歴"
+            : "730 days of aggregate history"
           : locale === "ja"
-            ? "個別契約"
-            : "by contract",
+            ? "個別にお問い合わせ"
+            : "custom usage terms",
       );
-      if (plan === "Scale")
-        await expect(card).toContainText(
-          locale === "ja"
-            ? "一括管理・枠の割当"
-            : "Multi-server management, slot assignment",
-        );
+      await expect(card).not.toContainText(
+        /API|RBAC|Govern|Integrate|一括管理|枠の割当|監査|個別要件に合わせる|チームで運営する/,
+      );
       await expect(card).not.toContainText("$149");
     }
     const overflow = await page.evaluate(() =>
@@ -135,9 +137,14 @@ for (const locale of ["en", "ja"] as const) {
       path: `test-results/polish-${locale}-landing-mobile.png`,
       fullPage: true,
     });
-    await page.locator(".mobile-site-menu summary").click();
     await page
-      .locator(".mobile-site-menu")
+      .getByRole("button", {
+        name: locale === "ja" ? "メニューを開く" : "Open menu",
+        exact: true,
+      })
+      .click();
+    await page
+      .locator(".nx-mobile-menu")
       .getByRole("link", {
         name: locale === "ja" ? "ログイン" : "Log in",
         exact: true,

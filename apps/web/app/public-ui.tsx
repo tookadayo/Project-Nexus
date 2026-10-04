@@ -1,6 +1,18 @@
 import { cookies, headers } from "next/headers";
+import { Geist } from "next/font/google";
 import type { ReactNode } from "react";
 import { installUrl } from "./auth/session";
+import { Navigation } from "./landing/navigation";
+import { Brand } from "./landing/primitives";
+import { ProductPreview } from "./landing/product-preview";
+import "./landing/landing.css";
+import "./landing/public-pages.css";
+
+const geist = Geist({
+  subsets: ["latin"],
+  variable: "--nx-font-sans",
+  display: "swap",
+});
 
 export type SiteLocale = "ja" | "en";
 export async function siteLocale(): Promise<SiteLocale> {
@@ -17,82 +29,21 @@ export const copy = <T,>(locale: SiteLocale, ja: T, en: T): T =>
   locale === "ja" ? ja : en;
 
 export function SiteHeader({ locale }: { locale: SiteLocale }) {
-  const add = installUrl();
   return (
-    <header className="site-header">
-      <div className="site-header-inner">
-        <a className="site-logo" href="/" aria-label="NEXUS home">
-          <span className="site-logo-mark">✦</span>NEXUS
-        </a>
-        <nav aria-label="Main navigation">
-          <a href="/product">{copy(locale, "製品", "Product")}</a>
-          <a href="/pricing">{copy(locale, "料金", "Pricing")}</a>
-          <a href="/support">{copy(locale, "サポート", "Support")}</a>
-        </nav>
-        <div className="site-actions">
-          <a className="text-link" href="/auth/login">
-            {copy(locale, "ログイン", "Log in")}
-          </a>
-          {add && (
-            <a className="button button-discord" href={add}>
-              {copy(locale, "Discordに追加", "Add to Discord")}
-            </a>
-          )}
-          <details className="language-menu">
-            <summary aria-label="Language">{locale.toUpperCase()}</summary>
-            <form action="/locale" method="post">
-              <button name="locale" value="ja">
-                日本語
-              </button>
-              <button name="locale" value="en">
-                English
-              </button>
-            </form>
-          </details>
-        </div>
-        <details className="mobile-site-menu">
-          <summary aria-label={copy(locale, "メニュー", "Menu")}>☰</summary>
-          <nav
-            aria-label={copy(
-              locale,
-              "モバイルナビゲーション",
-              "Mobile navigation",
-            )}
-          >
-            <a href="/product">{copy(locale, "製品", "Product")}</a>
-            <a href="/pricing">{copy(locale, "料金", "Pricing")}</a>
-            <a href="/support">{copy(locale, "サポート", "Support")}</a>
-            <hr />
-            <a href="/auth/login">{copy(locale, "ログイン", "Log in")}</a>
-            {add && (
-              <a className="button button-discord" href={add}>
-                {copy(locale, "Discordに追加", "Add NEXUS to Discord")}
-              </a>
-            )}
-            <form
-              action="/locale"
-              method="post"
-              aria-label={copy(locale, "言語", "Language")}
-            >
-              <button name="locale" value="ja">
-                日本語
-              </button>
-              <button name="locale" value="en">
-                English
-              </button>
-            </form>
-          </nav>
-        </details>
-      </div>
-    </header>
+    <div
+      className={`nexus-site nx-public-header ${geist.variable}`}
+      lang={locale}
+    >
+      <Navigation locale={locale} />
+    </div>
   );
 }
 export function SiteFooter({ locale }: { locale: SiteLocale }) {
   return (
     <footer className="site-footer">
       <div>
-        <a className="site-logo" href="/">
-          <span className="site-logo-mark">✦</span>NEXUS
+        <a href="/" aria-label={copy(locale, "NEXUS ホーム", "NEXUS home")}>
+          <Brand />
         </a>
         <p>
           {copy(
@@ -120,7 +71,7 @@ export function SiteShell({
   children: ReactNode;
 }) {
   return (
-    <div className="site">
+    <div className={`site nexus-site ${geist.variable}`} lang={locale}>
       <SiteHeader locale={locale} />
       <main>{children}</main>
       <SiteFooter locale={locale} />
@@ -156,83 +107,5 @@ export function SiteCta({
   );
 }
 export function Preview({ locale }: { locale: SiteLocale }) {
-  return (
-    <div
-      className="site-preview"
-      aria-label={copy(
-        locale,
-        "製品画面の説明用プレビュー",
-        "Illustrative product preview",
-      )}
-    >
-      <div className="preview-bar">
-        <span className="preview-dots">● ● ●</span>
-        <strong>✦ NEXUS</strong>
-        <span>
-          {copy(
-            locale,
-            "画面イメージ · サンプルデータ",
-            "Illustrative preview · Example data",
-          )}
-        </span>
-      </div>
-      <div className="preview-body">
-        <div className="preview-side">
-          <strong>NEXUS</strong>
-          <span>▦ {copy(locale, "概要", "Overview")}</span>
-          <span>◉ {copy(locale, "新規メンバー", "New Members")}</span>
-          <span>⌁ {copy(locale, "対応", "Attention")}</span>
-          <span>◎ {copy(locale, "分析", "Insights")}</span>
-        </div>
-        <div className="preview-main">
-          <small>{copy(locale, "サーバー概要", "SERVER OVERVIEW")}</small>
-          <h3>
-            {copy(
-              locale,
-              "新規メンバーの活動と返信を確認。",
-              "Track newcomer activity and replies.",
-            )}
-          </h3>
-          <div className="preview-metrics">
-            <div>
-              <span>{copy(locale, "新規参加", "New members")}</span>
-              <strong>38</strong>
-            </div>
-            <div>
-              <span>{copy(locale, "最初の交流", "First connection")}</span>
-              <strong>74%</strong>
-            </div>
-            <div>
-              <span>{copy(locale, "初回返信", "First reply")}</span>
-              <strong>18 min</strong>
-            </div>
-          </div>
-          <div className="preview-insight">
-            <span className="badge badge-violet">NEXUS INSIGHT</span>
-            <strong>
-              {copy(
-                locale,
-                "返信が遅い場所が見つかりました",
-                "A slower reply path appeared",
-              )}
-            </strong>
-            <p>
-              {copy(
-                locale,
-                "#looking-for-group の初回応答の中央値は前の比較期間より14分遅れています。",
-                "Median first responses in #looking-for-group take 14 minutes longer than the previous comparable period.",
-              )}
-            </p>
-            <small>
-              {copy(
-                locale,
-                "17件の投稿を観測 · 例示データ",
-                "17 observed posts · Example data",
-              )}
-            </small>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return <ProductPreview locale={locale} />;
 }

@@ -4,6 +4,11 @@ Current release: **0.6.0-alpha.5**. PostgreSQL is the normalized billing and
 entitlement source of truth. Current documents retain their established paths
 where moving them would create unnecessary link churn.
 
+## Website design
+
+- [Project Nexus product website and verified claims](design/nexus-website.md)
+- [Website visual review and QA](design/nexus-website-qa.md)
+
 ## Billing and commercial contracts
 
 - [Stripe readiness and Web Experience v2 boundary](billing/stripe-readiness.md)

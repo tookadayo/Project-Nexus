@@ -33,7 +33,7 @@ test("public product and pricing are readable without dashboard credentials", as
     ).toBe(200);
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(
-    "newcomer replies",
+    "Know where newcomers need a reply.",
   );
   await page.keyboard.press("Tab");
   await expect(page.locator(":focus-visible")).toHaveCount(1);
@@ -86,7 +86,12 @@ test("public product and pricing are readable without dashboard credentials", as
     fullPage: true,
   });
   await page.goto("/pricing");
-  await expect(page.getByRole("table")).toContainText("Planned");
+  await expect(page.getByRole("table")).toContainText(
+    "Automated unanswered reminders",
+  );
+  await expect(page.getByRole("table")).not.toContainText(
+    /Planned|API access|Role-based access|AI explanations|Scheduled reports|Webhook integrations|Multi-server overview|Audit export/,
+  );
   await expect(page.locator(".price-card")).toHaveCount(5);
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.screenshot({

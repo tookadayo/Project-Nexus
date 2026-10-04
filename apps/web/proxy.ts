@@ -14,4 +14,4 @@ export function proxy(req:NextRequest){
  if(!secret||secret.length<16||actual.length!==expected.length||!timingSafeEqual(actual,expected))return new NextResponse('Authentication required',{status:401,headers:{'WWW-Authenticate':'Basic realm="NEXUS"','Cache-Control':'no-store'}});
  return NextResponse.next();
 }
-export const config={matcher:['/((?!_next/static|_next/image|favicon.ico).*)']};
+export const config={matcher:['/((?!_next/static|_next/image|favicon.ico|nexus/).*)']};

@@ -16,6 +16,20 @@ export default async function Pricing() {
   const locale = await siteLocale(),
     language = locale === "ja" ? 0 : 1,
     add = installUrl();
+  const availableFeatures = canonicalFeatures.filter(
+    (feature) => featureAvailability[feature] === "available",
+  );
+  const publicPlanCopy = {
+    ...planCopy,
+    SCALE: {
+      heading: ["より長い集計履歴を確認する", "Review a longer history"],
+      purpose: ["集計履歴と運用上限", "History and operational limits"],
+    },
+    ENTERPRISE: {
+      heading: ["利用条件を相談する", "Discuss your usage requirements"],
+      purpose: ["個別の利用条件", "Custom usage terms"],
+    },
+  };
   return (
     <SiteShell locale={locale}>
       <section className="site-section pricing-intro">
@@ -23,8 +37,8 @@ export default async function Pricing() {
         <h1>
           {copy(
             locale,
-            "コミュニティの形は、無料で観測。",
-            "Observe your community’s shape for free.",
+            "Discordの運営に合うプランを選ぶ。",
+            "Choose a plan for Discord community operations.",
           )}
         </h1>
         <p>
@@ -49,30 +63,36 @@ export default async function Pricing() {
         {plans.map((plan, index) => {
           const spec = planRegistry[plan],
             previous = index ? planRegistry[plans[index - 1]!] : null;
-          const available = canonicalFeatures.filter(
+          const additional = availableFeatures.filter(
             (feature) =>
-              featureAvailability[feature] === "available" &&
               spec.features.includes(feature) &&
               (!previous || !previous.features.includes(feature)),
           );
-          const planned = canonicalFeatures.filter(
-            (feature) =>
-              featureAvailability[feature] === "planned" &&
-              spec.features.includes(feature),
-          );
+          const available = additional.length
+            ? additional
+            : availableFeatures.filter(
+                (feature) =>
+                  spec.features.includes(feature) &&
+                  [
+                    "custom_recipe",
+                    "attention_automation",
+                    "improvement_tracking",
+                    "csv_export",
+                  ].includes(feature),
+              );
           return (
             <article className="price-card" key={plan}>
               <p className="site-eyebrow">{plan}</p>
-              <h2>{planCopy[plan].heading[language]}</h2>
+              <h2>{publicPlanCopy[plan].heading[language]}</h2>
               <p className="price-description">
-                {planCopy[plan].purpose[language]}
+                {publicPlanCopy[plan].purpose[language]}
               </p>
               <div className="price">
                 {!pricingMetadata.publishPrices ? (
                   copy(
                     locale,
-                    plan === "FREE" ? "無料で始める" : "お問い合わせ",
-                    plan === "FREE" ? "Start free" : "Contact us",
+                    plan === "FREE" ? "無料" : "お問い合わせ",
+                    plan === "FREE" ? "Free" : "Contact us",
                   )
                 ) : spec.price === null ? (
                   copy(locale, "個別契約", "Custom contract")
@@ -115,36 +135,21 @@ export default async function Pricing() {
                 {plan === "ENTERPRISE"
                   ? copy(
                       locale,
-                      "サーバー数・保持期間・運用上限は個別契約。",
-                      "Guild allowance, retention and operational limits by contract.",
+                      "利用条件は個別にお問い合わせください。",
+                      "Contact us to discuss custom usage terms.",
                     )
-                  : copy(
-                      locale,
-                      `${spec.limits.guilds}サーバーの登録枠 · ${spec.limits.historyDays}日の集計履歴`,
-                      `${spec.limits.guilds} server allowance · ${spec.limits.historyDays} days of aggregate history`,
-                    )}
+                  : plan === "SCALE"
+                    ? copy(
+                        locale,
+                        `${spec.limits.historyDays}日の集計履歴`,
+                        `${spec.limits.historyDays} days of aggregate history`,
+                      )
+                    : copy(
+                        locale,
+                        `${spec.limits.guilds}サーバーの登録枠 · ${spec.limits.historyDays}日の集計履歴`,
+                        `${spec.limits.guilds} server allowance · ${spec.limits.historyDays} days of aggregate history`,
+                      )}
               </p>
-              {planned.length > 0 && (
-                <details>
-                  <summary>
-                    {copy(locale, "準備中の機能", "Planned features")}
-                  </summary>
-                  <ul className="planned-features">
-                    {planned.map((feature) => (
-                      <li key={feature}>○ {featureCopy[feature][language]}</li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-              {plan === "SCALE" && (
-                <p className="pricing-note">
-                  {copy(
-                    locale,
-                    "5サーバーの枠を定義しています。一括管理・枠の割当・RBAC・API・監査出力は準備中です。",
-                    "The catalog defines five slots. Multi-server management, slot assignment, RBAC, API and audit export are planned.",
-                  )}
-                </p>
-              )}
               {plan === "FREE" && add ? (
                 <a className="button button-discord" href={add}>
                   {copy(locale, "Discordに追加", "Add to Discord")}
@@ -167,8 +172,8 @@ export default async function Pricing() {
         <h2>
           {copy(
             locale,
-            "いつもの運営を、もう一歩。",
-            "Go further with your everyday workflows.",
+            "運営で使う機能を確認する。",
+            "Compare features for your community workflows.",
           )}
         </h2>
         <ul>
@@ -178,7 +183,7 @@ export default async function Pricing() {
               "Replies: see unanswered newcomers; automate reminders with Growth.",
             ],
             [
-              "Support Forum：最初の応答を観測し、Starterで応答分布、Growthで担当者に通知。",
+              "Support Forum：最初の応答を観測し、Starterで応答分布、Growthでスタッフチャンネルやロールへ通知。",
               "Support Forums: observe first responses; inspect distributions with Starter and route alerts with Growth.",
             ],
             [
@@ -224,15 +229,13 @@ export default async function Pricing() {
               </tr>
             </thead>
             <tbody>
-              {canonicalFeatures.map((feature) => (
+              {availableFeatures.map((feature) => (
                 <tr key={feature}>
                   <th scope="row">{featureCopy[feature][language]}</th>
                   {plans.map((plan) => (
                     <td key={plan}>
                       {planRegistry[plan].features.includes(feature)
-                        ? featureAvailability[feature] === "planned"
-                          ? copy(locale, "準備中", "Planned")
-                          : "✓"
+                        ? "✓"
                         : "—"}
                     </td>
                   ))}

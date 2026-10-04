@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#f7f9fc"/>
+  <path d="M70 103V65l38 38V65M70 65h12m14 38h12" fill="none" stroke="#17212b" stroke-width="4"/>
+  <text x="130" y="97" font-family="Arial,sans-serif" font-size="30" fill="#17212b" letter-spacing="4">NEXUS</text>
+  <text x="68" y="192" font-family="Arial,sans-serif" font-size="13" font-weight="bold" fill="#526171" letter-spacing="1">DISCORD COMMUNITY OPERATIONS</text>
+  <g font-family="Arial,sans-serif" font-size="53" font-weight="bold" fill="#17212b" letter-spacing="-2">
+    <text x="65" y="277">Know where</text><text x="65" y="342">newcomers</text><text x="65" y="407">need a reply.</text>
+  </g>
+  <text x="68" y="465" font-family="Arial,sans-serif" font-size="18" fill="#526171">Activity, unanswered posts and measurement evidence.</text>
+  <text x="68" y="566" font-family="Arial,sans-serif" font-size="13" fill="#526171">PROJECT NEXUS · ALPHA RELEASE</text>
+  <rect x="610" y="130" width="524" height="398" rx="10" fill="#0f1723" stroke="#30425b"/>
+  <path d="M610 177h524" stroke="#30425b"/>
+  <text x="635" y="159" font-family="Arial,sans-serif" font-size="12" fill="#c1cee0">NEXUS / PRODUCT PREVIEW · EXAMPLE DATA</text>
+  <text x="638" y="221" font-family="Arial,sans-serif" font-size="21" fill="#f1f5fa">Newcomer activity</text>
+  <rect x="637" y="246" width="221" height="100" rx="6" fill="#172334" stroke="#30425b"/>
+  <rect x="875" y="246" width="230" height="100" rx="6" fill="#172334" stroke="#30425b"/>
+  <g font-family="Arial,sans-serif" font-size="12" fill="#c1cee0"><text x="651" y="271">Eligible newcomers</text><text x="890" y="271">First connections</text></g>
+  <g font-family="Arial,sans-serif" font-size="34" fill="#f1f5fa"><text x="651" y="316">38</text><text x="890" y="316">28 / 38</text></g>
+  <rect x="637" y="364" width="468" height="127" rx="6" fill="#172334" stroke="#30425b"/>
+  <text x="654" y="390" font-family="Arial,sans-serif" font-size="11" fill="#f1c17e">NEEDS ATTENTION</text>
+  <text x="654" y="421" font-family="Arial,sans-serif" font-size="18" fill="#f1f5fa">2 posts are waiting for a reply</text>
+  <text x="654" y="450" font-family="Arial,sans-serif" font-size="12" fill="#c1cee0">No direct reply observed after the configured delay.</text>
+  <text x="638" y="512" font-family="Arial,sans-serif" font-size="10" fill="#c1cee0">Completed example cohort · 72-hour observation complete</text>
+</svg>
