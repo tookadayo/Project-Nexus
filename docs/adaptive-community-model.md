@@ -1,4 +1,4 @@
-# Adaptive community model v2 — alpha.5
+# Adaptive community model v2 — alpha.7
 
 NEXUS separates what Discord exposes, what the administrator wants to observe, and what actually happened after collection began. The [capability audit](discord-capability-matrix.md) records the official API and product references checked on 2026-10-02. Support means the documented metadata described there, not access to content or complete server history.
 

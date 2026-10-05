@@ -7,7 +7,7 @@ import {
   type GuildAuthorizationSnapshot,
 } from "./server-authorization";
 export type BillingAction =
-  "VIEW" | "UPGRADE" | "DOWNGRADE" | "CANCEL" | "REDEEM" | "ASSIGN_GUILD";
+  "VIEW" | "CHECKOUT" | "CHANGE" | "PORTAL" | "UPGRADE" | "DOWNGRADE" | "CANCEL" | "REDEEM" | "ASSIGN_GUILD";
 export class BillingAuthorization {
   constructor(
     private readonly authority: ServerAuthorization,

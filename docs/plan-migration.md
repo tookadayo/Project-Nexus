@@ -1,11 +1,11 @@
 # Plan registry v1 → v2 migration
 
 Base alpha.5: `8ba55f83c91253eeeb218ee97340e2e821cda042`. Master is the source
-of truth. Version remains 0.6.0-alpha.5. Migration numbers 035–037 follow the
-existing 001–034 migration runner; changes are additive and transactionally applied.
+of truth. Current release is 0.6.0-alpha.7. Migration 039 follows shipped
+001–038 unchanged; changes are additive and transactionally applied.
 
 1. Back up PostgreSQL and identity/lookup keys using the existing operations process.
-2. Apply `corepack pnpm migrate` through 037 before starting the updated apps.
+2. Apply `corepack pnpm migrate` through 039 before starting the updated apps.
 3. Inspect immutable `billing_plan_versions` revision 2 and seeded LEGACY grants.
 4. Leave payment/native configuration disabled until the hosted blockers are met.
 5. Check Free core observation, current authorization, helper/digest preservation
@@ -44,7 +44,23 @@ metrics. Development-only overrides remain development-only. Privacy tombstones
 take precedence over both old and new billing state.
 
 Integration coverage boots a database through migration 034, seeds an existing
-Starter guild with helper/digest settings, applies 035–037 and verifies preserved
+Starter guild with helper/digest settings, applies 035–039 and verifies preserved
 access, immutable catalog rows and untouched accounting. Downgrade recovery, worker
 pauses, grants and deletion are also covered. Billing rollback requires a reviewed
 application/database compatibility deployment, not dropping new tables blindly.
+
+Alpha.7 also tests 037 → latest, 038 → 039 and fresh → latest. Migration 039 locks
+all pre-existing Offerings because prior ever-enabled history is unavailable;
+new never-enabled drafts remain editable. It adds durable unknown-operation state and trusted
+customer guild ownership, and enforces one assignment per subscription. Invalid
+enabled Stripe mapping or an existing multi-guild assignment aborts the transaction
+for operator review; it never silently deletes or remaps financial records.
+Historical reference digests, ciphertext, input digests and audits are unchanged.
+An already leased pre-alpha.7 PENDING operation becomes RECONCILE_REQUIRED because
+the external outcome may be unknown. Existing FAILED operations also fail closed
+on a retry under the new digest contract, without rewriting the old payload.
+
+
+Current alpha.7 contracts and commerce: [contracts](billing/contract-hardening-alpha7.md)
+and [Stripe integration](billing/stripe-integration.md). Real Sandbox is tested;
+Stripe Live remains DISABLED.

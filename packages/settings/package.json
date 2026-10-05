@@ -1,9 +1,12 @@
 {
   "name": "@nexus/settings",
-  "version": "0.6.0-alpha.5",
+  "version": "0.6.0-alpha.7",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit -p ../../tsconfig.json"
+  },
+  "dependencies": {
+    "stripe": "23.0.0"
   }
 }

@@ -29,7 +29,18 @@ const manifest = (file: string) =>
   JSON.parse(readFileSync(file, "utf8")) as { version: string };
 it("uses one SemVer source for every workspace package", () => {
   expect(VERSION).toMatch(/^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/);
-  expect(VERSION).toBe("0.6.0-alpha.5");
+  expect(VERSION).toBe("0.6.0-alpha.7");
+  expect(manifest("package.json").version).toBe(VERSION);
+  expect(
+    readFileSync("README.md", "utf8").match(
+      /現在のリリースは \*\*([^*]+)\*\*/,
+    )?.[1],
+  ).toBe(VERSION);
+  expect(
+    readFileSync("docs/README.md", "utf8").match(
+      /Current release: \*\*([^*]+)\*\*/,
+    )?.[1],
+  ).toBe(VERSION);
   expect(RELEASE_CHANNEL).toBe("Alpha");
   for (const area of ["apps", "packages"])
     for (const name of readdirSync(area)) {

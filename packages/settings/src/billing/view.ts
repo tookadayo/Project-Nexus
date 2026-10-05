@@ -33,28 +33,34 @@ export function billingViewModel(
           status.features.includes(key) &&
           decisions[key].availability === "planned",
       ),
+      // Canonical provider-neutral actions for all new clients.
       billingActions: {
         purchase: [
           {
             provider: "STRIPE",
+            configured: false,
             available: false,
             method: "CHECKOUT",
             requiresOffering: true,
           },
           {
             provider: "DISCORD",
+            configured: nativeBillingCapability(config) === "AVAILABLE",
             available:
               !status.privacyDeleted &&
               nativeBillingCapability(config) === "AVAILABLE",
             method: "STORE",
             requiresOffering: true,
+            url: status.privacyDeleted ? null : discordStoreUrl(config),
           },
         ],
         manage: [
           { provider: "STRIPE", available: false, method: "CUSTOMER_PORTAL" },
         ],
       },
+      /** @deprecated Use presentation.billingActions. Kept for alpha.5 clients. */
       nativeCapability: nativeBillingCapability(config),
+      /** @deprecated Use presentation.billingActions.purchase[].url. */
       nativePurchaseUrl: status.privacyDeleted ? null : discordStoreUrl(config),
       historyRequestMaxDays: SYSTEM_MAX_HISTORY_DAYS,
       // These are current scoped benefits; public campaigns and codes are never enumerated.

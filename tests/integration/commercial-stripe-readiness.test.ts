@@ -19,7 +19,9 @@ import {
   campaignSchema,
   checkoutOffering,
   type NormalizedBillingEvent,
-  type ReconcileTarget,
+  type ProviderReconcileRequest,
+  type ProviderReconcileResult,
+  type ProviderSignal,
 } from "../../packages/settings/src/billing";
 import { internalBillingActor } from "../../packages/security/src/billing-authorization";
 import { deleteBillingCommunity } from "../../packages/security/src/billing-privacy";
@@ -67,6 +69,14 @@ afterAll(async () => {
 async function fixture() {
   const s = scope();
   await ensureGuild(db, s);
+  const account = randomUUID();
+  const customerRef = "fixture-customer:" + s.guildId;
+  await sql`INSERT INTO billing_accounts(id,organization_id) VALUES(${account}::uuid,${s.organizationId}::uuid)`.execute(
+    db,
+  );
+  await sql`INSERT INTO billing_provider_customers(id,account_id,provider,reference_digest,reference_ciphertext,reference_guild_id) VALUES(${randomUUID()}::uuid,${account}::uuid,'STRIPE',${vault.digest("billing-customer-reference:STRIPE", customerRef)},${vault.seal(s, customerRef)},${s.guildId})`.execute(
+    db,
+  );
   return {
     s,
     billing: new BillingService(db, vault),
@@ -99,9 +109,55 @@ class FixtureStripe extends StripeBillingProvider {
   ) {
     super();
   }
-  override reconcile(_s: ReturnType<typeof scope>, _target?: ReconcileTarget) {
-    return this.latest();
+  override async reconcile(
+    input: ProviderReconcileRequest,
+  ): Promise<ProviderReconcileResult> {
+    const events = await this.latest();
+    if (input.target) {
+      const subscription = events.find(
+        (event) => event.subscriptionRef === input.target!.subscriptionRef,
+      );
+      return subscription
+        ? { kind: "TARGET_FOUND", subscription }
+        : {
+            kind: "TARGET_ABSENT",
+            subscriptionRef: input.target.subscriptionRef,
+          };
+    }
+    return { kind: "FULL_CENSUS", complete: true, events };
   }
+}
+async function receiveSignal(
+  billing: BillingService,
+  signal: ProviderSignal & { scope: ReturnType<typeof scope> },
+) {
+  const customerRef = "fixture-customer:" + signal.scope.guildId;
+  class VerifiedFixture extends StripeBillingProvider {
+    override async verifyWebhook() {
+      return [
+        {
+          ...signal,
+          customerRef,
+          bindingEvidence: {
+            kind: "CUSTOMER_SUBSCRIPTION" as const,
+            customerRef,
+            subscriptionRef: signal.subscriptionRef,
+          },
+        },
+      ];
+    }
+  }
+  const before = (
+    await sql`SELECT id FROM billing_provider_signals WHERE event_digest=${vault.digest("billing-signal:STRIPE", signal.eventId)}`.execute(
+      db,
+    )
+  ).rows.length;
+  await billing.receive(
+    new VerifiedFixture(),
+    Buffer.from("verified-fixture"),
+    {},
+  );
+  return { duplicate: Boolean(before) };
 }
 it("retains durable failed session retries and rejects a changed payload under the same key", async () => {
   const f = await fixture(),
@@ -111,6 +167,7 @@ it("retains durable failed session retries and rejects a changed payload under t
     provider: "STRIPE" as const,
     operation: "PORTAL" as const,
     idempotencyKey: randomUUID(),
+    customer: await f.billing.customerReference(f.s, "STRIPE"),
   };
   const execute = () => new StripeBillingProvider().createPortalSession(input);
   await expect(operations.session(input, execute)).rejects.toThrow(
@@ -177,15 +234,15 @@ it("deduplicates out-of-order signals and projects latest snapshots independent 
     scope: f.s,
     subscriptionRef: latest.subscriptionRef,
   };
-  expect(await f.billing.storeSignal(signal)).toEqual({ duplicate: false });
-  expect(await f.billing.storeSignal(signal)).toEqual({ duplicate: true });
+  expect(await receiveSignal(f.billing, signal)).toEqual({ duplicate: false });
+  expect(await receiveSignal(f.billing, signal)).toEqual({ duplicate: true });
   expect(await f.billing.processSignal(provider)).toBe(true);
   latest = snapshot(f.s, {
     status: "SUSPENDED",
     version: 0,
     occurredAt: new Date(0).toISOString(),
   });
-  await f.billing.storeSignal({ ...signal, eventId: "even-older-webhook" });
+  await receiveSignal(f.billing, { ...signal, eventId: "even-older-webhook" });
   await f.billing.processSignal(provider);
   // Deliberately project the newer retrieval before the older retrieval.
   await sql`UPDATE billing_provider_events SET received_at=now()-interval '1 day' WHERE organization_id=${f.s.organizationId}::uuid AND (normalized->>'version')::integer=2`.execute(
@@ -247,7 +304,7 @@ it("fences overlapping retrievals and rejects expired reconciliation leases", as
 });
 it("retains bounded retry failures without marking failed reconciliation projected", async () => {
   const f = await fixture();
-  await f.billing.storeSignal({
+  await receiveSignal(f.billing, {
     eventId: randomUUID(),
     provider: "STRIPE",
     scope: f.s,
@@ -285,7 +342,7 @@ it("monthly, annual and currencies coexist while capabilities use only the plan"
     ["YEAR", "JPY"],
     ["MONTH", "USD"],
   ].entries()) {
-    await sql`INSERT INTO billing_offerings(id,plan_key,plan_revision,provider,provider_price_id,billing_interval,currency,enabled,final_price_minor) VALUES(${ids[i]!}::uuid,'GROWTH',2,'STRIPE',${"fixture-price-" + ids[i]},${interval},${currency},true,4900)`.execute(
+    await sql`INSERT INTO billing_offerings(id,plan_key,plan_revision,provider,provider_product_id,provider_price_id,billing_interval,currency,enabled,final_price_minor,tax_behavior) VALUES(${ids[i]!}::uuid,'GROWTH',2,'STRIPE',${"fixture-product-" + ids[i]},${"fixture-price-" + ids[i]},${interval},${currency},true,4900,'EXCLUSIVE')`.execute(
       db,
     );
     expect((await checkoutOffering(db, ids[i]!)).planKey).toBe("GROWTH");
@@ -297,9 +354,11 @@ it("monthly, annual and currencies coexist while capabilities use only the plan"
   );
   await f.billing.projectOne();
   expect(await f.entitlements.can(f.s, "custom_recipe")).toBe(true);
-  await sql`UPDATE billing_offerings SET provider_price_id=NULL WHERE id=ANY(${ids}::uuid[])`.execute(
-    db,
-  );
+  await expect(
+    sql`UPDATE billing_offerings SET provider_price_id=NULL WHERE id=ANY(${ids}::uuid[])`.execute(
+      db,
+    ),
+  ).rejects.toThrow("BILLING_OFFERING_IMMUTABLE");
   expect(await f.entitlements.can(f.s, "custom_recipe")).toBe(true);
 });
 async function promotion(patch: Record<string, unknown> = {}) {
@@ -307,7 +366,7 @@ async function promotion(patch: Record<string, unknown> = {}) {
     offering = randomUUID(),
     promotions = new PromotionService(db, vault),
     reservations = new PromotionReservationService(db, vault);
-  await sql`INSERT INTO billing_offerings(id,plan_key,plan_revision,provider,enabled,currency,final_price_minor) VALUES(${offering}::uuid,'GROWTH',2,'STRIPE',true,'JPY',4900)`.execute(
+  await sql`INSERT INTO billing_offerings(id,plan_key,plan_revision,provider,enabled,currency,final_price_minor,provider_product_id,provider_price_id,tax_behavior) VALUES(${offering}::uuid,'GROWTH',2,'STRIPE',true,'JPY',4900,${"fixture-product-" + offering},${"fixture-price-" + offering},'EXCLUSIVE')`.execute(
     db,
   );
   const c = await promotions.createCampaign(
@@ -413,11 +472,16 @@ it.each(["campaign", "guild", "code"])(
 it("finalizes only associated authoritative subscriptions once, never a success redirect", async () => {
   const f = await promotion({ maxRedemptions: 1, allowedPlans: ["FREE"] });
   const r = await f.reservations.reserve(f.s, "fixture-actor", f.request);
+  const { campaignId, ...commercialTerms } =
+    await f.reservations.checkoutContext(f.s, r.id, f.request.offeringId);
+  expect(campaignId).toBe(f.c.id);
   const key = randomUUID();
   await expect(
     f.reservations.finalize(f.s, r.id, randomUUID(), key),
   ).rejects.toThrow("PROMOTION_UNAVAILABLE");
-  const current = snapshot(f.s);
+  const current = snapshot(f.s, {
+    commercialEvidence: { ...commercialTerms, discountApplied: true },
+  });
   await f.reservations.bindSubscription(f.s, r.id, current.subscriptionRef);
   await f.billing.reconcileLatest(
     f.s,
@@ -464,7 +528,7 @@ it("revocation blocks pending finalization and privacy deletion removes new scop
   await expect(
     f.reservations.finalize(f.s, r.id, randomUUID(), randomUUID()),
   ).rejects.toThrow("PROMOTION_UNAVAILABLE");
-  await f.billing.storeSignal({
+  await receiveSignal(f.billing, {
     eventId: randomUUID(),
     provider: "STRIPE",
     scope: f.s,

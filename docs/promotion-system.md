@@ -82,3 +82,8 @@ DISCOUNT redemption still fails safely until a real provider discount adapter is
 configured. No Discord coupon API is claimed. Policy was rechecked against
 [Discord's official required support and discount guidance](https://support-dev.discord.com/hc/en-us/articles/23810643331735-Premium-Apps-Required-Support-for-Monetizing-Apps)
 on 2026-10-03; unsupported time-delimited discount exceptions are not automated.
+
+
+Current alpha.7 contracts and commerce: [contracts](billing/contract-hardening-alpha7.md)
+and [Stripe integration](billing/stripe-integration.md). Real Sandbox initial-invoice
+discounts and evidence-based finalization are tested; Stripe Live remains DISABLED.

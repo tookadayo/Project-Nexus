@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-// Adapter helper, not a claimed Stripe/Discord webhook format. A real adapter must
-// implement its provider's exact signing specification before enabling reception.
+// Test fixture helper only. This is not Stripe or Discord signature verification
+// and must never be imported by runtime code. Stripe requires its official SDK.
 export function verifyBillingHmac(
   body: Buffer,
   signature: string,

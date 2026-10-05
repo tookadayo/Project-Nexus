@@ -151,10 +151,9 @@ function definition(
 }
 export const planCurrency = "USD" as const;
 export const pricingMetadata = {
-  currencyDecision: "pending",
-  publishPrices: false,
-  reason:
-    "No approved public pricing currency is recorded; hide currency-denominated prices until product approval.",
+  currency: planCurrency,
+  classification: "INTERNAL_PROVISIONAL",
+  // Publication and checkout enablement are server-owned commercialLaunch state.
 } as const;
 export const planRegistry: Record<Plan, PlanDefinition> = {
   FREE: definition("FREE", 0, free, {

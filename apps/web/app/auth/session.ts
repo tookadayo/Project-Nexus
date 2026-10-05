@@ -4,6 +4,7 @@ import {discordInstallUrl} from '../../../../packages/discord/src/install';
 import {manageableConnection} from './server-access';
 import type {VerificationState} from '../../../../packages/security/src/server-verification';
 import {webAuthMode} from '../../../../packages/config/src/web-auth';
+import {webOrigin} from '../../../../packages/config/src/web-origin';
 import type {UserFailure} from '../../../../packages/shared/src/error-types';
 import {userFailure} from '../../../../packages/shared/src/errors';
 import {DiscordFailure} from '../../../../packages/discord/src/rest';
@@ -15,8 +16,8 @@ export async function validateOAuthSession(session:Session){
  const identity=await identified.json() as {id?:string};if(identity.id!==session.userId)throw new Error('SESSION_EXPIRED');
 }
 export const authMode=()=>webAuthMode();
-export const oauthRedirectUri=()=>new URL('/auth/callback',process.env.NEXUS_WEB_URL).toString();
-export const secureCookies=()=>process.env.NEXUS_WEB_URL?.startsWith('https://')??false;
+export const oauthRedirectUri=()=>new URL('/auth/callback',webOrigin()).toString();
+export const secureCookies=()=>webOrigin().startsWith('https://');
 const key=()=>{const secret=process.env.NEXUS_SESSION_SECRET;if(!secret||secret.length<32)throw new Error('NEXUS_SESSION_SECRET must be at least 32 characters');return createHash('sha256').update(secret).digest();};
 export function sealSession(session:Session){const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',key(),iv),data=Buffer.concat([cipher.update(JSON.stringify(session),'utf8'),cipher.final()]);return Buffer.concat([iv,cipher.getAuthTag(),data]).toString('base64url');}
 export function openSession(value:string|undefined):Session|null{if(!value||value.length>8192)return null;try{const bytes=Buffer.from(value,'base64url');if(bytes.length<30)return null;const decipher=createDecipheriv('aes-256-gcm',key(),bytes.subarray(0,12));decipher.setAuthTag(bytes.subarray(12,28));const session=JSON.parse(Buffer.concat([decipher.update(bytes.subarray(28)),decipher.final()]).toString()) as Session;if(typeof session.accessToken!=='string'||!session.accessToken||!/^\d{17,20}$/.test(session.userId)||!Number.isFinite(session.expiresAt)||session.expiresAt<=Date.now())return null;return session;}catch{return null;}}

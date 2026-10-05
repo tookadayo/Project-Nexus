@@ -1,6 +1,6 @@
 # Discord Premium Apps review
 
-Official documentation reviewed **2026-10-03**. Installed discord.js 14.27.0 and
+Official documentation reviewed **2026-10-05**. Installed discord.js 14.27.0 and
 discord-api-types 0.38.55 were inspected before implementation. Recheck eligibility
 and policies before activating a public offering; this review does not establish
 approval, an actual SKU purchase or successful live billing.
@@ -10,7 +10,8 @@ GROWTH and SCALE, never personal subscriptions or invented production IDs. Nativ
 capability is AVAILABLE, UNSUPPORTED_DEVELOPER_LOCALE, NOT_CONFIGURED or DISABLED.
 AVAILABLE requires explicit enablement, operator-recorded approval, a supported
 developer country, application ID and three distinct valid SKU IDs. The shipped
-example is disabled with empty IDs: operational status **NOT CONFIGURED**.
+example is disabled with empty IDs: **DISABLED / NOT CONFIGURED**. Alpha.7's
+real Stripe Sandbox tests do not enable Discord Native Billing or approve parity.
 
 [Monetization eligibility](https://support-dev.discord.com/hc/en-us/articles/17297949965079-How-Do-I-Monetize-My-App)
 currently lists developers based in the US, UK and EU. Japan is unsupported in
@@ -46,14 +47,16 @@ remain constrained. NEXUS uses a conservative compatibility check: equivalent
 currency and reviewed prices are required, and external-only discounts that make
 Discord more expensive are rejected. The documented exception is **not** an
 implemented checkout exemption. No Discord coupon API is invented. Payment
-discount activation/application stays blocked without a real provider adapter
-and an approved compatibility path.
+discount application uses real Stripe Coupons in Sandbox. Live activation stays
+blocked without an approved compatibility path and current equivalent final-price
+review. The Sandbox run used explicit Discord-price fixtures, not approved SKUs.
 
 [Monetization Policy](https://support.discord.com/hc/en-us/articles/10575066024983-Monetization-Policy)
 and [Monetization Terms](https://support.discord.com/hc/en-us/articles/5330075836311-Monetization-Terms)
 also apply. Store localized price, tax and proration are never fabricated in a
 NEXUS preview. No live checkout, Premium Apps approval or production purchase was
-performed during this hardening.
+performed during this release. Stripe-hosted Sandbox purchase and Webhook tests
+are recorded separately in [Stripe readiness](billing/stripe-readiness.md).
 
 The current [Channel API](https://docs.discord.com/developers/resources/channel)
 has no stable dedicated LFG channel type in the inspected type table. LFG remains

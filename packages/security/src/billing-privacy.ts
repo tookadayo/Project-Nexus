@@ -3,6 +3,14 @@ import type { Scope } from "../../shared/src/index";
 import type { IdentityVault } from "../../identity/src/index";
 // Caller holds the existing exclusive privacy fence. No billing grace can postpone this.
 export async function deleteBillingCommunity(tx: Tx, s: Scope) {
+  // Match Customer binding/projection order: the caller's privacy fence, then
+  // account ownership, then dependent Customer/subscription rows.
+  await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"billing-account:" + s.organizationId},0))`.execute(
+    tx,
+  );
+  await sql`SELECT id FROM billing_accounts WHERE organization_id=${s.organizationId}::uuid FOR UPDATE`.execute(
+    tx,
+  );
   for (const table of [
     "billing_provider_signals",
     "promotion_redemption_reservations",
@@ -28,13 +36,19 @@ export async function deleteBillingCommunity(tx: Tx, s: Scope) {
   await sql`DELETE FROM billing_subscriptions b WHERE b.organization_id=${s.organizationId}::uuid AND NOT EXISTS(SELECT 1 FROM billing_subscription_assignments a WHERE a.subscription_id=b.id)`.execute(
     tx,
   );
-  await sql`DELETE FROM billing_provider_customers c USING billing_accounts a WHERE a.id=c.account_id AND a.organization_id=${s.organizationId}::uuid AND NOT EXISTS(SELECT 1 FROM billing_subscriptions b WHERE b.account_id=a.id)`.execute(
+  // Current customer bindings use this guild's encryption AAD. A different
+  // subscription in the organization cannot retain the deleted guild's identity.
+  // Unscoped historical bindings keep their existing account cleanup policy.
+  await sql`DELETE FROM billing_provider_customers c USING billing_accounts a WHERE a.id=c.account_id AND a.organization_id=${s.organizationId}::uuid AND (c.reference_guild_id=${s.guildId} OR (c.reference_guild_id IS NULL AND NOT EXISTS(SELECT 1 FROM billing_subscriptions b WHERE b.account_id=a.id)))`.execute(
     tx,
   );
   await sql`DELETE FROM billing_authorizations WHERE organization_id=${s.organizationId}::uuid AND NOT EXISTS(SELECT 1 FROM billing_subscription_assignments a WHERE a.organization_id=${s.organizationId}::uuid)`.execute(
     tx,
   );
-  await sql`UPDATE billing_accounts SET deleted_at=now() WHERE organization_id=${s.organizationId}::uuid AND NOT EXISTS(SELECT 1 FROM billing_subscriptions b WHERE b.account_id=billing_accounts.id)`.execute(
+  // A completed Checkout can bind its Customer before its subscription exists.
+  // Retain only surviving scoped bindings or started Checkout operations; the
+  // deleted guild's rows were removed above and its privacy tombstone still wins.
+  await sql`UPDATE billing_accounts SET deleted_at=now() WHERE organization_id=${s.organizationId}::uuid AND NOT EXISTS(SELECT 1 FROM billing_subscriptions b WHERE b.account_id=billing_accounts.id) AND NOT EXISTS(SELECT 1 FROM billing_provider_customers c WHERE c.account_id=billing_accounts.id AND c.reference_guild_id IS NOT NULL) AND NOT EXISTS(SELECT 1 FROM billing_operations o WHERE o.organization_id=billing_accounts.organization_id AND o.operation='CHECKOUT' AND o.state IN ('PENDING','FINALIZED','RECONCILE_REQUIRED') AND o.external_started_at IS NOT NULL)`.execute(
     tx,
   );
   await sql`UPDATE billing_audit_log SET guild_id=NULL,actor_hash=NULL,metadata=metadata-'reason' WHERE ${tenant(s)}`.execute(

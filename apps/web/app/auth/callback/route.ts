@@ -2,6 +2,7 @@ import {NextRequest,NextResponse} from 'next/server';
 import {oauthRedirectUri,sealSession,secureCookies,validOAuthState} from '../session';
 import {authProblem} from '../problem-response';
 import {DomainError} from '../../../../../packages/shared/src/index';
+import {webOrigin} from '../../../../../packages/config/src/web-origin';
 export async function GET(req:NextRequest){
  const state=req.nextUrl.searchParams.get('state'),code=req.nextUrl.searchParams.get('code');
  if(!code||!validOAuthState(req.cookies.get('nexus_oauth_state')?.value,state))return authProblem(new DomainError('SESSION_EXPIRED',403));
@@ -16,7 +17,7 @@ export async function GET(req:NextRequest){
   if(!identified.ok)return authProblem(new DomainError('SESSION_EXPIRED',401));
   const user=await identified.json() as {id:string};if(!/^\d{17,20}$/.test(user.id))return authProblem(new DomainError('SESSION_EXPIRED',401));
   const next=req.cookies.get('nexus_oauth_next')?.value;
-  const response=NextResponse.redirect(new URL(next&&(next==='/link'||/^\/dashboard\/\d{17,20}$/.test(next))?next:'/servers',process.env.NEXUS_WEB_URL));
+  const response=NextResponse.redirect(new URL(next&&(next==='/link'||/^\/dashboard\/\d{17,20}$/.test(next))?next:'/servers',webOrigin(req)));
   response.cookies.set('nexus_session',sealSession({accessToken:token.access_token,userId:user.id,expiresAt:Date.now()+Math.min(token.expires_in,604800)*1000}),{httpOnly:true,secure:secureCookies(),sameSite:'lax',path:'/',maxAge:Math.min(token.expires_in,604800)});
   response.cookies.delete('nexus_oauth_state');response.cookies.delete('nexus_oauth_next');return response;
  }catch{return authProblem(new DomainError('DISCORD_UNAVAILABLE',503));}

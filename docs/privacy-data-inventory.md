@@ -1,4 +1,4 @@
-# Privacy data inventory — alpha.5
+# Privacy data inventory — alpha.7
 
 Commercial hardening adds a separate billing domain. Billing providers receive no
 community activity or message data. These operational records do not imply an
@@ -49,3 +49,8 @@ Message bodies, attachments, embeds, poll labels, forum titles, emoji meanings, 
 There is no public member export endpoint in the existing product. An operator-assisted access request must use the verified tenant/member scope, decrypt only that identity, and include applicable new typed projections. It must exclude other members' identities and credentials. Do not expose raw SQL or introduce an unauthenticated export route.
 
 Deletion and retention tests cover the typed projections, daily rollups, inbox, verification, scoped tenant collisions and absent content. [Intent operations](privileged-intent-operations.md) explains the privileged intent's purpose and review evidence.
+
+
+Current alpha.7 contracts and commerce: [contracts](billing/contract-hardening-alpha7.md)
+and [Stripe integration](billing/stripe-integration.md). Real Sandbox is tested;
+Stripe Live remains DISABLED. Card data and raw Webhook payloads are never stored.

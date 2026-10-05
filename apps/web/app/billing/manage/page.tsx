@@ -1,5 +1,6 @@
 import { BillingView } from "../view";
 export const dynamic = "force-dynamic";
-export default function ManageBilling() {
-  return <BillingView section="manage" />;
+export default async function ManageBilling({searchParams}:{searchParams:Promise<{offering?:string}>}) {
+  const {offering}=await searchParams;
+  return <BillingView section="manage" selectedOffering={offering} />;
 }

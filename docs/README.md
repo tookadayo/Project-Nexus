@@ -1,6 +1,6 @@
 # NEXUS documentation
 
-Current release: **0.6.0-alpha.5**. PostgreSQL is the normalized billing and
+Current release: **0.6.0-alpha.7** — Stripe Commerce Launch Foundation. PostgreSQL is the normalized billing and
 entitlement source of truth. Current documents retain their established paths
 where moving them would create unnecessary link churn.
 
@@ -11,7 +11,11 @@ where moving them would create unnecessary link churn.
 
 ## Billing and commercial contracts
 
-- [Stripe readiness and Web Experience v2 boundary](billing/stripe-readiness.md)
+- [Stripe integration and commerce architecture](billing/stripe-integration.md)
+- [alpha.7 contract hardening](billing/contract-hardening-alpha7.md)
+- [alpha.7 release validation](billing/contract-hardening-alpha7-validation.md)
+- [Stripe readiness and Live gates](billing/stripe-readiness.md)
+- [alpha.7 market validation](research/alpha7-market-validation.md)
 - [Billing architecture](billing-architecture.md)
 - [Billing security](billing-security.md)
 - [Pricing and entitlements](pricing-entitlements.md)

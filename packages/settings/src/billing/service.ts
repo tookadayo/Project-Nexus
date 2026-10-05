@@ -12,6 +12,10 @@ import { errorReference, logFailure } from "../../../shared/src/diagnostics";
 import type { IdentityVault } from "../../../identity/src/index";
 import { EntitlementService } from "./entitlements";
 import { billingViewModel } from "./view";
+import { BillingOperationService } from "./operations";
+import { PromotionReservationService } from "./reservations";
+import { commercialLaunch, paidPlanReady } from "./commerce";
+import { billingOffering, offeringFingerprint } from "./offerings";
 import {
   planRegistry,
   planRank,
@@ -21,9 +25,16 @@ import {
 import { planChangePreview, type BillingProviderKind } from "./domain";
 import {
   normalizedBillingEventSchema,
+  providerReconcileResultSchema,
   type BillingProvider,
   type NormalizedBillingEvent,
   type ProviderSignal,
+  type ProviderReconcileRequest,
+  type ProviderReconcileResult,
+  type TrustedProviderCustomerReference,
+  type TrustedProviderSubscriptionReference,
+  type ChangeSubscriptionRequest,
+  type CancelSubscriptionRequest,
 } from "./providers/types";
 type StoredEvent = Omit<
   NormalizedBillingEvent,
@@ -65,6 +76,238 @@ export class BillingService {
     private readonly db: Database,
     private readonly vault: IdentityVault,
   ) {}
+  async customerReference(
+    s: Scope,
+    provider: BillingProviderKind,
+  ): Promise<TrustedProviderCustomerReference> {
+    const row = (
+      await sql<{
+        id: string;
+        reference_ciphertext: string;
+      }>`SELECT c.id,c.reference_ciphertext FROM billing_provider_customers c JOIN billing_accounts a ON a.id=c.account_id WHERE a.organization_id=${s.organizationId}::uuid AND a.deleted_at IS NULL AND c.provider=${provider} AND c.reference_guild_id=${s.guildId}`.execute(
+        this.db,
+      )
+    ).rows[0];
+    assert(row, "BILLING_CUSTOMER_REFERENCE_UNAVAILABLE", 409);
+    return {
+      provider,
+      bindingId: row.id,
+      customerRef: this.vault.open(s, row.reference_ciphertext),
+    };
+  }
+  /** Core writes only a Customer relationship confirmed by a bound Checkout result or verified provider object. */
+  async bindCustomerReference(
+    s: Scope,
+    provider: BillingProviderKind,
+    evidence: { operationId: string; checkoutRef: string; customerRef: string },
+    transaction?: Tx,
+  ): Promise<TrustedProviderCustomerReference> {
+    assert(
+      provider === "STRIPE" &&
+        evidence.customerRef.length > 0 &&
+        evidence.customerRef.length <= 200 &&
+        evidence.checkoutRef.length > 0 &&
+        evidence.checkoutRef.length <= 200,
+      "BILLING_CUSTOMER_BINDING_INVALID",
+      409,
+    );
+    const bind = async (tx: Tx) => {
+      await billingScopeLock(tx, s);
+      const checkoutDigest = this.vault.digest(
+        "billing-checkout-reference:" + provider,
+        evidence.checkoutRef,
+      );
+      const operation = (
+        await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND id=${evidence.operationId}::uuid AND provider=${provider} AND operation='CHECKOUT' AND state='FINALIZED' AND provider_reference_digest=${checkoutDigest} AND external_started_at IS NOT NULL`.execute(
+          tx,
+        )
+      ).rows[0];
+      assert(operation, "BILLING_CUSTOMER_BINDING_UNVERIFIED", 409);
+      return this.persistCustomerReference(tx, s, provider, evidence.customerRef);
+    };
+    return transaction ? bind(transaction) : this.db.transaction().execute(bind);
+  }
+  async bindCreatedCustomer(s: Scope, operationId: string, customerRef: string) {
+    return this.db.transaction().execute(async tx => {
+      await billingScopeLock(tx, s);
+      const operation = await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND id=${operationId}::uuid AND provider='STRIPE' AND operation='CHECKOUT' AND state='PENDING' AND external_started_at IS NOT NULL AND lease_until>now()`.execute(tx);
+      assert(operation.rows.length, "BILLING_CUSTOMER_BINDING_UNVERIFIED", 409);
+      return this.persistCustomerReference(tx, s, "STRIPE", customerRef);
+    });
+  }
+  private async persistCustomerReference(tx: Tx, s: Scope, provider: BillingProviderKind, customerRef: string): Promise<TrustedProviderCustomerReference> {
+      assert(customerRef.length > 0 && customerRef.length <= 200, "BILLING_CUSTOMER_BINDING_INVALID", 409);
+      const digest = this.vault.digest(
+        "billing-customer-reference:" + provider,
+        customerRef,
+      );
+      await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"billing-customer:" + provider + ":" + digest},0))`.execute(
+        tx,
+      );
+      await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"billing-account:" + s.organizationId},0))`.execute(
+        tx,
+      );
+      await sql`INSERT INTO billing_accounts(id,organization_id) VALUES(${randomUUID()}::uuid,${s.organizationId}::uuid) ON CONFLICT(organization_id) DO NOTHING`.execute(
+        tx,
+      );
+      const account = (
+        await sql<{
+          id: string;
+        }>`SELECT id FROM billing_accounts WHERE organization_id=${s.organizationId}::uuid AND deleted_at IS NULL FOR UPDATE`.execute(
+          tx,
+        )
+      ).rows[0];
+      assert(account, "BILLING_ACCOUNT_UNAVAILABLE", 409);
+      const existing = (
+        await sql<{
+          id: string;
+          account_id: string;
+          reference_digest: string;
+          reference_guild_id: string | null;
+        }>`SELECT id,account_id,reference_digest,reference_guild_id FROM billing_provider_customers WHERE provider=${provider} AND (reference_digest=${digest} OR account_id=${account.id}::uuid) FOR UPDATE`.execute(
+          tx,
+        )
+      ).rows;
+      assert(
+        existing.every(
+          (row) =>
+            row.account_id === account.id &&
+            row.reference_digest === digest &&
+            row.reference_guild_id === s.guildId,
+        ),
+        "BILLING_SCOPE_CONFLICT",
+        409,
+      );
+      const id = existing[0]?.id ?? randomUUID();
+      if (!existing.length)
+        await sql`INSERT INTO billing_provider_customers(id,account_id,provider,reference_digest,reference_ciphertext,reference_guild_id) VALUES(${id}::uuid,${account.id}::uuid,${provider},${digest},${this.vault.seal(s, customerRef)},${s.guildId})`.execute(
+          tx,
+        );
+      return { provider, bindingId: id, customerRef };
+  }
+  async subscriptionReferences(
+    s: Scope,
+    provider: BillingProviderKind,
+  ): Promise<TrustedProviderSubscriptionReference[]> {
+    const rows = (
+      await sql<{
+        id: string;
+        reference_ciphertext: string | null;
+      }>`SELECT b.id,b.reference_ciphertext FROM billing_subscriptions b JOIN billing_subscription_assignments a ON a.subscription_id=b.id WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND b.provider=${provider}`.execute(
+        this.db,
+      )
+    ).rows;
+    return rows.map((row) => {
+      assert(
+        row.reference_ciphertext,
+        "BILLING_SUBSCRIPTION_REFERENCE_UNAVAILABLE",
+        409,
+      );
+      return {
+        provider,
+        bindingId: row.id,
+        subscriptionRef: this.vault.open(s, row.reference_ciphertext),
+      };
+    });
+  }
+  async subscriptionReference(s: Scope, provider: BillingProviderKind) {
+    const references = await this.subscriptionReferences(s, provider);
+    const mutable = (await sql<{id:string}>`SELECT b.id FROM billing_subscriptions b JOIN billing_subscription_assignments a ON a.subscription_id=b.id WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND b.provider=${provider} AND b.status NOT IN ('CANCELED','EXPIRED')`.execute(this.db)).rows;
+    const current = references.filter(ref => mutable.some(row => row.id === ref.bindingId));
+    assert(
+      current.length === 1,
+      "BILLING_SUBSCRIPTION_REFERENCE_AMBIGUOUS",
+      409,
+    );
+    return current[0]!;
+  }
+  async assertNewCheckout(s: Scope, provider: BillingProviderKind) {
+    const state = await new EntitlementService(this.db).effective(s);
+    const paid = state.subscriptions.filter(
+      (row) =>
+        row.plan !== "FREE" &&
+        row.status !== "EXPIRED" && row.status !== "CANCELED",
+    );
+    assert(
+      !paid.some((row) => row.provider === provider),
+      "BILLING_EXISTING_SUBSCRIPTION",
+      409,
+    );
+    assert(!paid.length, "BILLING_PROVIDER_MIGRATION_REQUIRED", 409);
+    const unknown =
+      await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND operation='CHECKOUT' AND state IN ('PENDING','RECONCILE_REQUIRED') AND external_started_at IS NOT NULL`.execute(
+        this.db,
+      );
+    assert(!unknown.rows.length, "BILLING_RECONCILE_REQUIRED", 409);
+    const open = await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND operation='CHECKOUT' AND state='FINALIZED' AND checkout_completed_at IS NULL AND checkout_expires_at>now()`.execute(this.db);
+    assert(!open.rows.length, "BILLING_CHECKOUT_IN_PROGRESS", 409);
+  }
+  async changeSubscription(
+    s: Scope,
+    provider: BillingProvider,
+    offeringId: string,
+    idempotencyKey: string,
+    policy: ChangeSubscriptionRequest["policy"],
+  ) {
+    assert(
+      provider.kind === "STRIPE" || provider.kind === "DISCORD",
+      "BILLING_PROVIDER_MISMATCH",
+      409,
+    );
+    const subscription = await this.subscriptionReference(s, provider.kind);
+    return new BillingOperationService(this.db, this.vault).mutation(
+      {
+        scope: s,
+        provider: provider.kind,
+        operation: "CHANGE",
+        offeringId,
+        idempotencyKey,
+        subscription,
+        policy,
+      },
+      async (context) => {
+        assert(context.offering, "BILLING_OFFERING_REQUIRED", 409);
+        await provider.changeSubscription({
+          scope: s,
+          subscription,
+          offering: context.offering,
+          currentOffering: context.currentOffering,
+          idempotencyKey: context.idempotencyKey,
+          policy,
+        });
+      },
+    );
+  }
+  async cancelSubscription(
+    s: Scope,
+    provider: BillingProvider,
+    idempotencyKey: string,
+    policy: CancelSubscriptionRequest["policy"],
+  ) {
+    assert(
+      provider.kind === "STRIPE" || provider.kind === "DISCORD",
+      "BILLING_PROVIDER_MISMATCH",
+      409,
+    );
+    const subscription = await this.subscriptionReference(s, provider.kind);
+    return new BillingOperationService(this.db, this.vault).mutation(
+      {
+        scope: s,
+        provider: provider.kind,
+        operation: "CANCEL",
+        idempotencyKey,
+        subscription,
+        policy,
+      },
+      (context) =>
+        provider.cancel({
+          scope: s,
+          subscription,
+          idempotencyKey: context.idempotencyKey,
+          policy,
+        }),
+    );
+  }
   async receive(
     provider: BillingProvider,
     body: Buffer,
@@ -99,7 +342,10 @@ export class BillingService {
     input: NormalizedBillingEvent,
     transaction?: Tx,
   ) {
-    const event = normalizedBillingEventSchema.parse(input);
+    const event = normalizedBillingEventSchema.parse({
+      ...input,
+      planRevision: input.planRevision ?? 2,
+    });
     assert(event.authoritative, "BILLING_EVENT_UNVERIFIED", 403);
     assert(
       new Date(event.occurredAt).getTime() <= Date.now() + 300000,
@@ -120,6 +366,43 @@ export class BillingService {
     };
     const persist = async (tx: Tx) => {
       await billingScopeLock(tx, event.scope);
+      const offeringId =
+        event.offeringAssociation?.offeringId ??
+        event.commercialEvidence?.offeringId;
+      if (offeringId) {
+        const offering = await billingOffering(tx, offeringId);
+        assert(
+          offering.provider === event.provider &&
+            offering.planKey === event.plan &&
+            offering.planRevision === event.planRevision &&
+            (!event.offeringAssociation ||
+              offeringFingerprint(offering) ===
+                event.offeringAssociation.fingerprint),
+          "BILLING_OFFERING_ASSOCIATION_INVALID",
+          409,
+        );
+      }
+      if(event.scheduledOfferingAssociation) {
+        const scheduled=await billingOffering(tx,event.scheduledOfferingAssociation.offeringId);
+        assert(scheduled.provider===event.provider && scheduled.planKey===event.scheduledPlan && offeringFingerprint(scheduled)===event.scheduledOfferingAssociation.fingerprint,"BILLING_OFFERING_ASSOCIATION_INVALID",409);
+      }
+      const ownership = (
+        await sql<{
+          organization_id: string;
+          guild_id: string;
+        }>`SELECT a.organization_id,a.guild_id FROM billing_subscriptions b JOIN billing_subscription_assignments a ON a.subscription_id=b.id WHERE b.provider=${event.provider} AND b.reference_digest=${stored.referenceDigest}`.execute(
+          tx,
+        )
+      ).rows;
+      assert(
+        ownership.every(
+          (row) =>
+            row.organization_id === event.scope.organizationId &&
+            row.guild_id === event.scope.guildId,
+        ),
+        "BILLING_SCOPE_CONFLICT",
+        409,
+      );
       const row = (
         await sql<{
           id: string;
@@ -133,7 +416,7 @@ export class BillingService {
       ? persist(transaction)
       : this.db.transaction().execute(persist);
   }
-  async storeSignal(signal: ProviderSignal) {
+  private async storeSignal(signal: ProviderSignal) {
     assert(signal.provider === "STRIPE", "BILLING_PROVIDER_MISMATCH");
     assert(
       signal.eventId.length > 0 &&
@@ -143,10 +426,89 @@ export class BillingService {
       "BILLING_SIGNAL_INVALID",
     );
     return this.db.transaction().execute(async (tx) => {
-      await billingScopeLock(tx, signal.scope);
+      const referenceDigest = this.vault.digest(
+        "billing-reference:STRIPE",
+        signal.subscriptionRef,
+      );
+      let resolved = (
+        await sql<Scope>`SELECT a.organization_id AS "organizationId",a.guild_id AS "guildId" FROM billing_subscriptions b JOIN billing_subscription_assignments a ON a.subscription_id=b.id WHERE b.provider='STRIPE' AND b.reference_digest=${referenceDigest}`.execute(
+          tx,
+        )
+      ).rows[0];
+      if (
+        !resolved &&
+        signal.customerRef &&
+        signal.bindingEvidence?.kind === "CUSTOMER_SUBSCRIPTION" &&
+        signal.bindingEvidence.customerRef === signal.customerRef &&
+        signal.bindingEvidence.subscriptionRef === signal.subscriptionRef
+      ) {
+        const digest = this.vault.digest(
+          "billing-customer-reference:STRIPE",
+          signal.customerRef,
+        );
+        resolved = (
+          await sql<Scope>`SELECT a.organization_id AS "organizationId",c.reference_guild_id AS "guildId" FROM billing_provider_customers c JOIN billing_accounts a ON a.id=c.account_id WHERE c.provider='STRIPE' AND c.reference_digest=${digest} AND c.reference_guild_id IS NOT NULL AND a.deleted_at IS NULL`.execute(
+            tx,
+          )
+        ).rows[0];
+      }
+      if (
+        !resolved &&
+        signal.checkoutOperationId &&
+        signal.checkoutRef &&
+        signal.bindingEvidence?.kind === "CHECKOUT_SUBSCRIPTION" &&
+        signal.bindingEvidence.checkoutRef === signal.checkoutRef &&
+        signal.bindingEvidence.subscriptionRef === signal.subscriptionRef
+      ) {
+        const digest = this.vault.digest(
+          "billing-checkout-reference:STRIPE",
+          signal.checkoutRef,
+        );
+        resolved = (
+          await sql<Scope>`SELECT organization_id AS "organizationId",guild_id AS "guildId" FROM billing_operations WHERE id=${signal.checkoutOperationId}::uuid AND provider='STRIPE' AND operation='CHECKOUT' AND state='FINALIZED' AND external_started_at IS NOT NULL AND provider_reference_digest=${digest}`.execute(
+            tx,
+          )
+        ).rows[0];
+      }
+      assert(resolved, "BILLING_SCOPE_UNRESOLVED", 409);
+      assert(
+        !signal.scope ||
+          (signal.scope.organizationId === resolved.organizationId &&
+            signal.scope.guildId === resolved.guildId),
+        "BILLING_SCOPE_CONFLICT",
+        409,
+      );
+      const s = resolved;
+      await billingScopeLock(tx, s);
+      if (
+        signal.checkoutOperationId &&
+        signal.checkoutRef &&
+        signal.bindingEvidence?.kind === "CHECKOUT_SUBSCRIPTION" &&
+        signal.bindingEvidence.checkoutRef === signal.checkoutRef &&
+        signal.bindingEvidence.subscriptionRef === signal.subscriptionRef &&
+        signal.bindingEvidence.customerRef
+      ) {
+        assert(
+          !signal.customerRef ||
+            signal.customerRef === signal.bindingEvidence.customerRef,
+          "BILLING_SCOPE_CONFLICT",
+          409,
+        );
+        await this.bindCustomerReference(
+          s,
+          signal.provider,
+          {
+            operationId: signal.checkoutOperationId,
+            checkoutRef: signal.checkoutRef,
+            customerRef: signal.bindingEvidence.customerRef,
+          },
+          tx,
+        );
+        await sql`UPDATE billing_operations SET checkout_completed_at=COALESCE(checkout_completed_at,now()) WHERE ${tenant(s)} AND id=${signal.checkoutOperationId}::uuid AND provider='STRIPE' AND operation='CHECKOUT' AND state='FINALIZED' AND provider_reference_digest=${this.vault.digest("billing-checkout-reference:STRIPE",signal.checkoutRef)}`.execute(tx);
+      }
       const digest = this.vault.digest("billing-signal:STRIPE", signal.eventId);
       const result =
-        await sql`INSERT INTO billing_provider_signals(id,provider,event_digest,organization_id,guild_id,reference_ciphertext) VALUES(${randomUUID()}::uuid,'STRIPE',${digest},${signal.scope.organizationId}::uuid,${signal.scope.guildId},${this.vault.seal(signal.scope, signal.subscriptionRef)}) ON CONFLICT(provider,event_digest) DO NOTHING RETURNING id`.execute(
+        await sql`INSERT INTO billing_provider_signals(id,provider,event_digest,organization_id,guild_id,reference_ciphertext) VALUES(${randomUUID()}::uuid,'STRIPE',${digest},${s.organizationId}::uuid,${s.guildId},${this.vault.seal(s, signal.subscriptionRef)}) ON CONFLICT(provider,event_digest) DO NOTHING RETURNING id`.execute(
           tx,
         );
       return { duplicate: result.rows.length === 0 };
@@ -178,10 +540,42 @@ export class BillingService {
     if (!claim) return false;
     try {
       // Network retrieval takes place outside all PostgreSQL transactions.
-      const snapshots = await provider.reconcile(s, { subscriptionRef });
+      const request = await this.reconcileRequest(
+        s,
+        provider.kind,
+        subscriptionRef,
+      );
+      let result: ProviderReconcileResult;
+      try {
+        result = providerReconcileResultSchema.parse(
+          await provider.reconcile(request),
+        );
+      } catch (error) {
+        await this.markProviderUnavailable(s, provider.kind);
+        throw error;
+      }
+      if (result.kind === "INCOMPLETE") {
+        await this.markProviderUnavailable(s, provider.kind);
+        assert(false, "BILLING_RECONCILIATION_INCOMPLETE", 503);
+      }
+      const snapshots =
+        result.kind === "TARGET_FOUND"
+          ? [result.subscription]
+          : result.kind === "FULL_CENSUS"
+            ? result.events
+            : [];
       assert(
-        !subscriptionRef || snapshots.length > 0,
-        "BILLING_RECONCILIATION_EMPTY",
+        subscriptionRef
+          ? result.kind === "TARGET_FOUND" || result.kind === "TARGET_ABSENT"
+          : result.kind === "FULL_CENSUS",
+        "BILLING_RECONCILIATION_TARGET_INVALID",
+        409,
+      );
+      assert(
+        result.kind !== "TARGET_ABSENT" ||
+          result.subscriptionRef === subscriptionRef,
+        "BILLING_RECONCILIATION_TARGET_INVALID",
+        409,
       );
       return await this.db.transaction().execute(async (tx) => {
         await billingScopeLock(tx, s);
@@ -190,7 +584,14 @@ export class BillingService {
             tx,
           );
         assert(valid.rows.length, "BILLING_RECONCILIATION_LEASE_EXPIRED", 409);
-        for (const snapshot of snapshots) {
+        const absent = await this.absentSnapshots(
+          tx,
+          s,
+          provider.kind,
+          result,
+          snapshots,
+        );
+        for (const snapshot of [...snapshots, ...absent]) {
           assert(
             snapshot.provider === "STRIPE" &&
               snapshot.scope.organizationId === s.organizationId &&
@@ -217,6 +618,117 @@ export class BillingService {
         this.db,
       );
     }
+  }
+  private async reconcileRequest(
+    s: Scope,
+    provider: BillingProviderKind,
+    subscriptionRef?: string,
+  ): Promise<ProviderReconcileRequest> {
+    const subscriptions = await this.subscriptionReferences(s, provider);
+    let customer: TrustedProviderCustomerReference | undefined;
+    if (provider === "STRIPE") {
+      try {
+        customer = await this.customerReference(s, provider);
+      } catch {
+        /* A targeted trusted subscription can reconcile without a Customer. */
+      }
+      assert(
+        subscriptionRef || customer,
+        "BILLING_CUSTOMER_REFERENCE_UNAVAILABLE",
+        409,
+      );
+    }
+    let target = subscriptionRef
+      ? subscriptions.find((row) => row.subscriptionRef === subscriptionRef)
+      : undefined;
+    if (subscriptionRef && !target) {
+      const signals = (
+        await sql<{
+          id: string;
+          reference_ciphertext: string;
+        }>`SELECT id,reference_ciphertext FROM billing_provider_signals WHERE ${tenant(s)} AND provider=${provider}`.execute(
+          this.db,
+        )
+      ).rows;
+      const binding = signals.find(
+        (signal) =>
+          this.vault.open(s, signal.reference_ciphertext) === subscriptionRef,
+      );
+      assert(binding, "BILLING_SCOPE_UNRESOLVED", 409);
+      target = { provider, bindingId: binding.id, subscriptionRef };
+    }
+    const rows = (
+      await sql<{
+        id: string;
+      }>`SELECT id FROM billing_offerings WHERE provider=${provider} AND commercial_locked`.execute(
+        this.db,
+      )
+    ).rows;
+    const offerings = await Promise.all(
+      rows.map((row) => billingOffering(this.db, row.id)),
+    );
+    return { scope: s, customer, subscriptions, target, offerings,
+      promotions: await new PromotionReservationService(this.db, this.vault).confirmationContexts(s) };
+  }
+  private async absentSnapshots(
+    tx: Tx,
+    s: Scope,
+    provider: BillingProviderKind,
+    result: ProviderReconcileResult,
+    snapshots: NormalizedBillingEvent[],
+  ): Promise<NormalizedBillingEvent[]> {
+    if (result.kind !== "FULL_CENSUS" && result.kind !== "TARGET_ABSENT")
+      return [];
+    assert(
+      result.kind !== "FULL_CENSUS" || result.complete === true,
+      "BILLING_RECONCILIATION_INCOMPLETE",
+      503,
+    );
+    const existing = (
+      await sql<{
+        reference_ciphertext: string;
+        plan_key: Plan;
+        plan_revision: number;
+        offering_id: string | null;
+      }>`SELECT b.reference_ciphertext,b.plan_key,b.plan_revision,b.offering_id FROM billing_subscriptions b JOIN billing_subscription_assignments a ON a.subscription_id=b.id WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND b.provider=${provider} UNION SELECT normalized->>'referenceCiphertext' AS reference_ciphertext,normalized->>'plan' AS plan_key,COALESCE((normalized->>'planRevision')::integer,2) AS plan_revision,COALESCE(normalized->'offeringAssociation'->>'offeringId',normalized->'commercialEvidence'->>'offeringId')::uuid AS offering_id FROM billing_provider_events WHERE ${tenant(s)} AND provider=${provider} AND projected_at IS NULL AND normalized->>'referenceCiphertext' IS NOT NULL`.execute(
+        tx,
+      )
+    ).rows;
+    const events: NormalizedBillingEvent[] = [];
+    for (const row of existing) {
+      const ref = this.vault.open(s, row.reference_ciphertext);
+      const absent =
+        result.kind === "TARGET_ABSENT"
+          ? result.subscriptionRef === ref
+          : !snapshots.some((snapshot) => snapshot.subscriptionRef === ref);
+      if (!absent) continue;
+      const at = new Date().toISOString();
+      const offering = row.offering_id
+        ? await billingOffering(tx, row.offering_id)
+        : undefined;
+      events.push({
+        eventId: "absent:" + randomUUID(),
+        subscriptionRef: ref,
+        provider,
+        scope: s,
+        plan: row.plan_key,
+        planRevision: row.plan_revision,
+        offeringAssociation: offering
+          ? {
+              offeringId: offering.id,
+              fingerprint: offeringFingerprint(offering),
+            }
+          : undefined,
+        status: "CANCELED",
+        occurredAt: at,
+        version: Date.now(),
+        periodEnd: at,
+        scheduledPlan: null,
+        scheduledAt: null,
+        authoritative: true,
+      });
+    }
+    return events;
   }
   async processSignal(provider: BillingProvider) {
     const token = randomUUID();
@@ -317,6 +829,20 @@ export class BillingService {
           "BILLING_SCOPE_CONFLICT",
           409,
         );
+        if (existing) {
+          const assignments = (
+            await sql<{
+              guild_id: string;
+            }>`SELECT guild_id FROM billing_subscription_assignments WHERE subscription_id=${existing.id}::uuid`.execute(
+              tx,
+            )
+          ).rows;
+          assert(
+            assignments.length === 1 && assignments[0]!.guild_id === s.guildId,
+            "BILLING_SCOPE_CONFLICT",
+            409,
+          );
+        }
         const older =
           existing &&
           (event.version < Number(existing.provider_event_version) ||
@@ -376,9 +902,9 @@ export class BillingService {
               )
             : null;
           const id = existing?.id ?? randomUUID();
-          await sql`INSERT INTO billing_subscriptions(id,account_id,organization_id,provider,reference_digest,reference_ciphertext,plan_key,status,current_period_end,scheduled_plan,scheduled_at,confirmed_at,last_good_plan,last_good_until,provider_event_at,provider_event_version,provider_event_key)
-    VALUES(${id}::uuid,${account.id}::uuid,${s.organizationId}::uuid,${event.provider},${event.referenceDigest},${event.referenceCiphertext},${event.plan},${event.status},${event.periodEnd}::timestamptz,${event.scheduledPlan},${event.scheduledAt}::timestamptz,${confirmed || (event.provider === "STRIPE" && event.status === "CANCELED" && event.periodEnd && new Date(event.periodEnd) > new Date()) ? event.occurredAt : null}::timestamptz,${confirmed ? event.plan : null},${goodUntil},${event.occurredAt}::timestamptz,${event.version},${event.eventDigest})
-    ON CONFLICT(provider,reference_digest) DO UPDATE SET plan_key=CASE WHEN ${confirmed || event.status === "CANCELED"} THEN EXCLUDED.plan_key ELSE billing_subscriptions.plan_key END,status=EXCLUDED.status,current_period_end=EXCLUDED.current_period_end,scheduled_plan=EXCLUDED.scheduled_plan,scheduled_at=EXCLUDED.scheduled_at,confirmed_at=COALESCE(EXCLUDED.confirmed_at,billing_subscriptions.confirmed_at),last_good_plan=COALESCE(EXCLUDED.last_good_plan,billing_subscriptions.last_good_plan),last_good_until=COALESCE(EXCLUDED.last_good_until,billing_subscriptions.last_good_until),provider_event_at=EXCLUDED.provider_event_at,provider_event_version=EXCLUDED.provider_event_version,provider_event_key=EXCLUDED.provider_event_key`.execute(
+          await sql`INSERT INTO billing_subscriptions(id,account_id,organization_id,provider,reference_digest,reference_ciphertext,plan_key,plan_revision,offering_id,status,current_period_end,scheduled_plan,scheduled_at,confirmed_at,last_good_plan,last_good_until,provider_event_at,provider_event_version,provider_event_key)
+    VALUES(${id}::uuid,${account.id}::uuid,${s.organizationId}::uuid,${event.provider},${event.referenceDigest},${event.referenceCiphertext},${event.plan},${event.planRevision ?? 2},${event.offeringAssociation?.offeringId ?? event.commercialEvidence?.offeringId ?? null}::uuid,${event.status},${event.periodEnd}::timestamptz,${event.scheduledPlan},${event.scheduledAt}::timestamptz,${confirmed || (event.provider === "STRIPE" && event.status === "CANCELED" && event.periodEnd && new Date(event.periodEnd) > new Date()) ? event.occurredAt : null}::timestamptz,${confirmed ? event.plan : null},${goodUntil},${event.occurredAt}::timestamptz,${event.version},${event.eventDigest})
+    ON CONFLICT(provider,reference_digest) DO UPDATE SET plan_key=CASE WHEN ${confirmed || event.status === "CANCELED"} THEN EXCLUDED.plan_key ELSE billing_subscriptions.plan_key END,plan_revision=CASE WHEN ${confirmed} THEN EXCLUDED.plan_revision ELSE billing_subscriptions.plan_revision END,offering_id=COALESCE(EXCLUDED.offering_id,billing_subscriptions.offering_id),status=EXCLUDED.status,current_period_end=EXCLUDED.current_period_end,scheduled_plan=EXCLUDED.scheduled_plan,scheduled_at=EXCLUDED.scheduled_at,confirmed_at=COALESCE(EXCLUDED.confirmed_at,billing_subscriptions.confirmed_at),last_good_plan=COALESCE(EXCLUDED.last_good_plan,billing_subscriptions.last_good_plan),last_good_until=COALESCE(EXCLUDED.last_good_until,billing_subscriptions.last_good_until),provider_event_at=EXCLUDED.provider_event_at,provider_event_version=EXCLUDED.provider_event_version,provider_event_key=EXCLUDED.provider_event_key`.execute(
             tx,
           );
           await sql`INSERT INTO billing_subscription_assignments(organization_id,guild_id,subscription_id) VALUES(${s.organizationId}::uuid,${s.guildId},${id}::uuid) ON CONFLICT DO NOTHING`.execute(
@@ -400,8 +926,13 @@ export class BillingService {
             plan: event.plan,
             status: event.status,
           });
+          await billingAudit(tx,s,null,"SUBSCRIPTION_RECONCILED",{provider:event.provider,plan:event.plan,status:event.status});
+          if(existing && existing.plan_key!==event.plan) await billingAudit(tx,s,null,"PLAN_CHANGE_RECONCILED",{plan:event.plan});
         }
         await this.refreshState(s, tx, before.plan);
+        if(!older && !contradictory && event.provider === "STRIPE") {
+          await sql`UPDATE billing_operations o SET state='FINALIZED',error_category=NULL WHERE o.organization_id=${s.organizationId}::uuid AND o.guild_id=${s.guildId} AND o.provider='STRIPE' AND o.state='RECONCILE_REQUIRED' AND o.subscription_id IN(SELECT b.id FROM billing_subscriptions b WHERE b.provider='STRIPE' AND b.reference_digest=${event.referenceDigest}) AND ((o.operation='CHANGE' AND o.offering_id=${event.offeringAssociation?.offeringId ?? null}::uuid AND ${["ACTIVE","CANCEL_AT_PERIOD_END"].includes(event.status)}) OR (o.operation='CHANGE' AND o.offering_id=${event.scheduledOfferingAssociation?.offeringId ?? null}::uuid) OR (o.operation='CANCEL' AND ${["CANCEL_AT_PERIOD_END","CANCELED"].includes(event.status)}))`.execute(tx);
+        }
         await sql`UPDATE billing_provider_events SET projected_at=now(),error_category=NULL WHERE id=${row.id}::uuid`.execute(
           tx,
         );
@@ -456,7 +987,7 @@ export class BillingService {
       tx,
     );
     if (state.conflict && !saved?.conflict)
-      await billingAudit(tx, s, null, "billing.conflict", {
+      await billingAudit(tx, s, null, "BILLING_CONFLICT", {
         providers: state.subscriptions.map((row) => row.provider),
       });
     const config = (
@@ -549,43 +1080,69 @@ export class BillingService {
     };
   }
   async view(s: Scope) {
-    return billingViewModel(await this.status(s));
+    const view = billingViewModel(await this.status(s)), launch = commercialLaunch();
+    const offerings = (await sql<{id:string;plan_key:Plan;currency:string;final_price_minor:number;billing_interval:"MONTH"|"YEAR"}>`SELECT id,plan_key,currency,final_price_minor,billing_interval FROM billing_offerings WHERE provider='STRIPE' AND enabled ORDER BY final_price_minor,id`.execute(this.db)).rows
+      .filter(o => !launch.livemode || paidPlanReady(o.plan_key)).map(o => ({id:o.id,plan:o.plan_key,currency:o.currency,unitAmountMinor:o.final_price_minor,interval:o.billing_interval}));
+    const stripe = view.subscriptions.find(row => row.provider === "STRIPE" && !["CANCELED","EXPIRED"].includes(row.status));
+    const bound = (await sql`SELECT c.id FROM billing_provider_customers c JOIN billing_accounts a ON a.id=c.account_id WHERE a.organization_id=${s.organizationId}::uuid AND a.deleted_at IS NULL AND c.provider='STRIPE' AND c.reference_guild_id=${s.guildId}`.execute(this.db)).rows.length > 0;
+    const pending=(await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND provider='STRIPE' AND (state='RECONCILE_REQUIRED' OR (state='PENDING' AND external_started_at IS NOT NULL) OR (operation='CHECKOUT' AND state='FINALIZED' AND checkout_completed_at IS NULL AND checkout_expires_at>now() AND NOT EXISTS(SELECT 1 FROM billing_subscriptions b WHERE b.organization_id=${s.organizationId}::uuid AND b.provider='STRIPE' AND b.status NOT IN ('CANCELED','EXPIRED'))))`.execute(this.db)).rows.length>0;
+    return { ...view, presentation: { ...view.presentation, billingActions: {
+      purchase: view.presentation.billingActions.purchase.map(action => action.provider === "STRIPE" ? {
+        ...action, configured: launch.checkoutEnabled, available: launch.checkoutEnabled && !view.privacyDeleted && !stripe && !view.conflict && !pending && offerings.length>0, offerings,
+      } : {...action,offerings:[]} ),
+      manage: [
+        {provider:"STRIPE", method:"PORTAL", available: launch.checkoutEnabled && bound && Boolean(process.env.STRIPE_PORTAL_CONFIGURATION_ID) && !view.privacyDeleted},
+        {provider:"STRIPE", method:"CHANGE", available: launch.checkoutEnabled && !pending && !view.conflict && stripe?.status === "ACTIVE" && !stripe.scheduledPlan && !view.privacyDeleted, offerings},
+        {provider:"STRIPE", method:"CANCEL", available: launch.checkoutEnabled && !pending && !view.conflict && Boolean(stripe) && !["CANCEL_AT_PERIOD_END","INCOMPLETE"].includes(stripe?.status ?? "") && !view.privacyDeleted},
+      ],
+    } } };
   }
   async reconcile(s: Scope, provider: BillingProvider) {
     if (provider.kind === "STRIPE") return this.reconcileLatest(s, provider);
-    const events = await provider.reconcile(s);
-    for (const event of events) await this.storeVerified(event);
-    // Empty authoritative Discord census ends only previously normalized Discord entitlements.
-    if (provider.kind === "DISCORD") {
-      const existing = (
-        await sql<{
-          reference_ciphertext: string;
-          plan_key: Plan;
-        }>`SELECT b.reference_ciphertext,b.plan_key FROM billing_subscriptions b JOIN billing_subscription_assignments a ON a.subscription_id=b.id WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND b.provider='DISCORD' AND b.status<>'CANCELED'`.execute(
-          this.db,
-        )
-      ).rows;
-      for (const row of existing) {
-        const ref = this.vault.open(s, row.reference_ciphertext);
-        if (!events.some((event) => event.subscriptionRef === ref)) {
-          const now = new Date();
-          await this.storeVerified({
-            eventId: `absent:${ref}:${now.toISOString()}`,
-            subscriptionRef: ref,
-            provider: "DISCORD",
-            scope: s,
-            plan: row.plan_key,
-            status: "CANCELED",
-            occurredAt: now.toISOString(),
-            version: now.getTime(),
-            periodEnd: now.toISOString(),
-            scheduledPlan: null,
-            scheduledAt: null,
-            authoritative: true,
-          });
-        }
-      }
+    let result: ProviderReconcileResult;
+    try {
+      result = providerReconcileResultSchema.parse(
+        await provider.reconcile(await this.reconcileRequest(s, provider.kind)),
+      );
+    } catch (error) {
+      await this.markProviderUnavailable(s, provider.kind);
+      throw error;
     }
+    if (result.kind === "INCOMPLETE") {
+      await this.markProviderUnavailable(s, provider.kind);
+      assert(false, "BILLING_RECONCILIATION_INCOMPLETE", 503);
+    }
+    const events =
+      result.kind === "TARGET_FOUND"
+        ? [result.subscription]
+        : result.kind === "FULL_CENSUS"
+          ? result.events
+          : [];
+    assert(
+      result.kind === "FULL_CENSUS",
+      "BILLING_RECONCILIATION_TARGET_INVALID",
+      409,
+    );
+    await this.db.transaction().execute(async (tx) => {
+      await billingScopeLock(tx, s);
+      const absent = await this.absentSnapshots(
+        tx,
+        s,
+        provider.kind,
+        result,
+        events,
+      );
+      for (const event of [...events, ...absent]) {
+        assert(
+          event.provider === provider.kind &&
+            event.scope.organizationId === s.organizationId &&
+            event.scope.guildId === s.guildId,
+          "BILLING_PROVIDER_MISMATCH",
+          409,
+        );
+        await this.persistSnapshot(event, tx);
+      }
+    });
   }
   async markProviderUnavailable(s: Scope, provider: BillingProviderKind) {
     await this.db.transaction().execute(async (tx) => {

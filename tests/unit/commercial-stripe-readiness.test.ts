@@ -63,7 +63,8 @@ it("trial policy, suspensions, expiration and paid cancellation periods bound ac
       subscriptionPlan(sub(status), new Date("2026-10-05T00:00:00Z")),
     ).toBeNull();
   }
-  expect(subscriptionPlan(sub("CANCELED"), now)?.plan).toBe("GROWTH");
+  expect(subscriptionPlan(sub("CANCEL_AT_PERIOD_END"), now)?.plan).toBe("GROWTH");
+  expect(subscriptionPlan(sub("CANCELED"), now)).toBeNull();
   expect(
     subscriptionPlan({ ...sub("CANCELED"), periodEnd: null }, now),
   ).toBeNull();
@@ -87,6 +88,10 @@ it("credentials and success redirects never activate Stripe or grant access", as
     planKey: "GROWTH",
     planRevision: 2,
     provider: "STRIPE",
+    providerProductId: "fixture-product",
+    providerPriceId: "fixture-price",
+    providerNeutralOfferingId: null,
+    taxBehavior: "EXCLUSIVE",
     billingInterval: "MONTH",
     billingIntervalCount: 1,
     currency: "JPY",
@@ -95,6 +100,7 @@ it("credentials and success redirects never activate Stripe or grant access", as
   };
   const request = {
     scope,
+    operationId: scope.organizationId,
     offeringId: offering.id,
     offering,
     idempotencyKey: scope.organizationId,
@@ -102,16 +108,17 @@ it("credentials and success redirects never activate Stripe or grant access", as
   await expect(provider.createCheckout(request)).rejects.toThrow(
     "BILLING_PROVIDER_NOT_CONFIGURED",
   );
-  await expect(provider.createPortalSession(request)).rejects.toThrow(
+  const subscription = { provider: "STRIPE" as const, bindingId: scope.organizationId, subscriptionRef: "fixture-subscription" };
+  await expect(provider.createPortalSession({scope, idempotencyKey: request.idempotencyKey, customer: {provider: "STRIPE", bindingId: scope.organizationId, customerRef: "fixture-customer"}})).rejects.toThrow(
     "BILLING_PROVIDER_NOT_CONFIGURED",
   );
-  await expect(provider.cancel(scope, request.idempotencyKey)).rejects.toThrow(
+  await expect(provider.cancel({scope, subscription, idempotencyKey: request.idempotencyKey, policy: "AT_PERIOD_END"})).rejects.toThrow(
     "BILLING_PROVIDER_NOT_CONFIGURED",
   );
-  await expect(provider.changeSubscription(request)).rejects.toThrow(
+  await expect(provider.changeSubscription({...request, subscription, policy: {effective: "IMMEDIATE", proration: "PROVIDER_CALCULATED"}})).rejects.toThrow(
     "BILLING_PROVIDER_NOT_CONFIGURED",
   );
-  await expect(provider.reconcile(scope)).rejects.toThrow(
+  await expect(provider.reconcile({scope, subscriptions: [], offerings: []})).rejects.toThrow(
     "BILLING_PROVIDER_NOT_CONFIGURED",
   );
   await expect(
@@ -140,6 +147,7 @@ it("credentials and success redirects never activate Stripe or grant access", as
   });
   expect(view.presentation.billingActions.purchase[0]).toMatchObject({
     provider: "STRIPE",
+    configured: false,
     available: false,
     requiresOffering: true,
   });

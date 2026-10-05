@@ -4,10 +4,13 @@ import { BillingControls } from "./controls";
 import { planCopy } from "../../../../packages/settings/src/plan-copy";
 import { currentRecipe } from "../../../../packages/settings/src/recipes";
 import { RecipeControls } from "./recipe-controls";
+import { CommerceControls } from "./commerce-controls";
 export async function BillingView({
   section = "overview",
+  selectedOffering,
 }: {
   section?: "overview" | "manage" | "promotions";
+  selectedOffering?:string;
 }) {
   const locale = await siteLocale();
   let context;
@@ -33,7 +36,12 @@ export async function BillingView({
     );
   }
   const status = await context.billing.view(context.scope),
-    store = status.presentation.nativePurchaseUrl;
+    externalConfigured = status.presentation.billingActions.purchase.some(
+      (action) => action.method === "CHECKOUT" && action.configured,
+    ),
+    store = status.presentation.billingActions.purchase.find(
+      (action) => action.provider === "DISCORD" && action.available,
+    )?.url;
   return (
     <SiteShell locale={locale}>
       <section className="site-section">
@@ -70,6 +78,7 @@ export async function BillingView({
                     timeStyle: "short",
                   }).format(new Date(subscription.periodEnd))
                 : copy(locale, "未確定", "Not confirmed")}
+              {subscription.scheduledPlan && <> · {copy(locale,"変更予定","Scheduled change")}: {subscription.scheduledPlan} {subscription.scheduledAt ? new Date(subscription.scheduledAt).toLocaleDateString(locale):""}</>}
             </p>
           ))}
           <p>
@@ -161,11 +170,16 @@ export async function BillingView({
         )}
         {section === "manage" && (
           <>
+            {context.canManage && <CommerceControls locale={locale} currentPlan={status.subscriptions.find(s=>s.provider==="STRIPE" && s.status==="ACTIVE")?.plan ?? status.plan} purchase={status.presentation.billingActions.purchase} manage={status.presentation.billingActions.manage} selectedOffering={selectedOffering}/>}
             <p>
               {copy(
                 locale,
-                "外部決済は準備中です。プラン変更の内容を確認できます。",
-                "External checkout is unconfigured. You can review a plan change preview.",
+                externalConfigured
+                  ? "変更内容のプレビューも確認できます。支払い操作後は契約の確認結果が反映されます。"
+                  : "外部決済は準備中です。プラン変更の内容を確認できます。",
+                externalConfigured
+                  ? "You can also review a plan change preview. Billing changes appear after subscription confirmation."
+                  : "External checkout is unconfigured. You can review a plan change preview.",
               )}
             </p>
             {context.canManage && store && (

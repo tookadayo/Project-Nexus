@@ -9,22 +9,113 @@ import {
   type PlanChangePreview,
 } from "../domain";
 import type { Plan } from "../../plan-registry";
+import {
+  commercialDiscountEvidenceSchema,
+  type PromotionCheckoutContext,
+} from "../policy";
+import type { BillingOffering } from "../offerings";
 export type ProviderEventOrdering = "MONOTONIC_VERSION" | "RECONCILE_LATEST";
 export type CheckoutRequest = {
   scope: Scope;
+  operationId: string;
   offeringId: string;
   offering: import("../offerings").BillingOffering;
   idempotencyKey: string;
-  promotionReservationId?: string;
+  /** Core-owned fixed expiry, stable across retries of one Checkout operation. */
+  checkoutExpiresAt?: string;
+  customer?: TrustedProviderCustomerReference;
+  promotion?: PromotionCheckoutContext;
+  /** Core persists an SDK-created Customer before the next external mutation. */
+  onCustomerCreated?: (customerRef: string) => Promise<void>;
 };
-export type PortalRequest = { scope: Scope; idempotencyKey: string };
+export type TrustedProviderCustomerReference = {
+  provider: BillingProviderKind;
+  bindingId: string;
+  customerRef: string;
+};
+export type TrustedProviderSubscriptionReference = {
+  provider: BillingProviderKind;
+  bindingId: string;
+  subscriptionRef: string;
+};
+export type PortalRequest = {
+  scope: Scope;
+  customer: TrustedProviderCustomerReference;
+  idempotencyKey: string;
+};
+export type CheckoutSessionResult = {
+  url: string;
+  expiresAt: string;
+  providerCheckoutRef: string;
+  /** Present only when the authoritative Customer is already known at session creation. */
+  providerCustomerRef?: string;
+};
+// Discord's native store URL is not an expiring Checkout Session.
+export type NativeCheckoutResult = {
+  url: string;
+  expiresAt?: never;
+  providerCheckoutRef?: never;
+};
+export type PortalSessionResult = { url: string; cacheUntil?: string };
+export type ChangeSubscriptionRequest = {
+  scope: Scope;
+  subscription: TrustedProviderSubscriptionReference;
+  offering: BillingOffering;
+  /** Core-resolved current identity; optional only for legacy adapters. */
+  currentOffering?: BillingOffering;
+  idempotencyKey: string;
+  policy: {
+    effective: "IMMEDIATE" | "AT_PERIOD_END";
+    proration: "NONE" | "PROVIDER_CALCULATED";
+  };
+};
+export type CancelSubscriptionRequest = {
+  scope: Scope;
+  subscription: TrustedProviderSubscriptionReference;
+  policy: "IMMEDIATE" | "AT_PERIOD_END";
+  idempotencyKey: string;
+};
 export type ProviderSignal = {
   eventId: string;
   provider: BillingProviderKind;
-  scope: Scope;
+  /** Untrusted metadata claim; Core must resolve ownership from a stored binding. */
+  scope?: Scope;
   subscriptionRef: string;
+  customerRef?: string;
+  checkoutOperationId?: string;
+  checkoutRef?: string;
+  /** Verified provider object relationship, never copied from metadata. */
+  bindingEvidence?:
+    | {
+        kind: "CUSTOMER_SUBSCRIPTION";
+        customerRef: string;
+        subscriptionRef: string;
+      }
+    | {
+        kind: "CHECKOUT_SUBSCRIPTION";
+        checkoutRef: string;
+        subscriptionRef: string;
+        customerRef?: string;
+      };
 };
 export type ReconcileTarget = { subscriptionRef?: string; signalId?: string };
+export type ProviderReconcileRequest = {
+  scope: Scope;
+  customer?: TrustedProviderCustomerReference;
+  subscriptions: TrustedProviderSubscriptionReference[];
+  offerings: BillingOffering[];
+  target?: TrustedProviderSubscriptionReference;
+  promotions?: PromotionCheckoutContext[];
+};
+export type ProviderReconcileResult =
+  | { kind: "TARGET_FOUND"; subscription: NormalizedBillingEvent }
+  | { kind: "TARGET_ABSENT"; subscriptionRef: string }
+  | { kind: "FULL_CENSUS"; complete: true; events: NormalizedBillingEvent[] }
+  | {
+      kind: "INCOMPLETE";
+      events: NormalizedBillingEvent[];
+      reason: "NETWORK_FAILURE" | "PARTIAL" | "AMBIGUOUS";
+    };
 const providerTime = z.iso
   .datetime({ offset: true })
   .transform((value) => new Date(value).toISOString());
@@ -40,6 +131,16 @@ export const normalizedBillingEventSchema = z
       .strict(),
     subscriptionRef: z.string().min(1).max(200),
     plan: z.enum(plans),
+    // Alpha.5 snapshots omit this; Core canonically projects those as revision 2.
+    planRevision: z.number().int().positive().optional(),
+    offeringAssociation: z
+      .object({
+        offeringId: z.uuid(),
+        fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      })
+      .strict()
+      .optional(),
+    scheduledOfferingAssociation: z.object({offeringId:z.uuid(),fingerprint:z.string().regex(/^[a-f0-9]{64}$/)}).strict().optional(),
     status: z.enum(subscriptionStates),
     occurredAt: providerTime,
     ordering: z.enum(["MONOTONIC_VERSION", "RECONCILE_LATEST"]).optional(),
@@ -48,46 +149,67 @@ export const normalizedBillingEventSchema = z
     scheduledPlan: z.enum(plans).nullable().default(null),
     scheduledAt: providerTime.nullable().default(null),
     authoritative: z.boolean(),
+    commercialEvidence: commercialDiscountEvidenceSchema.optional(),
   })
   .strict();
 export type NormalizedBillingEvent = z.infer<
   typeof normalizedBillingEventSchema
 >;
+export const providerReconcileResultSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("TARGET_FOUND"),
+      subscription: normalizedBillingEventSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("TARGET_ABSENT"),
+      subscriptionRef: z.string().min(1).max(200),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("FULL_CENSUS"),
+      complete: z.literal(true),
+      events: z.array(normalizedBillingEventSchema),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("INCOMPLETE"),
+      events: z.array(normalizedBillingEventSchema),
+      reason: z.enum(["NETWORK_FAILURE", "PARTIAL", "AMBIGUOUS"]),
+    })
+    .strict(),
+]);
 export interface BillingProvider {
   readonly kind: BillingProviderKind;
   readonly ordering: ProviderEventOrdering;
-  createPortalSession(
-    input: PortalRequest,
-  ): Promise<{ url: string; expiresAt?: string }>;
+  createPortalSession(input: PortalRequest): Promise<PortalSessionResult>;
   verifyWebhook(
     body: Buffer,
     headers: Record<string, string>,
   ): Promise<ProviderSignal[]>;
   createCheckout(
     input: CheckoutRequest,
-  ): Promise<{ url: string; expiresAt?: string }>;
+  ): Promise<CheckoutSessionResult | NativeCheckoutResult>;
   previewPlanChange(
     scope: Scope,
     preview: PlanChangePreview,
   ): Promise<PlanChangePreview>;
-  changeSubscription(input: {
-    scope: Scope;
-    offeringId: string;
-    idempotencyKey: string;
-  }): Promise<void>;
+  changeSubscription(input: ChangeSubscriptionRequest): Promise<void>;
   cancel(
-    scope: Scope,
-    idempotencyKey: string,
+    input: CancelSubscriptionRequest,
   ): Promise<{ scheduledAt: string | null }>;
-  reconcile(
-    scope: Scope,
-    target?: ReconcileTarget,
-  ): Promise<NormalizedBillingEvent[]>;
+  reconcile(input: ProviderReconcileRequest): Promise<ProviderReconcileResult>;
   parseEvent(
     body: Buffer,
     headers: Record<string, string>,
   ): Promise<NormalizedBillingEvent[]>;
-  currentSubscription(scope: Scope): Promise<EntitlementSubscription | null>;
+  currentSubscription(
+    input: TrustedProviderSubscriptionReference,
+  ): Promise<EntitlementSubscription | null>;
 }
 export class UnconfiguredBillingProvider implements BillingProvider {
   readonly kind: BillingProviderKind;
@@ -106,8 +228,8 @@ export class UnconfiguredBillingProvider implements BillingProvider {
     return this.kind === "STRIPE" ? "RECONCILE_LATEST" : "MONOTONIC_VERSION";
   }
   async createPortalSession(
-    _input: PortalRequest,
-  ): Promise<{ url: string; expiresAt?: string }> {
+    _input: PortalRequest | { scope: Scope; idempotencyKey: string },
+  ): Promise<PortalSessionResult> {
     assert(false, "BILLING_PROVIDER_NOT_CONFIGURED", 503);
   }
   async verifyWebhook(
@@ -120,7 +242,7 @@ export class UnconfiguredBillingProvider implements BillingProvider {
     _input: CheckoutRequest | Scope,
     _plan?: Plan,
     _idempotencyKey?: string,
-  ): Promise<{ url: string; expiresAt?: string }> {
+  ): Promise<CheckoutSessionResult | NativeCheckoutResult> {
     assert(false, "BILLING_PROVIDER_NOT_CONFIGURED", 503);
   }
   async previewPlanChange(
@@ -131,19 +253,22 @@ export class UnconfiguredBillingProvider implements BillingProvider {
     assert(false, "BILLING_PROVIDER_NOT_CONFIGURED", 503);
   }
   async cancel(
-    _scope: Scope,
-    _idempotencyKey: string,
+    _input: CancelSubscriptionRequest | Scope,
+    _idempotencyKey?: string,
   ): Promise<{ scheduledAt: string | null }> {
     assert(false, "BILLING_PROVIDER_NOT_CONFIGURED", 503);
   }
-  async changeSubscription(_input: {
-    scope: Scope;
-    offeringId: string;
-    idempotencyKey: string;
-  }): Promise<void> {
+  async changeSubscription(
+    _input:
+      | ChangeSubscriptionRequest
+      | { scope: Scope; offeringId: string; idempotencyKey: string },
+  ): Promise<void> {
     assert(false, "BILLING_PROVIDER_NOT_CONFIGURED", 503);
   }
-  async reconcile(_scope: Scope): Promise<NormalizedBillingEvent[]> {
+  async reconcile(
+    _input: ProviderReconcileRequest | Scope,
+    _legacyTarget?: ReconcileTarget,
+  ): Promise<ProviderReconcileResult> {
     assert(false, "BILLING_PROVIDER_NOT_CONFIGURED", 503);
   }
   async parseEvent(
@@ -153,7 +278,7 @@ export class UnconfiguredBillingProvider implements BillingProvider {
     assert(false, "BILLING_PROVIDER_NOT_CONFIGURED", 503);
   }
   async currentSubscription(
-    _scope: Scope,
+    _input: TrustedProviderSubscriptionReference | Scope,
   ): Promise<EntitlementSubscription | null> {
     assert(false, "BILLING_PROVIDER_NOT_CONFIGURED", 503);
   }

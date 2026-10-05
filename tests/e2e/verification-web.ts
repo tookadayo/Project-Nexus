@@ -37,6 +37,9 @@ const child = spawn(
       API_KEY: "verification-api-key",
       NEXT_TELEMETRY_DISABLED: "1",
       NEXUS_DISCORD_BILLING_ENABLED: "false",
+      // Explicit developer locale lets this fixture exercise the unconfigured
+      // provider boundary. Discord parity failures have dedicated tests.
+      NEXUS_BILLING_DEVELOPER_COUNTRY: "JP",
       NEXUS_INTERNAL_ADMIN_IDS: "911111111111111111",
     },
   },

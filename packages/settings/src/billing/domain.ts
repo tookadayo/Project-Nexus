@@ -91,10 +91,9 @@ export function subscriptionPlan(
     (subscription.status === "TRIALING" && subscription.trialAllowed === false)
   )
     return null;
-  if (subscription.status === "CANCELED")
-    return subscription.provider === "STRIPE" && end !== null && end > at
-      ? { plan: subscription.plan, grace: false }
-      : null;
+  // Paid-through access belongs to CANCEL_AT_PERIOD_END. Authoritative CANCELED
+  // ends access even if a provider clock or retained period boundary is ahead.
+  if (subscription.status === "CANCELED") return null;
   if (
     ["UNKNOWN", "PAST_DUE", "GRACE", "CONFLICT"].includes(subscription.status)
   ) {

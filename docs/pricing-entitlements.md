@@ -1,4 +1,4 @@
-# Pricing and entitlements v2 — alpha.5 hardening
+# Pricing and entitlements v2 — 0.6.0-alpha.7
 
 NEXUS sells history, analysis depth and community operations. No Discord surface
 requires a paid plan merely to observe it. Correct UNKNOWN/PARTIAL states, Metric
@@ -20,9 +20,11 @@ a production Scale RBAC/API workflow.
 
 Provisional internal monthly price points remain unchanged in the registry; they
 are not approved public offers.
-`pricingMetadata.publishPrices` remains false: ordinary public JA/EN pages do not
-publish currency-denominated prices. Hosted external checkout is unconfigured.
-Prices, currency, taxes and purchase availability require separate approval.
+Registry pricing metadata classifies these USD amounts as INTERNAL_PROVISIONAL.
+Server-owned `commercialLaunch` separates publication and Checkout enablement
+from product capabilities. Configured Sandbox exposes real hosted purchase CTAs;
+production hides unapproved prices and requires every Live launch gate. Tax,
+public prices and production purchase availability require separate approval.
 
 `plan-registry.ts` separates canonical features from numeric limits, at revision 2. Limits cover guilds, historyDays, monthlyObservedMembers, customRecipes,
 automationRules, scheduledReports, teamSeats, webhooks and apiRequestsMonthly.
@@ -63,3 +65,8 @@ clamp to 30/90/365/730 days. Enterprise `null` means no catalog visibility limit
 not infinite storage retention: requests remain bounded and only retained data
 can be returned. A contract may allow more than 730 days within the system bound.
 This change does not extend physical retention or the public retention promise.
+
+
+Current alpha.7 contracts and commerce: [contracts](billing/contract-hardening-alpha7.md)
+and [Stripe integration](billing/stripe-integration.md). Real Sandbox is tested;
+Stripe Live remains DISABLED.

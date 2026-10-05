@@ -1,4 +1,4 @@
-# Billing architecture — alpha.5 commercial foundation
+# Billing architecture — alpha.7 commercial foundation
 
 PostgreSQL is canonical. The existing `EntitlementService` is the one server-side
 decision boundary for Web, Discord, API presentation and workers. React copy and
@@ -25,15 +25,17 @@ immutable custom recipe keys. Existing usage history is not rewritten.
 
 Providers are STRIPE, DISCORD and MANUAL. Historical generic references are read-only EXTERNAL_LEGACY. The interface separates checkout,
 preview, cancellation, reconciliation, verified event parsing and subscription
-inspection. STRIPE/MANUAL are safe unconfigured adapters. The Stripe webhook
-route returns 503 and does not accept an unsigned event or invent a successful
-payment. The generic HMAC helper is a building block, not a claimed Stripe or
-Discord webhook implementation.
+inspection. STRIPE uses the official server-only SDK when its configuration is
+valid; MANUAL and disabled providers fail closed. The Stripe Node.js Webhook
+route verifies exact raw-body signatures with that SDK. Generic HMAC is test-only.
+See [alpha.7 contracts](billing/contract-hardening-alpha7.md) and
+[commerce integration](billing/stripe-integration.md).
 
-`receive` stores only adapter-verified normalized events; it never mutates a
+`receive` stores adapter-verified Discord events or trusted Stripe signals; it never mutates a
 subscription. The projector holds privacy and guild fences, then an account lock
 and inbox/subscription row locks. Provider event HMACs deduplicate delivery.
-Provider sequence and timestamp reject older events. Contradictory equal-order
+Discord/manual sequence and timestamp reject older events; Stripe uses
+RECONCILE_LATEST with internally fenced retrieval revisions. Contradictory equal-order
 events become CONFLICT. Failures persist bounded exponential retry scheduling and
 an NXS reference so poison events do not monopolize subsequent work. All locks,
 leases, retry clocks and states survive process/database restarts.
@@ -41,8 +43,9 @@ leases, retry clocks and states survive process/database restarts.
 The resolver supports TRIALING, ACTIVE, PAST_DUE, GRACE, CANCEL_AT_PERIOD_END,
 CANCELED, INCOMPLETE, UNKNOWN and CONFLICT. Only authoritative confirmation unlocks
 an upgrade. Redirect success or a Store-link click does not. Scheduled downgrades
-retain the confirmed plan until authoritative replacement. Cancellation retains
-confirmed access through the paid end. Unknown/unavailable providers preserve
+retain the confirmed plan until authoritative replacement. CANCEL_AT_PERIOD_END
+retains confirmed access through the paid end; authoritative CANCELED removes
+access immediately. Unknown/unavailable providers preserve
 bounded last-known-good access, with a configurable account grace (default 72
 hours after the confirmed end; indefinite entitlements use the last successful
 confirmation). No prior confirmation means no paid access.
@@ -80,7 +83,7 @@ History recovery is distinct from payment grace and never delays privacy deletio
 
 `BillingService.view(scope)` adds one versioned server presentation model to the
 canonical billing status. Web and Discord consume its feature decisions, available
-and planned feature lists, native capability/purchase URL, history request bound
+and planned feature lists, canonical billingActions, history request bound
 and current scoped benefits. `/billing/status` exposes this model after current
 OAuth, server verification and billing VIEW authorization, with `no-store`.
 `canManage` is separately checked against current billing mutation authority.

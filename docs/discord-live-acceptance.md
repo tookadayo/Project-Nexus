@@ -1,4 +1,4 @@
-# Discord live acceptance — alpha.5
+# Discord live acceptance — alpha.7
 
 Status: **PARTIAL** (2026-10-02). Read-only REST acceptance against the configured development guild passed: bot-member screening and flags were explicitly returned, capability discovery succeeded, and three channels were observable with a known current total. No identifiers or credentials were written to the public record. Automated tests use fake Discord transports, recorded metadata and local PostgreSQL/Redis. Developer Portal toggles and real multi-account actions have not been exercised. Controlled multi-account activity, live OAuth, Gateway reconnect/intent-loss acceptance and Developer Portal obfuscation toggles were **NOT RUN**. The environment provides one development Bot/guild but no controlled participants or the full seven-guild acceptance setup.
 

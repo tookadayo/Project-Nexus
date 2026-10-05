@@ -66,7 +66,7 @@ await pg.start();
 const databaseUrl = `postgresql://nexus:nexus@127.0.0.1:${pgPort}/postgres`,
   db = connect(databaseUrl);
 await migrate(db);
-await sql`INSERT INTO billing_offerings(id,plan_key,plan_revision,provider,enabled,currency,final_price_minor) VALUES('11111111-1111-4111-8111-111111111111','GROWTH',2,'STRIPE',true,'JPY',4900)`.execute(
+await sql`INSERT INTO billing_offerings(id,plan_key,plan_revision,provider,enabled,currency,final_price_minor,provider_product_id,provider_price_id,tax_behavior) VALUES('11111111-1111-4111-8111-111111111111','GROWTH',2,'STRIPE',true,'JPY',4900,'fixture-product-verification-growth','fixture-price-verification-growth','EXCLUSIVE')`.execute(
   db,
 );
 class VerificationDiscord extends FakeDiscord {

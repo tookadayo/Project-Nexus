@@ -1,2 +1,3 @@
 import {webAuthMode} from '../../packages/config/src/web-auth';
-export function register(){webAuthMode();}
+import {webOrigin} from '../../packages/config/src/web-origin';
+export function register(){webAuthMode();webOrigin();}

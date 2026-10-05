@@ -7,6 +7,8 @@ import {
   UnconfiguredBillingProvider,
   type NormalizedBillingEvent,
   type CheckoutRequest,
+  type ProviderReconcileRequest,
+  type ProviderReconcileResult,
 } from "./types";
 export type NativeBillingCapability =
   "AVAILABLE" | "UNSUPPORTED_DEVELOPER_LOCALE" | "NOT_CONFIGURED" | "DISABLED";
@@ -164,11 +166,22 @@ export class DiscordBillingProvider extends UnconfiguredBillingProvider {
       ["STARTER", "GROWTH", "SCALE"].includes(plan),
       "BILLING_OFFERING_UNAVAILABLE",
     );
+    assert(
+      input.offering.id === input.offeringId &&
+        input.offering.providerNeutralOfferingId ===
+          this.config.skus[plan as keyof typeof this.config.skus],
+      "BILLING_OFFERING_MAPPING_MISMATCH",
+      409,
+    );
+    assert(!input.promotion, "PROMOTION_PROVIDER_UNSUPPORTED", 409);
     const url = discordStoreUrl(this.config, plan);
     assert(url, "BILLING_PROVIDER_NOT_CONFIGURED", 503);
     return { url };
   }
-  override async reconcile(scope: Scope) {
+  override async reconcile(
+    input: ProviderReconcileRequest,
+  ): Promise<ProviderReconcileResult> {
+    const scope = input.scope;
     assert(
       nativeBillingCapability(this.config) === "AVAILABLE" &&
         this.discord.billingEntitlements,
@@ -176,16 +189,28 @@ export class DiscordBillingProvider extends UnconfiguredBillingProvider {
       503,
     );
     const now = new Date();
-    return (await this.discord.billingEntitlements(scope.guildId)).flatMap(
-      (entitlement) => {
-        const event = discordEntitlementEvent(
-          scope,
-          entitlement,
-          this.config,
-          now,
-        );
-        return event ? [event] : [];
-      },
-    );
+    const events = (
+      await this.discord.billingEntitlements(scope.guildId)
+    ).flatMap((entitlement) => {
+      const event = discordEntitlementEvent(
+        scope,
+        entitlement,
+        this.config,
+        now,
+      );
+      return event ? [event] : [];
+    });
+    if (input.target) {
+      const subscription = events.find(
+        (event) => event.subscriptionRef === input.target!.subscriptionRef,
+      );
+      return subscription
+        ? { kind: "TARGET_FOUND", subscription }
+        : {
+            kind: "TARGET_ABSENT",
+            subscriptionRef: input.target.subscriptionRef,
+          };
+    }
+    return { kind: "FULL_CENSUS", complete: true, events };
   }
 }

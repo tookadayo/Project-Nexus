@@ -12,6 +12,8 @@ import {
   discordBillingConfiguration,
   nativeBillingCapability,
   StripeBillingProvider,
+  stripeConfiguration,
+  PromotionReservationService,
 } from "../../../packages/settings/src/billing";
 export class BillingWorker {
   constructor(
@@ -28,6 +30,7 @@ export class BillingWorker {
     for (let i = 0; i < 20; i++) {
       if (!(await new BillingService(this.db, this.vault).projectOne())) break;
     }
+    await new PromotionReservationService(this.db,this.vault).finalizeConfirmed();
   }
   async tick(s: Scope) {
     const billing = new BillingService(this.db, this.vault);
@@ -36,34 +39,38 @@ export class BillingWorker {
       await billing.refreshState(s, tx);
     });
     const config = discordBillingConfiguration();
-    if (nativeBillingCapability(config) !== "AVAILABLE") return;
+    for (const provider of [
+      ...(nativeBillingCapability(config) === "AVAILABLE" ? [new DiscordBillingProvider(this.discord,config)] : []),
+      ...(stripeConfiguration().capability === "AVAILABLE" ? [new StripeBillingProvider()] : []),
+    ]) {
     const lease = randomUUID();
     const claimed = await this.db.transaction().execute(async (tx) => {
       await billingScopeLock(tx, s);
-      await sql`INSERT INTO billing_reconcile_jobs(organization_id,guild_id,provider) VALUES(${s.organizationId}::uuid,${s.guildId},'DISCORD') ON CONFLICT DO NOTHING`.execute(
+      await sql`INSERT INTO billing_reconcile_jobs(organization_id,guild_id,provider) VALUES(${s.organizationId}::uuid,${s.guildId},${provider.kind}) ON CONFLICT DO NOTHING`.execute(
         tx,
       );
       return (
         (
-          await sql`UPDATE billing_reconcile_jobs SET lease_token=${lease}::uuid,lease_until=now()+interval '2 minutes' WHERE ${tenant(s)} AND provider='DISCORD' AND due_at<=now() AND (lease_until IS NULL OR lease_until<now()) RETURNING guild_id`.execute(
+          await sql`UPDATE billing_reconcile_jobs SET lease_token=${lease}::uuid,lease_until=now()+interval '2 minutes' WHERE ${tenant(s)} AND provider=${provider.kind} AND due_at<=now() AND (lease_until IS NULL OR lease_until<now()) RETURNING guild_id`.execute(
             tx,
           )
         ).rows.length > 0
       );
     });
-    if (!claimed) return;
+    if (!claimed) continue;
     let failed = false;
     try {
       await billing.reconcile(
         s,
-        new DiscordBillingProvider(this.discord, config),
+        provider,
       );
     } catch {
       failed = true;
-      await billing.markProviderUnavailable(s, "DISCORD");
+      await billing.markProviderUnavailable(s, provider.kind);
     }
-    await sql`UPDATE billing_reconcile_jobs SET due_at=now()+make_interval(secs=>${failed ? 300 : 3600}),lease_until=NULL,lease_token=NULL,failures=CASE WHEN ${failed} THEN failures+1 ELSE 0 END WHERE ${tenant(s)} AND provider='DISCORD' AND lease_token=${lease}::uuid`.execute(
+    await sql`UPDATE billing_reconcile_jobs SET due_at=now()+make_interval(secs=>${failed ? 300 : 3600}),lease_until=NULL,lease_token=NULL,failures=CASE WHEN ${failed} THEN failures+1 ELSE 0 END WHERE ${tenant(s)} AND provider=${provider.kind} AND lease_token=${lease}::uuid`.execute(
       this.db,
     );
+    }
   }
 }

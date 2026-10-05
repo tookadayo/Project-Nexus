@@ -17,7 +17,7 @@ import {
   resolveEntitlements,
   featureDecision,
 } from "../../packages/settings/src/billing";
-import { verifyBillingHmac } from "../../packages/security/src/billing-signature";
+import { verifyBillingHmac } from "../helpers/billing-signature";
 import { visibleMetrics } from "../../packages/settings/src/metric-visibility";
 import {
   observedSurfaceUsage,

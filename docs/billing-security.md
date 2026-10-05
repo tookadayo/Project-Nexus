@@ -16,12 +16,22 @@ same-origin POST. API tenant credentials are not billing actors. Discord billing
 management and promotion replies are ephemeral. Ordinary members receive no
 purchase paywall or public-channel upgrade advertisement.
 
-External HTTP events fail closed while their real provider is unconfigured. A
-future adapter must verify the provider's exact signature format on bounded raw
-bytes, timestamp/replay policy, account/application ownership and scope mapping
-before returning an authoritative normalized event. Never trust a caller-supplied
-authoritative flag at an HTTP boundary. HMAC utility tests do not demonstrate live
-Stripe verification. Checkout/session IDs are not proof of paid entitlement.
+Stripe HTTP events fail closed when unconfigured. The official SDK verifies the
+exact raw bytes and Stripe-Signature on the Node.js route, with both declared and
+actual 64KiB size limits. Events become deduplicated signals after trusted
+Customer/Subscription/operation scope binding; they never directly become paid
+entitlement. Core retrieves current Stripe API state and serializes snapshot
+revisions. Event creation time, metadata guild IDs and success redirects confer
+no authority. The generic HMAC helper is confined to test fixtures, never Stripe
+verification. Checkout/session IDs are not proof of paid entitlement.
+
+Commercial identity locks when used. Idempotency fingerprints bind full Offering
+and promotion terms; leases fence overlapping Checkout/change/cancel calls.
+Unknown transport or partial mutation outcomes require reconciliation. Customer
+references use keyed lookup digests and tenant-sealed retrieval values, with one
+Customer per Billing Account and one guild per subscription. Sandbox rejects live
+keys/objects; enabled production rejects test keys. Live purchase additionally
+requires all documented commercial and operational approvals.
 
 Provider event/reference keys use keyed digests; required provider references are
 encrypted with tenant IdentityVault encryption. Codes use random one-time plaintext
@@ -68,3 +78,9 @@ not promotion code inventories or internal campaigns. Discord plan views now sho
 provider/subscription state; their existing ephemeral interaction flow is retained.
 History reads explicitly reject privacy-deleted scopes. A contract visibility
 limit and billing recovery cannot authorize access to privacy-deleted data.
+
+
+Current alpha.7 details: [contracts](billing/contract-hardening-alpha7.md) and
+[Stripe integration](billing/stripe-integration.md). Real Sandbox purchase and
+signed delivery are tested. Stripe Live remains DISABLED; production keys/webhook,
+Discord approval/parity and hosted operational readiness remain release gates.

@@ -123,7 +123,7 @@ it("seeds every immutable catalog revision without altering legacy usage or pric
         n: number;
       }>`SELECT count(*)::integer AS n FROM schema_migrations`.execute(db)
     ).rows[0]!.n,
-  ).toBe(38);
+  ).toBe(40);
   await expect(
     sql`UPDATE billing_plan_versions SET limits='{}' WHERE plan_key='FREE'`.execute(
       db,
@@ -372,7 +372,16 @@ it("failed provider projection is durably backed off and does not block later gu
     ref = "scoped-private-fixture";
   await a.billing.storeVerified(event(a.s, { subscriptionRef: ref }));
   await a.billing.projectOne();
-  await b.billing.storeVerified(event(b.s, { subscriptionRef: ref }));
+  await expect(
+    b.billing.storeVerified(event(b.s, { subscriptionRef: ref })),
+  ).rejects.toThrow("BILLING_SCOPE_CONFLICT");
+  // A pre-existing poison inbox row still needs bounded backoff even though the
+  // alpha.7 ingress guard now rejects this ownership conflict before insertion.
+  const poisoned = event(b.s, { subscriptionRef: ref });
+  const { eventId, subscriptionRef, ...normalized } = poisoned;
+  await sql`INSERT INTO billing_provider_events(id,provider,event_digest,organization_id,guild_id,normalized,verified_at) VALUES(${randomUUID()}::uuid,'MANUAL',${vault.digest("billing-event:MANUAL", eventId)},${b.s.organizationId}::uuid,${b.s.guildId},${JSON.stringify({ ...normalized, eventDigest: vault.digest("billing-event:MANUAL", eventId), referenceDigest: vault.digest("billing-reference:MANUAL", subscriptionRef), referenceCiphertext: vault.seal(b.s, subscriptionRef) })}::jsonb,now())`.execute(
+    db,
+  );
   await c.billing.storeVerified(event(c.s));
   await b.billing.projectOne();
   await c.billing.projectOne();
@@ -773,11 +782,11 @@ it.each([
     const externalId = randomUUID(),
       discordId = randomUUID();
     try {
-      await sql`INSERT INTO billing_offerings(id,plan_key,plan_revision,provider,enabled,currency,final_price_minor) VALUES(${externalId}::uuid,'GROWTH',2,'STRIPE',true,'USD',4900)`.execute(
+      await sql`INSERT INTO billing_offerings(id,plan_key,plan_revision,provider,enabled,currency,final_price_minor,provider_product_id,provider_price_id,tax_behavior,parity_reviewed_at) VALUES(${externalId}::uuid,'GROWTH',2,'STRIPE',true,'USD',4900,${"fixture-product-" + externalId},${"fixture-price-" + externalId},'EXCLUSIVE',now())`.execute(
         db,
       );
       if (input.discord)
-        await sql`INSERT INTO billing_offerings(id,plan_key,plan_revision,provider,enabled,currency,final_price_minor,parity_reviewed_at) VALUES(${discordId}::uuid,'GROWTH',2,'DISCORD',true,${input.currency},${input.price},${input.reviewed ? new Date() : null})`.execute(
+        await sql`INSERT INTO billing_offerings(id,plan_key,plan_revision,provider,provider_offering_id,enabled,currency,final_price_minor,parity_reviewed_at,tax_behavior) VALUES(${discordId}::uuid,'GROWTH',2,'DISCORD',${"fixture-sku-" + discordId},true,${input.currency},${input.price},${input.reviewed ? new Date() : null},'EXCLUSIVE')`.execute(
           db,
         );
       const f = await fixture(),
@@ -805,7 +814,7 @@ it.each([
         expect(await f.entitlements.plan(f.s)).toBe("FREE");
       }
     } finally {
-      await sql`DELETE FROM billing_offerings WHERE id IN (${externalId}::uuid,${discordId}::uuid)`.execute(
+      await sql`UPDATE billing_offerings SET enabled=false WHERE id IN (${externalId}::uuid,${discordId}::uuid)`.execute(
         db,
       );
       vi.unstubAllEnvs();

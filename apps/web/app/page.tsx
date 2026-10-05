@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import { headers } from "next/headers";
+import { webOrigin } from "../../../packages/config/src/web-origin";
 import { installUrl } from "./auth/session";
 import { siteLocale } from "./public-ui";
 import { faqs, text, type Locale } from "./landing/content";
@@ -37,9 +38,7 @@ function HeadingCopy({
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await siteLocale();
   const request = await headers();
-  const origin =
-    process.env.NEXUS_WEB_URL ??
-    `${request.get("x-forwarded-proto") ?? "http"}://${request.get("host") ?? "localhost:3100"}`;
+  const origin = webOrigin({ headers: request });
   const title = text(
     locale,
     "NEXUS — Discord community operations",
