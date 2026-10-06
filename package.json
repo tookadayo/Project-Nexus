@@ -1,6 +1,6 @@
 {
   "name": "nexus",
-  "version": "0.6.0-alpha.7",
+  "version": "0.6.0-alpha.8",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.19.0",
@@ -28,6 +28,7 @@
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/sdk-node": "^0.222.0",
+    "@resvg/resvg-js": "2.6.2",
     "bullmq": "^6.3.8",
     "discord-api-types": "^0.38.55",
     "discord.js": "^14.27.0",

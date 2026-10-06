@@ -1,8 +1,23 @@
-# Privacy data inventory — alpha.7
+# Privacy data inventory — alpha.8
 
 Commercial hardening adds a separate billing domain. Billing providers receive no
 community activity or message data. These operational records do not imply an
 invoice archive or established legal financial retention policy.
+
+alpha.8 adds scoped saved views/segments (aggregate filters), immutable Playbook
+definitions, report templates/schedules and aggregate evidence snapshots. Explicit
+intake answers are encrypted separately from message observations and are visible
+only to operation-authorized staff; member deletion removes that person's requests
+and associated Attention/events. No form plaintext enters audit or outbound payloads.
+API credentials retain only token digests/prefixes; outbound signing keys are sealed.
+Organization staff references are explicit administrative membership bindings,
+encrypted with lookup digests; they are not community-member tracking or a graph.
+Organization aggregates contain only guild-level evidence/health/counts. Guild
+deletion cascades these configurations; redacted operation audit records keep only
+safe scalar actor digests, action categories, target keys and revision/outcome.
+Downgrade pauses execution while retaining configuration, without extending privacy
+retention. Background Discord/webhook delivery holds its final privacy and source
+configuration fences through the bounded external request.
 
 | Billing domain                             | Persisted data                                                                                                     | Deletion / retention                                                                                                               |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
@@ -44,12 +59,11 @@ Detailed retention remains the configured 7/14/30 days. Existing anonymous aggre
 
 Message bodies, attachments, embeds, poll labels, forum titles, emoji meanings, presence, DM content, voice audio/transcripts and voice relationship graphs are excluded. Outbound administrator-authored messages are configuration/action payloads, not collected Discord content. No individual engagement score, moderator productivity ranking, cross-server identity or benchmark exists.
 
-`PrivacyService` serializes deletion against short DB mutations. REST is outside those transactions. A write already in flight cannot be atomically cancelled by PostgreSQL: workers check ownership before and after the request, avoid recreating deleted DB state, and compensate newly created panels/roles where supported. Already delivered outbound messages and unavailable compensation require operator review. Unknown writes are not treated as safely repeatable sends.
+`PrivacyService` serializes deletion against scoped mutations. Legacy panel/role REST writes run outside their DB transaction and require before/after ownership checks and compensation where supported. Alpha.8 chart/report/webhook sends retain a bounded final privacy/configuration fence through delivery, so deletion waits for the admitted send; later sends are rejected. PostgreSQL cannot cancel a remote write already in flight. Already delivered outbound messages and unavailable compensation require operator review. Unknown writes are not treated as safely repeatable sends.
 
 There is no public member export endpoint in the existing product. An operator-assisted access request must use the verified tenant/member scope, decrypt only that identity, and include applicable new typed projections. It must exclude other members' identities and credentials. Do not expose raw SQL or introduce an unauthenticated export route.
 
 Deletion and retention tests cover the typed projections, daily rollups, inbox, verification, scoped tenant collisions and absent content. [Intent operations](privileged-intent-operations.md) explains the privileged intent's purpose and review evidence.
-
 
 Current alpha.7 contracts and commerce: [contracts](billing/contract-hardening-alpha7.md)
 and [Stripe integration](billing/stripe-integration.md). Real Sandbox is tested;

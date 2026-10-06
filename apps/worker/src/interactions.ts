@@ -1,4 +1,10 @@
 import { AttentionOperations } from "../../../packages/operations/src/attention.js";
+import { OperationsIntake } from "../../../packages/operations/src/intake";
+import { operationsAccess } from "../../../packages/operations/src/policy";
+import { ExploreService } from "../../../packages/analytics/src/explore";
+import { chartQuerySchema } from "../../../packages/analytics/src/chart-spec";
+import { renderChartPng } from "../../../packages/analytics/src/chart-renderer";
+import { adaptivePresentation } from "../../../packages/presentation/src/adaptive";
 import {
   connectionCodePanel,
   disconnectPanel,
@@ -9,7 +15,12 @@ import { nextZonedDayStart } from "../../../packages/shared/src/timezones.js";
 import { discordDashboardLink } from "../../../packages/shared/src/web-link.js";
 import { advanceSetup } from "../../../packages/shared/src/setup-flow.js";
 import { PermissionFlagsBits } from "discord-api-types/v10";
-import { sql, tenant, type Database } from "../../../packages/db/src/index.js";
+import {
+  sql,
+  tenant,
+  privacyReadLock,
+  type Database,
+} from "../../../packages/db/src/index.js";
 import type { IdentityVault } from "../../../packages/identity/src/index.js";
 import {
   Components,
@@ -325,6 +336,10 @@ export class InteractionWorker {
       );
     }
     await this.db.transaction().execute(async (tx) => {
+      await privacyReadLock(tx, s);
+      const { nexusFiles, ...replyBody } = body as Panel & {
+        nexusFiles?: { filename: string; dataBase64: string }[];
+      };
       const interactionHash = this.vault.hash(s, input.id);
       await enqueue(
         tx,
@@ -334,7 +349,8 @@ export class InteractionWorker {
         {
           applicationId: input.applicationId,
           encryptedToken: this.vault.seal(s, input.token),
-          body,
+          body: replyBody,
+          ...(nexusFiles ? { files: nexusFiles } : {}),
           interactionHash,
         },
       );
@@ -388,6 +404,187 @@ export class InteractionWorker {
       ? await this.tokens.read(this.db, s, input.customId, actorHash)
       : { action: input.command };
     const action = String(intent.action ?? "");
+    if (action === "intakeSubmit") {
+      const result = await new OperationsIntake(
+        this.db,
+        this.vault,
+        this.discord,
+        this.tokens,
+      ).submit(s, actor, input.userId, input.id, intent, input.fields ?? {});
+      return {
+        content:
+          locale === "ja"
+            ? `運営へのリクエストを受け付けました。受付番号: ${result.id}`
+            : `Your operations request was received. Reference: ${result.id}`,
+        allowed_mentions: { parse: [] },
+      };
+    }
+    if (action === "overview") {
+      assert(
+        !member.bot && Date.now() - authorization.checkedAt <= 10000,
+        "GUILD_MEMBER_REQUIRED",
+        403,
+      );
+      await this.db
+        .transaction()
+        .execute((tx) => operationsAccess(tx, s, actor, "READ"));
+      const overview = await adaptivePresentation(
+        this.db,
+        s,
+        current,
+        30,
+        new Date(),
+        0,
+      );
+      const summary = overview.metrics.filter((metric) =>
+        [
+          "directReplies",
+          "postResponse",
+          "voiceCopresence",
+          "eventSubscriptions",
+          "eventAttendance",
+        ].includes(metric.key),
+      );
+      const changes = await this.db.transaction().execute(async (tx) => {
+        await privacyReadLock(tx, s);
+        assert(
+          !(await new EntitlementService(tx).effective(s)).privacyDeleted,
+          "PRIVACY_DELETED",
+          403,
+        );
+        return (
+          await sql<{
+            n: number;
+            latest: Date | null;
+          }>`SELECT count(*)::int AS n,max(occurred_at) AS latest FROM attention_events WHERE ${tenant(s)} AND occurred_at>=now()-interval '7 days'`.execute(
+            tx,
+          )
+        ).rows[0]!;
+      });
+      return {
+        content: `**Community Snapshot**\n${summary.map((metric) => `${metric.definition}: ${metric.evidence?.value ?? "UNKNOWN"} · ${metric.evidence?.coverageState ?? "UNKNOWN"}`).join("\n")}\nCoverage: ${overview.coverage.ratio === null ? "UNKNOWN" : Math.round(overview.coverage.ratio * 100) + "%"}\n${locale === "ja" ? "記録された対応状況の変化（7日）" : "Recorded attention changes (7 days)"}: ${changes.n}${changes.latest ? " · " + changes.latest.toISOString() : ""}\n${locale === "ja" ? "イベント申込は出席ではありません。" : "Event signup is not attendance."}`,
+        allowed_mentions: { parse: [] },
+      };
+    }
+    if (
+      [
+        "chart",
+        "compare",
+        "chartPeriod",
+        "support-health",
+        "newcomer-flow",
+      ].includes(action)
+    ) {
+      assert(
+        !member.bot && Date.now() - authorization.checkedAt <= 10000,
+        "GUILD_MEMBER_REQUIRED",
+        403,
+      );
+      await this.db
+        .transaction()
+        .execute((tx) =>
+          operationsAccess(tx, s, actor, "READ", "discord_charts"),
+        );
+      const options = input.commandOptions ?? intent;
+      const query = chartQuerySchema.parse({
+        metric: options.metric ?? "reply",
+        days: Number(options.days ?? 7),
+        compare: action === "compare" || options.compare === true,
+        timezone: current.timezone,
+      });
+      const explore = new ExploreService(this.db),
+        spec =
+          action === "support-health" || action === "newcomer-flow"
+            ? await explore.saved(s, action)
+            : await explore.chart(s, query);
+      const image = await renderChartPng(spec),
+        files = [
+          { filename: "nexus-chart.png", dataBase64: image.toString("base64") },
+        ];
+      const issueChart: Issue = (data) =>
+        this.tokens.issue(
+          this.db,
+          s,
+          { ...data, privateSettings: true },
+          actorHash,
+          900,
+        );
+      const web = await this.webLink(s);
+      const entitlement = await new EntitlementService(this.db).effective(s),
+        comparable = await new EntitlementService(this.db).can(
+          s,
+          "comparable_periods",
+        );
+      const buttons = await actionRow(issueChart, [
+        ...[7, 30, 90].map((days) => ({
+          label: `${days} days`,
+          action: "chartPeriod",
+          data: { metric: spec.metric, days, compare: query.compare },
+          disabled:
+            entitlement.limits.historyDays !== null &&
+            days * (query.compare ? 2 : 1) > entitlement.limits.historyDays,
+        })),
+        {
+          label: locale === "ja" ? "比較" : "Compare",
+          action: "chartPeriod",
+          data: { metric: spec.metric, days: spec.range.days, compare: true },
+          disabled:
+            !comparable ||
+            (entitlement.limits.historyDays !== null &&
+              spec.range.days * 2 > entitlement.limits.historyDays),
+        },
+      ]);
+      const body: Panel & { nexusFiles?: typeof files } = {
+        content: `**${spec.title}**\n${spec.range.from.slice(0, 10)} — ${spec.range.to.slice(0, 10)} · ${spec.evidence.coverageState}\n${locale === "ja" ? "観測された集計です。欠測を0や原因に置き換えません。" : "Aggregate observations. Missing data is not zero; changes are not causal claims."}`,
+        allowed_mentions: { parse: [] },
+        embeds: [{ image: { url: "attachment://nexus-chart.png" } }],
+        components: [
+          buttons,
+          ...(web.url
+            ? [
+                {
+                  type: 1 as const,
+                  components: [
+                    {
+                      type: 2 as const,
+                      style: 5 as const,
+                      label:
+                        locale === "ja" ? "Dashboardを開く" : "Open Dashboard",
+                      url: web.url,
+                    },
+                  ],
+                },
+              ]
+            : []),
+        ],
+      };
+      if (options.visibility === "channel") {
+        assert(input.channelId, "CHANNEL_REQUIRED", 400);
+        await this.discord.checkChannel(s.guildId, input.channelId);
+        await this.db.transaction().execute(async (tx) => {
+          await operationsAccess(tx, s, actor, "OPERATE", "discord_charts");
+          assert(
+            Date.now() - authorization.checkedAt <= 10000,
+            "AUTHORIZATION_EXPIRED",
+            403,
+          );
+          await enqueue(tx, s, `chart-publish:${input.id}`, "CHART_PUBLISH", {
+            channelId: input.channelId,
+            body,
+            files,
+          });
+        });
+        return {
+          content:
+            locale === "ja"
+              ? "権限を確認したチャンネルへのレポート送信を受け付けました。"
+              : "Chart publication queued for the authorized channel.",
+          allowed_mentions: { parse: [] },
+        };
+      }
+      body.nexusFiles = files;
+      return body;
+    }
     onStage(`action:${action}`);
     const requested = String(intent.page ?? input.values?.[0] ?? "");
     const returnPage = [

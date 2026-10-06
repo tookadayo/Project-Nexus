@@ -71,6 +71,10 @@ export async function migrate(
       "038_stripe_readiness",
       "039_billing_contract_hardening",
       "040_stripe_commerce",
+      "041_explore_views",
+      "042_community_operations",
+      "043_organization_operations",
+      "044_market_parity_plan_catalog",
     ].entries()) {
       const version = index + 1;
       if (

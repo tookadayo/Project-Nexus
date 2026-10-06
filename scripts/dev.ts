@@ -1,4 +1,5 @@
 import { AttentionOperations } from "../packages/operations/src/attention.js";
+import { CommunityOperationsWorker } from "../apps/worker/src/community-operations";
 import { loadEnvFile } from "node:process";
 import { hostname } from "node:os";
 import { Queue, Worker } from "bullmq";
@@ -90,6 +91,7 @@ const actions = new ActionWorker(
   interactionHealth,
   (s) => interactions.refreshHome(s),
 );
+const communityOperations = new CommunityOperationsWorker(db, vault);
 const interactions = new InteractionWorker(
   db,
   vault,
@@ -210,6 +212,7 @@ const worker = new Worker<Scope>(
         }
         await optimization.tick(s);
         await new AttentionOperations(db).observe(s, await settings.get(s));
+        await communityOperations.tick(s);
       } finally {
         span.end();
       }

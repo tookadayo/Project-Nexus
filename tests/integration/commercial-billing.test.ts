@@ -110,7 +110,7 @@ it("seeds every immutable catalog revision without altering legacy usage or pric
       await sql<{
         features: string[];
         limits: unknown;
-      }>`SELECT features,limits FROM billing_plan_versions WHERE plan_key=${plan} AND revision=2`.execute(
+      }>`SELECT features,limits FROM billing_plan_versions WHERE plan_key=${plan} AND revision=${planRegistry[plan].revision}`.execute(
         db,
       )
     ).rows[0]!;
@@ -123,7 +123,7 @@ it("seeds every immutable catalog revision without altering legacy usage or pric
         n: number;
       }>`SELECT count(*)::integer AS n FROM schema_migrations`.execute(db)
     ).rows[0]!.n,
-  ).toBe(40);
+  ).toBe(44);
   await expect(
     sql`UPDATE billing_plan_versions SET limits='{}' WHERE plan_key='FREE'`.execute(
       db,

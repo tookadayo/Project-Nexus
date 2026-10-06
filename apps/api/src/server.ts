@@ -15,6 +15,7 @@ import type { InteractionHealthSnapshot } from "../../interaction/src/health.js"
 import { runtimeInfo } from "../../../packages/shared/src/runtime-info.js";
 import { EntitlementService } from "../../../packages/settings/src/billing/index.js";
 import { visibleMetrics } from "../../../packages/settings/src/metric-visibility.js";
+import { registerOperationsApi } from "./commerce-operations";
 export function createApi(
   analytics: AnalyticsService,
   key: string,
@@ -216,6 +217,7 @@ export function createApi(
     },
   );
   if (db) {
+    if (vault) registerOperationsApi(app, db, vault);
     registerV02(app, db, key, discord);
     registerV03(app, db, key, discord, vault);
   }

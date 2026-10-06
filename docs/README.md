@@ -1,10 +1,13 @@
 # NEXUS documentation
 
-Current release: **0.6.0-alpha.7** — Stripe Commerce Launch Foundation. PostgreSQL is the normalized billing and
+Current release: **0.6.0-alpha.8** — Market Parity & Community Operations. PostgreSQL is the normalized billing and
 entitlement source of truth. Current documents retain their established paths
 where moving them would create unnecessary link churn.
 
 ## Website design
+
+- [alpha.8 implementation and validation](alpha8-community-operations.md)
+- [alpha.8 market parity decisions](research/alpha8-market-parity.md)
 
 - [Project Nexus product website and verified claims](design/nexus-website.md)
 - [Website visual review and QA](design/nexus-website-qa.md)

@@ -1,5 +1,20 @@
 # Attention and team operations
 
+## Alpha.8 execution
+
+The authenticated Attention Inbox retains Basic Attention reads for Free and adds
+Growth operations with evidence, optimistic versions, assignment and an event history.
+Growth Playbooks store immutable revisions for Attention/trend triggers, minimum
+sample conditions, destinations, escalation and comparable intervention measurements.
+Scale adds explicit team routing and independent approval; a revised head returns
+to DRAFT. Historical dry runs emit counts and coverage suppression, never an action.
+
+Scheduled weekly/monthly reports use timezone-safe due times and current saved views
+or immutable template queries. PNG reports and Scale CSV/JSON exports record delivery
+separately from queue acceptance. Scoped read API and signed webhook deliveries share
+the domain's entitlements/privacy fences. See [alpha.8 implementation and acceptance](alpha8-community-operations.md)
+for limits, deployment requirements and validation.
+
 The existing Attention lifecycle remains OPEN, ACKNOWLEDGED, SNOOZED, RESOLVED. Alpha.5 persists the reason, target surface, threshold, evidence, opened/acknowledged/resolved timestamps and resolution reason. Legacy acknowledgement/open timestamps remain unknown; they are excluded from latency statistics.
 
 Text newcomer posts require a direct human reply. Administrator-mapped Support and LFG posts require another human participant in the observed post. Reactions, mentions, archive and lock do not resolve the queue. Forum response observations never set the direct-reply flag. Observed replies can automatically close a corresponding operational item. Operational resolution is separate from confirmed question resolution.

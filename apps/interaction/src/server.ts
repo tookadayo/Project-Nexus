@@ -1,5 +1,6 @@
 import { notificationModal } from "./settings-modal.js";
 import { promotionModal } from "./billing-modal";
+import { OperationsIntake } from "../../../packages/operations/src/intake";
 import { BillingAuthorization } from "../../../packages/security/src/billing-authorization";
 import { ServerAuthorization } from "../../../packages/security/src/server-authorization";
 import { communityModal, modalFields } from "./community-modal.js";
@@ -49,7 +50,20 @@ const interaction = z.object({
     custom_id: z.string().max(100).optional(),
     values: z.array(z.string().max(100)).max(25).optional(),
     options: z
-      .array(z.object({ name: z.string().max(100) }))
+      .array(
+        z.object({
+          name: z.string().max(100),
+          options: z
+            .array(
+              z.object({
+                name: z.string().max(30),
+                value: z.union([z.string().max(100), z.number(), z.boolean()]),
+              }),
+            )
+            .max(8)
+            .optional(),
+        }),
+      )
       .max(10)
       .optional(),
     components: z
@@ -84,6 +98,7 @@ export type InteractionJob = {
   targetMessageId?: string;
   targetUserId?: string;
   command?: string;
+  commandOptions?: Record<string, string | number | boolean>;
   customId?: string;
   values?: string[];
   fields?: Record<string, string>;
@@ -204,6 +219,15 @@ export async function handleGatewayInteraction(
               ),
               locale,
             );
+          }
+          if (intent.action === "intakeOpen") {
+            if (!opts.discord) throw new Error("DISCORD_UNAVAILABLE");
+            return new OperationsIntake(
+              opts.db,
+              opts.vault,
+              opts.discord,
+              opts.components,
+            ).modal(s, userId, intent);
           }
           if (
             intent.action !== "editNodeOpen" &&
@@ -367,6 +391,15 @@ export async function handleGatewayInteraction(
         : input.isContextMenuCommand?.()
           ? contextAction[input.commandName as keyof typeof contextAction]
           : undefined,
+    commandOptions: input.isChatInputCommand()
+      ? Object.fromEntries(
+          (input.options.data ?? [])
+            .flatMap((option) => option.options ?? [])
+            .flatMap((option) =>
+              option.value === undefined ? [] : [[option.name, option.value]],
+            ),
+        )
+      : undefined,
     customId,
     values: input.isAnySelectMenu() ? input.values : undefined,
     fields: input.isModalSubmit()
@@ -498,6 +531,15 @@ export function createInteractionServer(opts: {
               input.data.custom_id!,
               opts.vault.hash(s, input.member.user.id),
             );
+            if (intent.action === "intakeOpen") {
+              if (!opts.discord) throw new Error("DISCORD_UNAVAILABLE");
+              return new OperationsIntake(
+                opts.db,
+                opts.vault,
+                opts.discord,
+                opts.components!,
+              ).modal(s, input.member.user.id, intent);
+            }
             if (intent.action !== "billingPromotionOpen") return null;
             if (!opts.discord)
               throw new Error("BILLING_AUTHORIZATION_UNAVAILABLE");
@@ -695,6 +737,12 @@ export function createInteractionServer(opts: {
           : contextName
             ? contextAction[contextName]
             : undefined,
+      commandOptions: Object.fromEntries(
+        (input.data.options?.[0]?.options ?? []).map((option) => [
+          option.name,
+          option.value,
+        ]),
+      ),
       customId: input.data.custom_id,
       values: input.data.values,
       fields:

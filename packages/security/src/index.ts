@@ -100,6 +100,7 @@ export class Components {
       "controlNotificationEdit",
       "controlModelEdit",
       "billingPromotionOpen",
+      "intakeOpen",
     ].includes(String(intent.action))
       ? "modal:"
       : intent.privateSettings === true ||

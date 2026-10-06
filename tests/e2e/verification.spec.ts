@@ -218,6 +218,9 @@ for (const locale of ["en", "ja"])
     context,
     request,
   }) => {
+    await request.post(`${fixture}/fixture/operations-plan`, {
+      data: { guildId: ids[0], plan: "FREE" },
+    });
     await signIn(context, user, locale);
     await context.addCookies([
       { name: "nexus_guild", value: ids[0]!, url: base },
@@ -362,3 +365,364 @@ for (const locale of ["en", "ja"])
       });
     }
   });
+
+for (const locale of ["en", "ja"])
+  test(`operations tiers, real exports and editable forms fit 360px (${locale})`, async ({
+    page,
+    context,
+    request,
+  }) => {
+    const guildId = locale === "ja" ? ids[1]! : ids[0]!;
+    await signIn(context, user, locale);
+    await context.addCookies([
+      { name: "nexus_guild", value: guildId, url: base },
+    ]);
+    await page.setViewportSize({ width: 360, height: 800 });
+    const headers = { origin: base, "sec-fetch-site": "same-origin" };
+    // Reuse the earlier verified connection in the full suite. A filtered run
+    // establishes its own connection instead of consuming redundant redemption
+    // attempts and tripping the real user-wide verification rate limit.
+    if (!(await page.request.get("/operations/data?view=attention")).ok()) {
+      const { code } = await (
+        await request.post(`${fixture}/fixture/code`, { data: { guildId } })
+      ).json();
+      expect(
+        (
+          await page.request.post("/link/redeem", { headers, data: { code } })
+        ).ok(),
+      ).toBe(true);
+    }
+    async function tier(plan: string) {
+      expect(
+        (
+          await request.post(`${fixture}/fixture/operations-plan`, {
+            data: { guildId, plan },
+          })
+        ).ok(),
+      ).toBe(true);
+    }
+    async function data(view: string) {
+      const response = await page.request.get(`/operations/data?view=${view}`);
+      expect(response.status()).toBe(200);
+      return response.json();
+    }
+    await tier("FREE");
+    const free = await data("attention");
+    expect(free.access.features.basic_attention).toBe(true);
+    expect(free.access.features.discord_charts).toBe(true);
+    expect(free.access.features.api).toBe(false);
+    const chart = await page.request.get("/explore/data");
+    expect(chart.status()).toBe(200);
+    expect((await chart.json()).spec.evidence.value).toBeNull();
+    const png = await page.request.get("/explore/data?format=png");
+    expect(png.status()).toBe(200);
+    expect(png.headers()["content-type"]).toBe("image/png");
+    expect((await png.body()).subarray(0, 8)).toEqual(
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    );
+    expect((await page.request.get("/explore/data?format=csv")).status()).toBe(
+      403,
+    );
+    const denied = await page.request.post("/operations/data", {
+      headers,
+      data: {
+        action: "credential",
+        input: {
+          name: "Unavailable API",
+          scopes: ["guild:read"],
+          kind: "PERSONAL",
+        },
+      },
+    });
+    expect(denied.status()).toBe(403);
+    await page.goto("/operations?view=intake");
+    await page
+      .getByLabel(locale === "ja" ? "タイトル" : "Panel title", { exact: true })
+      .fill(`Free intake ${locale}`);
+    await page
+      .getByLabel(locale === "ja" ? "相談の分類" : "Request category", {
+        exact: true,
+      })
+      .fill("workflow");
+    await page
+      .getByRole("button", {
+        name: locale === "ja" ? "下書き保存" : "Save draft",
+        exact: true,
+      })
+      .click();
+    await expect(
+      page
+        .getByRole("status")
+        .filter({ hasText: locale === "ja" ? "保存しました" : "Saved." }),
+    ).toBeVisible();
+    const retained = (await data("intake")).intake.panels.find(
+      (p: { title: string }) => p.title === `Free intake ${locale}`,
+    );
+    expect(retained.fields).toHaveLength(2);
+    await tier("STARTER");
+    await page.goto("/explore");
+    await expect(
+      page.getByRole("heading", {
+        name:
+          locale === "ja"
+            ? "保存ビューとレポートショートカット"
+            : "Saved views and report shortcuts",
+      }),
+    ).toBeVisible();
+    await page
+      .getByLabel(locale === "ja" ? "名前" : "Name", { exact: true })
+      .fill(`Support ${locale}`);
+    await page
+      .getByLabel(
+        locale === "ja" ? "Discordショートカット" : "Discord shortcut",
+        { exact: false },
+      )
+      .selectOption("support-health");
+    await page
+      .getByRole("button", {
+        name: locale === "ja" ? "ビューを保存" : "Save view",
+        exact: true,
+      })
+      .click();
+    await expect(
+      page.getByRole("button", { name: `Support ${locale} · 7d`, exact: true }),
+    ).toBeVisible();
+    const csv = await page.request.get("/explore/data?format=csv");
+    expect(csv.status()).toBe(200);
+    expect(await csv.text()).toContain("coverage");
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth + 1,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/alpha8-${locale}-explore-360.png`,
+      fullPage: true,
+    });
+    await page.goto("/operations?view=events");
+    await page
+      .getByLabel(locale === "ja" ? "タイトル" : "Title", { exact: true })
+      .fill(`Weekly review ${locale}`);
+    await page
+      .getByLabel(locale === "ja" ? "現地時刻の開始日時" : "Local start", {
+        exact: true,
+      })
+      .fill("2026-11-02T10:00");
+    await page
+      .getByLabel(locale === "ja" ? "繰り返し" : "Recurrence", { exact: false })
+      .selectOption("WEEKLY");
+    await page
+      .getByRole("button", {
+        name: locale === "ja" ? "イベントを保存" : "Save event",
+        exact: true,
+      })
+      .click();
+    await expect(
+      page.getByRole("heading", {
+        name: `Weekly review ${locale}`,
+        exact: true,
+      }),
+    ).toBeVisible();
+    const event = (await data("events")).events.find(
+      (e: { title: string }) => e.title === `Weekly review ${locale}`,
+    );
+    const ics = await page.request.get(
+      `/operations/data?format=ics&id=${event.id}`,
+    );
+    expect(ics.status()).toBe(200);
+    expect(await ics.text()).toContain("RRULE:FREQ=WEEKLY");
+    await page
+      .getByRole("article")
+      .filter({
+        has: page.getByRole("heading", {
+          name: `Weekly review ${locale}`,
+          exact: true,
+        }),
+      })
+      .getByRole("button")
+      .click();
+    await expect(
+      page.getByLabel(locale === "ja" ? "現地時刻の開始日時" : "Local start", {
+        exact: true,
+      }),
+    ).toHaveValue("2026-11-02T10:00");
+    await page
+      .getByLabel(locale === "ja" ? "タイトル" : "Title", { exact: true })
+      .fill(`Reviewed event ${locale}`);
+    await page
+      .getByRole("button", {
+        name: locale === "ja" ? "イベントを保存" : "Save event",
+        exact: true,
+      })
+      .click();
+    await expect(
+      page.getByRole("heading", {
+        name: `Reviewed event ${locale}`,
+        exact: true,
+      }),
+    ).toBeVisible();
+    expect(
+      (await data("events")).events.find(
+        (e: { id: string }) => e.id === event.id,
+      ).revision,
+    ).toBe(event.revision + 1);
+    await tier("GROWTH");
+    const growth = await data("integrations");
+    expect(growth.access.features.api).toBe(true);
+    expect(growth.access.features.webhooks).toBe(true);
+    expect(growth.access.features.scheduled_reports).toBe(true);
+    expect(growth.access.features.multi_guild).toBe(false);
+    const credential = await page.request.post("/operations/data", {
+      headers,
+      data: {
+        action: "credential",
+        input: {
+          name: `Read integration ${locale}`,
+          scopes: ["guild:read", "metrics:read"],
+          kind: "PERSONAL",
+        },
+      },
+    });
+    expect(credential.status()).toBe(200);
+    const token = (await credential.json()).token;
+    expect(token).toMatch(/^nxs_/);
+    expect(JSON.stringify(await data("integrations"))).not.toContain(token);
+    await tier("SCALE");
+    const scale = await data("organization");
+    expect(scale.access.features.multi_guild).toBe(true);
+    expect(scale.access.features.automation_sandbox).toBe(true);
+    expect(scale.access.features.rbac).toBe(true);
+    for (const view of [
+      "attention",
+      "reports",
+      "playbooks",
+      "improvements",
+      "intake",
+      "events",
+      "organization",
+      "integrations",
+    ]) {
+      await page.goto(`/operations?view=${view}`);
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+      await expect(page.locator(".page-head")).toContainText("SCALE");
+      expect(
+        (await page.getByRole("heading", { level: 1 }).boundingBox())!.height,
+      ).toBeLessThan(120);
+      await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth + 1,
+        ),
+      ).toBe(true);
+      await page.screenshot({
+        path: `test-results/alpha8-${locale}-${view}-360.png`,
+        fullPage: true,
+      });
+    }
+    const cross = await page.request.post("/operations/data", {
+      headers: {
+        origin: "https://attacker.example",
+        "sec-fetch-site": "cross-site",
+      },
+      data: { action: "event", input: {} },
+    });
+    expect(cross.status()).toBe(403);
+    const extra = await page.request.post("/explore/data", {
+      headers,
+      data: {
+        action: "saveView",
+        view: { name: "Injected", metric: "reply", memberId: user },
+      },
+    });
+    expect(extra.status()).toBe(400);
+    const oversized = await page.request.post("/operations/data", {
+      headers,
+      data: "x".repeat(180001),
+    });
+    expect(oversized.status()).toBe(413);
+    await tier("FREE");
+    const paused = await data("events");
+    expect(
+      paused.events.find((e: { id: string }) => e.id === event.id).state,
+    ).toBe("PAUSED_PLAN_LIMIT");
+    expect(
+      (
+        await page.request.get(`/operations/data?format=ics&id=${event.id}`)
+      ).status(),
+    ).toBe(403);
+    await tier("STARTER");
+  });
+
+test("explicit Viewer reads operations but cannot configure despite a Discord manager role", async ({
+  page,
+  context,
+  request,
+  browser,
+}) => {
+  await request.post(`${fixture}/fixture/operations-plan`, {
+    data: { guildId: ids[0], plan: "SCALE" },
+  });
+  await signIn(context);
+  await context.addCookies([
+    { name: "nexus_guild", value: ids[0]!, url: base },
+  ]);
+  const headers = { origin: base, "sec-fetch-site": "same-origin" };
+  expect(
+    (
+      await page.request.post("/operations/data", {
+        headers,
+        data: { action: "organization", input: { name: "Operations QA" } },
+      })
+    ).status(),
+  ).toBe(200);
+  expect(
+    (
+      await page.request.post("/operations/data", {
+        headers,
+        data: {
+          action: "member",
+          input: { userId: other, name: "Review observer", role: "VIEWER" },
+        },
+      })
+    ).status(),
+  ).toBe(200);
+  const reader = await browser.newContext({ baseURL: base });
+  try {
+    await signIn(reader, other);
+    await reader.addCookies([
+      { name: "nexus_guild", value: ids[0]!, url: base },
+    ]);
+    const { code } = await (
+      await request.post(`${fixture}/fixture/code`, {
+        data: { guildId: ids[0], userId: other },
+      })
+    ).json();
+    expect(
+      (
+        await reader.request.post("/link/redeem", { headers, data: { code } })
+      ).ok(),
+    ).toBe(true);
+    const model = await reader.request.get("/operations/data?view=reports");
+    expect(model.status()).toBe(200);
+    expect((await model.json()).access.permissions).toEqual(["READ"]);
+    const write = await reader.request.post("/operations/data", {
+      headers,
+      data: {
+        action: "intake",
+        input: { title: "Should be denied", category: "workflow" },
+      },
+    });
+    expect(write.status()).toBe(403);
+    const readonly = await reader.newPage();
+    await readonly.goto("/operations?view=intake");
+    await expect(readonly.getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(
+      readonly.getByRole("button", { name: "Save draft", exact: true }),
+    ).toHaveCount(0);
+    expect(
+      (await reader.request.get("/dashboard", { maxRedirects: 0 })).status(),
+    ).toBe(307);
+  } finally {
+    await reader.close();
+  }
+});

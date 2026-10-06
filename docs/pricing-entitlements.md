@@ -1,22 +1,27 @@
-# Pricing and entitlements v2 — 0.6.0-alpha.7
+# Pricing and entitlements v3 — 0.6.0-alpha.8
 
 NEXUS sells history, analysis depth and community operations. No Discord surface
 requires a paid plan merely to observe it. Correct UNKNOWN/PARTIAL states, Metric
 Evidence, Data Coverage, Integration Health, privacy, deletion and security remain
 available to every tier. Payment does not turn unavailable observations into zero.
 
-| Plan       | Purpose                                  | Guild allowance | Visible aggregate history | Available additional value                                                                                                                                                                                                                                                       |
-| ---------- | ---------------------------------------- | --------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FREE       | Observe / See what's happening           | 1               | 30 days                   | Newcomer joins, direct replies and first connections; Thread/Forum responses; current Reaction/Poll participation; Voice participation and qualified co-presence; Event signup and observable attendance; basic Attention and one confirmed matching preset with a basic Journey |
-| STARTER    | Understand / Understand where it happens | 1               | 90 days                   | Preset catalog, surface breakdowns, detailed Journeys, median/p75/p90 subject to sample rules, comparable periods, weekly digest and basic before/after tracking                                                                                                                 |
-| GROWTH     | Operate & Improve                        | 1               | 365 days                  | Custom immutable recipes, custom Attention/intervention settings, unattended reminders and helper escalation, staff channel/role routing, full improvement experiments and aggregate CSV export                                                                                  |
-| SCALE      | Team & Automate                          | 5 reserved      | 730 days                  | Growth capabilities with larger catalog allowances; allocation, multi-guild overview, RBAC, API and audit export are **PLANNED**                                                                                                                                                 |
-| ENTERPRISE | Govern & Integrate                       | Contract        | Contract                  | Scoped contract overrides and operator support arrangements; no implemented SSO/SAML claim                                                                                                                                                                                       |
+| Plan       | Purpose                 | Guild allowance | Visible aggregate history | Available additional value                                                                                                                                                                   |
+| ---------- | ----------------------- | --------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FREE       | Observe & Check         | 1               | 30 days                   | Basic observations and evidence, Attention, private 7/30-day Discord PNG charts, one explicit intake form                                                                                    |
+| STARTER    | Understand & Explore    | 1               | 90 days                   | Saved views/segments, surface and role filters, heatmaps, comparable periods, aggregate CSV, custom intake and ICS event templates                                                           |
+| GROWTH     | Operate & Integrate     | 1               | 365 days                  | Evidence-backed Inbox, immutable versioned Playbooks, escalation, before/after reviews, weekly/monthly branded charts, scoped read API and signed webhooks                                   |
+| SCALE      | Team, Automate & Govern | 5               | 730 days                  | Explicit organization licensing and aggregate overview, five NEXUS roles, teams, independent approval, redacted audit export, historical dry runs, recurring exports and advanced scoped API |
+| ENTERPRISE | Secure & Integrate      | Contract        | Contract                  | Scoped contract arrangements; SSO/SAML/SCIM/residency/DPA remain PLANNED                                                                                                                     |
 
-Scheduled reports, Webhooks and AI explanations are also PLANNED. Limits alone do
-not make a planned workflow available. `EntitlementService.check` rejects planned
-features even for Enterprise. Existing guild-scoped API credentials do not become
-a production Scale RBAC/API workflow.
+The alpha.8 capability catalog provides Discord PNG charts and explicit intake on
+Free; Starter saved views, segments, heatmaps, CSV and ICS event templates; Growth
+Attention Inbox, versioned Playbooks, weekly/monthly branded chart reports, scoped
+read API and signed outbound webhooks; Scale explicit organization membership for
+five guilds, five roles, team assignment, independent approval, historical dry runs,
+recurring aggregate exports, service accounts and selected Attention writes.
+AI explanations remain PLANNED and are rejected even for Enterprise. Google OAuth,
+Slack/email/Jira/CRM destinations, SAML SSO, SCIM, residency and custom DPA are
+PLANNED. The implementation does not imply approval to sell publicly.
 
 Provisional internal monthly price points remain unchanged in the registry; they
 are not approved public offers.
@@ -26,7 +31,7 @@ from product capabilities. Configured Sandbox exposes real hosted purchase CTAs;
 production hides unapproved prices and requires every Live launch gate. Tax,
 public prices and production purchase availability require separate approval.
 
-`plan-registry.ts` separates canonical features from numeric limits, at revision 2. Limits cover guilds, historyDays, monthlyObservedMembers, customRecipes,
+`plan-registry.ts` separates canonical features from numeric limits, at revision 3. Existing purchased commercial Offering revision 2 remains immutable: new capability benefits do not mutate its financial identity. Limits cover guilds, historyDays, monthlyObservedMembers, customRecipes,
 automationRules, scheduledReports, teamSeats, webhooks and apiRequestsMonthly.
 The member allowance is secondary operational accounting, currently a **soft**
 guard: it does not drop measurement, report zeros or automatically charge overage.
@@ -34,15 +39,15 @@ Accounting deduplicates observed activity once per member, guild and UTC month.
 Future hard enforcement must propagate BILLING_LIMIT_REACHED into evidence and
 coverage instead of silently suppressing events.
 
-| Community               | Free experience                                         | Paid workflow                                                                             |
-| ----------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Replies                 | First post, direct reply, unanswered newcomer Attention | Starter distributions and comparisons; Growth reminders                                   |
-| Threads / Support Forum | Creation, first human response and unanswered count     | Starter surface/tag details and Journey; Growth staff routing and escalation              |
-| Reaction / Poll creator | Observed current participation                          | Starter time/surface comparison; custom scheduled reports remain planned                  |
-| LFG + Voice             | LFG post, response and qualified co-presence            | Starter post → response → Voice Journey; Growth helper reminders                          |
-| Voice-first             | Participation and configured co-presence threshold      | Starter trends/repeat participation; Growth digest and configured improvement tracking    |
-| Event / Stage           | Signup and observable Voice/Stage attendance            | Starter event Journey; Growth improvement comparison; custom event reports remain planned |
-| Large mixed             | The same basic surfaces and evidence                    | Breakdown depth and operational limits, without paying for a primary surface              |
+| Community               | Free experience                                         | Paid workflow                                                                           |
+| ----------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Replies                 | First post, direct reply, unanswered newcomer Attention | Starter distributions and comparisons; Growth reminders                                 |
+| Threads / Support Forum | Creation, first human response and unanswered count     | Starter surface/tag details and Journey; Growth staff routing and escalation            |
+| Reaction / Poll creator | Observed current participation                          | Starter time/surface comparison; Growth scheduled aggregate charts                      |
+| LFG + Voice             | LFG post, response and qualified co-presence            | Starter post → response → Voice Journey; Growth helper reminders                        |
+| Voice-first             | Participation and configured co-presence threshold      | Starter trends/repeat participation; Growth digest and configured improvement tracking  |
+| Event / Stage           | Signup and observable Voice/Stage attendance            | Starter event Journey/ICS; Growth improvement comparison and scheduled aggregate charts |
+| Large mixed             | The same basic surfaces and evidence                    | Breakdown depth and operational limits, without paying for a primary surface            |
 
 Voice co-presence never proves conversation. Emoji never imply sentiment. External
 Event attendance is unobservable. Mixed-event counts preserve observed attendance
@@ -66,7 +71,6 @@ not infinite storage retention: requests remain bounded and only retained data
 can be returned. A contract may allow more than 730 days within the system bound.
 This change does not extend physical retention or the public retention promise.
 
-
-Current alpha.7 contracts and commerce: [contracts](billing/contract-hardening-alpha7.md)
+Current alpha.8 implementation: [community operations](alpha8-community-operations.md)
 and [Stripe integration](billing/stripe-integration.md). Real Sandbox is tested;
 Stripe Live remains DISABLED.

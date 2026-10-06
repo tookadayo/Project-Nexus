@@ -73,9 +73,9 @@ for (const plan of plans)
       "coverage_health",
     ] as const)
       expect(featureDecision(state, key).allowed).toBe(true);
-    expect(planRegistry[plan].revision).toBe(2);
+    expect(planRegistry[plan].revision).toBe(3);
   });
-it("Starter buys depth, Growth buys operation, Scale reserves five slots with planned security", () => {
+it("Starter buys exploration, Growth operations, Scale five guilds with enforced team roles", () => {
   const starter = resolveEntitlements(
     { subscriptions: [subscription("STARTER")], grants: [] },
     now,
@@ -94,8 +94,7 @@ it("Starter buys depth, Growth buys operation, Scale reserves five slots with pl
   );
   expect(scale.limits.guilds).toBe(5);
   expect(featureDecision(scale, "rbac")).toMatchObject({
-    allowed: false,
-    reason: "FEATURE_PLANNED",
+    allowed: true,
   });
   expect(canonicalFeature("automation_auto")).toBe("attention_automation");
   expect(canonicalFeatures.every((key) => key in featureAvailability)).toBe(
@@ -489,6 +488,11 @@ it("shared billing presentation denies planned workflows and exposes only scoped
   expect(model.plan).toBe("SCALE");
   expect(model.presentation.nativeCapability).toBe("DISABLED");
   expect(model.presentation.nativePurchaseUrl).toBeNull();
+  for (const key of ["ai_explanation"] as const) {
+    expect(model.presentation.featureDecisions[key].allowed).toBe(false);
+    expect(model.presentation.availableFeatures).not.toContain(key);
+    expect(model.presentation.plannedFeatures).toContain(key);
+  }
   for (const key of [
     "scheduled_reports",
     "webhooks",
@@ -496,11 +500,10 @@ it("shared billing presentation denies planned workflows and exposes only scoped
     "rbac",
     "api",
     "audit_export",
-    "ai_explanation",
   ] as const) {
-    expect(model.presentation.featureDecisions[key].allowed).toBe(false);
-    expect(model.presentation.availableFeatures).not.toContain(key);
-    expect(model.presentation.plannedFeatures).toContain(key);
+    expect(model.presentation.featureDecisions[key].allowed).toBe(true);
+    expect(model.presentation.availableFeatures).toContain(key);
+    expect(model.presentation.plannedFeatures).not.toContain(key);
   }
   expect(model.presentation.promotions.activeBenefits).toEqual(state.grants);
   expect(model.presentation.promotions.paymentDiscountAvailable).toBe(false);

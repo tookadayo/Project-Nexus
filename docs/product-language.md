@@ -1,5 +1,21 @@
 # NEXUS product language — JA / EN
 
+## Alpha.8 Community Operations
+
+Free observes and checks; Starter explores aggregate operational cohorts; Growth
+turns findings into repeatable operations; Scale coordinates communities and teams.
+Saved views, Discord PNGs, Web charts, CSV and API use the same ChartSpec and evidence.
+An unobserved bucket is NO DATA, missing coverage is UNKNOWN/PARTIAL, and zero is
+reserved for a completed observation with no matching events. Changes and intervention
+reviews report comparable differences without assigning cause. Intake stores explicit
+form fields, never conversation transcripts. Event registration is not attendance.
+
+Approval, queue acceptance and delivery are distinct states. A saved Playbook is not
+an executed action; an export is not delivered until its destination outcome succeeds.
+Downgrades pause stored configurations and require explicit review before resuming.
+Google Calendar OAuth, Ask NEXUS and Enterprise SSO/SCIM remain PLANNED; usable ICS
+exports and aggregate exploration must not imply those integrations exist.
+
 管理画面は、確認できた事実と次にできる操作を短く伝える。Landing は利用目的を説明し、管理画面は実際の集計を説明する。未実装機能や例示を現在の機能・実測値として表示しない。
 
 ## Writing rules

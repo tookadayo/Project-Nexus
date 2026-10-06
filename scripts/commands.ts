@@ -64,6 +64,59 @@ export function buildNexusCommand() {
         .setDescription(description)
         .setDescriptionLocalizations({ ja: jaDescription }),
     );
+  command.addSubcommand((sub) =>
+    sub
+      .setName("overview")
+      .setDescription("Community snapshot and observation coverage")
+      .setDescriptionLocalizations({
+        ja: "コミュニティの観測とCoverageを確認",
+      }),
+  );
+  for (const name of ["chart", "compare"] as const)
+    command.addSubcommand((sub) =>
+      sub
+        .setName(name)
+        .setDescription(
+          name === "chart"
+            ? "Show an aggregate community chart"
+            : "Compare aggregate community periods",
+        )
+        .addStringOption((option) =>
+          option
+            .setName("metric")
+            .setDescription("Observed community surface")
+            .addChoices(
+              ...["reply", "forum", "voice", "event", "reaction", "poll"].map(
+                (value) => ({ name: value, value }),
+              ),
+            ),
+        )
+        .addIntegerOption((option) =>
+          option
+            .setName("days")
+            .setDescription("Completed UTC days")
+            .addChoices(
+              { name: "7 days", value: 7 },
+              { name: "30 days", value: 30 },
+              { name: "90 days", value: 90 },
+            ),
+        )
+        .addStringOption((option) =>
+          option
+            .setName("visibility")
+            .setDescription("Private reply or authorized channel publication")
+            .addChoices(
+              { name: "private", value: "private" },
+              { name: "channel", value: "channel" },
+            ),
+        ),
+    );
+  for (const name of ["support-health", "newcomer-flow"] as const)
+    command.addSubcommand((sub) =>
+      sub
+        .setName(name)
+        .setDescription("Open a configured saved operational report"),
+    );
   return command;
 }
 export function buildNexusCommands() {

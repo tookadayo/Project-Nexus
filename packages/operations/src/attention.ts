@@ -22,8 +22,16 @@ export type AttentionType =
   | "FORUM_SUPPORT"
   | "LFG_RESPONSE"
   | "EVENT_OPERATION"
-  | "INTEGRATION_HEALTH";
-export type AttentionState = "OPEN" | "ACKNOWLEDGED" | "SNOOZED" | "RESOLVED";
+  | "INTEGRATION_HEALTH"
+  | "METRIC_TREND"
+  | "OPERATIONS_REQUEST";
+export type AttentionState =
+  | "OPEN"
+  | "ACKNOWLEDGED"
+  | "IN_PROGRESS"
+  | "SNOOZED"
+  | "RESOLVED"
+  | "DISMISSED";
 export function attentionEligibility(s: Scope, cfg: Settings, now: Date) {
   const mapped = sql`EXISTS(SELECT 1 FROM discord_surface_state ch JOIN jsonb_array_elements(${JSON.stringify(cfg.communityModel.channels)}::jsonb) mapping ON mapping->>'channelId'=ch.parent_id WHERE ch.organization_id=f.organization_id AND ch.guild_id=f.guild_id AND ch.channel_id=f.data->>'channelId' AND mapping->>'purpose' IN ('SUPPORT','LFG') AND ${cfg.communityModel.confirmed})`;
   const owner = sql`EXISTS(SELECT 1 FROM discord_surface_state ch JOIN member_identity_map m ON m.organization_id=ch.organization_id AND m.guild_id=ch.guild_id AND m.lookup_hash=ch.owner_hash WHERE ch.organization_id=${s.organizationId}::uuid AND ch.guild_id=${s.guildId} AND ch.channel_id=f.data->>'channelId' AND m.id=e.identity_id AND ch.creation_observed AND ch.created_at>=${new Date(now.getTime() - 86400000)} AND f.occurred_at>=ch.created_at)`;
@@ -61,7 +69,7 @@ export async function teamOperations(
       resolve_p75: number | null;
       opened: number;
       resolved: number;
-    }>`SELECT count(*) FILTER(WHERE status IN ('OPEN','ACKNOWLEDGED'))::integer AS open,count(*) FILTER(WHERE status='SNOOZED')::integer AS snoozed,min(opened_at) FILTER(WHERE status IN ('OPEN','ACKNOWLEDGED')) AS oldest,count(*) FILTER(WHERE acknowledged_at IS NOT NULL AND opened_at IS NOT NULL AND opened_at>=${from})::integer AS ack_sample,percentile_cont(.5) WITHIN GROUP(ORDER BY extract(epoch FROM acknowledged_at-opened_at)) FILTER(WHERE acknowledged_at IS NOT NULL AND opened_at IS NOT NULL AND opened_at>=${from}) AS ack_median,count(*) FILTER(WHERE resolved_at IS NOT NULL AND opened_at IS NOT NULL AND resolved_at>=${from})::integer AS resolve_sample,percentile_cont(.5) WITHIN GROUP(ORDER BY extract(epoch FROM resolved_at-opened_at)) FILTER(WHERE resolved_at IS NOT NULL AND opened_at IS NOT NULL AND resolved_at>=${from}) AS resolve_median,percentile_cont(.75) WITHIN GROUP(ORDER BY extract(epoch FROM resolved_at-opened_at)) FILTER(WHERE resolved_at IS NOT NULL AND opened_at IS NOT NULL AND resolved_at>=${from}) AS resolve_p75,count(*) FILTER(WHERE opened_at>=${from} AND opened_at<${to})::integer AS opened,count(*) FILTER(WHERE resolved_at>=${from} AND resolved_at<${to})::integer AS resolved FROM attention_items WHERE ${tenant(s)}`.execute(
+    }>`SELECT count(*) FILTER(WHERE status IN ('OPEN','ACKNOWLEDGED','IN_PROGRESS'))::integer AS open,count(*) FILTER(WHERE status='SNOOZED')::integer AS snoozed,min(opened_at) FILTER(WHERE status IN ('OPEN','ACKNOWLEDGED','IN_PROGRESS')) AS oldest,count(*) FILTER(WHERE acknowledged_at IS NOT NULL AND opened_at IS NOT NULL AND opened_at>=${from})::integer AS ack_sample,percentile_cont(.5) WITHIN GROUP(ORDER BY extract(epoch FROM acknowledged_at-opened_at)) FILTER(WHERE acknowledged_at IS NOT NULL AND opened_at IS NOT NULL AND opened_at>=${from}) AS ack_median,count(*) FILTER(WHERE resolved_at IS NOT NULL AND opened_at IS NOT NULL AND resolved_at>=${from})::integer AS resolve_sample,percentile_cont(.5) WITHIN GROUP(ORDER BY extract(epoch FROM resolved_at-opened_at)) FILTER(WHERE resolved_at IS NOT NULL AND opened_at IS NOT NULL AND resolved_at>=${from}) AS resolve_median,percentile_cont(.75) WITHIN GROUP(ORDER BY extract(epoch FROM resolved_at-opened_at)) FILTER(WHERE resolved_at IS NOT NULL AND opened_at IS NOT NULL AND resolved_at>=${from}) AS resolve_p75,count(*) FILTER(WHERE opened_at>=${from} AND opened_at<${to})::integer AS opened,count(*) FILTER(WHERE resolved_at>=${from} AND resolved_at<${to})::integer AS resolved FROM attention_items WHERE ${tenant(s)}`.execute(
       tx,
     )
   ).rows[0]!;
@@ -70,7 +78,7 @@ export async function teamOperations(
       type: AttentionType;
       surface: string;
       open: number;
-    }>`SELECT item_type AS type,target_surface AS surface,count(*)::integer AS open FROM attention_items WHERE ${tenant(s)} AND status IN ('OPEN','ACKNOWLEDGED') GROUP BY item_type,target_surface`.execute(
+    }>`SELECT item_type AS type,target_surface AS surface,count(*)::integer AS open FROM attention_items WHERE ${tenant(s)} AND status IN ('OPEN','ACKNOWLEDGED','IN_PROGRESS') GROUP BY item_type,target_surface`.execute(
       tx,
     )
   ).rows;
@@ -171,7 +179,7 @@ export class AttentionOperations {
         await sql<{
           message_id: string;
           version: number;
-        }>`UPDATE attention_items a SET status='RESOLVED',resolved_at=${now},resolution_reason='OBSERVED_RESPONSE',snooze_until=NULL,version=version+1,updated_at=${now} WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND a.status<>'RESOLVED' AND a.item_type IN ('TEXT_NEWCOMER','FORUM_SUPPORT','LFG_RESPONSE') AND EXISTS(SELECT 1 FROM lifecycle_events f WHERE f.organization_id=a.organization_id AND f.guild_id=a.guild_id AND f.kind='message.sent' AND f.data->>'messageId'=a.message_id AND (f.data->>'receivedExplicitReply'='true' OR a.item_type IN ('FORUM_SUPPORT','LFG_RESPONSE') AND f.data->>'receivedHumanParticipant'='true')) RETURNING message_id,version`.execute(
+        }>`UPDATE attention_items a SET status='RESOLVED',resolved_at=${now},resolution_reason='OBSERVED_RESPONSE',snooze_until=NULL,version=version+1,updated_at=${now} WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND a.status NOT IN ('RESOLVED','DISMISSED') AND a.item_type IN ('TEXT_NEWCOMER','FORUM_SUPPORT','LFG_RESPONSE') AND EXISTS(SELECT 1 FROM lifecycle_events f WHERE f.organization_id=a.organization_id AND f.guild_id=a.guild_id AND f.kind='message.sent' AND f.data->>'messageId'=a.message_id AND (f.data->>'receivedExplicitReply'='true' OR a.item_type IN ('FORUM_SUPPORT','LFG_RESPONSE') AND f.data->>'receivedHumanParticipant'='true')) RETURNING message_id,version`.execute(
           tx,
         )
       ).rows;
@@ -250,8 +258,27 @@ export class AttentionOperations {
         ).rows.length
       )
         return;
+      const unknown = reason.endsWith("UNKNOWN"),
+        proof = metricEvidence({
+          metricKey: "integration.issue",
+          definitionVersion: "integration-health-v1",
+          definition:
+            "Observed integration health issue. This describes collection health, not community activity.",
+          value: unknown ? null : problem ? 1 : 0,
+          numerator: unknown ? null : problem ? 1 : 0,
+          denominator: null,
+          sampleSize: unknown ? 0 : 1,
+          minimumSample: 1,
+          coverageState: unknown ? "UNKNOWN" : "COMPLETE",
+          requiredSurfaces: ["INTEGRATION_HEALTH"],
+          evidenceSources: ["discord_integration_health"],
+          coverageReasons: unknown ? [reason] : [],
+          windowStart: now.toISOString(),
+          windowEnd: now.toISOString(),
+          collectionEpochIds: [],
+        });
       if (problem)
-        await sql`INSERT INTO attention_items(organization_id,guild_id,channel_id,message_id,detected_at,status,item_type,target_surface,reason,opened_at,updated_at) VALUES(${s.organizationId}::uuid,${s.guildId},'',${key},${now},'OPEN','INTEGRATION_HEALTH','INTEGRATION',${reason},${now},${now}) ON CONFLICT(organization_id,guild_id,message_id) DO UPDATE SET status=CASE WHEN attention_items.resolution_reason='INTEGRATION_RESTORED' THEN 'OPEN' ELSE attention_items.status END,opened_at=CASE WHEN attention_items.resolution_reason='INTEGRATION_RESTORED' THEN EXCLUDED.opened_at ELSE attention_items.opened_at END,resolved_at=CASE WHEN attention_items.resolution_reason='INTEGRATION_RESTORED' THEN NULL ELSE attention_items.resolved_at END,resolution_reason=CASE WHEN attention_items.resolution_reason='INTEGRATION_RESTORED' THEN NULL ELSE attention_items.resolution_reason END,reason=EXCLUDED.reason,updated_at=EXCLUDED.updated_at`.execute(
+        await sql`INSERT INTO attention_items(organization_id,guild_id,channel_id,message_id,detected_at,status,item_type,target_surface,reason,opened_at,updated_at,evidence) VALUES(${s.organizationId}::uuid,${s.guildId},'',${key},${now},'OPEN','INTEGRATION_HEALTH','INTEGRATION',${reason},${now},${now},${json(proof)}) ON CONFLICT(organization_id,guild_id,message_id) DO UPDATE SET status=CASE WHEN attention_items.resolution_reason='INTEGRATION_RESTORED' THEN 'OPEN' ELSE attention_items.status END,opened_at=CASE WHEN attention_items.resolution_reason='INTEGRATION_RESTORED' THEN EXCLUDED.opened_at ELSE attention_items.opened_at END,resolved_at=CASE WHEN attention_items.resolution_reason='INTEGRATION_RESTORED' THEN NULL ELSE attention_items.resolved_at END,resolution_reason=CASE WHEN attention_items.resolution_reason='INTEGRATION_RESTORED' THEN NULL ELSE attention_items.resolution_reason END,reason=EXCLUDED.reason,evidence=EXCLUDED.evidence,updated_at=EXCLUDED.updated_at`.execute(
           tx,
         );
       else
@@ -271,10 +298,42 @@ export class AttentionOperations {
         ).rows.length
       )
         return;
-      await sql`INSERT INTO attention_items(organization_id,guild_id,channel_id,message_id,detected_at,status,item_type,target_surface,reason,opened_at,updated_at)
-        SELECT ${s.organizationId}::uuid,${s.guildId},COALESCE(ev.data->>'channelId',''),'event:'||ev.state_key,ev.observed_at,'OPEN','EVENT_OPERATION','SCHEDULED_EVENT','CANCELLED_EVENT_WITH_OBSERVED_SIGNUPS',${now},${now} FROM adaptive_states ev WHERE ev.organization_id=${s.organizationId}::uuid AND ev.guild_id=${s.guildId} AND ev.domain='event' AND ev.data->>'status'='4' AND EXISTS(SELECT 1 FROM adaptive_facts f WHERE f.organization_id=ev.organization_id AND f.guild_id=ev.guild_id AND f.kind='scheduled_event.subscribed' AND f.data->>'eventId'=ev.state_key AND f.occurred_at>=${new Date(now.getTime() - 30 * 86400000)}) ON CONFLICT DO NOTHING`.execute(
-        tx,
-      );
+      const from = new Date(now.getTime() - 30 * 86400000),
+        events = (
+          await sql<{
+            key: string;
+            channel_id: string;
+            observed_at: Date;
+          }>`SELECT ev.state_key AS key,COALESCE(ev.data->>'channelId','') AS channel_id,ev.observed_at FROM adaptive_states ev WHERE ${tenant(s)} AND ev.domain='event' AND ev.data->>'status'='4' AND ev.observed_at>=${from} AND EXISTS(SELECT 1 FROM adaptive_facts f WHERE f.organization_id=ev.organization_id AND f.guild_id=ev.guild_id AND f.kind='scheduled_event.subscribed' AND f.data->>'eventId'=ev.state_key AND f.occurred_at>=${from}) LIMIT 100`.execute(
+            tx,
+          )
+        ).rows;
+      for (const event of events) {
+        const proof = metricEvidence({
+          metricKey: "event.cancelled_with_observed_signup",
+          definitionVersion: "event-signup-v1",
+          definition:
+            "A cancellation and at least one signup were observed. Signup is not attendance; this is not total participation.",
+          value: 1,
+          numerator: 1,
+          denominator: null,
+          sampleSize: 1,
+          minimumSample: 1,
+          coverageState: "COMPLETE",
+          requiredSurfaces: ["SCHEDULED_EVENT"],
+          evidenceSources: [
+            "adaptive_states",
+            "adaptive_facts:scheduled_event.subscribed",
+          ],
+          coverageReasons: [],
+          windowStart: from.toISOString(),
+          windowEnd: now.toISOString(),
+          collectionEpochIds: [],
+        });
+        await sql`INSERT INTO attention_items(organization_id,guild_id,channel_id,message_id,detected_at,status,item_type,target_surface,reason,opened_at,updated_at,evidence) VALUES(${s.organizationId}::uuid,${s.guildId},${event.channel_id},${"event:" + event.key},${event.observed_at},'OPEN','EVENT_OPERATION','SCHEDULED_EVENT','CANCELLED_EVENT_WITH_OBSERVED_SIGNUPS',${now},${now},${json(proof)}) ON CONFLICT DO NOTHING`.execute(
+          tx,
+        );
+      }
     });
   }
   async action(
@@ -298,7 +357,11 @@ export class AttentionOperations {
       ).rows[0];
       assert(item, "ATTENTION_NOT_FOUND", 404);
       if (item.status === status) return { status, duplicate: true };
-      assert(item.status !== "RESOLVED", "ATTENTION_NOT_ACTIVE", 409);
+      assert(
+        !["RESOLVED", "DISMISSED"].includes(item.status),
+        "ATTENTION_NOT_ACTIVE",
+        409,
+      );
       assert(
         status !== "SNOOZED" || (snoozeUntil && snoozeUntil > at),
         "INVALID_SNOOZE",
@@ -324,8 +387,20 @@ export class AttentionOperations {
     detectedAt: Date,
     evidence: MetricEvidence | null = null,
   ) {
-    await sql`INSERT INTO attention_items(organization_id,guild_id,channel_id,message_id,detected_at,status,opened_at,item_type,reason,evidence,updated_at) VALUES(${s.organizationId}::uuid,${s.guildId},${channelId},${messageId},${detectedAt},'OPEN',${openedAt},'TEXT_NEWCOMER','ADMIN_ADDED_OBSERVED_POST',${json(evidence)},${openedAt}) ON CONFLICT DO NOTHING`.execute(
-      this.db,
-    );
+    await this.db.transaction().execute(async (tx) => {
+      await privacyReadLock(tx, s);
+      assert(
+        !(
+          await sql`SELECT id FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash IS NULL AND completed_at IS NOT NULL`.execute(
+            tx,
+          )
+        ).rows.length,
+        "PRIVACY_DELETED",
+        403,
+      );
+      await sql`INSERT INTO attention_items(organization_id,guild_id,channel_id,message_id,detected_at,status,opened_at,item_type,reason,evidence,updated_at) VALUES(${s.organizationId}::uuid,${s.guildId},${channelId},${messageId},${detectedAt},'OPEN',${openedAt},'TEXT_NEWCOMER','ADMIN_ADDED_OBSERVED_POST',${json(evidence)},${openedAt}) ON CONFLICT DO NOTHING`.execute(
+        tx,
+      );
+    });
   }
 }

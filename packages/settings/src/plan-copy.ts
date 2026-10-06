@@ -8,13 +8,14 @@ export const limitCopy: Record<LimitKey, readonly [string, string]> = {
   ],
   customRecipes: ["独自の測定ルール", "Custom recipes"],
   automationRules: ["自動化ルール", "Automation rules"],
-  scheduledReports: ["定期レポート（準備中）", "Scheduled reports (planned)"],
+  scheduledReports: ["定期レポート", "Scheduled reports"],
   teamSeats: ["チームの利用枠", "Team seats"],
-  webhooks: ["通知連携（準備中）", "Webhooks (planned)"],
+  webhooks: ["通知連携", "Webhooks"],
   apiRequestsMonthly: [
-    "月間API利用枠（準備中）",
-    "Monthly API requests (planned)",
+    "サーバーごとの月間API利用枠",
+    "Monthly API requests per server",
   ],
+  intakePanels: ["受付パネル数", "Operations intake panels"],
 };
 export const featureCopy: Record<
   EntitlementFeature,
@@ -94,6 +95,34 @@ export const featureCopy: Record<
     "確認して実行する改善アクション",
     "Reviewed improvement actions",
   ],
+  discord_charts: ["Discord内の集計チャート", "Aggregate charts in Discord"],
+  saved_views: [
+    "保存ビューとセグメント",
+    "Saved views and operational segments",
+  ],
+  heatmaps: ["曜日・時間の集計", "Weekday and hour heatmaps"],
+  event_operations: [
+    "イベントテンプレートとカレンダー",
+    "Event templates and calendars",
+  ],
+  intake_panels: ["運営の課題受付", "Operations intake panels"],
+  attention_inbox: ["根拠付きの対応管理", "Attention Inbox with evidence"],
+  playbooks: ["運営Playbook", "Versioned operations playbooks"],
+  report_branding: [
+    "レポートのタイトル・ロゴ・フッター",
+    "Report title, logo and footer",
+  ],
+  team_assignment: ["NEXUSチームへの割当", "Assignment to NEXUS teams"],
+  approval_workflow: ["Playbookの承認", "Playbook approval workflow"],
+  automation_sandbox: [
+    "過去データによる試行",
+    "Historical automation dry runs",
+  ],
+  recurring_exports: ["定期的な集計出力", "Recurring aggregate exports"],
+  advanced_api: [
+    "サービスアカウントと限定書込API",
+    "Service accounts and selected write API",
+  ],
 };
 export const planCopy: Record<
   Plan,
@@ -101,22 +130,22 @@ export const planCopy: Record<
 > = {
   FREE: {
     heading: ["いま起きていることを知る", "See what’s happening"],
-    purpose: ["観測する", "Observe"],
+    purpose: ["観測と確認", "Observe & Check"],
   },
   STARTER: {
     heading: ["どこで起きているかを理解する", "Understand where it happens"],
-    purpose: ["理解する", "Understand"],
+    purpose: ["理解と探索", "Understand & Explore"],
   },
   GROWTH: {
     heading: ["運営し、改善する", "Operate and improve"],
-    purpose: ["運営と改善", "Operate & Improve"],
+    purpose: ["運営と連携", "Operate & Integrate"],
   },
   SCALE: {
     heading: ["チームで運営する", "Run it with a team"],
-    purpose: ["チームと自動化", "Team & Automate"],
+    purpose: ["チーム・自動化・統制", "Team, Automate & Govern"],
   },
   ENTERPRISE: {
     heading: ["組織の個別要件に合わせる", "Custom organizational requirements"],
-    purpose: ["管理と連携", "Govern & Integrate"],
+    purpose: ["保護と連携", "Secure & Integrate"],
   },
 };

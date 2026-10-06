@@ -51,6 +51,12 @@ export class PrivacyService {
             tx,
           );
           await deleteBillingCommunity(tx, s);
+          await sql`DELETE FROM operations_organizations WHERE id=${s.organizationId}::uuid AND home_guild_id=${s.guildId}`.execute(
+            tx,
+          );
+          await sql`DELETE FROM operations_org_guilds WHERE ${tenant(s)}`.execute(
+            tx,
+          );
           for (const table of [
             "message_observations",
             "reaction_state",
@@ -73,6 +79,23 @@ export class PrivacyService {
             );
           // Only an audit tombstone and disabled settings remain. Published flows can be deleted, never mutated.
           for (const table of [
+            "report_templates",
+            "operations_interventions",
+            "playbooks",
+            "operations_intake_panels",
+            "integration_destinations",
+            "webhook_endpoints",
+            "api_credentials",
+            "api_guild_usage_months",
+            "operations_domain_events",
+            "operations_coverage_heads",
+            "operations_plan_heads",
+            "operations_audit_events",
+            "event_operation_templates",
+            "operations_role_bindings",
+            "operations_team_bindings",
+            "saved_metric_views",
+            "operational_segments",
             "suggestion_feedback",
             "weekly_summary_deliveries",
             "helper_alerts",
@@ -226,6 +249,27 @@ export class PrivacyService {
         tx,
       );
       await deleteBillingActor(tx, s, userId, this.vault);
+      await sql`DELETE FROM api_credentials c USING operations_role_bindings b,operations_role_bindings subject WHERE subject.organization_id=${s.organizationId}::uuid AND subject.guild_id=${s.guildId} AND subject.actor_hash=${hash} AND b.root_organization_id=subject.root_organization_id AND b.member_id=subject.member_id AND c.organization_id=b.organization_id AND c.guild_id=b.guild_id AND c.actor_hash=b.actor_hash`.execute(
+        tx,
+      );
+      await sql`DELETE FROM operations_org_members m USING operations_role_bindings b WHERE b.organization_id=${s.organizationId}::uuid AND b.guild_id=${s.guildId} AND b.actor_hash=${hash} AND m.organization_id=b.root_organization_id AND m.id=b.member_id`.execute(
+        tx,
+      );
+      await sql`DELETE FROM operations_domain_events v USING operations_requests r WHERE v.organization_id=r.organization_id AND v.guild_id=r.guild_id AND r.organization_id=${s.organizationId}::uuid AND r.guild_id=${s.guildId} AND r.actor_hash=${hash} AND v.data->>'attentionKey'=r.attention_key`.execute(
+        tx,
+      );
+      await sql`DELETE FROM attention_items a USING operations_requests r WHERE a.organization_id=r.organization_id AND a.guild_id=r.guild_id AND a.message_id=r.attention_key AND r.organization_id=${s.organizationId}::uuid AND r.guild_id=${s.guildId} AND r.actor_hash=${hash}`.execute(
+        tx,
+      );
+      await sql`DELETE FROM api_credentials WHERE ${tenant(s)} AND actor_hash=${hash}`.execute(
+        tx,
+      );
+      await sql`DELETE FROM operations_audit_events WHERE ${tenant(s)} AND actor_hash=${hash}`.execute(
+        tx,
+      );
+      await sql`UPDATE attention_events SET actor_hash=NULL WHERE ${tenant(s)} AND actor_hash=${hash}`.execute(
+        tx,
+      );
       await sql`DELETE FROM usage_counters WHERE ${tenant(s)} AND member_hash=${hash}`.execute(
         tx,
       );

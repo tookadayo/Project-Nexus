@@ -2839,3 +2839,156 @@ h3 {
   overflow-wrap: anywhere;
   max-width: 100%;
 }
+/* Aggregate operations surfaces share the established console styles. */
+.operations-page > *,
+.operations-page .page-head {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.operations-page .page-head {
+  display: block;
+}
+.operations-page a {
+  color: var(--lime);
+}
+.operations-page form,
+.operations-page select,
+.operations-page input,
+.operations-page textarea {
+  min-width: 0;
+}
+.operations-page .surface {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.operations-page form {
+  display: grid;
+  gap: 16px;
+}
+.operations-page label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+.operations-page input:not([type="checkbox"]),
+.operations-page select,
+.operations-page textarea {
+  width: 100%;
+  max-width: 100%;
+  min-height: 40px;
+  padding: 8px;
+  border: 1px solid #7e8c82;
+  border-radius: 6px;
+  background: #fff;
+  color: #17221a;
+  font: inherit;
+}
+.operations-page input[type="checkbox"] {
+  width: auto;
+}
+.operations-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 16px;
+}
+.operations-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.operations-page button {
+  min-height: 40px;
+  padding: 9px 14px;
+  margin-right: 8px;
+  border: 1px solid #7e8c82;
+  border-radius: 7px;
+  background: #e7efdc;
+  color: #17221a;
+  font: inherit;
+  cursor: pointer;
+}
+.operations-page button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.operations-nav [aria-current="page"] {
+  font-weight: 700;
+  text-decoration: underline;
+}
+.operations-state {
+  font-size: 0.85em;
+  border: 1px solid #7e8c82;
+  border-radius: 5px;
+  padding: 3px 7px;
+}
+.operations-list {
+  display: grid;
+  gap: 18px;
+}
+.sidebar nav a {
+  display: block;
+  padding: 10px 14px;
+  color: inherit;
+}
+.operations-page {
+  max-width: 1200px;
+  margin: auto;
+  padding: 24px;
+  display: grid;
+  gap: 24px;
+}
+.operations-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid #344638;
+}
+.explore-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: end;
+}
+.explore-controls label {
+  display: grid;
+  gap: 8px;
+  max-width: 100%;
+}
+.explore-controls input,
+.explore-controls select {
+  max-width: 100%;
+  min-height: 38px;
+}
+.heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(24px, 1fr));
+  gap: 3px;
+  overflow-x: auto;
+}
+.heatmap-grid span {
+  text-align: center;
+  padding: 5px;
+  font-size: 12px;
+}
+.operations-page details {
+  margin: 12px 0;
+}
+.operations-page svg {
+  overflow: visible;
+}
+@media (max-width: 600px) {
+  .operations-page {
+    padding: 14px;
+  }
+  .operations-nav {
+    gap: 14px;
+  }
+  .explore-controls {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .heatmap-grid {
+    grid-template-columns: repeat(24, 26px);
+  }
+}

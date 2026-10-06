@@ -46,30 +46,101 @@ export async function POST(request: NextRequest) {
         z
           .object({ action: z.literal("portal"), idempotencyKey: z.uuid() })
           .strict(),
-        z.object({action:z.literal("change"),offeringId:z.uuid(),idempotencyKey:z.uuid()}).strict(),
-        z.object({action:z.literal("cancel"),idempotencyKey:z.uuid()}).strict(),
-        z.object({action:z.literal("reserve"),offeringId:z.uuid(),code:z.string().max(128),idempotencyKey:z.uuid()}).strict(),
+        z
+          .object({
+            action: z.literal("change"),
+            offeringId: z.uuid(),
+            idempotencyKey: z.uuid(),
+          })
+          .strict(),
+        z
+          .object({ action: z.literal("cancel"), idempotencyKey: z.uuid() })
+          .strict(),
+        z
+          .object({ action: z.literal("payment"), idempotencyKey: z.uuid() })
+          .strict(),
+        z
+          .object({
+            action: z.literal("reserve"),
+            offeringId: z.uuid(),
+            code: z.string().max(128),
+            idempotencyKey: z.uuid(),
+          })
+          .strict(),
       ])
       .parse(JSON.parse(text));
     const context = await billingContext(
       input.action === "redeem" || input.action === "reserve"
         ? "REDEEM"
-        : input.action === "checkout" ? "CHECKOUT" : input.action === "portal" ? "PORTAL" : input.action === "change" ? "CHANGE" : input.action === "cancel" ? "CANCEL" : "VIEW",
+        : input.action === "checkout"
+          ? "CHECKOUT"
+          : input.action === "portal"
+            ? "PORTAL"
+            : input.action === "change" || input.action === "payment"
+              ? "CHANGE"
+              : input.action === "cancel"
+                ? "CANCEL"
+                : "VIEW",
     );
-    if(input.action === "reserve") return NextResponse.json(await new PromotionReservationService(context.services.db,context.services.vault).reserve(context.scope,context.snapshot.actor.key,input),{headers:{"Cache-Control":"no-store"}});
-    if(input.action === "change" || input.action === "cancel") {
-      const state = await context.billing.status(context.scope), current = state.subscriptions.find(s=>s.provider === "STRIPE" && !["CANCELED","EXPIRED"].includes(s.status));
-      assert(current,"BILLING_SUBSCRIPTION_REFERENCE_UNAVAILABLE",409);
+    if (input.action === "payment")
+      return NextResponse.json(
+        await context.billing.pendingPayment(
+          context.scope,
+          new StripeBillingProvider(),
+        ),
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    if (input.action === "reserve")
+      return NextResponse.json(
+        await new PromotionReservationService(
+          context.services.db,
+          context.services.vault,
+        ).reserve(context.scope, context.snapshot.actor.key, input),
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    if (input.action === "change" || input.action === "cancel") {
+      const state = await context.billing.status(context.scope),
+        current = state.subscriptions.find(
+          (s) =>
+            s.provider === "STRIPE" &&
+            !["CANCELED", "EXPIRED"].includes(s.status),
+        );
+      assert(current, "BILLING_SUBSCRIPTION_REFERENCE_UNAVAILABLE", 409);
       const provider = new StripeBillingProvider();
-      if(input.action === "cancel") await context.billing.cancelSubscription(context.scope,provider,input.idempotencyKey,"AT_PERIOD_END");
+      let changeResult;
+      if (input.action === "cancel")
+        await context.billing.cancelSubscription(
+          context.scope,
+          provider,
+          input.idempotencyKey,
+          "AT_PERIOD_END",
+        );
       else {
-        const target = await checkoutOffering(context.services.db,input.offeringId);
-        assert(target.provider === current.provider,"BILLING_PROVIDER_MISMATCH",409);
-        const upgrade = planRank(target.planKey)>planRank(current.plan);
-        await context.billing.changeSubscription(context.scope,provider,input.offeringId,input.idempotencyKey,{effective:upgrade?"IMMEDIATE":"AT_PERIOD_END",proration:upgrade?"PROVIDER_CALCULATED":"NONE"});
+        const target = await checkoutOffering(
+          context.services.db,
+          input.offeringId,
+        );
+        assert(
+          target.provider === current.provider,
+          "BILLING_PROVIDER_MISMATCH",
+          409,
+        );
+        const upgrade = planRank(target.planKey) > planRank(current.plan);
+        changeResult = await context.billing.changeSubscription(
+          context.scope,
+          provider,
+          input.offeringId,
+          input.idempotencyKey,
+          {
+            effective: upgrade ? "IMMEDIATE" : "AT_PERIOD_END",
+            proration: upgrade ? "PROVIDER_CALCULATED" : "NONE",
+          },
+        );
       }
-      await context.billing.reconcileLatest(context.scope,provider);
-      return NextResponse.json({state:"CONFIRMING"},{headers:{"Cache-Control":"no-store"}});
+      await context.billing.reconcileLatest(context.scope, provider);
+      return NextResponse.json(changeResult ?? { state: "CONFIRMING" }, {
+        headers: { "Cache-Control": "no-store" },
+      });
     }
     if (input.action === "redeem") {
       const state = await context.billing.status(context.scope),

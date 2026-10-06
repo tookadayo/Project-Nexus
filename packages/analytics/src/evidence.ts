@@ -210,6 +210,8 @@ export function buildMetricEvidence(
     requiredSurfaces?: string[];
     definitionVersion?: string;
     minimumSample?: number;
+    semanticsKnown?: boolean;
+    semanticsReasons?: string[];
   },
   snapshot: CapabilitySnapshot | null,
   cfg: Settings,
@@ -245,6 +247,7 @@ export function buildMetricEvidence(
   return metricEvidence({
     metricKey: key,
     available:
+      input.semanticsKnown !== false &&
       !(
         required.includes("members") &&
         context.unknownJoins?.length &&
@@ -268,16 +271,17 @@ export function buildMetricEvidence(
     numerator: input.numerator,
     denominator: input.denominator,
     sampleSize: input.sample,
-    coverageState: coverage.state,
+    coverageState: input.semanticsKnown === false ? "UNKNOWN" : coverage.state,
     requiredSurfaces: required,
     evidenceSources: definition.sources,
-    coverageReasons: coverage.reasons,
+    coverageReasons: [...coverage.reasons, ...(input.semanticsReasons ?? [])],
     windowStart: context.from.toISOString(),
     windowEnd: context.to.toISOString(),
     collectionEpochIds: context.epochs.map((e) => e.id),
     collecting: input.collecting,
     minimumSample: input.minimumSample,
     comparisonBlockers: [
+      ...(input.semanticsReasons ?? []),
       ...(legacyReply ? ["LEGACY_REPLY_SEMANTICS_UNKNOWN"] : []),
       ...(coverage.reasons.includes("COLLECTION_GAP")
         ? ["COLLECTION_GAP"]

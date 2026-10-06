@@ -74,7 +74,7 @@ for (const from of [34, 37, 38, null])
             n: number;
           }>`SELECT count(*)::integer AS n FROM schema_migrations`.execute(db)
         ).rows[0]!.n,
-      ).toBe(40);
+      ).toBe(44);
       if (from)
         expect(
           (

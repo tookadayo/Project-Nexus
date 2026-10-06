@@ -2,7 +2,7 @@
 
 NEXUS は Discord Community Operations 製品です。サーバーの運営目的に合う計測方法を保存し、Discordで観測できた事実の範囲と確実性を示します。新しいメンバーへの対応、最初の返信やVoice同席、参加後の活動を確認し、運営queueと改善後の結果をつなげます。比較から原因を断定せず、個人の活動点数やスタッフ評価を作りません。
 
-現在のリリースは **0.6.0-alpha.7** です。バージョンはルートの `package.json` を唯一のリリース版ソースとし、`MAJOR.MINOR.PATCH-prerelease` の SemVer に従います。例: `0.6.0-alpha.2`、`0.6.0-beta.1`、`0.6.0-rc.1`、`0.6.0`。Build は Git の短縮 SHA です。パッケージ環境では `NEXUS_BUILD_SHA` を指定できます。
+現在のリリースは **0.6.0-alpha.8** です。バージョンはルートの `package.json` を唯一のリリース版ソースとし、`MAJOR.MINOR.PATCH-prerelease` の SemVer に従います。例: `0.6.0-alpha.2`、`0.6.0-beta.1`、`0.6.0-rc.1`、`0.6.0`。Build は Git の短縮 SHA です。パッケージ環境では `NEXUS_BUILD_SHA` を指定できます。
 
 ## Project Nexus 製品サイト
 
@@ -55,13 +55,13 @@ Hosted Web は `NODE_ENV=production`、`NEXUS_WEB_AUTH_MODE=oauth`、`DISCORD_CL
 
 表示用語と計測の定義は [Product language](docs/product-language.md)、対応範囲・残課題・検証結果は [alpha.5 quality audit](docs/archive/releases/NEXUS%20v0.6.0-alpha.5%20QUALITY%20AUDIT.md) を参照してください。Homeの比較期間はカレンダー週ではなく、観測を完了した参加期間です。
 
-Webも既存のDB・Identity鍵・Bot設定を使用します。起動前に `corepack pnpm migrate` で039までのmigrationを適用してください。確認付きの `/nexus unlink` またはSettingsのサーバー接続解除でWeb接続だけを解除でき、設定・履歴・分析データは保持されます。構成・検証方法は [Server verification](docs/server-verification.md) を参照してください。
+Webも既存のDB・Identity鍵・Bot設定を使用します。起動前に `corepack pnpm migrate` で044までのmigrationを適用してください。確認付きの `/nexus unlink` またはSettingsのサーバー接続解除でWeb接続だけを解除でき、設定・履歴・分析データは保持されます。構成・検証方法は [Server verification](docs/server-verification.md) を参照してください。
 
 ## Pricing & entitlements v2
 
-現行リリース: **NEXUS v0.6.0-alpha.7 — Stripe Commerce Launch Foundation**。[Stripe integration](docs/billing/stripe-integration.md) と [契約の強化](docs/billing/contract-hardening-alpha7.md) を参照してください。以前の検証記録は [commercial hardening report](docs/commercial-hardening-report.md) に保存しています。
+現行リリース: **NEXUS v0.6.0-alpha.8 — Market Parity & Community Operations**。[実装と検証](docs/alpha8-community-operations.md)、[市場での提供範囲](docs/research/alpha8-market-parity.md)、[Stripe integration](docs/billing/stripe-integration.md) を参照してください。以前の検証記録は各リリース文書に保存しています。
 
-FreeはReply・Thread・Forum・Reaction・Poll・Voice・Eventの基本観測、最初の交流、基本Attention・Journeyと測定根拠を含みます。Starterは履歴と分析の深さ、Growthは独自の測定ルールと運営自動化・改善追跡を追加します。Scaleは集計履歴と運用上限を拡大し、Enterpriseの利用条件は個別に確認します。公開価格は承認まで非表示で、外部決済は未設定です。
+Freeは基本観測・測定根拠・Discord内の7/30日チャート・受付フォーム1件を含みます。Starterは90日履歴、保存ビュー・セグメント・集計CSV・イベントカレンダー、Growthは対応一覧・版管理Playbook・定期チャートレポート・読取API・署名通知、Scaleは5サーバーの組織管理・チーム権限・独立承認・過去データの試行・限定書込APIを追加します。EnterpriseのSSO・SCIM等はPLANNEDです。価格は暫定値で、公開販売の承認は別に必要です。
 
 `/nexus plan` は非公開のプラン画面とプロモーションModalを開きます。Webの `/billing`、`/billing/manage`、`/billing/promotions` はOAuth・接続済みサーバー・現在の権限を確認します。`/billing/admin` のキャンペーン・Partner/Debug特典はNEXUS内部管理者だけが操作できます。Discordの管理者権限は内部権限ではありません。
 
@@ -89,4 +89,4 @@ corepack pnpm test:performance
 
 性能は既存10k・50k Guildと600人Voiceのfixtureを継続測定し、alpha.4比20%以内を基本の回帰基準とします。raw factとdaily rollupの同じ活動結果も比較します。実測と限界は [Scaling architecture](docs/scaling-architecture.md) を参照してください。migrationは追加方式で、旧データの意味を変更しません。
 
-現行の文書は [Documentation index](docs/README.md)、Stripe実装とLive gateは [Stripe readiness](docs/billing/stripe-readiness.md)、市場判断は [alpha.7 market validation](docs/research/alpha7-market-validation.md) を参照してください。過去のリリースレポートは `docs/archive/releases/` に保存しています。
+現行の文書は [Documentation index](docs/README.md)、Stripe実装とLive gateは [Stripe readiness](docs/billing/stripe-readiness.md)、市場判断は [alpha.8 market parity](docs/research/alpha8-market-parity.md) を参照してください。過去のリリースレポートは `docs/archive/releases/` に保存しています。

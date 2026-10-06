@@ -1,4 +1,5 @@
 import EmbeddedPostgres from "embedded-postgres";
+import { z } from "zod";
 import Fastify from "fastify";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -220,6 +221,25 @@ fixture.post("/fixture/promotion", async (request) => {
     stackingPolicy: "MAX",
   });
   return promotions.generateCode(actor, campaign.id);
+});
+// Test-only server and isolated database: set exact paid tiers without inventing
+// provider subscriptions or exposing a development entitlement route in the app.
+fixture.post("/fixture/operations-plan", async (request) => {
+  const { guildId, plan } = z
+      .object({
+        guildId: z.enum(ids as [string, ...string[]]),
+        plan: z.enum(["FREE", "STARTER", "GROWTH", "SCALE"]),
+      })
+      .strict()
+      .parse(request.body),
+    s = scopeForGuild(guildId);
+  await sql`UPDATE entitlement_grants SET revoked_at=now() WHERE ${tenant(s)} AND revoked_at IS NULL`.execute(
+    db,
+  );
+  await sql`INSERT INTO guild_subscriptions(organization_id,guild_id,plan_key,status) VALUES(${s.organizationId}::uuid,${s.guildId},${plan},'active') ON CONFLICT(organization_id,guild_id) DO UPDATE SET plan_key=EXCLUDED.plan_key,status='active'`.execute(
+    db,
+  );
+  return { ok: true };
 });
 fixture.get("/fixture/data/:guildId", async (request) => {
   const { guildId } = request.params as { guildId: string };

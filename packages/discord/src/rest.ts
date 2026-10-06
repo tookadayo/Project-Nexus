@@ -23,6 +23,7 @@ export type Member = {
   guildName?: string;
   ownerId?: string;
 };
+export type DiscordAttachment = { filename: string; data: Buffer };
 export const nativeOnboardingSchema = z.object({
   guild_id: z.string(),
   enabled: z.boolean(),
@@ -144,6 +145,7 @@ export interface DiscordPort {
     channelId: string,
     body: RESTPostAPIChannelMessageJSONBody,
     nonce: string,
+    files?: DiscordAttachment[],
   ): Promise<string>;
   editPanel(
     channelId: string,
@@ -155,6 +157,7 @@ export interface DiscordPort {
     applicationId: string,
     token: string,
     body: RESTPostAPIChannelMessageJSONBody,
+    files?: DiscordAttachment[],
   ): Promise<void>;
   followup?(
     applicationId: string,
@@ -399,15 +402,17 @@ export class DiscordRest implements DiscordPort {
     path: string,
     method = "GET",
     body?: unknown,
+    files?: DiscordAttachment[],
   ): Promise<T> {
     return traceStep("discord.rest", { stage: method }, () =>
-      this.requestInternal<T>(path, method, body),
+      this.requestInternal<T>(path, method, body, files),
     );
   }
   private async requestInternal<T>(
     path: string,
     method = "GET",
     body?: unknown,
+    files?: DiscordAttachment[],
   ): Promise<T> {
     const route = this.route(path, method),
       signal = AbortSignal.timeout(20000);
@@ -444,9 +449,14 @@ export class DiscordRest implements DiscordPort {
             method,
             headers: {
               Authorization: `Bot ${this.token}`,
-              "Content-Type": "application/json",
+              ...(files?.length ? {} : { "Content-Type": "application/json" }),
             },
-            body: body === undefined ? undefined : JSON.stringify(body),
+            body:
+              body === undefined
+                ? undefined
+                : files?.length
+                  ? discordMultipart(body, files)
+                  : JSON.stringify(body),
             signal: AbortSignal.any([signal, AbortSignal.timeout(6000)]),
           });
         } catch (error) {
@@ -881,6 +891,7 @@ export class DiscordRest implements DiscordPort {
     channelId: string,
     body: RESTPostAPIChannelMessageJSONBody,
     nonce: string,
+    files?: DiscordAttachment[],
   ) {
     return (
       await this.request<{ id: string }>(
@@ -891,6 +902,7 @@ export class DiscordRest implements DiscordPort {
           nonce: nonce.replaceAll("-", "").slice(0, 25),
           enforce_nonce: true,
         },
+        files,
       )
     ).id;
   }
@@ -927,11 +939,13 @@ export class DiscordRest implements DiscordPort {
     applicationId: string,
     token: string,
     body: RESTPostAPIChannelMessageJSONBody,
+    files?: DiscordAttachment[],
   ) {
     await this.request(
       `/webhooks/${applicationId}/${encodeURIComponent(token)}/messages/@original`,
       "PATCH",
       body,
+      files,
     );
   }
   async followup(
@@ -945,4 +959,38 @@ export class DiscordRest implements DiscordPort {
       { ...body, flags: 64 },
     );
   }
+}
+export function discordMultipart(body: unknown, files: DiscordAttachment[]) {
+  assert(
+    files.length <= 5 &&
+      files.every(
+        (file) =>
+          /^[a-z0-9_-]+\.(png|csv|json)$/.test(file.filename) &&
+          file.data.length <= 2 * 1024 * 1024,
+      ),
+    "DISCORD_ATTACHMENT_INVALID",
+    400,
+  );
+  const form = new FormData();
+  form.set(
+    "payload_json",
+    JSON.stringify({
+      ...(body as object),
+      attachments: files.map((file, id) => ({ id, filename: file.filename })),
+    }),
+  );
+  files.forEach((file, id) =>
+    form.set(
+      `files[${id}]`,
+      new Blob([Uint8Array.from(file.data)], {
+        type: file.filename.endsWith(".png")
+          ? "image/png"
+          : file.filename.endsWith(".csv")
+            ? "text/csv"
+            : "application/json",
+      }),
+      file.filename,
+    ),
+  );
+  return form;
 }

@@ -39,6 +39,19 @@ export const canonicalFeatures = [
   "hybrid_onboarding",
   "custom_activation",
   "interventions",
+  "discord_charts",
+  "saved_views",
+  "heatmaps",
+  "event_operations",
+  "intake_panels",
+  "attention_inbox",
+  "playbooks",
+  "report_branding",
+  "team_assignment",
+  "approval_workflow",
+  "automation_sandbox",
+  "recurring_exports",
+  "advanced_api",
 ] as const;
 export type EntitlementFeature = (typeof canonicalFeatures)[number];
 // Explicit compatibility map; no existing capability is silently removed.
@@ -47,6 +60,9 @@ export const legacyFeatureAliases = {
   diagnosis: "comparable_periods",
   automation_auto: "attention_automation",
   experiments: "improvement_tracking",
+  advanced_filters: "surface_breakdowns",
+  drilldowns: "surface_breakdowns",
+  saved_segments: "saved_views",
 } as const satisfies Record<string, EntitlementFeature>;
 export type Feature = EntitlementFeature | keyof typeof legacyFeatureAliases;
 export const features: readonly Feature[] = [
@@ -70,12 +86,13 @@ export const limitKeys = [
   "teamSeats",
   "webhooks",
   "apiRequestsMonthly",
+  "intakePanels",
 ] as const;
 export type LimitKey = (typeof limitKeys)[number];
 export type PlanLimits = Record<LimitKey, number | null>;
 export type PlanDefinition = {
   id: Plan;
-  revision: 2;
+  revision: 3;
   features: readonly Feature[];
   limits: PlanLimits;
   availability: "AVAILABLE" | "CONTRACT";
@@ -96,6 +113,8 @@ const free: EntitlementFeature[] = [
   "fallback_onboarding",
   "hybrid_onboarding",
   "interventions",
+  "discord_charts",
+  "intake_panels",
 ];
 const starter: EntitlementFeature[] = [
   ...free,
@@ -107,6 +126,10 @@ const starter: EntitlementFeature[] = [
   "scheduled_digest",
   "basic_improvement_tracking",
   "custom_activation",
+  "saved_views",
+  "heatmaps",
+  "csv_export",
+  "event_operations",
 ];
 const growth: EntitlementFeature[] = [
   ...starter,
@@ -116,16 +139,23 @@ const growth: EntitlementFeature[] = [
   "improvement_tracking",
   "scheduled_reports",
   "team_routing",
-  "csv_export",
   "webhooks",
   "ai_explanation",
+  "api",
+  "attention_inbox",
+  "playbooks",
+  "report_branding",
 ];
 const scale: EntitlementFeature[] = [
   ...growth,
   "multi_guild",
   "rbac",
-  "api",
   "audit_export",
+  "team_assignment",
+  "approval_workflow",
+  "automation_sandbox",
+  "recurring_exports",
+  "advanced_api",
 ];
 function definition(
   id: Plan,
@@ -135,7 +165,7 @@ function definition(
 ): PlanDefinition {
   return {
     id,
-    revision: 2,
+    revision: 3,
     features: [
       ...keys,
       ...Object.entries(legacyFeatureAliases)
@@ -166,6 +196,7 @@ export const planRegistry: Record<Plan, PlanDefinition> = {
     teamSeats: 1,
     webhooks: 0,
     apiRequestsMonthly: 0,
+    intakePanels: 1,
   }),
   STARTER: definition("STARTER", 15, starter, {
     guilds: 1,
@@ -177,6 +208,7 @@ export const planRegistry: Record<Plan, PlanDefinition> = {
     teamSeats: 1,
     webhooks: 0,
     apiRequestsMonthly: 0,
+    intakePanels: 5,
   }),
   GROWTH: definition("GROWTH", 49, growth, {
     guilds: 1,
@@ -187,7 +219,8 @@ export const planRegistry: Record<Plan, PlanDefinition> = {
     scheduledReports: 10,
     teamSeats: 5,
     webhooks: 5,
-    apiRequestsMonthly: 0,
+    apiRequestsMonthly: 10000,
+    intakePanels: 25,
   }),
   SCALE: definition("SCALE", 149, scale, {
     guilds: 5,
@@ -199,6 +232,7 @@ export const planRegistry: Record<Plan, PlanDefinition> = {
     teamSeats: 20,
     webhooks: 20,
     apiRequestsMonthly: 100000,
+    intakePanels: 100,
   }),
   ENTERPRISE: definition("ENTERPRISE", null, scale, {
     guilds: null,
@@ -210,17 +244,10 @@ export const planRegistry: Record<Plan, PlanDefinition> = {
     teamSeats: null,
     webhooks: null,
     apiRequestsMonthly: null,
+    intakePanels: null,
   }),
 };
-const planned: EntitlementFeature[] = [
-  "scheduled_reports",
-  "webhooks",
-  "multi_guild",
-  "rbac",
-  "api",
-  "audit_export",
-  "ai_explanation",
-];
+const planned: EntitlementFeature[] = ["ai_explanation"];
 export const featureAvailability = Object.fromEntries(
   features.map((key) => [
     key,

@@ -1,4 +1,6 @@
 import { traceStep } from "../../../packages/shared/src/observability.js";
+import { deliveryFence } from "../../../packages/operations/src/delivery-policy";
+import { operationsLock } from "../../../packages/operations/src/policy";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import {
@@ -8,10 +10,11 @@ import {
   type Database,
   type Tx,
 } from "../../../packages/db/src/index.js";
-import type { Scope } from "../../../packages/shared/src/index.js";
+import { assert, type Scope } from "../../../packages/shared/src/index.js";
 import { IdentityVault } from "../../../packages/identity/src/index.js";
 import {
   DiscordFailure,
+  type DiscordAttachment,
   type DiscordPort,
 } from "../../../packages/discord/src/rest.js";
 import {
@@ -29,6 +32,7 @@ import {
   SettingsService,
 } from "../../../packages/settings/src/index.js";
 import type { Panel } from "../../../packages/discord-panels/src/index.js";
+import { EntitlementService } from "../../../packages/settings/src/billing/entitlements";
 import { InterventionWorker } from "./interventions.js";
 import type { InteractionHealth } from "../../interaction/src/health.js";
 type Action = {
@@ -38,6 +42,34 @@ type Action = {
   attempts: number;
   leaseToken: string;
 };
+function attachmentFiles(input: unknown): DiscordAttachment[] | undefined {
+  if (input === undefined) return undefined;
+  return z
+    .array(
+      z
+        .object({
+          filename: z.string().regex(/^[a-z0-9_-]+\.(png|csv|json)$/),
+          dataBase64: z.string().max(2800000),
+        })
+        .strict(),
+    )
+    .max(5)
+    .parse(input)
+    .map((file) => {
+      const data = Buffer.from(file.dataBase64, "base64");
+      if (
+        data.length > 2 * 1024 * 1024 ||
+        data.toString("base64") !== file.dataBase64
+      )
+        throw new Error("INVALID_ATTACHMENT");
+      return { filename: file.filename, data };
+    });
+}
+function cleanAttachmentBody(body: Panel): Panel {
+  const clean = { ...body } as Panel & { nexusFiles?: unknown };
+  delete clean.nexusFiles;
+  return clean;
+}
 export class ActionWorker {
   constructor(
     private readonly db: Database,
@@ -273,16 +305,102 @@ export class ActionWorker {
           s.guildId,
           z.array(z.unknown()).parse(action.payload.commands),
         );
-      } else if (action.kind === "TEST_MESSAGE") {
+      } else if (
+        [
+          "TEST_MESSAGE",
+          "CHART_PUBLISH",
+          "OPERATIONS_NOTIFY",
+          "REPORT_PUBLISH",
+          "INTAKE_PUBLISH",
+          "INTAKE_NOTIFY",
+        ].includes(action.kind)
+      ) {
         const payload = action.payload as { channelId: string; body: Panel };
+        if (action.kind === "OPERATIONS_NOTIFY")
+          await new EntitlementService(this.db).require(s, "playbooks");
+        if (action.kind === "REPORT_PUBLISH")
+          await new EntitlementService(this.db).require(
+            s,
+            action.payload.export === true
+              ? "recurring_exports"
+              : "scheduled_reports",
+          );
+        if (action.kind === "INTAKE_NOTIFY")
+          await new EntitlementService(this.db).require(
+            s,
+            "surface_breakdowns",
+          );
+        if (action.kind === "INTAKE_PUBLISH") {
+          await new EntitlementService(this.db).require(s, "intake_panels");
+          assert(
+            (
+              await sql`SELECT id FROM operations_intake_panels WHERE ${tenant(s)} AND id=${String(action.payload.intakePanelId)}::uuid AND version=${Number(action.payload.intakePanelVersion)} AND state='PUBLISHING'`.execute(
+                this.db,
+              )
+            ).rows.length,
+            "INTAKE_PANEL_UNAVAILABLE",
+            409,
+          );
+        }
         await this.discord.checkChannel(s.guildId, payload.channelId);
+        if (action.payload.roleId)
+          assert(
+            (await this.discord.roles(s.guildId)).some(
+              (role) => role.id === action.payload.roleId,
+            ),
+            "ROLE_NOT_FOUND",
+            404,
+          );
         if (!(await this.live(s, action))) return true;
-        sideEffectStarted = true;
-        await this.discord.sendPanel(
-          payload.channelId,
-          payload.body,
-          action.id,
-        );
+        const publishedId = await this.db.transaction().execute(async (tx) => {
+          await privacyReadLock(tx, s);
+          if (!(await this.live(s, action, tx))) return null;
+          await operationsLock(tx, s);
+          if (action.kind === "OPERATIONS_NOTIFY")
+            await deliveryFence(
+              tx,
+              s,
+              "PLAYBOOK",
+              String(action.payload.playbookRunId),
+            );
+          if (action.kind === "REPORT_PUBLISH")
+            await deliveryFence(
+              tx,
+              s,
+              "REPORT",
+              String(action.payload.reportRunId),
+            );
+          if (action.kind === "INTAKE_PUBLISH")
+            await deliveryFence(
+              tx,
+              s,
+              "INTAKE",
+              String(action.payload.intakePanelId),
+            );
+          if (action.kind === "INTAKE_NOTIFY")
+            await deliveryFence(
+              tx,
+              s,
+              "INTAKE_NOTIFY",
+              String(action.payload.intakeRequestId),
+            );
+          if (action.payload.roleId)
+            await new EntitlementService(tx).require(s, "team_routing");
+          sideEffectStarted = true;
+          return this.discord.sendPanel(
+            payload.channelId,
+            payload.body,
+            action.id,
+            attachmentFiles(action.payload.files),
+          );
+        });
+        if (!publishedId) return true;
+        if (action.kind === "INTAKE_PUBLISH")
+          await this.commit(s, action, async (tx) => {
+            await sql`UPDATE operations_intake_panels SET state='PUBLISHED',message_id=${publishedId} WHERE ${tenant(s)} AND id=${String(action.payload.intakePanelId)}::uuid AND version=${Number(action.payload.intakePanelVersion)} AND state='PUBLISHING'`.execute(
+              tx,
+            );
+          });
       } else {
         const payload = action.payload as {
           encryptedToken: string;
@@ -296,13 +414,14 @@ export class ActionWorker {
           await this.discord.followup(
             payload.applicationId,
             this.vault.open(s, payload.encryptedToken),
-            payload.body,
+            cleanAttachmentBody(payload.body),
           );
         } else
           await this.discord.editReply(
             payload.applicationId,
             this.vault.open(s, payload.encryptedToken),
-            payload.body,
+            cleanAttachmentBody(payload.body),
+            attachmentFiles(action.payload.files),
           );
         replyCompleted = true;
         if (payload.interactionHash)

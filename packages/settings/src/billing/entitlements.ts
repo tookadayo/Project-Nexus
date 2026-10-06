@@ -11,6 +11,7 @@ import {
   featureDecision,
   type EntitlementGrant,
   type EntitlementSubscription,
+  type EffectiveEntitlement,
 } from "./domain";
 export {
   features,
@@ -38,7 +39,11 @@ export function visibleHistoryDays(
 }
 export class EntitlementService {
   constructor(private readonly db: Tx) {}
-  async effective(s: Scope, now = new Date()) {
+  async effective(
+    s: Scope,
+    now = new Date(),
+    organizationLicense = true,
+  ): Promise<EffectiveEntitlement> {
     const subscriptions = (
       await sql<EntitlementSubscription>`SELECT b.id,b.provider,b.plan_key AS plan,b.status,account.trial_allowed AS "trialAllowed",b.current_period_end::text AS "periodEnd",b.scheduled_plan AS "scheduledPlan",b.scheduled_at::text AS "scheduledAt",b.confirmed_at::text AS "confirmedAt",b.last_good_plan AS "lastGoodPlan",b.last_good_until::text AS "lastGoodUntil" FROM billing_subscriptions b JOIN billing_subscription_assignments a ON a.subscription_id=b.id AND a.organization_id=b.organization_id JOIN billing_accounts account ON account.id=b.account_id AND account.deleted_at IS NULL WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId}`.execute(
         this.db,
@@ -96,7 +101,61 @@ export class EntitlementService {
           this.db,
         )
       ).rows.length > 0;
-    return resolveEntitlements({ subscriptions, grants, privacyDeleted }, now);
+    const local = resolveEntitlements(
+      { subscriptions, grants, privacyDeleted },
+      now,
+    );
+    if (
+      organizationLicense &&
+      !privacyDeleted &&
+      !local.features.includes("multi_guild")
+    ) {
+      const link = (
+        await sql<{
+          root_organization_id: string;
+          home_guild_id: string;
+          position: number;
+        }>`SELECT g.root_organization_id,o.home_guild_id,g.position FROM (SELECT *,row_number() OVER(PARTITION BY root_organization_id ORDER BY CASE WHEN organization_id=root_organization_id THEN 0 ELSE 1 END,linked_at,guild_id)::integer AS position FROM operations_org_guilds WHERE state='ACTIVE' AND root_organization_id=(SELECT root_organization_id FROM operations_org_guilds WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId} AND state='ACTIVE')) g JOIN operations_organizations o ON o.id=g.root_organization_id WHERE g.organization_id=${s.organizationId}::uuid AND g.guild_id=${s.guildId} AND (o.id<>${s.organizationId}::uuid OR o.home_guild_id<>${s.guildId})`.execute(
+          this.db,
+        )
+      ).rows[0];
+      if (link) {
+        const owner = await this.effective(
+          {
+            organizationId: link.root_organization_id,
+            guildId: link.home_guild_id,
+          },
+          now,
+          false,
+        );
+        if (
+          !owner.privacyDeleted &&
+          owner.features.includes("multi_guild") &&
+          (owner.limits.guilds === null || link.position <= owner.limits.guilds)
+        )
+          return resolveEntitlements(
+            {
+              subscriptions,
+              privacyDeleted,
+              grants: [
+                ...grants,
+                {
+                  id: "organization-license:" + link.root_organization_id,
+                  source: "CONTRACT",
+                  plan: owner.plan,
+                  features: [],
+                  limits: owner.limits,
+                  startsAt: new Date(0).toISOString(),
+                  endsAt: null,
+                  revokedAt: null,
+                },
+              ],
+            },
+            now,
+          );
+      }
+    }
+    return local;
   }
   async plan(s: Scope): Promise<Plan> {
     return (await this.effective(s)).plan;

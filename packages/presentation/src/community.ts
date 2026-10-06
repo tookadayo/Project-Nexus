@@ -587,7 +587,7 @@ export class CommunityService {
         threshold_seconds: number | null;
         evidence:
           import("../../shared/src/metric-evidence").MetricEvidence | null;
-      }>`SELECT channel_id,message_id,detected_at AS occurred_at,status,item_type,opened_at,acknowledged_at,threshold_seconds,evidence,count(*) OVER()::integer AS total FROM attention_items WHERE ${tenant(s)} AND status IN ('OPEN','ACKNOWLEDGED') AND item_type IN ('TEXT_NEWCOMER','FORUM_SUPPORT','LFG_RESPONSE') ORDER BY detected_at,message_id LIMIT ${Math.max(1, Math.min(50, attentionLimit))} OFFSET ${Math.max(0, Math.min(1000, attentionOffset))}`.execute(
+      }>`SELECT channel_id,message_id,detected_at AS occurred_at,status,item_type,opened_at,acknowledged_at,threshold_seconds,evidence,count(*) OVER()::integer AS total FROM attention_items WHERE ${tenant(s)} AND status IN ('OPEN','ACKNOWLEDGED','IN_PROGRESS') AND item_type IN ('TEXT_NEWCOMER','FORUM_SUPPORT','LFG_RESPONSE') ORDER BY detected_at,message_id LIMIT ${Math.max(1, Math.min(50, attentionLimit))} OFFSET ${Math.max(0, Math.min(1000, attentionOffset))}`.execute(
         this.db,
       )
     ).rows;

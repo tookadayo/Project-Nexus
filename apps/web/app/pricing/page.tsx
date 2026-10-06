@@ -12,12 +12,12 @@ import {
 import { SiteShell, copy, siteLocale } from "../public-ui";
 import { installUrl } from "../auth/session";
 import { publicBillingCatalog } from "../billing/catalog";
-export const dynamic="force-dynamic";
+export const dynamic = "force-dynamic";
 export default async function Pricing() {
   const locale = await siteLocale(),
     language = locale === "ja" ? 0 : 1,
     add = installUrl();
-  const {launch,offerings}=await publicBillingCatalog();
+  const { launch, offerings } = await publicBillingCatalog();
   const availableFeatures = canonicalFeatures.filter(
     (feature) => featureAvailability[feature] === "available",
   );
@@ -25,15 +25,24 @@ export default async function Pricing() {
     ...planCopy,
     STARTER: {
       ...planCopy.STARTER,
-      purpose: ["参加の流れが、なぜ・どこで止まるかを理解する。", "See why and where community flow breaks."],
+      purpose: [
+        "参加の流れが、なぜ・どこで止まるかを理解する。",
+        "See why and where community flow breaks.",
+      ],
     },
     GROWTH: {
       ...planCopy.GROWTH,
-      purpose: ["発見を、繰り返し実行できる運営と改善につなげる。", "Turn findings into recurring operations."],
+      purpose: [
+        "発見を、繰り返し実行できる運営と改善につなげる。",
+        "Turn findings into recurring operations.",
+      ],
     },
     SCALE: {
-      heading: ["履歴と運用の範囲を広げる", "Extend history and operations"],
-      purpose: ["チーム運営・自動化は準備中。現在は履歴・運用上限をSandboxで検証。", "Team & Automate is planned. Test history and operational limits in Sandbox; multi-community and team features are planned."],
+      ...planCopy.SCALE,
+      purpose: [
+        "複数のコミュニティを、チームと承認ルールで運営する。",
+        "Operate multiple communities as a team, with approval rules.",
+      ],
     },
     ENTERPRISE: {
       heading: ["利用条件を相談する", "Discuss your usage requirements"],
@@ -61,8 +70,16 @@ export default async function Pricing() {
         <span className="badge badge-violet">
           {copy(
             locale,
-            launch.checkoutEnabled?(launch.livemode?"USD月額プラン":"Sandbox検証 · 暫定USD価格 · 実際の請求はありません"):"有料決済は準備中。価格は承認後に公開。",
-            launch.checkoutEnabled?(launch.livemode?"Monthly USD plans":"Sandbox testing · Provisional USD prices · No real-money charge"):"Paid checkout is being prepared. Prices await approval.",
+            launch.checkoutEnabled
+              ? launch.livemode
+                ? "USD月額プラン"
+                : "Sandbox検証 · 暫定USD価格 · 実際の請求はありません"
+              : "有料決済は準備中。価格は承認後に公開。",
+            launch.checkoutEnabled
+              ? launch.livemode
+                ? "Monthly USD plans"
+                : "Sandbox testing · Provisional USD prices · No real-money charge"
+              : "Paid checkout is being prepared. Prices await approval.",
           )}
         </span>
       </section>
@@ -73,7 +90,7 @@ export default async function Pricing() {
         {plans.map((plan, index) => {
           const spec = planRegistry[plan],
             previous = index ? planRegistry[plans[index - 1]!] : null;
-          const offering=offerings.find(o=>o.plan_key===plan);
+          const offering = offerings.find((o) => o.plan_key === plan);
           const additional = availableFeatures.filter(
             (feature) =>
               spec.features.includes(feature) &&
@@ -113,7 +130,9 @@ export default async function Pricing() {
                       style: "currency",
                       currency: offering?.currency ?? planCurrency,
                       maximumFractionDigits: 0,
-                    }).format(offering?offering.final_price_minor/100:spec.price)}
+                    }).format(
+                      offering ? offering.final_price_minor / 100 : spec.price,
+                    )}
                     <small>/{copy(locale, "月", "month")}</small>
                   </>
                 )}
@@ -152,8 +171,8 @@ export default async function Pricing() {
                   : plan === "SCALE"
                     ? copy(
                         locale,
-                        `${spec.limits.historyDays}日の集計履歴`,
-                        `${spec.limits.historyDays} days of aggregate history`,
+                        `${spec.limits.guilds}サーバーの組織運営 · ${spec.limits.historyDays}日の集計履歴`,
+                        `${spec.limits.guilds} communities per organization · ${spec.limits.historyDays} days of aggregate history`,
                       )
                     : copy(
                         locale,
@@ -166,13 +185,24 @@ export default async function Pricing() {
                   {copy(locale, "Discordに追加", "Add to Discord")}
                 </a>
               ) : offering && launch.checkoutEnabled ? (
-                <a className="button button-primary" href={`/billing/manage?offering=${offering.id}`}>{copy(locale,`${plan}を選ぶ`,`Choose ${plan[0]}${plan.slice(1).toLowerCase()}`)}</a>
+                <a
+                  className="button button-primary"
+                  href={`/billing/manage?offering=${offering.id}`}
+                >
+                  {copy(
+                    locale,
+                    `${plan}を選ぶ`,
+                    `Choose ${plan[0]}${plan.slice(1).toLowerCase()}`,
+                  )}
+                </a>
               ) : (
                 <a className="button button-secondary" href="/support">
                   {copy(
                     locale,
-                    plan==="ENTERPRISE"?"問い合わせる":"公開準備中 · 問い合わせる",
-                    plan==="ENTERPRISE"?"Contact":"Coming soon · Contact",
+                    plan === "ENTERPRISE"
+                      ? "問い合わせる"
+                      : "公開準備中 · 問い合わせる",
+                    plan === "ENTERPRISE" ? "Contact" : "Coming soon · Contact",
                   )}
                 </a>
               )}
@@ -319,8 +349,16 @@ export default async function Pricing() {
           <p>
             {copy(
               locale,
-              launch.checkoutEnabled?(launch.livemode?"プランは決済側の契約を確認した後に反映されます。":"Sandboxではテスト購入できます。プランは決済側の契約を確認した後に反映されます。"):"決済は現在準備中です。問い合わせやリンクのクリックだけでは購入やプラン変更は完了しません。",
-              launch.checkoutEnabled?(launch.livemode?"A plan activates after authoritative subscription confirmation.":"Test purchases are available in Sandbox. A plan activates after authoritative subscription confirmation."):"Checkout is currently unconfigured. Contacting support or clicking a link does not purchase or activate a plan.",
+              launch.checkoutEnabled
+                ? launch.livemode
+                  ? "プランは決済側の契約を確認した後に反映されます。"
+                  : "Sandboxではテスト購入できます。プランは決済側の契約を確認した後に反映されます。"
+                : "決済は現在準備中です。問い合わせやリンクのクリックだけでは購入やプラン変更は完了しません。",
+              launch.checkoutEnabled
+                ? launch.livemode
+                  ? "A plan activates after authoritative subscription confirmation."
+                  : "Test purchases are available in Sandbox. A plan activates after authoritative subscription confirmation."
+                : "Checkout is currently unconfigured. Contacting support or clicking a link does not purchase or activate a plan.",
             )}
           </p>
         </details>

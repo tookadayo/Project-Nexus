@@ -1,4 +1,4 @@
-# Stripe Commerce Launch Foundation — 0.6.0-alpha.7
+# Stripe commerce and recovery — 0.6.0-alpha.8
 
 NEXUS owns capabilities and commercial policy. Stripe Billing, hosted Checkout
 and recurring Prices handle financial subscriptions. No card-input UI is built in
@@ -27,7 +27,9 @@ Browser purchase input accepts Offering ID, UUID idempotency key and an optional
 reservation ID. Server code resolves everything else. Core passes encrypted
 Customer/Subscription bindings and full trusted Offerings to the provider; the
 provider never queries NEXUS DB. One Billing Account has one Stripe Customer;
-one subscription has one guild until formal multi-guild provisioning ships.
+one provider subscription has one guild assignment. Scale organization licenses
+project only after explicit authorized linking; they never copy a provider reference
+into another guild's subscription assignment.
 
 ## Mutations and recovery
 
@@ -41,7 +43,10 @@ while the paid-subscription guard continues to apply.
 
 Upgrades use `pending_if_incomplete` with `always_invoice` proration. The target
 plan becomes effective only when the authoritative subscription changes after
-payment. Downgrades create a Subscription Schedule with the paid current phase
+payment. Required authentication returns a freshly verified Stripe-hosted invoice
+URL; revisiting billing re-fetches the bound current invoice. Expired pending updates
+become failed operations rather than granting the requested plan. Downgrades create
+a Subscription Schedule with the paid current phase
 and target next phase, no proration, and release at schedule completion. Current
 entitlement remains until Stripe confirms the new Offering. Cancel releases only
 a NEXUS-managed schedule and sets `cancel_at_period_end`. Access remains for

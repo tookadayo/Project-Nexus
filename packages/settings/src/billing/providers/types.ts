@@ -57,6 +57,9 @@ export type NativeCheckoutResult = {
   providerCheckoutRef?: never;
 };
 export type PortalSessionResult = { url: string; cacheUntil?: string };
+export type ChangeSubscriptionResult =
+  | { state: "CONFIRMING" }
+  | { state: "PAYMENT_ACTION_REQUIRED"; paymentUrl: string };
 export type ChangeSubscriptionRequest = {
   scope: Scope;
   subscription: TrustedProviderSubscriptionReference;
@@ -140,7 +143,13 @@ export const normalizedBillingEventSchema = z
       })
       .strict()
       .optional(),
-    scheduledOfferingAssociation: z.object({offeringId:z.uuid(),fingerprint:z.string().regex(/^[a-f0-9]{64}$/)}).strict().optional(),
+    scheduledOfferingAssociation: z
+      .object({
+        offeringId: z.uuid(),
+        fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      })
+      .strict()
+      .optional(),
     status: z.enum(subscriptionStates),
     occurredAt: providerTime,
     ordering: z.enum(["MONOTONIC_VERSION", "RECONCILE_LATEST"]).optional(),
@@ -149,6 +158,8 @@ export const normalizedBillingEventSchema = z
     scheduledPlan: z.enum(plans).nullable().default(null),
     scheduledAt: providerTime.nullable().default(null),
     authoritative: z.boolean(),
+    // Only an authoritative retrieval may affirm absence of a pending update.
+    pendingUpdate: z.boolean().optional(),
     commercialEvidence: commercialDiscountEvidenceSchema.optional(),
   })
   .strict();
@@ -198,7 +209,12 @@ export interface BillingProvider {
     scope: Scope,
     preview: PlanChangePreview,
   ): Promise<PlanChangePreview>;
-  changeSubscription(input: ChangeSubscriptionRequest): Promise<void>;
+  changeSubscription(
+    input: ChangeSubscriptionRequest,
+  ): Promise<ChangeSubscriptionResult | void>;
+  pendingPayment(input: {
+    subscription: TrustedProviderSubscriptionReference;
+  }): Promise<ChangeSubscriptionResult>;
   cancel(
     input: CancelSubscriptionRequest,
   ): Promise<{ scheduledAt: string | null }>;
@@ -262,7 +278,12 @@ export class UnconfiguredBillingProvider implements BillingProvider {
     _input:
       | ChangeSubscriptionRequest
       | { scope: Scope; offeringId: string; idempotencyKey: string },
-  ): Promise<void> {
+  ): Promise<ChangeSubscriptionResult | void> {
+    assert(false, "BILLING_PROVIDER_NOT_CONFIGURED", 503);
+  }
+  async pendingPayment(_input: {
+    subscription: TrustedProviderSubscriptionReference;
+  }): Promise<ChangeSubscriptionResult> {
     assert(false, "BILLING_PROVIDER_NOT_CONFIGURED", 503);
   }
   async reconcile(

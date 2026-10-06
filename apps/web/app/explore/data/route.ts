@@ -1,0 +1,112 @@
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { operationsContext } from "../../operations/context";
+import { sameOrigin } from "../../auth/origin";
+import { billingBody, billingFailure } from "../../billing/request";
+import {
+  ExploreService,
+  savedViewSchema,
+} from "../../../../../packages/analytics/src/explore";
+import {
+  chartQuerySchema,
+  chartCsv,
+} from "../../../../../packages/analytics/src/chart-spec";
+import { renderChartPng } from "../../../../../packages/analytics/src/chart-renderer";
+import { EntitlementService } from "../../../../../packages/settings/src/billing/entitlements";
+import { latestCapability } from "../../../../../packages/lifecycle/src/discovery";
+import { assert } from "../../../../../packages/shared/src/index";
+export const runtime = "nodejs";
+function failure(error: unknown) {
+  if (error instanceof z.ZodError || error instanceof SyntaxError)
+    return NextResponse.json(
+      { error: "INVALID_EXPLORE_REQUEST" },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
+  return billingFailure(error);
+}
+export async function GET(request: NextRequest) {
+  try {
+    const context = await operationsContext(),
+      explore = new ExploreService(context.services.db),
+      params = request.nextUrl.searchParams,
+      q = params.get("q") ?? "{}";
+    assert(q.length <= 4096, "REQUEST_TOO_LARGE", 413);
+    const query = chartQuerySchema.parse(JSON.parse(q)),
+      saved = params.get("saved"),
+      spec = saved
+        ? await explore.saved(context.scope, z.uuid().parse(saved))
+        : await explore.chart(context.scope, query),
+      entitlements = new EntitlementService(context.services.db);
+    if (params.get("format") === "csv") {
+      await entitlements.require(context.scope, "csv_export");
+      return new Response(chartCsv(spec), {
+        headers: {
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": 'attachment; filename="nexus-aggregate.csv"',
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+    if (params.get("format") === "png")
+      return new Response(new Uint8Array(await renderChartPng(spec)), {
+        headers: { "Content-Type": "image/png", "Cache-Control": "no-store" },
+      });
+    const advanced = (
+      await entitlements.check(context.scope, "surface_breakdowns")
+    ).allowed;
+    return NextResponse.json(
+      {
+        spec,
+        views: advanced ? await explore.list(context.scope) : [],
+        segments: advanced ? await explore.segments(context.scope) : [],
+        capabilities: {
+          advanced,
+          csv: (await entitlements.check(context.scope, "csv_export")).allowed,
+          historyDays: (await entitlements.effective(context.scope)).limits
+            .historyDays,
+        },
+        channels:
+          (
+            await latestCapability(context.services.db, context.scope)
+          )?.channels.map((channel) => ({
+            id: channel.id,
+            type: channel.type,
+            observable: channel.observable,
+          })) ?? [],
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  } catch (error) {
+    return failure(error);
+  }
+}
+export async function POST(request: NextRequest) {
+  try {
+    assert(sameOrigin(request), "ORIGIN_REJECTED", 403);
+    const context = await operationsContext(),
+      input = z
+        .discriminatedUnion("action", [
+          z
+            .object({ action: z.literal("saveView"), view: savedViewSchema })
+            .strict(),
+          z
+            .object({ action: z.literal("saveSegment"), segment: z.unknown() })
+            .strict(),
+        ])
+        .parse(JSON.parse(await billingBody(request, 8192))),
+      explore = new ExploreService(context.services.db);
+    const result =
+      input.action === "saveView"
+        ? await explore.save(context.scope, context.actor, input.view)
+        : await explore.saveSegment(
+            context.scope,
+            context.actor,
+            input.segment,
+          );
+    return NextResponse.json(result, {
+      headers: { "Cache-Control": "no-store" },
+    });
+  } catch (error) {
+    return failure(error);
+  }
+}

@@ -90,8 +90,16 @@ test("public product and pricing are readable without dashboard credentials", as
     "Automated unanswered reminders",
   );
   await expect(page.getByRole("table")).not.toContainText(
-    /Planned|API access|Role-based access|AI explanations|Scheduled reports|Webhook integrations|Multi-server overview|Audit export/,
+    /Planned|AI explanations|Google Calendar sync|SAML|SCIM/,
   );
+  for (const feature of [
+    "API access",
+    "Scheduled reports",
+    "Webhook integrations",
+    "Role-based access",
+    "Historical automation dry runs",
+  ])
+    await expect(page.getByRole("table")).toContainText(feature);
   await expect(page.locator(".price-card")).toHaveCount(5);
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.screenshot({

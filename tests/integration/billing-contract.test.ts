@@ -139,11 +139,15 @@ it("configured Checkout remains distinguishable from a purchase blocked by an ex
     const f = await fixture();
     await offer();
     await confirmed(f);
-    const configured = (await f.billing.view(f.scope)).presentation.billingActions.purchase.find(a => a.method === "CHECKOUT");
-    expect(configured).toMatchObject({configured:true, available:false});
+    const configured = (
+      await f.billing.view(f.scope)
+    ).presentation.billingActions.purchase.find((a) => a.method === "CHECKOUT");
+    expect(configured).toMatchObject({ configured: true, available: false });
     vi.stubEnv("NEXUS_STRIPE_ENABLED", "false");
-    const disabled = (await f.billing.view(f.scope)).presentation.billingActions.purchase.find(a => a.method === "CHECKOUT");
-    expect(disabled).toMatchObject({configured:false, available:false});
+    const disabled = (
+      await f.billing.view(f.scope)
+    ).presentation.billingActions.purchase.find((a) => a.method === "CHECKOUT");
+    expect(disabled).toMatchObject({ configured: false, available: false });
   } finally {
     vi.unstubAllEnvs();
     vi.stubEnv("NEXUS_BILLING_DEVELOPER_COUNTRY", "JP");
@@ -345,7 +349,12 @@ it("authoritative cancellation ends access even with a future provider period bo
   const f = await fixture();
   await confirmed(f);
   expect(await f.entitlements.plan(f.scope)).toBe("GROWTH");
-  await f.billing.reconcileLatest(f.scope,new FixtureStripe(async () => census([snapshot(f.scope,{status:"CANCELED"})])));
+  await f.billing.reconcileLatest(
+    f.scope,
+    new FixtureStripe(async () =>
+      census([snapshot(f.scope, { status: "CANCELED" })]),
+    ),
+  );
   await project(f.billing);
   expect(await f.entitlements.plan(f.scope)).toBe("FREE");
 });
@@ -619,7 +628,13 @@ it.each(["creation", "completion"])(
     }
     const customer = await f.billing.customerReference(f.scope, "STRIPE");
     expect(customer.customerRef).toBe(customerRef);
-    const completion=(await sql<{checkout_completed_at:Date|null}>`SELECT checkout_completed_at FROM billing_operations WHERE id=${operationId}::uuid`.execute(db)).rows[0]!.checkout_completed_at;
+    const completion = (
+      await sql<{
+        checkout_completed_at: Date | null;
+      }>`SELECT checkout_completed_at FROM billing_operations WHERE id=${operationId}::uuid`.execute(
+        db,
+      )
+    ).rows[0]!.checkout_completed_at;
     expect(Boolean(completion)).toBe(stage === "completion");
     const stored = (
       await sql<{
@@ -778,6 +793,82 @@ it("full census rejects target-only or malformed completeness claims without can
   ).rejects.toThrow();
   expect(await f.entitlements.plan(f.scope)).toBe("GROWTH");
 });
+it("expired unpaid pending upgrade releases the mutation fence and rejects its stale payment cache", async () => {
+  const f = await fixture(),
+    current = await offer(4900),
+    target = await offer(5900);
+  const association = {
+    offeringId: current.id,
+    fingerprint: offeringFingerprint(current),
+  };
+  await confirmed(f, {
+    offeringAssociation: association,
+    pendingUpdate: false,
+  });
+  class PendingStripe extends FixtureStripe {
+    override async changeSubscription() {
+      return {
+        state: "PAYMENT_ACTION_REQUIRED" as const,
+        paymentUrl: "https://invoice.stripe.com/i/fixture",
+      };
+    }
+  }
+  const provider = new PendingStripe(async () =>
+      census([
+        snapshot(f.scope, {
+          offeringAssociation: association,
+          pendingUpdate: true,
+        }),
+      ]),
+    ),
+    key = randomUUID(),
+    policy = {
+      effective: "IMMEDIATE" as const,
+      proration: "PROVIDER_CALCULATED" as const,
+    };
+  expect(
+    await f.billing.changeSubscription(
+      f.scope,
+      provider,
+      target.id,
+      key,
+      policy,
+    ),
+  ).toMatchObject({ state: "PAYMENT_ACTION_REQUIRED" });
+  await confirmed(f, {
+    offeringAssociation: association,
+    pendingUpdate: false,
+  });
+  expect(
+    (
+      await sql<{
+        state: string;
+        error_category: string;
+      }>`SELECT state,error_category FROM billing_operations WHERE ${sql.ref("organization_id")}=${f.scope.organizationId}::uuid AND operation='CHANGE'`.execute(
+        db,
+      )
+    ).rows[0],
+  ).toEqual({
+    state: "FAILED",
+    error_category: "BILLING_PENDING_UPDATE_EXPIRED",
+  });
+  await expect(
+    f.billing.changeSubscription(f.scope, provider, target.id, key, policy),
+  ).rejects.toThrow("BILLING_PENDING_UPDATE_EXPIRED");
+  expect(await f.entitlements.plan(f.scope)).toBe("GROWTH");
+  expect(
+    (await f.billing.subscriptionReference(f.scope, "STRIPE")).subscriptionRef,
+  ).toBe("fixture-subscription:" + f.scope.guildId);
+  expect(
+    await f.billing.changeSubscription(
+      f.scope,
+      provider,
+      target.id,
+      randomUUID(),
+      policy,
+    ),
+  ).toMatchObject({ state: "PAYMENT_ACTION_REQUIRED" });
+});
 it("Offering revision association projects revision 3 and remains immutable after disabling", async () => {
   const f = await fixture(),
     id = randomUUID();
@@ -921,7 +1012,12 @@ it.each(["CHANGE", "CANCEL"] as const)(
     }));
     const completedResult = await f.operations.mutation(completed, prior);
     // An accepted mutation fences new keys until its authoritative effect is observed.
-    await expect(f.operations.mutation({ ...completed, idempotencyKey: randomUUID() }, prior)).rejects.toThrow("BILLING_RECONCILE_REQUIRED");
+    await expect(
+      f.operations.mutation(
+        { ...completed, idempotencyKey: randomUUID() },
+        prior,
+      ),
+    ).rejects.toThrow("BILLING_RECONCILE_REQUIRED");
     await confirmed(f, { status: "CANCEL_AT_PERIOD_END" });
     let release!: () => void;
     const hold = new Promise<void>((resolve) => {

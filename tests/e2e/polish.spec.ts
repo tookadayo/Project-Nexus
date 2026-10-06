@@ -47,7 +47,7 @@ for (const locale of ["en", "ja"] as const) {
     await expect(page).toHaveURL(/\/pricing$/);
     await expect(page.locator(".planned-features")).toHaveCount(0);
     await expect(page.getByRole("table")).not.toContainText(
-      /Planned|準備中|API|Role-based access|役割ごとのアクセス管理|AI explanations|AIによる説明|Scheduled reports|定期レポート|Webhook integrations|外部への通知連携|Multi-server overview|複数サーバーの一括管理|Audit export|監査記録の出力/,
+      /Planned|準備中|AI explanations|AIによる説明|Google Calendar|SAML|SCIM/,
     );
     await expect(page.locator("main")).toContainText(
       locale === "ja"
@@ -72,7 +72,7 @@ for (const locale of ["en", "ja"] as const) {
             : "custom usage terms",
       );
       await expect(card).not.toContainText(
-        /API|RBAC|Govern|Integrate|一括管理|枠の割当|監査|個別要件に合わせる|チームで運営する/,
+        /SAML|SCIM|Ask NEXUS|Google Calendar sync|AI explanations|AIによる説明/,
       );
       await expect(card).not.toContainText("$149");
     }

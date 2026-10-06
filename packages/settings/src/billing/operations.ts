@@ -21,6 +21,7 @@ import {
 import type {
   TrustedProviderCustomerReference,
   TrustedProviderSubscriptionReference,
+  ChangeSubscriptionResult,
 } from "./providers/types";
 export type SessionOperation = {
   scope: Scope;
@@ -56,8 +57,11 @@ type SessionResult = {
 };
 // An adapter may only label a failure definitive when it knows no external mutation happened.
 export class DefinitiveBillingFailure extends Error {
-  constructor(readonly category: string, cause?: unknown) {
-    super(category, {cause});
+  constructor(
+    readonly category: string,
+    cause?: unknown,
+  ) {
+    super(category, { cause });
   }
 }
 const canonicalPromotion = (value: PromotionCheckoutContext | undefined) =>
@@ -67,7 +71,9 @@ export class BillingOperationService {
     private readonly db: Database,
     private readonly vault: IdentityVault,
   ) {}
-  async mutation<T extends { scheduledAt: string | null } | void>(
+  async mutation<
+    T extends { scheduledAt: string | null } | ChangeSubscriptionResult | void,
+  >(
     input: SessionOperation & { operation: "CHANGE" | "CANCEL" },
     execute: (context: BillingExecutionContext) => Promise<T>,
   ): Promise<T> {
@@ -176,9 +182,20 @@ export class BillingOperationService {
       const offering = input.offeringId
         ? await checkoutOffering(tx, input.offeringId)
         : undefined;
-      const current = subscription ? (await sql<{ offering_id: string | null }>`SELECT offering_id FROM billing_subscriptions WHERE id=${subscription.bindingId}::uuid`.execute(tx)).rows[0] : undefined;
-      const currentId = previous[0]?.current_offering_id ?? current?.offering_id;
-      const currentOffering = currentId ? await billingOffering(tx,currentId) : undefined;
+      const current = subscription
+        ? (
+            await sql<{
+              offering_id: string | null;
+            }>`SELECT offering_id FROM billing_subscriptions WHERE id=${subscription.bindingId}::uuid`.execute(
+              tx,
+            )
+          ).rows[0]
+        : undefined;
+      const currentId =
+        previous[0]?.current_offering_id ?? current?.offering_id;
+      const currentOffering = currentId
+        ? await billingOffering(tx, currentId)
+        : undefined;
       assert(
         (input.operation !== "CHECKOUT" && input.operation !== "CHANGE") ||
           offering,
@@ -193,9 +210,25 @@ export class BillingOperationService {
       let promotion: PromotionCheckoutContext | undefined;
       const reservationId =
         input.promotionReservationId ?? input.promotion?.reservationId;
-      const finalizedPromotion = reservationId && (await sql<{ state: string }>`SELECT state FROM promotion_redemption_reservations WHERE id=${reservationId}::uuid AND ${tenant(s)}`.execute(tx)).rows[0]?.state === "FINALIZED";
-      if (previous[0]?.state === "FINALIZED" && finalizedPromotion && previous[0]?.promotion_context_ciphertext)
-        promotion = promotionCheckoutContextSchema.parse(JSON.parse(this.vault.open(s,previous[0].promotion_context_ciphertext)));
+      const finalizedPromotion =
+        reservationId &&
+        (
+          await sql<{
+            state: string;
+          }>`SELECT state FROM promotion_redemption_reservations WHERE id=${reservationId}::uuid AND ${tenant(s)}`.execute(
+            tx,
+          )
+        ).rows[0]?.state === "FINALIZED";
+      if (
+        previous[0]?.state === "FINALIZED" &&
+        finalizedPromotion &&
+        previous[0]?.promotion_context_ciphertext
+      )
+        promotion = promotionCheckoutContextSchema.parse(
+          JSON.parse(
+            this.vault.open(s, previous[0].promotion_context_ciphertext),
+          ),
+        );
       else if (reservationId && offering)
         promotion = await new PromotionReservationService(
           this.db,
@@ -219,11 +252,13 @@ export class BillingOperationService {
             reservationId ?? null,
             input.customer ? customer : null,
             subscription ?? null,
-            input.operation === "CHANGE" && currentOffering ? offeringFingerprint(currentOffering) : null,
+            input.operation === "CHANGE" && currentOffering
+              ? offeringFingerprint(currentOffering)
+              : null,
             input.policy ?? null,
           ]),
         );
-      await sql`INSERT INTO billing_operations(id,organization_id,guild_id,provider,operation,request_digest,input_digest,offering_id,subscription_id,promotion_reservation_id,current_offering_id,promotion_context_ciphertext,retry_until) VALUES(${randomUUID()}::uuid,${s.organizationId}::uuid,${s.guildId},${input.provider},${input.operation},${request},${payload},${offering?.id ?? null}::uuid,${subscription?.bindingId ?? null}::uuid,${reservationId ?? null}::uuid,${currentOffering?.id ?? null}::uuid,${promotion ? this.vault.seal(s,JSON.stringify(promotion)) : null},now()+interval '23 hours') ON CONFLICT(organization_id,guild_id,operation,request_digest) DO NOTHING`.execute(
+      await sql`INSERT INTO billing_operations(id,organization_id,guild_id,provider,operation,request_digest,input_digest,offering_id,subscription_id,promotion_reservation_id,current_offering_id,promotion_context_ciphertext,retry_until) VALUES(${randomUUID()}::uuid,${s.organizationId}::uuid,${s.guildId},${input.provider},${input.operation},${request},${payload},${offering?.id ?? null}::uuid,${subscription?.bindingId ?? null}::uuid,${reservationId ?? null}::uuid,${currentOffering?.id ?? null}::uuid,${promotion ? this.vault.seal(s, JSON.stringify(promotion)) : null},now()+interval '23 hours') ON CONFLICT(organization_id,guild_id,operation,request_digest) DO NOTHING`.execute(
         tx,
       );
       const row = (
@@ -236,12 +271,23 @@ export class BillingOperationService {
           external_started_at: Date | null;
           retry_until: Date | null;
           checkout_expires_at: Date | null;
+          error_category: string | null;
         }>`SELECT * FROM billing_operations WHERE ${tenant(s)} AND operation=${input.operation} AND request_digest=${request} FOR UPDATE`.execute(
           tx,
         )
       ).rows[0]!;
       assert(row.input_digest === payload, "IDEMPOTENCY_CONFLICT", 409);
-      if (row.state === "FINALIZED" || (row.state === "RECONCILE_REQUIRED" && row.result_ciphertext && ["CHANGE","CANCEL"].includes(input.operation))) {
+      assert(
+        row.error_category !== "BILLING_PENDING_UPDATE_EXPIRED",
+        "BILLING_PENDING_UPDATE_EXPIRED",
+        409,
+      );
+      if (
+        row.state === "FINALIZED" ||
+        (row.state === "RECONCILE_REQUIRED" &&
+          row.result_ciphertext &&
+          ["CHANGE", "CANCEL"].includes(input.operation))
+      ) {
         assert(
           row.result_ciphertext &&
             row.result_expires_at &&
@@ -282,9 +328,12 @@ export class BillingOperationService {
           s,
           input.provider,
         );
-      if(input.operation === "CHECKOUT" && input.provider === "STRIPE") {
-        const other = await sql`SELECT c.id FROM billing_provider_customers c JOIN billing_accounts a ON a.id=c.account_id WHERE a.organization_id=${s.organizationId}::uuid AND c.provider='STRIPE' AND c.reference_guild_id IS DISTINCT FROM ${s.guildId}`.execute(tx);
-        assert(!other.rows.length,"BILLING_SCOPE_CONFLICT",409);
+      if (input.operation === "CHECKOUT" && input.provider === "STRIPE") {
+        const other =
+          await sql`SELECT c.id FROM billing_provider_customers c JOIN billing_accounts a ON a.id=c.account_id WHERE a.organization_id=${s.organizationId}::uuid AND c.provider='STRIPE' AND c.reference_guild_id IS DISTINCT FROM ${s.guildId}`.execute(
+            tx,
+          );
+        assert(!other.rows.length, "BILLING_SCOPE_CONFLICT", 409);
       }
       if (
         subscription &&
@@ -308,12 +357,24 @@ export class BillingOperationService {
         ).rows[0]!;
         await reviewBaseOffering(tx, raw);
       }
-      const claimed =
-        await sql<{checkout_expires_at:Date|null}>`UPDATE billing_operations SET state='PENDING',lease_token=${token}::uuid,lease_until=now()+interval '2 minutes',external_started_at=now(),checkout_expires_at=CASE WHEN operation='CHECKOUT' AND provider='STRIPE' THEN COALESCE(checkout_expires_at,now()+interval '35 minutes') ELSE checkout_expires_at END WHERE id=${row.id}::uuid AND (lease_until IS NULL OR lease_until<now()) RETURNING checkout_expires_at`.execute(
-          tx,
-        );
+      const claimed = await sql<{
+        checkout_expires_at: Date | null;
+      }>`UPDATE billing_operations SET state='PENDING',lease_token=${token}::uuid,lease_until=now()+interval '2 minutes',external_started_at=now(),checkout_expires_at=CASE WHEN operation='CHECKOUT' AND provider='STRIPE' THEN COALESCE(checkout_expires_at,now()+interval '35 minutes') ELSE checkout_expires_at END WHERE id=${row.id}::uuid AND (lease_until IS NULL OR lease_until<now()) RETURNING checkout_expires_at`.execute(
+        tx,
+      );
       assert(claimed.rows.length, "BILLING_OPERATION_BUSY", 409);
-      await billingAudit(tx,s,null,{CHECKOUT:"CHECKOUT_REQUESTED",CHANGE:"PLAN_CHANGE_REQUESTED",CANCEL:"CANCEL_REQUESTED",PORTAL:"PORTAL_REQUESTED"}[input.operation],{operationId:row.id,provider:input.provider});
+      await billingAudit(
+        tx,
+        s,
+        null,
+        {
+          CHECKOUT: "CHECKOUT_REQUESTED",
+          CHANGE: "PLAN_CHANGE_REQUESTED",
+          CANCEL: "CANCEL_REQUESTED",
+          PORTAL: "PORTAL_REQUESTED",
+        }[input.operation],
+        { operationId: row.id, provider: input.provider },
+      );
       return {
         id: row.id,
         cached: null,
@@ -322,19 +383,26 @@ export class BillingOperationService {
         customer,
         subscription,
         currentOffering,
-        checkoutExpiresAt:claimed.rows[0]?.checkout_expires_at?.toISOString(),
+        checkoutExpiresAt: claimed.rows[0]?.checkout_expires_at?.toISOString(),
       };
     });
     if (claim.cached) return claim.cached;
-    let providerCalled=false;
+    let providerCalled = false;
     try {
       // Recheck after the durable claim and immediately before the provider call.
-      if (claim.promotion && claim.offering) await new PromotionReservationService(this.db, this.vault).checkoutContext(s, claim.promotion.reservationId, claim.offering.id);
-      if(claim.promotion) {
-        const valid = await sql`SELECT id FROM promotion_redemption_reservations WHERE ${tenant(s)} AND id=${claim.promotion.reservationId}::uuid AND state='PENDING' AND expires_at>now()+interval '37 minutes'`.execute(this.db);
-        assert(valid.rows.length,"PROMOTION_CHECKOUT_WINDOW_TOO_SHORT",409);
+      if (claim.promotion && claim.offering)
+        await new PromotionReservationService(
+          this.db,
+          this.vault,
+        ).checkoutContext(s, claim.promotion.reservationId, claim.offering.id);
+      if (claim.promotion) {
+        const valid =
+          await sql`SELECT id FROM promotion_redemption_reservations WHERE ${tenant(s)} AND id=${claim.promotion.reservationId}::uuid AND state='PENDING' AND expires_at>now()+interval '37 minutes'`.execute(
+            this.db,
+          );
+        assert(valid.rows.length, "PROMOTION_CHECKOUT_WINDOW_TOO_SHORT", 409);
       }
-      providerCalled=true;
+      providerCalled = true;
       const result = await execute({
         operationId: claim.id,
         idempotencyKey: input.idempotencyKey,
@@ -343,8 +411,14 @@ export class BillingOperationService {
         customer: claim.customer,
         subscription: claim.subscription,
         currentOffering: claim.currentOffering,
-        checkoutExpiresAt:claim.checkoutExpiresAt,
-        onCustomerCreated: async ref => { await new BillingService(this.db, this.vault).bindCreatedCustomer(s, claim.id, ref); },
+        checkoutExpiresAt: claim.checkoutExpiresAt,
+        onCustomerCreated: async (ref) => {
+          await new BillingService(this.db, this.vault).bindCreatedCustomer(
+            s,
+            claim.id,
+            ref,
+          );
+        },
       });
       assert(
         typeof result.url === "string" && result.url.length > 0,
@@ -375,7 +449,7 @@ export class BillingOperationService {
       const saved = await this.db.transaction().execute(async (tx) => {
         await billingScopeLock(tx, s);
         const saved =
-          await sql`UPDATE billing_operations SET state=${["CHANGE","CANCEL"].includes(input.operation)?"RECONCILE_REQUIRED":"FINALIZED"},result_ciphertext=${this.vault.seal(s, JSON.stringify(result))},result_expires_at=${cacheUntil},checkout_expires_at=${checkout ? result.expiresAt! : null}::timestamptz,provider_reference_digest=${result.providerCheckoutRef ? this.vault.digest("billing-checkout-reference:" + input.provider, result.providerCheckoutRef) : null},lease_token=NULL,lease_until=NULL,error_category=NULL WHERE id=${claim.id}::uuid AND lease_token=${token}::uuid AND lease_until>now() RETURNING id`.execute(
+          await sql`UPDATE billing_operations SET state=${["CHANGE", "CANCEL"].includes(input.operation) ? "RECONCILE_REQUIRED" : "FINALIZED"},result_ciphertext=${this.vault.seal(s, JSON.stringify(result))},result_expires_at=${cacheUntil},checkout_expires_at=${checkout ? result.expiresAt! : null}::timestamptz,provider_reference_digest=${result.providerCheckoutRef ? this.vault.digest("billing-checkout-reference:" + input.provider, result.providerCheckoutRef) : null},lease_token=NULL,lease_until=NULL,error_category=NULL WHERE id=${claim.id}::uuid AND lease_token=${token}::uuid AND lease_until>now() RETURNING id`.execute(
             tx,
           );
         if (saved.rows.length && checkout && result.providerCustomerRef)
@@ -389,16 +463,33 @@ export class BillingOperationService {
             },
             tx,
           );
-        if (saved.rows.length) await billingAudit(tx,s,null,{CHECKOUT:"CHECKOUT_CREATED",CHANGE:"PLAN_CHANGE_ACCEPTED",CANCEL:"CANCEL_ACCEPTED",PORTAL:"PORTAL_CREATED"}[input.operation],{operationId:claim.id,provider:input.provider});
+        if (saved.rows.length)
+          await billingAudit(
+            tx,
+            s,
+            null,
+            {
+              CHECKOUT: "CHECKOUT_CREATED",
+              CHANGE: "PLAN_CHANGE_ACCEPTED",
+              CANCEL: "CANCEL_ACCEPTED",
+              PORTAL: "PORTAL_CREATED",
+            }[input.operation],
+            { operationId: claim.id, provider: input.provider },
+          );
         return saved;
       });
       assert(saved.rows.length, "BILLING_OPERATION_LEASE_EXPIRED", 409);
       return { ...result, cacheUntil: cacheUntil.toISOString() };
     } catch (error) {
       const definitive =
-        !providerCalled || error instanceof DefinitiveBillingFailure ||
+        !providerCalled ||
+        error instanceof DefinitiveBillingFailure ||
         (isDomainError(error) &&
-          error.code === "BILLING_PROVIDER_NOT_CONFIGURED");
+          [
+            "BILLING_PROVIDER_NOT_CONFIGURED",
+            "BILLING_CHECKOUT_DISABLED",
+            "BILLING_MANAGEMENT_DISABLED",
+          ].includes(error.code));
       await sql`UPDATE billing_operations SET state=${definitive ? "FAILED" : "RECONCILE_REQUIRED"},error_category=${definitive ? "BILLING_DEFINITIVE_FAILURE" : "BILLING_OUTCOME_UNKNOWN"},lease_token=NULL,lease_until=NULL WHERE id=${claim.id}::uuid AND lease_token=${token}::uuid`.execute(
         this.db,
       );

@@ -333,6 +333,11 @@ describe("NEXUS Discord design system", () => {
       "plan",
       "link",
       "unlink",
+      "overview",
+      "chart",
+      "compare",
+      "support-health",
+      "newcomer-flow",
     ]);
   });
   it("keeps English and Japanese copy complete and short in the control panel", async () => {
