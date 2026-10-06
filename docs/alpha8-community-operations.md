@@ -44,7 +44,9 @@ Purchased Offering/Price financial identity remains at its existing immutable re
 
 Reads and external delivery use scoped privacy locks and current entitlement checks.
 Explicit NEXUS roles constrain Discord administrators. Revoked memberships cannot
-fall back to administrator authority. Browser scopes and prices remain server owned.
+fall back to administrator authority, including after a linked guild is reviewed
+and reactivated: revoked bindings remain authorization tombstones.
+Browser scopes and prices remain server owned.
 Downgrade retains configuration as PAUSED_PLAN_LIMIT; reactivation is explicit.
 Report/webhook leases have ownership tokens; stale workers cannot overwrite a
 new worker's result. Queued sends fence current source revisions and destination
@@ -80,8 +82,8 @@ Final local validation on 2026-10-06:
 | Full build                                               | PASS — 19 workspace tasks                                                                                     |
 | Web E2E                                                  | PASS — 28 tests                                                                                               |
 | OAuth/billing/operations verification                    | PASS — 11 tests; EN/JA at 360px, actual PNG/CSV/ICS exports, tier transitions and Viewer denial               |
-| Full integration                                         | PASS — 280 tests, 23 files, all migrations through 044                                                        |
-| Performance                                              | PASS — 4 tests; 50,000-member community query 3,105 ms; existing raw/rollup and 600-user voice gates retained |
+| Full integration                                         | PASS — 281 tests, 23 files, all migrations through 044                                                        |
+| Performance                                              | PASS — 4 tests; 50,000-member community query 2,550 ms; existing raw/rollup and 600-user voice gates retained |
 | Windows runtime                                          | PASS — original manager gate retained                                                                         |
 | Secret/provider-reference scan and historical migrations | PASS — zero findings, 001–040 committed contents preserved, documentation links valid                         |
 

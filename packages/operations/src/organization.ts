@@ -191,7 +191,10 @@ export class OperationsOrganization {
         await sql`UPDATE operations_org_guilds SET state='ACTIVE' WHERE ${tenant(target)}`.execute(
           tx,
         );
-        await sql`DELETE FROM operations_role_bindings WHERE ${tenant(target)}`.execute(
+        // Revoked bindings are authorization tombstones. Removing them would
+        // let a former NEXUS member fall back to Discord administrator authority.
+        // Only active members' bindings are replaced after live verification.
+        await sql`DELETE FROM operations_role_bindings b USING operations_org_members m WHERE b.organization_id=${target.organizationId}::uuid AND b.guild_id=${target.guildId} AND m.organization_id=b.root_organization_id AND m.id=b.member_id AND m.state='ACTIVE'`.execute(
           tx,
         );
       } else

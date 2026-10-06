@@ -206,6 +206,42 @@ it("enforces five NEXUS roles independently from Discord administrator permissio
       .execute((tx) => operationsAccess(tx, f.s, f.actorFor(viewer), "READ")),
   ).rejects.toThrow("NEXUS_ROLE_REQUIRED");
 });
+it("keeps revoked membership tombstones when a linked guild is reviewed and reactivated", async () => {
+  const f = await fixture(),
+    target = await fixture("FREE");
+  await f.organization.create(f.s, f.actor, owner, "Revocation review");
+  const revoked = await f.organization.member(f.s, f.actor, {
+    userId: viewer,
+    name: "Former staff",
+    role: "VIEWER",
+  });
+  await f.organization.link(f.s, f.actor, owner, target.s.guildId);
+  await f.organization.revokeMember(f.s, f.actor, revoked.id);
+  await sql`UPDATE operations_org_guilds SET state='REQUIRES_REVIEW' WHERE ${tenant(target.s)}`.execute(
+    db,
+  );
+  await f.organization.link(f.s, f.actor, owner, target.s.guildId, true);
+  const former = target.actorFor(viewer);
+  expect(former.permissions).toBe("8");
+  await expect(
+    db
+      .transaction()
+      .execute((tx) => operationsAccess(tx, target.s, former, "READ")),
+  ).rejects.toThrow("NEXUS_ROLE_REQUIRED");
+  await expect(
+    new ApiCredentials(db, vault).create(target.s, former, {
+      name: "Forbidden fallback",
+      scopes: ["guild:read"],
+    }),
+  ).rejects.toThrow("NEXUS_ROLE_REQUIRED");
+  expect(
+    (
+      await sql`SELECT actor_hash FROM operations_role_bindings WHERE ${tenant(target.s)} AND actor_hash=${former.key}`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(1);
+});
 it("requires independent approval of the current immutable playbook revision and scoped teams", async () => {
   const f = await fixture();
   await f.organization.create(f.s, f.actor, owner, "Approval");
