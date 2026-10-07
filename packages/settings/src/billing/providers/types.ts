@@ -27,6 +27,9 @@ export type CheckoutRequest = {
   promotion?: PromotionCheckoutContext;
   /** Core persists an SDK-created Customer before the next external mutation. */
   onCustomerCreated?: (customerRef: string) => Promise<void>;
+  ui?: "HOSTED" | "ELEMENTS";
+  confirmationToken?: string;
+  beforeMutation?: () => Promise<void>;
 };
 export type TrustedProviderCustomerReference = {
   provider: BillingProviderKind;
@@ -43,8 +46,18 @@ export type PortalRequest = {
   customer: TrustedProviderCustomerReference;
   idempotencyKey: string;
 };
-export type CheckoutSessionResult = {
-  url: string;
+export type CheckoutSessionResult = (
+  | {
+      kind?: "HOSTED";
+      url: string;
+      clientSecret?: never;
+    }
+  | {
+      kind: "ELEMENTS";
+      clientSecret: string;
+      url?: never;
+    }
+) & {
   expiresAt: string;
   providerCheckoutRef: string;
   /** Present only when the authoritative Customer is already known at session creation. */

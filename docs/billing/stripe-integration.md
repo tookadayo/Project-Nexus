@@ -150,3 +150,18 @@ See [readiness](stripe-readiness.md), [validation](contract-hardening-alpha7-val
 [market decisions](../research/alpha7-market-validation.md),
 [Discord requirements](../discord-premium-apps.md) and
 [remaining hosted/live gates](../hosted-beta-blockers.md).
+
+## alpha.9 Elements checkout
+
+The installed Stripe SDK 23 and official React SDK use Checkout Sessions
+`mode=subscription`, `ui_mode=elements`, trusted monthly USD Price and Customer,
+with a trusted NEXUS return origin and encrypted receipt. `STRIPE_PUBLISHABLE_KEY`
+is required and must match Sandbox/Live; it is the only public key passed to the
+client alongside the intended Checkout client secret. `STRIPE_SECRET_KEY`,
+Webhook secret and Discord/session secrets stay server-only.
+`NEXUS_STRIPE_CHECKOUT_UI=HOSTED` retains the previous hosted adapter as fallback.
+PaymentElement and ContactDetailsElement own sensitive inputs; Stripe's Checkout
+totals supply post-session amounts. Never add a NEXUS card or save-card field.
+See [alpha.9 validation and limitations](../alpha9-owner-commerce.md). Its dedicated
+Playwright test uses isolated Stripe HTTP/JS fixtures and SDK signatures; it is
+not a real Sandbox Elements payment. Older Sandbox validation is historical.

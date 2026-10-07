@@ -135,3 +135,14 @@ remain operational acceptance checks; automated tests use synthetic credentials
 and Discord fixtures. No OAuth token refresh, new login method, or invite system
 was added. Deployments must run the migration and existing command synchronization
 to expose `/nexus link` and `/nexus unlink`.
+
+## alpha.9 Owner purchase connection
+
+The Discord-first `/nexus link` flow remains. Checkout additionally offers explicit
+`POST /checkout/connect` with strict `guildId` and `confirm:true`. Active OAuth
+identity, current member/Owner and installed Bot are checked live, then checked
+again inside the privacy-fenced transaction before the sealed link and audit.
+GET never connects. Existing managers still use the established connection path.
+Checkout OAuth uses a separate state-bound AES-GCM Offering intent (ten-minute
+TTL); no arbitrary redirect and no email scope. Purchase guild listing rereads
+installation instead of reusing the general `/servers` cache.

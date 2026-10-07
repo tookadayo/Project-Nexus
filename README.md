@@ -2,7 +2,7 @@
 
 NEXUS は Discord Community Operations 製品です。サーバーの運営目的に合う計測方法を保存し、Discordで観測できた事実の範囲と確実性を示します。新しいメンバーへの対応、最初の返信やVoice同席、参加後の活動を確認し、運営queueと改善後の結果をつなげます。比較から原因を断定せず、個人の活動点数やスタッフ評価を作りません。
 
-現在のリリースは **0.6.0-alpha.8** です。バージョンはルートの `package.json` を唯一のリリース版ソースとし、`MAJOR.MINOR.PATCH-prerelease` の SemVer に従います。例: `0.6.0-alpha.2`、`0.6.0-beta.1`、`0.6.0-rc.1`、`0.6.0`。Build は Git の短縮 SHA です。パッケージ環境では `NEXUS_BUILD_SHA` を指定できます。
+現在のリリースは **0.6.0-alpha.9** です。バージョンはルートの `package.json` を唯一のリリース版ソースとし、`MAJOR.MINOR.PATCH-prerelease` の SemVer に従います。例: `0.6.0-alpha.2`、`0.6.0-beta.1`、`0.6.0-rc.1`、`0.6.0`。Build は Git の短縮 SHA です。パッケージ環境では `NEXUS_BUILD_SHA` を指定できます。
 
 ## Project Nexus 製品サイト
 
@@ -59,7 +59,7 @@ Webも既存のDB・Identity鍵・Bot設定を使用します。起動前に `co
 
 ## Pricing & entitlements v2
 
-現行リリース: **NEXUS v0.6.0-alpha.8 — Market Parity & Community Operations**。[実装と検証](docs/alpha8-community-operations.md)、[市場での提供範囲](docs/research/alpha8-market-parity.md)、[Stripe integration](docs/billing/stripe-integration.md) を参照してください。以前の検証記録は各リリース文書に保存しています。
+現行リリース: **NEXUS v0.6.0-alpha.9 — Owner-Gated Commerce & Checkout Experience**。[実装と検証](docs/alpha8-community-operations.md)、[市場での提供範囲](docs/research/alpha8-market-parity.md)、[Stripe integration](docs/billing/stripe-integration.md) を参照してください。以前の検証記録は各リリース文書に保存しています。
 
 Freeは基本観測・測定根拠・Discord内の7/30日チャート・受付フォーム1件を含みます。Starterは90日履歴、保存ビュー・セグメント・集計CSV・イベントカレンダー、Growthは対応一覧・版管理Playbook・定期チャートレポート・読取API・署名通知、Scaleは5サーバーの組織管理・チーム権限・独立承認・過去データの試行・限定書込APIを追加します。EnterpriseのSSO・SCIM等はPLANNEDです。価格は暫定値で、公開販売の承認は別に必要です。
 
@@ -90,3 +90,7 @@ corepack pnpm test:performance
 性能は既存10k・50k Guildと600人Voiceのfixtureを継続測定し、alpha.4比20%以内を基本の回帰基準とします。raw factとdaily rollupの同じ活動結果も比較します。実測と限界は [Scaling architecture](docs/scaling-architecture.md) を参照してください。migrationは追加方式で、旧データの意味を変更しません。
 
 現行の文書は [Documentation index](docs/README.md)、Stripe実装とLive gateは [Stripe readiness](docs/billing/stripe-readiness.md)、市場判断は [alpha.8 market parity](docs/research/alpha8-market-parity.md) を参照してください。過去のリリースレポートは `docs/archive/releases/` に保存しています。
+
+alpha.9の購入導線と金融権限、移行・検証・公開条件は
+[Owner-Gated Commerce report](docs/alpha9-owner-commerce.md) を参照してください。
+実Stripe Sandbox決済とローカルfixture検証は別に記録します。

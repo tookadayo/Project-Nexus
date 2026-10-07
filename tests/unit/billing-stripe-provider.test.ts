@@ -1,4 +1,5 @@
 import Stripe from "../../packages/settings/node_modules/stripe/esm/stripe.esm.node.js";
+import { DefinitiveBillingFailure } from "../../packages/settings/src/billing/operations";
 import { randomUUID, createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -107,14 +108,12 @@ function fixture() {
     customerCreate: vi
       .spyOn(client.customers, "create")
       .mockResolvedValue({ id: "cus_fixture", livemode: false } as never),
-    checkout: vi
-      .spyOn(client.checkout.sessions, "create")
-      .mockResolvedValue({
-        id: "cs_fixture",
-        livemode: false,
-        url: "https://checkout.stripe.com/c/pay/cs_fixture",
-        expires_at: now + 1800,
-      } as never),
+    checkout: vi.spyOn(client.checkout.sessions, "create").mockResolvedValue({
+      id: "cs_fixture",
+      livemode: false,
+      url: "https://checkout.stripe.com/c/pay/cs_fixture",
+      expires_at: now + 1800,
+    } as never),
     list: vi
       .spyOn(client.subscriptions, "list")
       .mockResolvedValue({ data: [], has_more: false } as never),
@@ -398,8 +397,8 @@ describe("Stripe SDK boundary", () => {
       mode: "subscription",
       customer: "cus_fixture",
       line_items: [{ price: f.current.providerPriceId, quantity: 1 }],
-      success_url: "http://localhost:3100/billing/success",
-      cancel_url: "http://localhost:3100/billing/manage",
+      success_url: "http://localhost:3100/checkout/confirmation",
+      cancel_url: "http://localhost:3100/checkout",
       automatic_tax: { enabled: false },
       managed_payments: { enabled: false },
       allow_promotion_codes: false,
@@ -743,4 +742,134 @@ describe("Stripe SDK boundary", () => {
       }),
     ).rejects.toThrow("STRIPE_OBJECT_MODE_MISMATCH");
   });
+});
+
+it.each(["price", "customer", "subscription"])(
+  "classifies read-only %s failure as definitive",
+  async (stage) => {
+    const f = fixture();
+    if (stage === "price")
+      f.mocks.price.mockRejectedValue(new Error("preflight-timeout"));
+    if (stage === "customer")
+      f.mocks.customer.mockRejectedValue(new Error("preflight-timeout"));
+    if (stage === "subscription")
+      f.mocks.list.mockRejectedValue(new Error("preflight-timeout"));
+    await expect(f.provider.createCheckout(f.input)).rejects.toBeInstanceOf(
+      DefinitiveBillingFailure,
+    );
+    expect(f.mocks.checkout).not.toHaveBeenCalled();
+    expect(f.mocks.customerCreate).not.toHaveBeenCalled();
+  },
+);
+it("preserves unknown outcome after an accepted customer write and a subsequent definitive session rejection", async () => {
+  const f = fixture();
+  const rejection = new Stripe.errors.StripeInvalidRequestError({
+    message: "rejected",
+    type: "invalid_request_error",
+  });
+  f.mocks.checkout.mockRejectedValue(rejection);
+  await expect(
+    f.provider.createCheckout({ ...f.input, customer: undefined }),
+  ).rejects.toBe(rejection);
+  expect(f.mocks.customerCreate).toHaveBeenCalledOnce();
+});
+it("keeps first write transport failures unknown and first write definitive rejections retryable", async () => {
+  const f = fixture(),
+    timeout = new Error("write-timeout");
+  f.mocks.checkout.mockRejectedValue(timeout);
+  await expect(f.provider.createCheckout(f.input)).rejects.toBe(timeout);
+  f.mocks.checkout.mockRejectedValue(
+    new Stripe.errors.StripeInvalidRequestError({
+      message: "rejected",
+      type: "invalid_request_error",
+    }),
+  );
+  await expect(f.provider.createCheckout(f.input)).rejects.toBeInstanceOf(
+    DefinitiveBillingFailure,
+  );
+});
+it("Elements uses a trusted return receipt and rejects publishable key mode before writes", async () => {
+  const f = fixture(),
+    provider = new StripeBillingProvider({
+      env: { ...env, STRIPE_PUBLISHABLE_KEY: "pk_test_fixture_only" },
+      client: f.client,
+    });
+  f.mocks.checkout.mockResolvedValue({
+    id: "cs_fixture",
+    livemode: false,
+    client_secret: "cs_fixture_secret_fixture",
+    expires_at: Math.floor(Date.now() / 1000) + 2100,
+  } as never);
+  const before = vi.fn(async () => {}),
+    result = await provider.createCheckout({
+      ...f.input,
+      ui: "ELEMENTS",
+      confirmationToken: "opaque-server-receipt",
+      beforeMutation: before,
+    });
+  expect(result).toMatchObject({
+    kind: "ELEMENTS",
+    clientSecret: "cs_fixture_secret_fixture",
+  });
+  expect(result).not.toHaveProperty("url");
+  expect(before).toHaveBeenCalled();
+  const params = f.mocks.checkout.mock.calls[0]![0];
+  expect(params).toMatchObject({
+    mode: "subscription",
+    ui_mode: "elements",
+    return_url:
+      "http://localhost:3100/checkout/confirmation?receipt=opaque-server-receipt",
+    line_items: [{ price: f.current.providerPriceId, quantity: 1 }],
+  });
+  expect(params).not.toHaveProperty("success_url");
+  expect(params).not.toHaveProperty("cancel_url");
+  const g = fixture(),
+    wrong = new StripeBillingProvider({
+      env: { ...env, STRIPE_PUBLISHABLE_KEY: "pk_live_fixture_only" },
+      client: g.client,
+    });
+  await expect(
+    wrong.createCheckout({ ...g.input, ui: "ELEMENTS" }),
+  ).rejects.toBeInstanceOf(DefinitiveBillingFailure);
+  expect(g.mocks.checkout).not.toHaveBeenCalled();
+});
+it("expiry retries are provider-idempotent and require an authoritative expired response", async () => {
+  const f = fixture(),
+    retrieve = vi
+      .spyOn(f.client.checkout.sessions, "retrieve")
+      .mockResolvedValue({
+        id: "cs_fixture",
+        mode: "subscription",
+        livemode: false,
+        status: "open",
+      } as never),
+    expire = vi
+      .spyOn(f.client.checkout.sessions, "expire")
+      .mockResolvedValue({
+        id: "cs_fixture",
+        livemode: false,
+        status: "expired",
+      } as never);
+  await f.provider.expireCheckout(scope, "cs_fixture", f.input.operationId);
+  expect(expire.mock.calls[0]![2]?.idempotencyKey).toBe(
+    stripeIdempotencyKey("abandon", scope, f.input.operationId),
+  );
+  retrieve.mockResolvedValue({
+    id: "cs_fixture",
+    mode: "subscription",
+    livemode: false,
+    status: "expired",
+  } as never);
+  await f.provider.expireCheckout(scope, "cs_fixture", f.input.operationId);
+  expect(expire).toHaveBeenCalledOnce();
+  retrieve.mockResolvedValue({
+    id: "cs_fixture",
+    mode: "subscription",
+    livemode: false,
+    status: "open",
+  } as never);
+  expire.mockRejectedValue(new Error("transport timeout"));
+  await expect(
+    f.provider.expireCheckout(scope, "cs_fixture", f.input.operationId),
+  ).rejects.not.toBeInstanceOf(DefinitiveBillingFailure);
 });

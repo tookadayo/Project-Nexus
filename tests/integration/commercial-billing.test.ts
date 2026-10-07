@@ -123,7 +123,7 @@ it("seeds every immutable catalog revision without altering legacy usage or pric
         n: number;
       }>`SELECT count(*)::integer AS n FROM schema_migrations`.execute(db)
     ).rows[0]!.n,
-  ).toBe(44);
+  ).toBe(45);
   await expect(
     sql`UPDATE billing_plan_versions SET limits='{}' WHERE plan_key='FREE'`.execute(
       db,
@@ -449,6 +449,7 @@ it("billing requires a fresh Discord owner/admin or organization manager, separa
   discord.members.set(user, {
     roles: [],
     permissions: "32",
+    ownerId: user,
     bot: false,
     joinedAt: "",
   });

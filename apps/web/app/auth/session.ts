@@ -104,6 +104,7 @@ type DiscordGuild = {
   name: string;
   owner?: boolean;
   permissions?: string;
+  icon?: string | null;
 };
 async function oauthDiscord(url: string | URL, authorization: string) {
   let response: Response;
@@ -150,8 +151,8 @@ async function discordGuilds(authorization: string): Promise<DiscordGuild[]> {
     after = last;
   }
 }
-export async function installedGuildIds() {
-  if (installationCache && installationCache.expires > Date.now())
+export async function installedGuildIds(fresh=false) {
+  if (!fresh && installationCache && installationCache.expires > Date.now())
     return installationCache.ids;
   const token = process.env.DISCORD_TOKEN;
   if (!token) throw new Error("DISCORD_TOKEN_REQUIRED");
@@ -214,6 +215,12 @@ export async function authorizedGuilds(
     for (const guild of batch) if (guild) guilds.push(guild);
   }
   return guilds;
+}
+export async function checkoutGuilds(token:string) {
+  // OAuth ownership is a selection projection only. Mutations use live Bot state.
+  const rows=await discordGuilds(`Bearer ${token}`);
+  const installed=await installedGuildIds(true);
+  return rows.filter(row=>/^\d{17,20}$/.test(row.id) && (row.owner===true || (BigInt(row.permissions??"0")&40n)!==0n)).map(row=>({id:row.id,name:row.name,owner:row.owner===true,installed:installed.has(row.id),installUrl:installUrl(row.id),iconUrl:row.icon&&/^[a-f0-9_]+$/.test(row.icon)?`https://cdn.discordapp.com/icons/${row.id}/${row.icon}.png?size=64`:null}));
 }
 export async function dashboardContext(
   sessionCookie: string | undefined,

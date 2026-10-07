@@ -96,3 +96,14 @@ physical retention. Downgrade recovery preserves eligible retained aggregates,
 while the lower current visibility applies immediately. Privacy deletion rejects
 history reads even during recovery. CSV row bounds use the same system constant;
 invalid Web history ranges return HTTP 400 rather than a provider outage error.
+
+## alpha.9 purchase authority and checkout
+
+Pricing → OAuth → owned guild → explicit connection → review → Elements →
+confirmation is now separate from `/billing/manage`. Subscription scope remains
+Guild → Billing Account → Provider Customer; the Primary Principal is an
+organization-keyed financial authority in existing `billing_authorizations`, not
+a user-scoped Subscription. See [alpha.9 design](alpha9-owner-commerce.md) for
+action policies, additive migration 045, historical recovery and rollback.
+Preflight failures clear retry markers; possibly sent writes retain reconciliation
+fences. Return/React/webhook handlers never directly grant entitlement.

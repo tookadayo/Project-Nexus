@@ -1,6 +1,6 @@
 # NEXUS documentation
 
-Current release: **0.6.0-alpha.8** — Market Parity & Community Operations. PostgreSQL is the normalized billing and
+Current release: **0.6.0-alpha.9** — Owner-Gated Commerce & Checkout Experience. PostgreSQL is the normalized billing and
 entitlement source of truth. Current documents retain their established paths
 where moving them would create unnecessary link churn.
 
@@ -60,3 +60,5 @@ where moving them would create unnecessary link churn.
   [alpha.5 audit](alpha5-repository-audit.md) preserve the previous review evidence.
 - `v02/`, the early architecture vertical-slice documents and ADRs retain useful
   historical design rationale. Historical source paths describe their original release.
+
+- [alpha.9 owner-gated commerce design and validation](alpha9-owner-commerce.md)

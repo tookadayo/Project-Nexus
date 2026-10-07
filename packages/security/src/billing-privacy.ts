@@ -73,6 +73,31 @@ export async function deleteBillingActor(
   await sql`DELETE FROM billing_authorizations WHERE organization_id=${s.organizationId}::uuid AND actor_hash=${org}`.execute(
     tx,
   );
+  const operations = (
+    await sql<{
+      id: string;
+      guild_id: string;
+      result_ciphertext: string | null;
+    }>`SELECT id,guild_id,result_ciphertext FROM billing_operations WHERE organization_id=${s.organizationId}::uuid AND principal_actor_hash=${org} FOR UPDATE`.execute(
+      tx,
+    )
+  ).rows;
+  for (const operation of operations) {
+    let result = operation.result_ciphertext;
+    if (result) {
+      const scope = {
+          organizationId: s.organizationId,
+          guildId: operation.guild_id,
+        },
+        data = JSON.parse(vault.open(scope, result));
+      delete data.confirmationToken;
+      result = vault.seal(scope, JSON.stringify(data));
+    }
+    await sql`UPDATE billing_operations SET principal_actor_hash=NULL,result_ciphertext=${result} WHERE id=${operation.id}::uuid`.execute(
+      tx,
+    );
+  }
+
   await sql`UPDATE entitlement_grants SET created_by=NULL WHERE organization_id=${s.organizationId}::uuid AND created_by=ANY(${[hash, org, internal]}::text[])`.execute(
     tx,
   );

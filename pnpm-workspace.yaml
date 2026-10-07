@@ -11,3 +11,5 @@ allowBuilds:
   protobufjs: true
   ssh2: false
   sharp: true
+  '@embedded-postgres/darwin-arm64': true
+  '@embedded-postgres/darwin-x64': true

@@ -17,6 +17,7 @@ import { EntitlementService } from "../../settings/src/billing/entitlements";
 import { integrationHealth } from "../../lifecycle/src/observation";
 import { latestCapability } from "../../lifecycle/src/discovery";
 import { ExploreService } from "../../analytics/src/explore";
+import { bindRevokedMembers } from "./membership-tombstones";
 import type { ChartSpec } from "../../analytics/src/chart-spec";
 type OrganizationSummary = {
   guildId: string;
@@ -205,6 +206,8 @@ export class OperationsOrganization {
         await sql`INSERT INTO operations_role_bindings VALUES(${target.organizationId}::uuid,${target.guildId},${group.id}::uuid,${binding.memberId}::uuid,${binding.hash}) ON CONFLICT DO NOTHING`.execute(
           tx,
         );
+      // Revocation during Discord preflight must also cover this newly linked guild.
+      await bindRevokedMembers(tx, this.vault, group.id);
       await sql`INSERT INTO operations_team_bindings(organization_id,guild_id,team_id,root_organization_id) SELECT ${target.organizationId}::uuid,${target.guildId},id,organization_id FROM operations_teams WHERE organization_id=${group.id}::uuid ON CONFLICT DO NOTHING`.execute(
         tx,
       );
@@ -281,7 +284,8 @@ export class OperationsOrganization {
             id: string;
             role: NexusRole;
             revision: number;
-          }>`SELECT id,role,revision FROM operations_org_members WHERE organization_id=${group.id}::uuid AND user_digest=${digest} FOR UPDATE`.execute(
+            state: string;
+          }>`SELECT id,role,revision,state FROM operations_org_members WHERE organization_id=${group.id}::uuid AND user_digest=${digest} FOR UPDATE`.execute(
             tx,
           )
         ).rows[0];
@@ -300,7 +304,7 @@ export class OperationsOrganization {
         ).rows[0]!.n;
         assert(ownRole === "OWNER" && owners > 1, "LAST_OWNER_REQUIRED", 409);
       }
-      if (!previous) {
+      if (!previous || previous.state !== "ACTIVE") {
         const count = (
           await sql<{
             n: number;
@@ -377,6 +381,7 @@ export class OperationsOrganization {
       await sql`UPDATE operations_org_members SET state='REVOKED',revision=revision+1 WHERE organization_id=${group.id}::uuid AND id=${id}::uuid`.execute(
         tx,
       );
+      await bindRevokedMembers(tx, this.vault, group.id);
       await sql`UPDATE api_credentials c SET state='REVOKED',revoked_at=now() FROM operations_role_bindings b WHERE b.root_organization_id=${group.id}::uuid AND b.member_id=${id}::uuid AND c.organization_id=b.organization_id AND c.guild_id=b.guild_id AND c.actor_hash=b.actor_hash`.execute(
         tx,
       );

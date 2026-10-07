@@ -29,6 +29,15 @@ export function rolePermissions(
 ): readonly OperationPermission[] {
   return role ? permissions[role] : permissions.ADMIN;
 }
+async function revokedMembership(tx: Tx, s: Scope, actor: Actor) {
+  if ((await sql`SELECT b.member_id FROM operations_role_bindings b JOIN operations_org_members m ON m.organization_id=b.root_organization_id AND m.id=b.member_id WHERE b.organization_id=${s.organizationId}::uuid AND b.guild_id=${s.guildId} AND b.actor_hash=${actor.key} AND m.state<>'ACTIVE'`.execute(tx)).rows.length) return true;
+  // Also covers historical revoked members who never had a guild binding.
+  // The digest function comes exclusively from live ServerAuthorization.
+  if (!actor.organizationMemberDigest) return false;
+  const roots = (await sql<{root_organization_id:string}>`SELECT root_organization_id FROM operations_org_guilds WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId}`.execute(tx)).rows;
+  for (const root of roots) if ((await sql`SELECT id FROM operations_org_members WHERE organization_id=${root.root_organization_id}::uuid AND user_digest=${actor.organizationMemberDigest(root.root_organization_id)} AND state='REVOKED'`.execute(tx)).rows.length) return true;
+  return false;
+}
 export async function actorPermissions(
   tx: Tx,
   s: Scope,
@@ -36,6 +45,7 @@ export async function actorPermissions(
 ): Promise<readonly OperationPermission[]> {
   const role = await nexusRole(tx, s, actor.key);
   if (role) return permissions[role];
+  if (await revokedMembership(tx,s,actor)) return [];
   const cfg = await new SettingsService(tx).get(s);
   if (
     canOperatePanel(actor.permissions, actor.roles, [
@@ -76,6 +86,7 @@ export async function operationsAccess(
   const entitlements = new EntitlementService(tx),
     state = await entitlements.effective(s);
   assert(!state.privacyDeleted, "PRIVACY_DELETED", 403);
+  assert(!(await revokedMembership(tx,s,actor)), "NEXUS_ROLE_REQUIRED", 403);
   const role = await nexusRole(tx, s, actor.key),
     cfg = await new SettingsService(tx).get(s);
   // Once an explicit NEXUS role exists it limits operations, even if its holder

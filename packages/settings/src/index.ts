@@ -190,6 +190,8 @@ export type Actor = {
   source: "DISCORD_PANEL" | "WEB_DASHBOARD" | "SYSTEM";
   requestId: string;
   encryptedUserId?: string;
+  /** Request-local trusted identity projection; never persisted or sent to clients. */
+  organizationMemberDigest?: (rootOrganizationId: string) => string;
 };
 export async function audit(
   tx: Tx,

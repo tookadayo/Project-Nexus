@@ -187,7 +187,7 @@ export default async function Pricing() {
               ) : offering && launch.checkoutEnabled ? (
                 <a
                   className="button button-primary"
-                  href={`/billing/manage?offering=${offering.id}`}
+                  href={`/checkout?offering=${offering.id}`}
                 >
                   {copy(
                     locale,

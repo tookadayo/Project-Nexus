@@ -1004,7 +1004,7 @@ it("completes setup with optional choices and confirms manager role grants", asy
     id: "655555555555555580",
     command: "status",
   });
-  expect(JSON.stringify(status)).toContain("0.6.0-alpha.8");
+  expect(JSON.stringify(status)).toContain("0.6.0-alpha.9");
   expect(JSON.stringify(status)).not.toContain("PID");
 });
 it("distinguishes setup approval from safe skip during a legacy guild review", async () => {

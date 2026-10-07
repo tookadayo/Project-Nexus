@@ -50,3 +50,12 @@ multi-community/team/API features still require production paid-feature approval
 Hosted Beta remains NO-GO until the relevant hosted/Discord/privacy/operations
 gates above are evidenced. See [Stripe integration](billing/stripe-integration.md)
 and [alpha.8 validation](alpha8-community-operations.md).
+
+## alpha.9 status
+
+Owner-gated Elements checkout and Primary Principal financial authority are
+implemented. [The alpha.9 report](alpha9-owner-commerce.md) separates fixture
+validation from actual Stripe Sandbox execution. Historical hosted Sandbox
+evidence does not validate the new Elements flow. Live remains disabled and
+NOT READY; Hosted Beta remains NO-GO until deployment, Discord/native parity,
+privacy, legal/support, monitoring, outage and backup/restore acceptance exists.
