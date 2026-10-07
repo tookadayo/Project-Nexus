@@ -58,6 +58,7 @@ export async function billingAudit(
 }
 export async function billingScopeLock(tx: Tx, scope: Scope) {
   await privacyReadLock(tx, scope);
+  await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"billing-org:" + scope.organizationId},0))`.execute(tx);
   await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"billing:" + scope.organizationId + ":" + scope.guildId},0))`.execute(
     tx,
   );
@@ -252,8 +253,10 @@ export class BillingService {
     );
     return current[0]!;
   }
-  async assertNewCheckout(s: Scope, provider: BillingProviderKind) {
+  async assertNewCheckout(s: Scope, provider: BillingProviderKind, currentOperationId?:string) {
     const state = await new EntitlementService(this.db).effective(s);
+    assert(!state.privacyDeleted,"PRIVACY_DELETED",403);
+    assert(!state.conflict,"BILLING_CONFLICT",409);
     assert(
       !state.grants.some((grant) =>
         grant.id.startsWith("organization-license:"),
@@ -274,12 +277,12 @@ export class BillingService {
     );
     assert(!paid.length, "BILLING_PROVIDER_MIGRATION_REQUIRED", 409);
     const unknown =
-      await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND operation='CHECKOUT' AND state IN ('PENDING','RECONCILE_REQUIRED') AND external_started_at IS NOT NULL`.execute(
+      await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND id IS DISTINCT FROM ${currentOperationId ?? null}::uuid AND operation IN ('CHECKOUT','CHANGE','CANCEL') AND (state='RECONCILE_REQUIRED' OR (state='PENDING' AND external_started_at IS NOT NULL))`.execute(
         this.db,
       );
     assert(!unknown.rows.length, "BILLING_RECONCILE_REQUIRED", 409);
     const open =
-      await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND operation='CHECKOUT' AND state='FINALIZED' AND checkout_completed_at IS NULL AND checkout_expires_at>now()`.execute(
+      await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND id IS DISTINCT FROM ${currentOperationId ?? null}::uuid AND operation='CHECKOUT' AND state='FINALIZED' AND checkout_completed_at IS NULL AND checkout_abandoned_at IS NULL AND checkout_expires_at>now()`.execute(
         this.db,
       );
     assert(!open.rows.length, "BILLING_CHECKOUT_IN_PROGRESS", 409);
@@ -1212,7 +1215,7 @@ export class BillingService {
       ).rows.length > 0;
     const pending =
       (
-        await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND provider='STRIPE' AND (state='RECONCILE_REQUIRED' OR (state='PENDING' AND external_started_at IS NOT NULL) OR (operation='CHECKOUT' AND state='FINALIZED' AND checkout_completed_at IS NULL AND checkout_expires_at>now() AND NOT EXISTS(SELECT 1 FROM billing_subscriptions b WHERE b.organization_id=${s.organizationId}::uuid AND b.provider='STRIPE' AND b.status NOT IN ('CANCELED','EXPIRED'))))`.execute(
+        await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND provider='STRIPE' AND (state='RECONCILE_REQUIRED' OR (state='PENDING' AND external_started_at IS NOT NULL) OR (operation='CHECKOUT' AND state='FINALIZED' AND checkout_completed_at IS NULL AND checkout_abandoned_at IS NULL AND checkout_expires_at>now() AND NOT EXISTS(SELECT 1 FROM billing_subscriptions b WHERE b.organization_id=${s.organizationId}::uuid AND b.provider='STRIPE' AND b.status NOT IN ('CANCELED','EXPIRED'))))`.execute(
           this.db,
         )
       ).rows.length > 0;

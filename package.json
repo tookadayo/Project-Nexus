@@ -1,6 +1,6 @@
 {
   "name": "nexus",
-  "version": "0.6.0-alpha.8",
+  "version": "0.6.0-alpha.9",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.19.0",
@@ -23,7 +23,9 @@
     "infra": "tsx scripts/infra.ts",
     "register": "tsx scripts/register.ts",
     "install-url": "tsx scripts/install-url.ts",
-    "web": "tsx scripts/web.ts"
+    "web": "tsx scripts/web.ts",
+    "test:e2e:checkout": "corepack pnpm --filter @nexus/web build && playwright test --config playwright.checkout.config.ts",
+    "check:secrets": "tsx scripts/secret-scan.ts"
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",

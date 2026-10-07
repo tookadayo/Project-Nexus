@@ -1,13 +1,17 @@
 # Billing security and privacy
 
-| Actor                                        | View guild billing                       | Upgrade / downgrade / cancel / redeem           | Assign organization slots               | Internal promotions/grants |
-| -------------------------------------------- | ---------------------------------------- | ----------------------------------------------- | --------------------------------------- | -------------------------- |
-| Current guild owner                          | Yes                                      | Yes                                             | No, unless organization billing manager | No                         |
-| Current Discord Manage Guild / Administrator | Yes                                      | Yes                                             | No, unless organization billing manager | No                         |
-| NEXUS manager                                | Yes                                      | No                                              | No                                      | No                         |
-| Organization billing manager                 | Yes, current membership/install required | Yes                                             | Authorized model; workflow planned      | No                         |
-| Ordinary member                              | No                                       | No                                              | No                                      | No                         |
-| NEXUS internal allowlist + OAuth             | Separate internal administration         | Guild authority still checked for guild actions | Separate scope                          | Yes, audited               |
+| Actor | View | Initial Checkout | Portal | Change/cancel | Organization assignment |
+| --- | --- | --- | --- | --- | --- |
+| Current guild Owner | Yes | Yes, live reverified | Only if Primary | Only if Primary or existing Billing Manager | Existing Billing Manager |
+| Discord Admin / Manage Server | Yes | No | No | No | Existing Billing Manager |
+| NEXUS community manager | Yes | No | No | No | No |
+| Primary Billing Principal | Yes | Current Owner only | Yes | Yes | Existing Billing Manager |
+| Explicit organization Billing Manager | Yes | Current Owner only | No | Yes | Yes |
+| Ordinary member | No | No | No | No | No |
+
+Financial authority requires current membership/installation and does not grant
+community access. Historical Customer bindings require principal review. Owner
+transfer does not cancel contracts or expose the Portal to the new Owner.
 
 Authorization reads current Discord membership, roles, permissions and settings.
 Snapshots expire after ten seconds; cached role state alone is insufficient.
@@ -84,3 +88,14 @@ Current alpha.7 details: [contracts](billing/contract-hardening-alpha7.md) and
 [Stripe integration](billing/stripe-integration.md). Real Sandbox purchase and
 signed delivery are tested. Stripe Live remains DISABLED; production keys/webhook,
 Discord approval/parity and hosted operational readiness remain release gates.
+
+## alpha.9 checkout boundaries
+
+See [release/design](alpha9-owner-commerce.md). Purpose-bound encrypted OAuth
+intents accept only enabled internal Offerings. Same-origin strict POST schemas
+reject client amount/Price/owner claims. Live Owner revalidation runs inside claim
+and pre-write transactions. Stripe Elements owns payment fields and provider
+formatted totals. Receipts never carry customer/subscription IDs; stored operation
+results remain tenant-sealed. Unknown mutation or expiry results stay fenced.
+`corepack pnpm check:secrets` checks API/webhook/Discord/session secrets without
+printing values; known invalid fixtures are allowed only under tests.

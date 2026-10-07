@@ -1,3 +1,4 @@
+vi.mock("server-only",()=>({}));
 import {DomainError} from '../../packages/shared/src/index';
 import {afterEach,it,expect,vi} from 'vitest';
 import {NextRequest} from '../../apps/web/node_modules/next/server.js';

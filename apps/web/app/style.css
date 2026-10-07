@@ -2992,3 +2992,25 @@ h3 {
     grid-template-columns: repeat(24, 26px);
   }
 }
+
+/* Owner-gated Checkout: the payment form and Stripe totals share one order. */
+.checkout-intro{max-width:1080px;margin-inline:auto;min-width:0}
+.checkout-heading{display:flex;align-items:center;justify-content:space-between;gap:1rem}
+.checkout-server-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:1rem;margin-block:2rem}
+.checkout-server-card,.checkout-review-card,.checkout-grid{border:1px solid var(--border,#dedee8);border-radius:20px;background:var(--panel,#fff);padding:1.5rem;min-width:0;overflow-wrap:anywhere}
+.checkout-server-card{display:flex;flex-direction:column;gap:1rem}
+.checkout-server-card h2,.checkout-review-card h2{margin:0}
+.checkout-server-card .button{margin-top:auto;text-align:center}
+.checkout-review-card{max-width:600px;margin:2rem auto;display:flex;flex-direction:column;gap:1rem}
+.checkout-price{font-size:2rem;font-weight:700;margin:0}.checkout-price small{font-size:1rem;font-weight:400}
+.checkout-guild{display:flex;gap:1rem;align-items:center;padding-block:1rem;min-width:0}.checkout-guild>div{min-width:0}.checkout-guild strong{overflow-wrap:anywhere}.checkout-guild p{margin:.3rem 0;font-size:.85rem}.checkout-guild-icon{flex:0 0 44px;height:44px;display:grid;place-items:center;border-radius:12px;background:#eeeafd;color:#6756de;font-size:1.4rem}
+.checkout-label{display:flex;flex-direction:column;gap:.5rem}.checkout-label input{width:100%;min-width:0;box-sizing:border-box;border:1px solid #b8b5c8;border-radius:8px;padding:.8rem;font:inherit}
+.checkout-grid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);grid-template-areas:"payment order" "payment totals" "payment submit";gap:1.5rem;margin-block:2rem}
+.checkout-payment-fields{grid-area:payment;min-width:0}.checkout-payment-fields h2{margin-top:0}.checkout-payment-fields>*+*{margin-top:1.25rem}.checkout-security{font-size:.9rem;line-height:1.6;color:#656276}
+.checkout-order{grid-area:order;min-width:0}.checkout-order h2{font-size:2rem;margin:.5rem 0}.checkout-totals{grid-area:totals;min-width:0}.checkout-totals dl{margin:0}.checkout-totals dl>div{display:flex;justify-content:space-between;gap:1rem;padding-block:.6rem}.checkout-totals dd{margin:0;overflow-wrap:anywhere}.checkout-total{border-top:1px solid #dedee8;font-weight:700;font-size:1.2rem}.checkout-totals p,.checkout-submit p{font-size:.85rem;line-height:1.5}.checkout-submit{grid-area:submit;min-width:0}.checkout-submit .button{width:100%;box-sizing:border-box}
+.checkout-confirmation{display:flex;flex-direction:column;gap:1rem}.checkout-managed{margin-top:3rem}.checkout-managed article{border-top:1px solid #dedee8;padding-block:1rem}
+.checkout-intro :focus-visible{outline:3px solid #6756de;outline-offset:4px}.checkout-intro button:disabled{opacity:.6;cursor:wait}
+@media(max-width:720px){.checkout-grid{grid-template-columns:minmax(0,1fr);grid-template-areas:"order" "payment" "totals" "submit";padding:1rem;gap:1.5rem}.checkout-review-card,.checkout-server-card{padding:1rem}.checkout-heading h1{font-size:1.65rem}.checkout-intro .button{white-space:normal;overflow-wrap:anywhere}.checkout-heading{align-items:flex-start}}
+
+@media(min-width:721px){.checkout-payment-fields{padding-right:1.5rem;border-right:1px solid #e6e5ed}.checkout-order,.checkout-totals,.checkout-submit{padding-inline:.5rem}.checkout-grid{column-gap:2rem}}
+.checkout-totals dl{background:#f7f7fa;border-radius:12px;padding:.8rem 1rem}.checkout-submit .button{min-height:52px;font-size:1rem}.checkout-submit a{text-decoration:underline}

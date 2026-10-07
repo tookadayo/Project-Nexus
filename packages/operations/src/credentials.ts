@@ -1,4 +1,5 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { revokedCredentialActor } from "./membership-tombstones";
 import { z } from "zod";
 import {
   sql,
@@ -55,6 +56,7 @@ export class ApiCredentials {
       )
     ).rows[0];
     assert(row, "API_UNAUTHORIZED", 401);
+    assert(!(await revokedCredentialActor(tx,this.vault,scope,row.actor_hash)), "API_UNAUTHORIZED", 401);
     const ent = new EntitlementService(tx);
     await ent.require(scope, "api");
     if (
@@ -230,6 +232,7 @@ export class ApiCredentials {
         )
       ).rows[0];
       assert(row && row.state === "ENABLED", "API_UNAUTHORIZED", 401);
+      assert(!(await revokedCredentialActor(tx,this.vault,scope,row.actor_hash)), "API_UNAUTHORIZED", 401);
       const expected = Buffer.from(row.token_hash, "hex"),
         actual = Buffer.from(
           this.vault.digest("operations-api-token", token),

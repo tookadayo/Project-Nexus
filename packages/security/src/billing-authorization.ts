@@ -7,7 +7,15 @@ import {
   type GuildAuthorizationSnapshot,
 } from "./server-authorization";
 export type BillingAction =
-  "VIEW" | "CHECKOUT" | "CHANGE" | "PORTAL" | "UPGRADE" | "DOWNGRADE" | "CANCEL" | "REDEEM" | "ASSIGN_GUILD";
+  | "VIEW"
+  | "CHECKOUT"
+  | "CHANGE"
+  | "PORTAL"
+  | "UPGRADE"
+  | "DOWNGRADE"
+  | "CANCEL"
+  | "REDEEM"
+  | "ASSIGN_GUILD";
 export class BillingAuthorization {
   constructor(
     private readonly authority: ServerAuthorization,
@@ -44,26 +52,60 @@ export class BillingAuthorization {
         (PermissionFlagsBits.ManageGuild |
           PermissionFlagsBits.Administrator)) !==
       0n;
-    const orgManager =
-      (
-        await sql`SELECT actor_hash FROM billing_authorizations WHERE organization_id=${snapshot.scope.organizationId}::uuid AND actor_hash=${this.vault.digest("billing-org-actor", snapshot.scope.organizationId + ":" + snapshot.userId)} AND revoked_at IS NULL`.execute(
-          this.db,
-        )
-      ).rows.length > 0;
-    if (!owner && !admin && !orgManager) this.authority.require(snapshot);
+    const roles = (
+      await sql<{
+        role: string;
+      }>`SELECT role FROM billing_authorizations WHERE organization_id=${snapshot.scope.organizationId}::uuid AND actor_hash=${this.principalHash(snapshot.scope, snapshot.userId)} AND revoked_at IS NULL`.execute(
+        this.db,
+      )
+    ).rows;
+    const principal = roles.some(
+      (row) => row.role === "PRIMARY_BILLING_PRINCIPAL",
+    );
+    const orgManager = roles.some((row) => row.role === "BILLING_MANAGER");
+    if (action === "CHECKOUT") this.authority.requireOwner(snapshot);
+    else if (action === "ASSIGN_GUILD")
+      assert(orgManager, "ORGANIZATION_BILLING_MANAGER_REQUIRED", 403);
+    else if (action === "PORTAL")
+      assert(principal, "BILLING_PRINCIPAL_REQUIRED", 403);
+    else if (["CHANGE", "UPGRADE", "DOWNGRADE", "CANCEL"].includes(action))
+      assert(principal || orgManager, "BILLING_PRINCIPAL_REQUIRED", 403);
+    else if (action === "REDEEM")
+      assert(
+        owner || principal || orgManager,
+        "BILLING_AUTHORIZATION_REQUIRED",
+        403,
+      );
+    else if (!owner && !admin && !principal && !orgManager)
+      this.authority.require(snapshot);
     assert(
       Date.now() - snapshot.checkedAt <= 10000,
       "AUTHORIZATION_EXPIRED",
       403,
     );
-    assert(
-      action === "VIEW" || owner || admin || orgManager,
-      "BILLING_AUTHORIZATION_REQUIRED",
-      403,
-    );
-    if (action === "ASSIGN_GUILD")
-      assert(orgManager, "ORGANIZATION_BILLING_MANAGER_REQUIRED", 403);
     return snapshot.actor;
+  }
+  principalHash(scope: Scope, userId: string) {
+    return this.vault.digest(
+      "billing-org-actor",
+      scope.organizationId + ":" + userId,
+    );
+  }
+  async ownership(scope: Scope, currentOwnerId: string | undefined) {
+    const row = (
+      await sql<{
+        actor_hash: string;
+      }>`SELECT actor_hash FROM billing_authorizations WHERE organization_id=${scope.organizationId}::uuid AND role='PRIMARY_BILLING_PRINCIPAL' AND revoked_at IS NULL`.execute(
+        this.db,
+      )
+    ).rows[0];
+    return !row
+      ? ("UNCLAIMED" as const)
+      : !currentOwnerId
+        ? ("UNKNOWN" as const)
+        : row.actor_hash === this.principalHash(scope, currentOwnerId)
+          ? ("ALIGNED" as const)
+          : ("BILLING_OWNERSHIP_REVIEW" as const);
   }
 }
 export type InternalBillingActor = {

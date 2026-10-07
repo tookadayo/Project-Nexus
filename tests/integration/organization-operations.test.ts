@@ -20,7 +20,10 @@ import {
   OperationsOrganization,
   auditExport,
 } from "../../packages/operations/src/organization";
-import { operationsAccess } from "../../packages/operations/src/policy";
+import {
+  operationsAccess,
+  actorPermissions,
+} from "../../packages/operations/src/policy";
 import { enforceOperationsPlan } from "../../packages/operations/src/plan-policy";
 import { Destinations } from "../../packages/operations/src/destinations";
 import { Playbooks } from "../../packages/operations/src/playbooks";
@@ -426,4 +429,136 @@ it("keeps historical plan versions immutable and stores the exact latest capabil
       db,
     ),
   ).rejects.toThrow();
+});
+
+it.each([false, true])(
+  "denies revoked staff who never joined the linked guild (member after link: %s), including historical missing bindings",
+  async (afterLink) => {
+    const f = await fixture(),
+      target = await fixture("FREE");
+    const original = f.discord.member.bind(f.discord);
+    let joined = false;
+    f.discord.member = async (guildId, userId) => {
+      if (guildId === target.s.guildId && userId === viewer && !joined)
+        throw new DiscordFailure(404);
+      return original(guildId, userId);
+    };
+    await f.organization.create(f.s, f.actor, owner, "Absent revoked member");
+    if (afterLink)
+      await f.organization.link(f.s, f.actor, owner, target.s.guildId);
+    const member = await f.organization.member(f.s, f.actor, {
+      userId: viewer,
+      name: "Former staff",
+      role: "ADMIN",
+    });
+    if (!afterLink)
+      await f.organization.link(f.s, f.actor, owner, target.s.guildId);
+    expect(
+      (
+        await sql`SELECT * FROM operations_role_bindings WHERE ${tenant(target.s)} AND member_id=${member.id}::uuid`.execute(
+          db,
+        )
+      ).rows,
+    ).toHaveLength(0);
+    await f.organization.revokeMember(f.s, f.actor, member.id);
+    joined = true;
+    const snapshot = await f.authority.snapshot(
+      target.s,
+      viewer,
+      "WEB_DASHBOARD",
+      "late-join",
+    );
+    expect(snapshot.actor.permissions).toBe("8");
+    for (const historical of [false, true]) {
+      if (historical)
+        await sql`DELETE FROM operations_role_bindings WHERE ${tenant(target.s)} AND member_id=${member.id}::uuid`.execute(
+          db,
+        );
+      await expect(
+        db
+          .transaction()
+          .execute((tx) =>
+            operationsAccess(tx, target.s, snapshot.actor, "READ"),
+          ),
+      ).rejects.toThrow("NEXUS_ROLE_REQUIRED");
+      await expect(
+        new ApiCredentials(db, vault).create(target.s, snapshot.actor, {
+          name: "Denied",
+          scopes: ["guild:read"],
+        }),
+      ).rejects.toThrow("NEXUS_ROLE_REQUIRED");
+      expect(await actorPermissions(db, target.s, snapshot.actor)).toEqual([]);
+    }
+    const ordinary = await f.authority.snapshot(
+      target.s,
+      admin,
+      "WEB_DASHBOARD",
+      "legitimate-admin",
+    );
+    await db
+      .transaction()
+      .execute((tx) => operationsAccess(tx, target.s, ordinary.actor, "READ"));
+  },
+);
+it("serializes reactivation seat accounting and permits edits to an active member at capacity", async () => {
+  const f = await fixture();
+  await f.organization.create(f.s, f.actor, owner, "Seats");
+  const revoked = [];
+  for (const userId of [viewer, admin]) {
+    const row = await f.organization.member(f.s, f.actor, {
+      userId,
+      name: "Reactivation",
+      role: "VIEWER",
+    });
+    await f.organization.revokeMember(f.s, f.actor, row.id);
+    revoked.push({ userId, revision: row.revision + 1 });
+  }
+  for (let i = 0; i < 18; i++) {
+    const userId = String(223000000000000000n + BigInt(i));
+    f.discord.members.set(userId, {
+      permissions: "0",
+      roles: [],
+      bot: false,
+      joinedAt: "",
+    });
+    await f.organization.member(f.s, f.actor, {
+      userId,
+      name: "Active staff",
+      role: "VIEWER",
+    });
+  }
+  const outcomes = await Promise.allSettled(
+    revoked.map((row) =>
+      f.organization.member(f.s, f.actor, {
+        ...row,
+        name: "Restore",
+        role: "VIEWER",
+      }),
+    ),
+  );
+  expect(outcomes.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+  expect(outcomes.filter((r) => r.status === "rejected")).toHaveLength(1);
+  expect(
+    (outcomes.find((r) => r.status === "rejected") as PromiseRejectedResult)
+      .reason.message,
+  ).toBe("BILLING_LIMIT_REACHED");
+  expect(
+    (
+      await sql<{
+        n: number;
+      }>`SELECT count(*)::int AS n FROM operations_org_members WHERE organization_id=${f.s.organizationId}::uuid AND state='ACTIVE'`.execute(
+        db,
+      )
+    ).rows[0]!.n,
+  ).toBe(20);
+  const winner = outcomes.findIndex((r) => r.status === "fulfilled");
+  const row = (
+    outcomes[winner] as PromiseFulfilledResult<{ id: string; revision: number }>
+  ).value;
+  await f.organization.member(f.s, f.actor, {
+    userId: revoked[winner]!.userId,
+    revision: row.revision,
+    name: "Edited at capacity",
+    role: "VIEWER",
+  });
 });

@@ -4,6 +4,7 @@ import {webAuthMode} from '../../packages/config/src/web-auth';
 import {webOrigin} from '../../packages/config/src/web-origin';
 export function proxy(req:NextRequest){
  const mode=webAuthMode();
+ if(req.nextUrl.pathname==='/checkout'||req.nextUrl.pathname.startsWith('/checkout/'))return NextResponse.next();
  if(req.nextUrl.pathname.startsWith('/auth/')||['/','/product','/pricing','/support','/privacy','/terms','/locale','/billing/webhooks/stripe'].includes(req.nextUrl.pathname))return NextResponse.next();
  if(mode!=='development'){
   if(req.nextUrl.pathname.startsWith('/link/')&&req.method!=='GET')return NextResponse.next();

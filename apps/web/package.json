@@ -1,15 +1,18 @@
 {
   "name": "@nexus/web",
-  "version": "0.6.0-alpha.8",
+  "version": "0.6.0-alpha.9",
   "private": true,
   "type": "module",
   "scripts": {
     "build": "next build"
   },
   "dependencies": {
+    "@stripe/react-stripe-js": "^7.0.0",
+    "@stripe/stripe-js": "^10.0.0",
     "next": "^16.3.5",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "recharts": "3.2.1"
+    "recharts": "3.2.1",
+    "server-only": "0.0.1"
   }
 }

@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { DomainError } from "../../../../packages/shared/src/index";
 import { assert, isDomainError } from "../../../../packages/shared/src/index";
 import {
   errorCategory,
@@ -33,6 +35,7 @@ export async function billingBody(request: NextRequest, maximum = 4096) {
   return Buffer.concat(chunks).toString("utf8");
 }
 export function billingFailure(error: unknown, fallback = 503) {
+  if(error instanceof z.ZodError || error instanceof SyntaxError) error=new DomainError("BILLING_INPUT_INVALID",400);
   const category = errorCategory(error),
     safe = ["INTERNAL", "DATABASE_FAILURE"].includes(category)
       ? new Error("BILLING_REQUEST_FAILED")

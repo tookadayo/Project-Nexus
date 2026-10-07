@@ -135,7 +135,7 @@ export function CommerceControls({
   return (
     <article className="billing-card">
       <h2>
-        {ja ? "購入と契約の管理" : "Purchase and subscription management"}
+        {ja ? "契約の管理" : "Subscription management"}
       </h2>
       {offerings.length > 0 && (
         <form onSubmit={submit} className="billing-form">

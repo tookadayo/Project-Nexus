@@ -75,6 +75,7 @@ export async function migrate(
       "042_community_operations",
       "043_organization_operations",
       "044_market_parity_plan_catalog",
+      "045_owner_checkout_authority",
     ].entries()) {
       const version = index + 1;
       if (

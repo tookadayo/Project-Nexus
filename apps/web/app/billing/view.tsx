@@ -94,6 +94,8 @@ export async function BillingView({
             {copy(locale, "日", "days")}
           </p>
         </article>
+        {context.ownership==="BILLING_OWNERSHIP_REVIEW" && <p role="status" className="billing-warning">{copy(locale,"DiscordのOwnerと支払いの責任者が異なります。契約は維持されます。支払い情報の引き継ぎは確認が必要です。","The current Discord Owner differs from the Primary Billing Principal. Your subscription remains active; financial ownership needs review.")}</p>}
+        {context.ownership==="UNCLAIMED" && status.subscriptions.some(s=>s.provider==="STRIPE") && <p role="status" className="billing-warning">{copy(locale,"この既存契約の金融権限は確認が必要です。現在のOwnerへ自動で請求情報を公開しません。","Financial authority for this historical contract requires review before exposing billing details.")}</p>}
         {status.conflict && (
           <p role="alert" className="billing-warning">
             {copy(
@@ -170,7 +172,7 @@ export async function BillingView({
         )}
         {section === "manage" && (
           <>
-            {context.canManage && <CommerceControls locale={locale} currentPlan={status.subscriptions.find(s=>s.provider==="STRIPE" && s.status==="ACTIVE")?.plan ?? status.plan} purchase={status.presentation.billingActions.purchase} manage={status.presentation.billingActions.manage} selectedOffering={selectedOffering}/>}
+            {context.canManage && <CommerceControls locale={locale} currentPlan={status.subscriptions.find(s=>s.provider==="STRIPE" && s.status==="ACTIVE")?.plan ?? status.plan} purchase={[]} manage={status.presentation.billingActions.manage.filter(action=>action.method!=="PORTAL" || context.canPortal)} selectedOffering={selectedOffering}/>}
             <p>
               {copy(
                 locale,
@@ -198,7 +200,7 @@ export async function BillingView({
           <BillingControls locale={locale} mode="promotion" />
         )}
         {section === "manage" &&
-          status.presentation.featureDecisions.custom_recipe.allowed && (
+          context.canCommunity && status.presentation.featureDecisions.custom_recipe.allowed && (
             <RecipeControls
               locale={locale}
               recipe={await currentRecipe(context.services.db, context.scope)}

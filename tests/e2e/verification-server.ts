@@ -88,6 +88,7 @@ discord.member = async (guildId, userId) => {
       ? [manager, ...(billingAdmins.has(`${guildId}:${userId}`) ? [admin] : [])]
       : [],
     permissions: "0",
+    ownerId:billingAdmins.has(`${guildId}:${userId}`)?userId:"999111111111111111",
     bot: false,
     joinedAt: "2026-01-01T00:00:00.000Z",
   };
@@ -142,7 +143,7 @@ fixture.get("/fixture/discord/users/@me/guilds", async (request) =>
 fixture.get("/fixture/discord/guilds/:guildId", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
   return installed.has(guildId)
-    ? { id: guildId, owner_id: "999111111111111111" }
+    ? { id: guildId, owner_id: billingAdmins.has(`${guildId}:${user}`)?user:"999111111111111111" }
     : reply.code(404).send({});
 });
 fixture.get("/fixture/discord/guilds/:guildId/roles", async (request) => {
@@ -201,6 +202,11 @@ fixture.post("/fixture/billing-authority", async (request) => {
   const key = `${guildId}:${user}`;
   if (enabled) billingAdmins.add(key);
   else billingAdmins.delete(key);
+  // Explicit fixture Owner + Primary authority, separate from Discord Admin.
+  const scope=scopeForGuild(guildId),hash=vault.digest("billing-org-actor",scope.organizationId+":"+user);
+  if(enabled) await sql`INSERT INTO billing_authorizations(organization_id,actor_hash,role) VALUES(${scope.organizationId}::uuid,${hash},'PRIMARY_BILLING_PRINCIPAL') ON CONFLICT(organization_id,actor_hash) DO UPDATE SET role='PRIMARY_BILLING_PRINCIPAL',revoked_at=NULL`.execute(db);
+  else await sql`DELETE FROM billing_authorizations WHERE organization_id=${scope.organizationId}::uuid AND actor_hash=${hash}`.execute(db);
+
   return { ok: true };
 });
 fixture.post("/fixture/promotion", async (request) => {

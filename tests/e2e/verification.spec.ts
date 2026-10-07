@@ -286,9 +286,9 @@ for (const locale of ["en", "ja"])
           idempotencyKey: "11111111-1111-4111-8111-111111111112",
         },
       });
-      expect(checkout.status()).toBe(503);
+      expect(checkout.status()).toBe(409);
       expect(await checkout.text()).toContain(
-        "BILLING_PROVIDER_NOT_CONFIGURED",
+        "BILLING_OFFERING_UNAVAILABLE",
       );
       const portal = await page.request.post("/billing/actions", {
         headers,
@@ -346,6 +346,11 @@ for (const locale of ["en", "ja"])
         caret: "initial",
         path: `test-results/billing-${locale}-mobile.png`,
         fullPage: true,
+      });
+      // Financial authority is now independent of community roles. Revoke both
+      // fixture Owner/Primary and community authority to test a stale request.
+      await request.post(`${fixture}/fixture/billing-authority`, {
+        data: { guildId: ids[0], enabled: false },
       });
       await request.post(`${fixture}/fixture/permission`, {
         data: { guildId: ids[0], allowed: false },

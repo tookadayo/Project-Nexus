@@ -19,6 +19,7 @@ import {
 import { DiscordRest } from "../../../../../packages/discord/src/rest";
 import { assert } from "../../../../../packages/shared/src/index";
 import { billingBody, billingFailure } from "../request";
+import { startCheckout } from "../../checkout/service";
 export async function POST(request: NextRequest) {
   try {
     assert(sameOrigin(request), "ORIGIN_REJECTED", 403);
@@ -209,6 +210,27 @@ export async function POST(request: NextRequest) {
       context.services.db,
       input.offeringId,
     );
+    if (offering.provider === "STRIPE") {
+      const result = await startCheckout(context, input, "HOSTED"),
+        response = NextResponse.json(result, {
+          headers: { "Cache-Control": "no-store" },
+        });
+      response.cookies.set(
+        "nexus_checkout_receipt",
+        new URL(
+          result.confirmationUrl,
+          "https://nexus.invalid",
+        ).searchParams.get("receipt")!,
+        {
+          httpOnly: true,
+          sameSite: "lax",
+          secure: request.nextUrl.protocol === "https:",
+          path: "/",
+          maxAge: 86400,
+        },
+      );
+      return response;
+    }
     const provider =
       offering.provider === "DISCORD"
         ? new DiscordBillingProvider(
@@ -217,11 +239,9 @@ export async function POST(request: NextRequest) {
               process.env.DISCORD_APPLICATION_ID!,
             ),
           )
-        : offering.provider === "STRIPE"
-          ? new StripeBillingProvider()
-          : new UnconfiguredBillingProvider(offering.provider);
+        : new UnconfiguredBillingProvider(offering.provider);
     assert(
-      offering.provider === "STRIPE" || offering.provider === "DISCORD",
+      offering.provider === "DISCORD",
       "BILLING_OFFERING_UNAVAILABLE",
       409,
     );
@@ -236,6 +256,8 @@ export async function POST(request: NextRequest) {
         idempotencyKey: input.idempotencyKey,
         offeringId: offering.id,
         promotionReservationId: input.promotionReservationId,
+        principalActorHash: context.principalActorHash,
+        revalidate: context.revalidateCheckout,
       },
       ({
         operationId,

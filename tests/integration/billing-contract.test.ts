@@ -1,3 +1,4 @@
+import Stripe from "../../packages/settings/node_modules/stripe/esm/stripe.esm.node.js";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { infrastructure } from "../fixtures/infrastructure";
@@ -1112,3 +1113,146 @@ it.each(["CHANGE", "CANCEL"] as const)(
     expect(execute).toHaveBeenCalledTimes(2);
   },
 );
+
+it.each(["preflight", "write"])(
+  "persists actual Stripe %s failure classification and fences fresh UUID retries correctly",
+  async (stage) => {
+    const f = await fixture(),
+      offering = await offer(),
+      client = new Stripe("sk_test_fixture_only");
+    const provider = new StripeBillingProvider({
+      client,
+      env: {
+        NODE_ENV: "development",
+        NEXUS_STRIPE_ENABLED: "true",
+        NEXUS_STRIPE_MODE: "SANDBOX",
+        STRIPE_SECRET_KEY: "sk_test_fixture_only",
+        NEXUS_WEB_URL: "http://localhost:3100",
+      },
+    });
+    const expectedPrice = {
+      id: offering.providerPriceId,
+      active: stage !== "preflight",
+      livemode: false,
+      product: offering.providerProductId,
+      currency: "jpy",
+      unit_amount: offering.unitAmountMinor,
+      type: "recurring",
+      billing_scheme: "per_unit",
+      tax_behavior: "exclusive",
+      transform_quantity: null,
+      recurring: {
+        interval: "month",
+        interval_count: 1,
+        usage_type: "licensed",
+        trial_period_days: null,
+      },
+    };
+    const price = vi
+      .spyOn(client.prices, "retrieve")
+      .mockResolvedValue(expectedPrice as never);
+    vi.spyOn(client.products, "retrieve").mockResolvedValue({
+      id: offering.providerProductId,
+      active: true,
+      livemode: false,
+    } as never);
+    vi.spyOn(client.customers, "retrieve").mockResolvedValue({
+      id: f.customerRef,
+      livemode: false,
+    } as never);
+    vi.spyOn(client.subscriptions, "list").mockResolvedValue({
+      data: [],
+      has_more: false,
+    } as never);
+    const checkout = vi
+      .spyOn(client.checkout.sessions, "create")
+      .mockRejectedValue(new Error("stripe-write-timeout"));
+    const invoke = (key: string) =>
+      f.operations.session(
+        {
+          scope: f.scope,
+          provider: "STRIPE",
+          operation: "CHECKOUT",
+          offeringId: offering.id,
+          idempotencyKey: key,
+        },
+        (ctx) =>
+          provider.createCheckout({
+            scope: f.scope,
+            operationId: ctx.operationId,
+            offeringId: offering.id,
+            offering: ctx.offering!,
+            idempotencyKey: ctx.idempotencyKey,
+            customer: ctx.customer,
+            checkoutExpiresAt: ctx.checkoutExpiresAt,
+          }),
+      );
+    const initialKey = randomUUID();
+    await expect(invoke(initialKey)).rejects.toThrow(
+      stage === "preflight"
+        ? "STRIPE_OFFERING_MISMATCH"
+        : "stripe-write-timeout",
+    );
+    const row = (
+      await sql<{
+        state: string;
+        external_started_at: Date | null;
+      }>`SELECT state,external_started_at FROM billing_operations WHERE organization_id=${f.scope.organizationId}::uuid`.execute(
+        db,
+      )
+    ).rows[0]!;
+    expect(row.state).toBe(
+      stage === "preflight" ? "FAILED" : "RECONCILE_REQUIRED",
+    );
+    if (stage === "preflight") {
+      expect(row.external_started_at).toBeNull();
+      expect(checkout).not.toHaveBeenCalled();
+      price.mockResolvedValue({ ...expectedPrice, active: true } as never);
+      checkout.mockResolvedValue({
+        id: "cs_fixture_retry",
+        livemode: false,
+        url: "https://checkout.stripe.com/c/pay/cs_fixture_retry",
+        expires_at: Math.floor(Date.now() / 1000) + 1800,
+      } as never);
+      await sql`UPDATE billing_operations SET checkout_expires_at=now()+interval '29 minutes' WHERE organization_id=${f.scope.organizationId}::uuid`.execute(
+        db,
+      );
+      // Older FAILED rows may retain their preflight expiry; retries must renew it.
+      await invoke(initialKey);
+      expect(checkout).toHaveBeenCalledOnce();
+    } else {
+      expect(row.external_started_at).not.toBeNull();
+      await expect(invoke(randomUUID())).rejects.toThrow(
+        "BILLING_RECONCILE_REQUIRED",
+      );
+      expect(checkout).toHaveBeenCalledOnce();
+    }
+    vi.restoreAllMocks();
+  },
+);
+
+it("fences migrated unknown Checkout claims even without a pre-alpha.7 external marker", async () => {
+  const f = await fixture(),
+    offering = await offer();
+  await sql`INSERT INTO billing_operations(id,organization_id,guild_id,provider,operation,request_digest,input_digest,state,error_category) VALUES(${randomUUID()}::uuid,${f.scope.organizationId}::uuid,${f.scope.guildId},'STRIPE','CHECKOUT','legacy-request','legacy-input','RECONCILE_REQUIRED','BILLING_OUTCOME_UNKNOWN')`.execute(
+    db,
+  );
+  const execute = vi.fn(async () => ({
+    url: "https://checkout.stripe.com/c/pay/unreachable",
+    expiresAt: new Date(Date.now() + 1800000).toISOString(),
+    providerCheckoutRef: "cs_unreachable",
+  }));
+  await expect(
+    f.operations.session(
+      {
+        scope: f.scope,
+        provider: "STRIPE",
+        operation: "CHECKOUT",
+        offeringId: offering.id,
+        idempotencyKey: randomUUID(),
+      },
+      execute,
+    ),
+  ).rejects.toThrow("BILLING_RECONCILE_REQUIRED");
+  expect(execute).not.toHaveBeenCalled();
+});
