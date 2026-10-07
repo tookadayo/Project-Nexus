@@ -70,9 +70,11 @@ The unchanged Node raw-byte webhook verifies the official Stripe signature, writ
 a deduplicated Provider Signal and resolves trusted operation/customer/subscription
 bindings. Core retrieves authoritative Stripe state through `RECONCILE_LATEST` and
 projects assignments and Effective Entitlement. Confirmation shows ACTIVE only
-when this Checkout has a verified completion and the purchased plan is actually
-effective without conflict/grace. It also handles ACTION_REQUIRED, FAILED and
-EXPIRED; provider failures preserve the prior state. Complete empty census is
+when this Checkout has a verified completion, an active purchased subscription,
+and its capabilities are effective without conflict/grace, including when a
+higher grant is effective. A grant alone cannot confirm the purchase. It also
+handles ACTION_REQUIRED, FAILED and EXPIRED; provider failures preserve the prior
+state. Complete empty census is
 absence; timeout/429/5xx/partial results remain incomplete and preserve access.
 
 ## Three P1 repairs
@@ -146,8 +148,10 @@ Local validation (2026-10-07, macOS arm64 / Node 24.19.0): frozen install, lint,
 typecheck, unit tests (431), full build (19 workspaces), integration (295),
 performance (4), general Playwright (28), verification Playwright (11), checkout
 Playwright (1 multi-stage flow), and redacted source secret scan passed. The
-checkout flow includes an active contract surviving Owner transfer, old Principal
-Portal access, new Owner Portal/receipt denial, and ownership-review presentation.
+checkout flow includes higher grants remaining CONFIRMING before reconciliation
+and ACTIVE after authoritative subscription projection, an active contract
+surviving Owner transfer, old Principal Portal access, new Owner Portal/receipt
+denial, and ownership-review presentation.
 `pnpm test:runtime` was invoked locally and could not execute because
 `powershell.exe` is unavailable on macOS; the existing Windows CI gate remains
 mandatory. Final exact-SHA remote CI is reported separately in the handoff.

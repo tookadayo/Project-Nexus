@@ -322,6 +322,20 @@ app.post("/fixture/reconcile", async () => {
   for (let i = 0; i < 30; i++) if (!(await billing.projectOne())) break;
   return { ok: true };
 });
+app.post("/fixture/higher-grant", async (req) => {
+  const scope = scopeForGuild(ids[0]!),
+    enabled = (req.body as { enabled: boolean }).enabled,
+    grantId = "11111111-1111-4111-8111-111111111120";
+  if (enabled)
+    await sql`INSERT INTO entitlement_grants(id,organization_id,guild_id,source,plan_key,reason) VALUES(${grantId}::uuid,${scope.organizationId}::uuid,${scope.guildId},'PARTNER','SCALE','Checkout confirmation regression fixture')`.execute(
+      db,
+    );
+  else
+    await sql`UPDATE entitlement_grants SET revoked_at=now() WHERE id=${grantId}::uuid AND organization_id=${scope.organizationId}::uuid AND guild_id=${scope.guildId}`.execute(
+      db,
+    );
+  return { plan: (await billing.status(scope)).plan };
+});
 app.get("/fixture/count", async () => ({ checkoutCalls }));
 await app.listen({ host: "127.0.0.1", port });
 let stopping = false;

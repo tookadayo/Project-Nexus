@@ -13,6 +13,7 @@ import { BillingAuthorization } from "../../../../packages/security/src/billing-
 import { sql, tenant } from "../../../../packages/db/src/index";
 import type { ConfirmationState } from "./confirmation/state";
 import { assert } from "../../../../packages/shared/src/index";
+import { planRank } from "../../../../packages/settings/src/plan-registry";
 export async function checkoutReceiptContext(value: string | undefined) {
   const receipt = openCheckoutReceipt(value),
     session = openSession((await cookies()).get("nexus_session")?.value);
@@ -85,7 +86,7 @@ export async function checkoutReceiptContext(value: string | undefined) {
   const confirmation: ConfirmationState =
     paid &&
     operation.checkout_completed_at &&
-    state.plan === offering.planKey &&
+    planRank(state.plan) >= planRank(offering.planKey) &&
     !state.grace &&
     !state.conflict
       ? "ACTIVE"

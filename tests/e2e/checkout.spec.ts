@@ -199,6 +199,7 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
     await page
       .getByRole("button", { name: "Start GROWTH" })
       .scrollIntoViewIfNeeded();
+    await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({
       path: `test-results/checkout-${width}.png`,
       fullPage: true,
@@ -231,6 +232,12 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
   expect(
     (await (await request.post(`${fixture}/fixture/webhook`)).json()).status,
   ).toBe(200);
+  // A higher effective grant must not make an unreconciled purchase ACTIVE.
+  const higherGrant = await request.post(`${fixture}/fixture/higher-grant`, {
+    data: { enabled: true },
+  });
+  expect(higherGrant.ok()).toBe(true);
+  expect((await higherGrant.json()).plan).toBe("SCALE");
   expect(
     (
       await (
@@ -254,6 +261,11 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
         ).state,
     )
     .toBe("ACTIVE");
+  const removedGrant = await request.post(`${fixture}/fixture/higher-grant`, {
+    data: { enabled: false },
+  });
+  expect(removedGrant.ok()).toBe(true);
+  expect((await removedGrant.json()).plan).toBe("GROWTH");
   await page.reload();
   await expect(page.getByText("ACTIVE", { exact: true })).toBeVisible();
   await request.post(`${fixture}/fixture/owner`, {
