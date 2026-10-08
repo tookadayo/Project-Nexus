@@ -62,7 +62,8 @@ export function invitationAllows(
     return false;
   if (mode === "read")
     return (
-      now.getTime() < row.expires_at.getTime() + BETA_GRACE_DAYS * 86400000
+      now.getTime() < row.expires_at.getTime() + BETA_GRACE_DAYS * 86400000 &&
+      (generation === undefined || generation === row.generation)
     );
   return (
     row.status === "ACTIVE" &&
@@ -111,10 +112,26 @@ export async function betaWork<T>(
   db: Database,
   s: Scope,
   work: () => Promise<T>,
+  access: {
+    mode?: "read" | "work" | "maintenance";
+    generation?: number | null;
+  } = {},
 ) {
   if (!hostedBetaEnabled()) return work();
+  const check = async (tx: Tx) => {
+    if (access.mode === "maintenance") {
+      // This fence does not grant authority. The caller must validate a
+      // specific lifecycle operation and current actor before any effect.
+      const row = await betaInvitation(tx, s);
+      assert(
+        access.generation === (row?.generation ?? null),
+        "BETA_UNAVAILABLE",
+        403,
+      );
+    } else await betaAccess(tx, s, access.mode ?? "work", access.generation);
+  };
   if (hasHeldReadFence(betaLockKey(s))) {
-    await betaAccess(db, s);
+    await check(db);
     return work();
   }
   return db.connection().execute(async (connection) => {
@@ -128,7 +145,7 @@ export async function betaWork<T>(
       );
       try {
         return await withHeldReadFences([privacy, betaLockKey(s)], async () => {
-          await betaAccess(connection, s);
+          await check(connection);
           return work();
         });
       } finally {

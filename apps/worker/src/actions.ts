@@ -1,7 +1,21 @@
-import {betaAccess,betaWork} from '../../../packages/security/src/hosted-beta';
+import {
+  betaAccess,
+  betaWork,
+  betaInvitation,
+  betaLock,
+} from "../../../packages/security/src/hosted-beta";
+import { hostedBetaEnabled } from "../../../packages/config/src/hosted-beta";
+import {
+  betaActionPolicy,
+  type BetaActionPolicy,
+} from "../../../packages/security/src/beta-outbox";
+import { ServerAuthorization } from "../../../packages/security/src/server-authorization";
 import { traceStep } from "../../../packages/shared/src/observability.js";
 import { deliveryFence } from "../../../packages/operations/src/delivery-policy";
-import { operationsLock } from "../../../packages/operations/src/policy";
+import {
+  operationsLock,
+  operationsAccess,
+} from "../../../packages/operations/src/policy";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import {
@@ -42,6 +56,7 @@ type Action = {
   payload: Record<string, unknown>;
   attempts: number;
   leaseToken: string;
+  policy?: BetaActionPolicy;
 };
 function attachmentFiles(input: unknown): DiscordAttachment[] | undefined {
   if (input === undefined) return undefined;
@@ -81,9 +96,41 @@ export class ActionWorker {
     private readonly refreshPanel?: (s: Scope) => Promise<Panel>,
   ) {}
   async tick(s: Scope): Promise<boolean> {
-    return traceStep("action.outbox", {}, () => betaWork(this.db,s,()=>this.execute(s)));
+    return traceStep("action.outbox", {}, async () => {
+      const action = await this.claim(s);
+      if (!action) return false;
+      let executing = false;
+      try {
+        action.policy = betaActionPolicy(
+          this.vault,
+          s,
+          action.kind,
+          action.payload,
+        );
+        return await betaWork(
+          this.db,
+          s,
+          async () => {
+            // Lifecycle/read replies have their own actor authorization. The
+            // fence alone, or the REPLY kind alone, never permits delivery.
+            if (!(await this.live(s, action))) return true;
+            executing = true;
+            return this.execute(s, action);
+          },
+          action.policy,
+        );
+      } catch (error) {
+        if (executing) throw error;
+        // A rejected pending job is terminal; it must not block an authorized
+        // unlink/read reply behind it or resurrect after pause/resume.
+        await sql`UPDATE action_outbox SET state='FAILED',lease_until=NULL,lease_token=NULL,error_category='BETA_PRECONDITION',last_error='Delivery authorization unavailable',completed_at=now(),updated_at=now() WHERE ${tenant(s)} AND id=${action.id}::uuid AND lease_token=${action.leaseToken}::uuid`.execute(
+          this.db,
+        );
+        return true;
+      }
+    });
   }
-  private async execute(s: Scope): Promise<boolean> {
+  private async claim(s: Scope) {
     // A crashed worker may have performed a REST operation; never blindly retry its expired lease.
     await sql`UPDATE action_outbox SET state=CASE WHEN (kind IN ('PANEL_DELETE','PANEL_REFRESH') OR kind='PANEL_UPSERT' AND operation_phase IS DISTINCT FROM 'CREATE') THEN 'PENDING' ELSE 'UNKNOWN' END,last_error='Worker lease expired',error_category='LEASE_EXPIRED',lease_until=NULL,lease_token=NULL,updated_at=now() WHERE ${tenant(s)} AND state='RUNNING' AND lease_until<now()`.execute(
       this.db,
@@ -105,7 +152,9 @@ export class ActionWorker {
       }
       return row;
     });
-    if (!action) return false;
+    return action;
+  }
+  private async execute(s: Scope, action: Action): Promise<boolean> {
     if (action.kind === "PANEL_REFRESH") return this.refresh(s, action);
     if (action.kind === "INTERVENTION_DELIVER") {
       const runId = z.uuid().parse(action.payload.runId);
@@ -409,6 +458,12 @@ export class ActionWorker {
           body: Panel;
           interactionHash?: string;
         };
+        if (action.policy?.reply) {
+          // One fresh lookup immediately before REST, outside a transaction.
+          // Repeating it at every lease/save check can outlive the lease.
+          await this.authorizeReply(s, action, action.policy, this.db);
+          if (!(await this.live(s, action))) return true;
+        }
         sideEffectStarted = true;
         if (action.kind === "REPLY_FOLLOWUP") {
           if (!this.discord.followup) throw new Error("FOLLOWUP_UNAVAILABLE");
@@ -497,14 +552,91 @@ export class ActionWorker {
     return true;
   }
   private async live(s: Scope, action: Action, tx: Tx = this.db) {
-    await betaAccess(tx,s);
+    if (hostedBetaEnabled()) {
+      const policy = action.policy!;
+      if (policy.mode === "maintenance") {
+        await betaLock(tx, s);
+        const row = await betaInvitation(tx, s);
+        assert(
+          policy.generation === (row?.generation ?? null),
+          "BETA_UNAVAILABLE",
+          403,
+        );
+      } else await betaAccess(tx, s, policy.mode, policy.generation);
+    }
     return (
       (
-        await sql`SELECT id FROM action_outbox WHERE ${tenant(s)} AND id=${action.id}::uuid AND state='RUNNING' AND lease_token=${action.leaseToken}::uuid AND lease_until>now() AND NOT EXISTS(SELECT 1 FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash IS NULL AND completed_at IS NOT NULL)`.execute(
+        await sql`SELECT id FROM action_outbox WHERE ${tenant(s)} AND id=${action.id}::uuid AND state='RUNNING' AND lease_token=${action.leaseToken}::uuid AND lease_until>now() AND (${action.policy?.mode === "maintenance" && ["deleteGuild", "unlinkConfirm"].includes(action.policy.reply?.action ?? "")} OR NOT EXISTS(SELECT 1 FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash IS NULL AND completed_at IS NOT NULL))`.execute(
           tx,
         )
       ).rows.length > 0
     );
+  }
+  private async authorizeReply(
+    s: Scope,
+    action: Action,
+    policy: BetaActionPolicy,
+    tx: Tx,
+  ) {
+    const reply = policy.reply!,
+      authority = new ServerAuthorization(
+        this.discord,
+        new SettingsService(this.db),
+        this.vault,
+      ),
+      snapshot = await authority.snapshot(
+        s,
+        reply.userId,
+        "DISCORD_PANEL",
+        action.id,
+      );
+    assert(
+      !snapshot.member.bot && Date.now() - snapshot.checkedAt <= 10000,
+      "GUILD_MEMBER_REQUIRED",
+      403,
+    );
+    if (policy.mode === "read") {
+      await operationsAccess(tx, s, snapshot.actor, "READ");
+    } else if (
+      !["privacy", "deleteMemberConfirm", "deleteMember"].includes(reply.action)
+    ) {
+      authority.require(snapshot);
+      const completedDeletion =
+        ["deleteGuild", "unlinkConfirm"].includes(reply.action) &&
+        (
+          await sql`SELECT id FROM beta_deletion_jobs WHERE ${tenant(s)} AND state IN ('ERASED','DONE')`.execute(
+            tx,
+          )
+        ).rows.length > 0;
+      if (!completedDeletion)
+        await operationsAccess(
+          tx,
+          s,
+          snapshot.actor,
+          "CONFIGURE",
+          undefined,
+          true,
+        );
+    }
+    if (!["deleteGuild", "unlinkConfirm"].includes(reply.action)) {
+      assert(
+        !(
+          await sql`SELECT id FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash IS NULL AND completed_at IS NOT NULL`.execute(
+            tx,
+          )
+        ).rows.length,
+        "PRIVACY_DELETED",
+        403,
+      );
+      if (policy.mode === "maintenance") {
+        const row = await betaInvitation(tx, s);
+        assert(
+          !row || !["DELETING", "DELETED", "REVOKED"].includes(row.status),
+          "BETA_UNAVAILABLE",
+          403,
+        );
+      }
+    }
   }
   private async commit(
     s: Scope,
@@ -582,24 +714,21 @@ export class ActionWorker {
       if (existing) {
         if (!this.refreshPanel) throw new Error("Panel renderer unavailable");
         const body = await this.refreshPanel(s);
-        const live = (
-          await sql`SELECT id FROM action_outbox WHERE ${tenant(s)} AND id=${action.id}::uuid AND state='RUNNING' AND lease_token=${action.leaseToken}::uuid AND lease_until>now() AND NOT EXISTS(SELECT 1 FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash IS NULL AND completed_at IS NOT NULL)`.execute(
-            this.db,
-          )
-        ).rows.length;
-        if (!live) return true;
+        if (!(await this.live(s, action))) return true;
         await this.discord.editPanel(
           existing.channel_id,
           existing.message_id,
           body,
         );
       }
-      await sql`UPDATE action_outbox SET state='SUCCEEDED',completed_at=now(),updated_at=now(),lease_until=NULL,lease_token=NULL,last_error=NULL,error_category=NULL WHERE ${tenant(s)} AND id=${action.id}::uuid AND lease_token=${action.leaseToken}::uuid`.execute(
-        this.db,
-      );
-      await sql`UPDATE action_outbox SET state='SUCCEEDED',completed_at=now(),updated_at=now(),error_category=NULL,last_error=NULL WHERE ${tenant(s)} AND kind='PANEL_REFRESH' AND state='PENDING' AND created_at<=${renderStartedAt}`.execute(
-        this.db,
-      );
+      await this.commit(s, action, async (tx) => {
+        await sql`UPDATE action_outbox SET state='SUCCEEDED',completed_at=now(),updated_at=now(),lease_until=NULL,lease_token=NULL,last_error=NULL,error_category=NULL WHERE ${tenant(s)} AND id=${action.id}::uuid AND lease_token=${action.leaseToken}::uuid`.execute(
+          tx,
+        );
+        await sql`UPDATE action_outbox SET state='SUCCEEDED',completed_at=now(),updated_at=now(),error_category=NULL,last_error=NULL WHERE ${tenant(s)} AND kind='PANEL_REFRESH' AND state='PENDING' AND created_at<=${renderStartedAt} AND (${!hostedBetaEnabled()} OR payload->>'betaGeneration'=${String(action.policy?.generation)})`.execute(
+          tx,
+        );
+      });
     } catch (error) {
       const known = error instanceof DiscordFailure,
         retry =

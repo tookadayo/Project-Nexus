@@ -1,6 +1,14 @@
-import {betaMaintenanceAction,betaReadAction} from '../../../packages/security/src/beta-interactions';
-import {betaAccess} from '../../../packages/security/src/hosted-beta';
-import {hostedBetaEnabled} from '../../../packages/config/src/hosted-beta';
+import {
+  betaMaintenanceAction,
+  betaReadAction,
+} from "../../../packages/security/src/beta-interactions";
+import {
+  betaAccess,
+  betaInvitation,
+  betaLock,
+} from "../../../packages/security/src/hosted-beta";
+import { certifyBetaReply } from "../../../packages/security/src/beta-outbox";
+import { hostedBetaEnabled } from "../../../packages/config/src/hosted-beta";
 import { setupInteraction } from "./setup-interactions";
 import { analysisInteraction } from "./analysis-interactions";
 import {analysisUsage} from "../../../packages/analysis/src/index";
@@ -208,6 +216,7 @@ export class InteractionWorker {
       privateError = false,
       stage = "dispatch",
       action = input.command ?? "unknown",
+      dispatched = false,
       challengeId: string | undefined,
       returnPage:
         | "overview"
@@ -231,6 +240,7 @@ export class InteractionWorker {
           challengeId = id;
         },
       );
+      dispatched = true;
       if (challengeId) {
         stage = "verification_reply";
         // Verification codes live only in memory and the ephemeral Discord reply.
@@ -349,19 +359,25 @@ export class InteractionWorker {
         nexusFiles?: { filename: string; dataBase64: string }[];
       };
       const interactionHash = this.vault.hash(s, input.id);
-      await enqueue(
-        tx,
-        s,
-        `reply:${input.id}`,
-        privateError ? "REPLY_FOLLOWUP" : "REPLY_EDIT",
-        {
-          applicationId: input.applicationId,
-          encryptedToken: this.vault.seal(s, input.token),
-          body: replyBody,
-          ...(nexusFiles ? { files: nexusFiles } : {}),
-          interactionHash,
-        },
-      );
+      const kind = privateError ? "REPLY_FOLLOWUP" : "REPLY_EDIT";
+      if (hostedBetaEnabled()) await betaLock(tx, s);
+      const generation =
+        dispatched && betaMaintenanceAction(action)
+          ? ((await betaInvitation(tx, s))?.generation ?? null)
+          : (input.betaGeneration ?? null);
+      const payload: Record<string, unknown> = {
+        applicationId: input.applicationId,
+        encryptedToken: this.vault.seal(s, input.token),
+        body: replyBody,
+        ...(nexusFiles ? { files: nexusFiles } : {}),
+        interactionHash,
+        ...(hostedBetaEnabled() ? { betaGeneration: generation } : {}),
+      };
+      const certificate = dispatched
+        ? certifyBetaReply(this.vault, s, kind, payload, action, input.userId)
+        : undefined;
+      if (certificate) payload.betaReply = certificate;
+      await enqueue(tx, s, `reply:${input.id}`, kind, payload, generation);
       await sql`UPDATE interaction_diagnostics SET result='queued' WHERE ${tenant(s)} AND interaction_hash=${interactionHash}`.execute(
         tx,
       );
@@ -412,7 +428,20 @@ export class InteractionWorker {
       ? await this.tokens.read(this.db, s, input.customId, actorHash)
       : { action: input.command };
     const action = String(intent.action ?? "");
-    if(!betaMaintenanceAction(action))await this.db.transaction().execute(tx=>betaAccess(tx,s,betaReadAction(action)?'read':'work',betaReadAction(action)?undefined:input.betaGeneration??null));
+    onStage(`action:${action}`);
+    if (!betaMaintenanceAction(action)) {
+      const invitation = await this.db
+        .transaction()
+        .execute((tx) =>
+          betaAccess(
+            tx,
+            s,
+            betaReadAction(action) ? "read" : "work",
+            betaReadAction(action) ? undefined : (input.betaGeneration ?? null),
+          ),
+        );
+      if (invitation) input.betaGeneration = invitation.generation;
+    }
     if (action === "intakeSubmit") {
       const result = await new OperationsIntake(
         this.db,
@@ -559,7 +588,6 @@ export class InteractionWorker {
       body.nexusFiles = files;
       return body;
     }
-    onStage(`action:${action}`);
     const requested = String(intent.page ?? input.values?.[0] ?? "");
     const returnPage = [
       "overview",

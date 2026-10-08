@@ -47,6 +47,7 @@ where moving them would create unnecessary link churn.
 ## Operations and security
 
 - [alpha.12 implementation and focused verification](alpha12-hosted-beta.md)
+- [alpha.12 outbox review fixes and delivery regression](alpha12-outbox-review-fixes.md)
 - [alpha.12 local operator procedures (Mac / Windows 11)](alpha12-operator-operations.md)
 - [alpha.12 authentication and data lifecycle inventory](alpha12-data-inventory.md)
 - [Server verification](server-verification.md)

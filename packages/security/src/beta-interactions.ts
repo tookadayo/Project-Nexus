@@ -5,6 +5,7 @@ import type { Components } from "./index";
 import { hostedBetaEnabled } from "../../config/src/hosted-beta";
 export const betaMaintenanceAction = (action: string) =>
   [
+    "privacy",
     "unlink",
     "unlinkConfirm",
     "unlinkCancel",

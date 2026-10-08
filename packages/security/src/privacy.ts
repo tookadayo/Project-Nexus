@@ -439,7 +439,9 @@ export class PrivacyService {
       await sql`DELETE FROM component_tokens WHERE ${tenant(s)} AND expires_at<now()`.execute(
         tx,
       );
-      await sql`DELETE FROM action_outbox WHERE ${tenant(s)} AND kind='REPLY_EDIT' AND created_at<now()-interval '15 minutes'`.execute(
+      // New certified followups carry a scoped encrypted reply identity. Give
+      // them the same short retention as interaction jobs and edited replies.
+      await sql`DELETE FROM action_outbox WHERE ${tenant(s)} AND (kind='REPLY_EDIT' OR kind='REPLY_FOLLOWUP' AND payload ? 'betaReply') AND created_at<now()-interval '15 minutes'`.execute(
         tx,
       );
       await sql`DELETE FROM event_inbox WHERE ${tenant(s)} AND received_at<${cutoff}`.execute(

@@ -13,6 +13,11 @@ synthetic tests and a local commit are authorized; publication and real
 credentials/data operations are separate decisions. The final commit SHA and
 command logs are recorded in the local `.local/alpha12-handoff.md` after commit.
 
+The follow-up review of local commit `1072bdfd21b49bf4d6a3d38b86eab3cb73e16257`
+identified two outbox delivery gaps. The [scoped fixes and post-change checks](alpha12-outbox-review-fixes.md)
+record authorized paused/expired replies and rejection of stale ordinary jobs.
+Its additional local SHA and logs are in `.local/alpha12-outbox-handoff.md`.
+
 ## Implemented boundaries
 
 | Responsibility           | Implementation and boundary                                                                                                                                                                                                                                                                                                                                                            |
