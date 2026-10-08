@@ -118,6 +118,7 @@ await settings.update(
 const vault = new IdentityVault("aa".repeat(32), "bb".repeat(32));
 const now = new Date();
 // Explicit synthetic observation evidence; the fixture is never production data.
+await sql`UPDATE location_population_collection SET introduced_at=${new Date(now.getTime()-31*86400000)} WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId}`.execute(db);
 await openCollectionEpoch(
   db,
   s,

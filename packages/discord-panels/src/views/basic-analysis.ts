@@ -1,6 +1,6 @@
 import {ComponentType, ButtonStyle} from "discord-api-types/v10";
 import {actionRow, callout, footer, nexusPanel, type PanelChild} from "../primitives";
-import {analysisCopy as c, metricNames, localized, qualityNames} from "../i18n/analysis";
+import {analysisCopy as c, metricNames, localized, qualityNames, hasHistoricalPostCoverage} from "../i18n/analysis";
 import type {Issue} from "../types";
 import type {UiLocale} from "../i18n";
 import type {ControlData, AnalysisView} from "./control";
@@ -20,6 +20,7 @@ export async function basicAnalysisPanel(issue:Issue,data:ControlData,locale:UiL
   const profile=data.model?.profile??data.community?.adaptive?.profile,channels=data.model?.capabilities?.channels??data.community?.adaptive?.capabilities?.channels??[];
   const overallKeys=channels.filter(channel=>[2,13].includes(channel.type)).length>channels.filter(channel=>[0,5,15,16].includes(channel.type)).length ? ["voice_copresence","event_signups","event_attendance"] : profile?.confirmed&&profile.channels.some(channel=>channel.purpose==="SHOWCASE")&&!profile.channels.some(channel=>channel.purpose==="SUPPORT") ? ["showcase_posts","observed_reactions","observed_comments"] : profile?.confirmed&&profile.channels.some(channel=>channel.purpose==="SUPPORT") ? ["observed_posts","observed_replies","waiting_response"] : keys.overall;
   const metrics=basic.result.metrics.filter(m=>(selected==="overall"?overallKeys:keys[selected]).includes(m.key)&&m.quality!=="NOT_APPLICABLE");
+  if(hasHistoricalPostCoverage(metrics))children.push(callout(c(locale,"historicalPostsTitle"),c(locale,"reasonHistoricalPosts")));
   for(const metric of metrics.slice(detailPage*3,detailPage*3+3))children.push(callout(localized(locale,metricNames[metric.key]??[c(locale,"unknownMetric"),c(locale,"unknownMetric")]),`${metric.evidence.value!==null&&["COMPLETE","PARTIAL"].includes(metric.quality)?metricValue(locale,metric.key,metric.evidence.value):c(locale,"unknown")}\n${localized(locale,qualityNames[metric.quality])}`));
   if(!metrics.length)children.push(callout(c(locale,"unknown"),c(locale,"purposeLater")));
   if(metrics.some(m=>m.key==="first_reply_seconds"))children.push(footer(c(locale,"medianNote")));

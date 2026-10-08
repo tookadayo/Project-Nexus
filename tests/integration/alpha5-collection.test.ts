@@ -40,6 +40,8 @@ async function fixture(
   s: Scope = { organizationId: randomUUID(), guildId: "111111111111111188" },
 ) {
   await ensureGuild(db, s);
+  // This fixture simulates a collector already active at its historical clock.
+  await sql`UPDATE location_population_collection SET introduced_at=${at} WHERE ${tenant(s)}`.execute(db);
   const settings = new SettingsService(db);
   return {
     s,

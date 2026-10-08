@@ -20,6 +20,7 @@ import {
   runStatusNames,
   localized,
   analysisEvidenceReason,
+  hasHistoricalPostCoverage,
 } from "../i18n/analysis";
 import type {
   AnalysisService,
@@ -123,6 +124,7 @@ export async function analysisPreviewPanel(
       localized(locale, availabilityNames[data.availability]),
     ),
   ];
+  if(hasHistoricalPostCoverage(data.metrics))children.push(callout(c(locale,"historicalPostsTitle"),c(locale,"reasonHistoricalPosts")));
   for (const metric of data.metrics.filter(m => m.quality !== "NOT_APPLICABLE").slice(0, 3))
     children.push(
       callout(
@@ -251,6 +253,7 @@ export async function analysisResultPanel(
     if(result.baseline?.changes.length)children.push(callout(c(locale,"changes"),result.baseline.changes.slice(0,2).map(change=>`${name(locale,change.key)}: ${metricValue(locale,change.key,change.before)} → ${metricValue(locale,change.key,change.after)}`).join("\n")));
     if(result.baseline && result.metrics.some(m=>m.evidence.sampleSize<5))children.push(footer(c(locale,"smallSample")));
     children.push(callout(c(locale,"quality"),localized(locale,qualityNames[result.dataQuality])));
+    if(hasHistoricalPostCoverage(result.metrics))children.push(callout(c(locale,"historicalPostsTitle"),c(locale,"reasonHistoricalPosts")));
     const metrics = result.metrics.filter(m => m.quality !== "NOT_APPLICABLE");
     const visible = showEvidence ? metrics.slice(detailPage * 5, detailPage * 5 + 5) : metrics.slice(0, 3);
     for (const metric of visible) {

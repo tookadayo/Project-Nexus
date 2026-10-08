@@ -21,6 +21,13 @@ import {
   integrationHealth,
   collectionEpochs,
 } from "../../lifecycle/src/observation";
+export type LocationPopulationSource = "LEGACY_PARTICIPANT_ONLY" | "LOCATION_STREAM_V1";
+export async function locationPopulationIntroduction(tx: Tx, s: Scope) {
+  return (await sql<{introduced_at:Date}>`SELECT introduced_at FROM location_population_collection WHERE ${tenant(s)} AND collector_version='LOCATION_STREAM_V1'`.execute(tx)).rows[0]?.introduced_at ?? null;
+}
+export async function locationPopulationCoversWindowStart(tx: Tx, s: Scope, from: Date) {
+  return (await sql<{complete:boolean}>`SELECT EXISTS(SELECT 1 FROM location_population_collection WHERE ${tenant(s)} AND collector_version='LOCATION_STREAM_V1' AND introduced_at<=${from}) AS complete`.execute(tx)).rows[0]!.complete;
+}
 export async function evidenceContext(tx: Tx, s: Scope, from: Date, to: Date) {
   const [health, epochs, gaps, safety, recipe, recipeVersions, unknownEntries] =
     await Promise.all([
@@ -107,12 +114,14 @@ export function metricCoverage(
   }
   let observedThrough = context.from.getTime();
   for (const epoch of context.epochs) {
+    // PostgreSQL timestamps can retain microseconds that JS Date rounds away.
+    // An epoch ending at the window boundary proves no in-window collection.
+    if (epoch.endedAt && Date.parse(epoch.endedAt) <= context.from.getTime()) continue;
     if (
-      Date.parse(epoch.startedAt) > observedThrough &&
-      observedThrough > context.from.getTime()
+      Date.parse(epoch.startedAt) > observedThrough
     ) {
       reasons.push("COLLECTION_GAP");
-      states.push("PARTIAL");
+      states.push(observedThrough === context.from.getTime() ? "LOWER_BOUND" : "PARTIAL");
     }
     observedThrough = Math.max(
       observedThrough,

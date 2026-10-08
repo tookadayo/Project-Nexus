@@ -6,7 +6,7 @@ import {basicAnalysisPanel} from "../../packages/discord-panels/src/views/basic-
 import {analysisHistoryPanel,analysisResultPanel,analysisPreviewPanel,metricValue,analysisAttentionConfirmationPanel} from "../../packages/discord-panels/src/views/analysis";
 import {setupPlacesPanel} from "../../packages/discord-panels/src/views/setup-wizard";
 import {run,result} from "../fixtures/analysis-panels";
-import {localized} from "../../packages/discord-panels/src/i18n/analysis";
+import {localized,analysisEvidenceReason} from "../../packages/discord-panels/src/i18n/analysis";
 const capture=()=>{const intents:Record<string,unknown>[]=[];return{intents,issue:async(data:Record<string,unknown>)=>{intents.push(data);return`opaque-${intents.length}`;}};};
 it.each(["ja","en"] as const)("separates basic activity from counted detailed analysis with stable entries (%s)",async locale=>{
  const {issue,intents}=capture(),home=await workflowHome(issue,{analysis:{remaining:0,latest:null,attentionCount:0}},locale);
@@ -81,4 +81,26 @@ it("keeps a correction free at zero remaining uses and preserves the original fi
  const old=await analysisResultPanel(issue,{run:{...run,scope_bug_impact:"POSSIBLE_CATEGORY_PARENT"},result},"en");
  expect(JSON.stringify(old)).toContain("Review corrected calculation");
  expect(intents.find(i=>i.action==="analysisPreview")).toMatchObject({correctionOf,periodStart:run.period_start.toISOString(),periodEnd:run.period_end.toISOString()});
+});
+
+it.each(["ja","en"] as const)("explains partial historical post coverage before detailed evidence without exposing its internal reason (%s)",async locale=>{
+ const reason="LEGACY_PARTICIPANT_ONLY_COVERAGE",{issue}=capture();
+ const metric={...result.metrics[0]!,quality:"PARTIAL" as const,evidence:{...result.metrics[0]!.evidence,value:4,coverageState:"PARTIAL" as const,coverageReasons:[reason],observationState:"OBSERVED" as const}};
+ const historyResult={...result,dataQuality:"PARTIAL" as const,metrics:[metric]};
+ const expected=analysisEvidenceReason(locale,reason);
+ expect(expected).toContain(locale==="ja"?"Botの投稿が0件だったか":"whether there were zero bot posts");
+ expect(expected).not.toContain(reason);
+ const panels=[
+  await basicAnalysisPanel(issue,{basicAnalysis:{result:historyResult,from:run.period_start,to:run.period_end,channelCount:1}},locale,"posts"),
+  await analysisPreviewPanel(issue,{request:{type:"OVERALL",days:30,periodStart:run.period_start.toISOString(),periodEnd:run.period_end.toISOString()},scope:{mode:"include",channelIds:["777777777777777777"]},availability:"PARTIAL",quality:"PARTIAL",metrics:[metric],periodStart:run.period_start,periodEnd:run.period_end,usage:{remaining:1,reserved:0,consumed:0},duplicate:null,configRevision:1,inputFingerprint:"a".repeat(64),estimate:null,targetChannelCount:1,consumeCount:1,correctionOf:null},locale),
+  await analysisResultPanel(issue,{run,result:historyResult},locale),
+  await analysisResultPanel(issue,{run,result:historyResult},locale,undefined,true),
+ ];
+ for(const panel of panels){
+  validatePanel(panel);
+  const content=JSON.stringify(panel);
+  expect(content).toContain(expected);
+  expect(content).not.toMatch(/LEGACY_PARTICIPANT_ONLY_COVERAGE|reasonHistoricalPosts|participant.only.coverage/i);
+  expect(content).not.toContain(locale==="ja"?"そろっています":"Complete enough");
+ }
 });

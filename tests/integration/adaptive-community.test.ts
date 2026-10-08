@@ -67,6 +67,8 @@ async function fixture(recipePreset?: "EVENT_STAGE") {
     discord = new FakeDiscord(),
     now = new Date(Date.now() - 3600000);
   await ensureGuild(db, s);
+  // The synthetic Gateway was already active at this fixture's historical clock.
+  await sql`UPDATE location_population_collection SET introduced_at=${now} WHERE ${tenant(s)}`.execute(db);
   await settings.update(s, actor, 0, {
     communityModel: {
       ...(recipePreset ? { recipePreset } : {}),

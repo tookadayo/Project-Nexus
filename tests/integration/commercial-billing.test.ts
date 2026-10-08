@@ -123,7 +123,7 @@ it("seeds every immutable catalog revision without altering legacy usage or pric
         n: number;
       }>`SELECT count(*)::integer AS n FROM schema_migrations`.execute(db)
     ).rows[0]!.n,
-  ).toBe(49);
+  ).toBe(50);
   await expect(
     sql`UPDATE billing_plan_versions SET limits='{}' WHERE plan_key='FREE'`.execute(
       db,

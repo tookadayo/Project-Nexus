@@ -4,7 +4,7 @@ These artifacts are **actual generated Components V2 message payloads with synth
 
 The before payloads come from immutable commit `71a27f937e8dd534c40c767033d91a492cdce44c`, extracted with `git archive` into a temporary directory. Its original panel implementation generated the before JSON. Before and after images use the same local approximation styles and 375px mobile / 700px desktop widths. They show component structure and text wrapping; they do not certify native Discord behavior.
 
-Full local generation: **132 payload cases, 264 screenshots**; this folder contains 26 selected JSON files and six PNGs (~570 KiB). [manifest.json](manifest.json) records SHA-256 hashes. Japanese and English cases include home, current observed results, history navigation, the S7 330-channel census draft, its last page, a separate 230-place long-name review, zero allowance, verified zero, legacy/no data, missing permissions and a free calculation correction. Counts and dates are fictional. A current result has five observed metrics, three shown initially, saved targets/calculation time and two baseline changes; the legacy/no-data result remains separate.
+Full local generation: **138 payload cases, 276 screenshots**; this folder contains 32 selected JSON files and eight PNGs. [manifest.json](manifest.json) records SHA-256 hashes. Japanese and English cases include home, current observed results, history navigation, the S7 330-channel census draft, its last page, a separate 230-place long-name review, zero allowance, verified zero, legacy/no data, missing permissions, a free calculation correction and partial historical post coverage. Counts and dates are fictional. A current result has five observed metrics, three shown initially, saved targets/calculation time and two baseline changes; the legacy/no-data result remains separate.
 
 | Image | Review focus |
 | --- | --- |
@@ -14,12 +14,16 @@ Full local generation: **132 payload cases, 264 screenshots**; this folder conta
 | [Current Japanese mobile result](images/after-ja-current-completed-mobile.png) | Period, target count, calculation time, units, observed changes and three primary measurements |
 | [English mobile history next page](images/after-en-history-next-mobile.png) | All five result actions and both navigation directions |
 | [English mobile final places page](images/after-en-places-last-mobile.png) | Later selected places remain reachable; long fixture names wrap |
+| [Japanese mobile historical result](images/after-ja-historical-result-mobile.png) | Older participant-only post records show a partial count and unknown Bot count |
+| [English mobile historical result](images/after-en-historical-result-mobile.png) | Long limitation text fits; unknown Bot count is distinct from verified zero |
 
 ![Before Japanese mobile home](images/before-ja-home-mobile.png)
 
 ![After Japanese mobile home](images/after-ja-home-mobile.png)
 
 Payload pairs use `ja-` and `en-` filenames. `representative-S7-setup.json` contains the final draft summary for a server with 330 channel records, of which 319 non-category places were selected in this synthetic draft. `representative-S7-places-last-page.json` preserves the final nine selected IDs and their purpose labels. This draft includes partial permission coverage; a real confirmation must recheck eligibility and cannot blindly save it. `places-last-page.json` is a distinct 230-place fixture for wrapping unusually long mention labels. Channel mentions resolve to names inside Discord; the approximation substitutes fixed fixture names for selected IDs.
+
+The six `ja-/en-historical-{basic-posts,preview,completed-result}.json` payloads contain the new historical limitation. Their synthetic human-post count is a lower bound of four; their Bot/integration-post count is unknown. They disclose that older records cover only some participants, so staff/Bot-inclusive totals and zero Bot posts cannot be confirmed. This explanation appears before detailed evidence in all three surfaces. These added fixtures preserve all earlier before/after evidence unchanged.
 
 Generate current output without starting application servers:
 

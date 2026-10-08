@@ -12,9 +12,13 @@ The shared typed resolver keeps a normal channel's activity on its own ID beneat
 
 Location post occurrences are projected independently of newcomer eligibility. Staff announcements and Bot/Webhook occurrences remain visible as posts; Bots do not become human participants. First observed human Forum responses need no Reply reference. Ordinary direct replies remain a distinct definition. Response obligations require confirmed SUPPORT/BUG_REPORT/LFG purposes as appropriate; casual, guide, announcement, showcase and unmapped places do not acquire obligations. Stable tag IDs determine administrator-defined resolution; archive, lock and tag names do not. Conflicting state tags require review. Poll participants are distinct observed subjects, separate from multi-answer totals; signup and observed event attendance remain separate.
 
+Historical participant-only ingestion cannot prove complete staff/Bot-inclusive post totals. The final coverage correction records per-Guild collector introduction and separate row provenance, including imported `observation-v3` rows. Historical and crossing windows retain observed positive counts as lower bounds, block comparison and return unknown for unsupported zero. Row-free windows receive the same limitation. The analysis recipe advances to v3 so saved v2 results cannot become baselines for the corrected evidence; immutable prior results and v1 correction eligibility remain intact. Basic, preview and result screens explain the limitation in Japanese and English.
+
 Basic analysis has six free views. Detailed analysis keeps the original five identifiers and adds `ANNOUNCEMENTS` and `SHOWCASE` with separate purpose-filtered calculations. Quotas stay 1/3/5/10/custom per Guild and UTC calendar month; Scale organization licensing and concurrency are separate. Packs remain classified 1/3/5 and disabled.
 
 Preview freezes exact UTC boundaries. Semantic confirmation includes meaningful scope, purposes, recipe and consumption conditions; data identity is a separate checksum of scoped sources. Unrelated activity, language-only changes and activity after the end of the confirmed window do not demand repeated confirmation. Corrections and deletions of relevant data change reuse identity. First-response state is clipped at the period end. Results retain original conditions, actual target IDs, definition, data identity and calculation time. Privacy deletion invalidates affected results and their aggregate Attention items while preserving immutable run/usage history.
+
+The period end is exclusive for replies as well as posts. A response exactly at the end leaves both metrics and scoped reuse identity unchanged; one millisecond before the end changes both. The regression failed first with five replies instead of four and passed after aligning the aggregate with the existing checksum boundary.
 
 History uses opaque database cursors tied to tenant, actor and filters; PostgreSQL timestamp precision and ID ordering are preserved. Previous/next pages and filtering do not consume a use. Comparison candidates are filtered in SQL, including compatible evidence definitions, rather than searching a capped recent list. Queued cancellation and stale delivery are fenced by database state and finalize a reservation once. Intake is bounded to five queued runs per Guild, 25 per organization, 12 previews per actor/Guild/minute across processes, and a 24-hour queue expiry. Existing BullMQ priority, aging, organization/Guild concurrency, requester reauthorization, lease fencing and Redis reconstruction remain in use. Physical computation may repeat after failures; valid result publication and consumption can only finalize once.
 
@@ -33,6 +37,9 @@ Apply the existing migration runner sequentially. Published migrations through 0
 | 047 | Typed deletion/permission state and separate minimal location-post observations |
 | 048 | Durable billing mutation phases, financial authority lifecycle and archived bindings |
 | 049 | Analysis metadata, cursor/admission state, compatible new kinds and earmarked bug correction |
+| 050 | Historical population provenance, durable collector introduction and prior collection-epoch closure |
+
+For this collector upgrade, stop the old Gateway and Worker processes, apply migrations, then start the new runtime. Mixed old/new collector processes are outside this upgrade procedure. Migration 050 closes existing Gateway epochs; collection resumes in a new epoch so the migration-to-login interval is not reported as fully collected. Pre-upgrade replay retains metadata without restoring an epoch before collector introduction. Member deletion preserves the introduction marker; server deletion clears it under the privacy fence.
 
 Existing balances, reservations, ledgers and immutable results are not reset. Old definitions cannot compare with the corrected definition. Migration 049 conservatively flags v1 results whose Guild has categorized activity channels as `POSSIBLE_CATEGORY_PARENT`; this identifies possible impact, not a proven wrong value. History can preview a correction of the same kind and exact original period. A `BUG_CORRECTION` grant is tied to the original run, is excluded from monthly availability and cannot fund ordinary analysis. Completion can consume that grant once; cancellation/failure releases it for retry. The corrected result records the original run and `CATEGORY_PARENT_RESOLUTION` reason. Old results remain intact. Data discarded by old Bot/newcomer ingestion cannot be reconstructed.
 
@@ -44,7 +51,7 @@ No source files are deleted or moved. Personal payment management receives a sep
 
 Local runtime is genuine Node 24.19.0, Corepack 0.36.0, pinned pnpm 11.19.0, embedded PostgreSQL 18.4 and isolated local Redis. Commands use the workspace runtime PATH and `REDIS_BINARY=/opt/homebrew/bin/redis-server` for local integration/performance. CI uses PostgreSQL 18/Redis 8 Docker containers and Node 24; Windows runtime runs on `windows-latest`.
 
-Final local outcomes at the frozen source candidate:
+The first published candidate `97a9264f6aa0a92527bc334c8c12d2609b338d6e` passed the following local gates and both Linux/Windows workflows. These are checkpoint results. The subsequent historical-coverage correction receives focused local verification and a new complete final-SHA CI run; only that later run determines the final decision recorded in the PR and handoff.
 
 | Command | Outcome |
 |---|---|
@@ -61,9 +68,11 @@ Final local outcomes at the frozen source candidate:
 | Playwright `playwright.discord.config.ts` | PASS, 132 payload cases / 264 desktop-mobile render checks in one browser test |
 | `corepack pnpm test:performance` | PASS, 5 files / 6 tests |
 | `git diff --check` | PASS |
-| Windows `corepack pnpm test:runtime` | CI-only; unavailable on the macOS host. Exact final-SHA outcome is in the PR/final handoff. |
+| Windows `corepack pnpm test:runtime` | PASS in both checkpoint CI runs; unavailable on the macOS host. Exact final-SHA outcome is in the PR/final handoff. |
 
-These counts come from the current runs, not the previous alpha.10 total. GitHub push and pull-request workflows run the required Linux and Windows gates; final success requires identifying their actual tested candidate SHA. CLI Git lacked authentication, so publication uses the existing authenticated GitHub connection to create identical blob/tree objects and purpose-specific commits, then a new follow-up branch at the resulting descendant of refreshed master. The fetched final commit tree is verified against the staged local tree before advancing the local branch; no force update is used.
+These counts come from the recorded checkpoint runs, not the previous alpha.10 total. The final GitHub push and pull-request workflows run the required Linux and Windows gates, including the actual Discord payload rendering test; final success requires identifying their actual tested candidate SHA. CLI Git lacked authentication, so publication uses the existing authenticated GitHub connection to create identical blob/tree objects and purpose-specific commits, then a new follow-up branch at the resulting descendant of refreshed master. The fetched final commit tree is verified against the staged local tree before advancing the local branch; no force update is used.
+
+After the final historical-coverage and exclusive-reply-end fixes, local unit verification passes 44 files / 478 tests and full integration passes 31 files / 400 tests. The new population suite contains 11 regressions; the complete focused population/stabilization run passes 25 tests. Lint, typecheck and secret scan pass. The final performance rerun passes all five files / six tests; its raw artifact and measurements below are updated from that run. The updated actual-payload browser test passes 138 cases / 276 desktop-mobile checks, and all 40 selected payload/image SHA256 hashes verify. Earlier failed fixed-date fixtures now explicitly declare their synthetic collector activation; all original assertions remain. The independent coverage review passes 38 focused tests and separately reproduces and verifies the one-second startup gap.
 
 Failing-first evidence includes category/parent attribution, stale confirmation caused by unrelated revision updates, free correction missing at zero balance, lease expiry during asynchronous authorization and independent Billing bypass reproductions. Added tests cover exact UTC preview windows, irrelevant versus corrected source reuse, precise history cursors, compatible comparison beyond 25 newer incompatible results, privacy invalidation, multi-instance admission, queued cancellation/expiry, representative servers, recursive payload constraints and process termination at provider boundaries. Existing assertions were retained; legacy synthetic fixtures were enriched with explicit observed structure and confirmed purposes rather than restoring unknown-as-text fallback. No tests are skipped to pass the candidate.
 
@@ -71,20 +80,20 @@ An intermediate combined run exposed macOS orphan PostgreSQL SysV resources and 
 
 ## Performance and acceptance limits
 
-[Active aggregate test](../tests/performance/analysis-active.test.ts) performs four actual production aggregate calculations against 80,000 location posts, three SQL passes per run, while ten signed HTTP interactions traverse real loopback networking and actual interaction/action workers. It records network ACK, injection ping separately, private screen completion through a fake Discord adapter, queue wait, run duration, pool acquisition, Node CPU/RSS, PostgreSQL connections/cache/read statistics and ten Billing reads interleaved with the interactions. Database samples show up to four active aggregate queries; nine requests were sent while calculations were active. The final performance suite ran after the other test suites finished. [Raw local measurements](alpha10-performance-local.json) preserve all samples and runtime details.
+[Active aggregate test](../tests/performance/analysis-active.test.ts) performs four actual production aggregate calculations against 80,000 location posts, three SQL passes per run, while ten signed HTTP interactions traverse real loopback networking and actual interaction/action workers. It records network ACK, injection ping separately, private screen completion through a fake Discord adapter, queue wait, run duration, pool acquisition, Node CPU/RSS, PostgreSQL connections/cache/read statistics and ten Billing reads interleaved with the interactions. Database samples show up to four active aggregate queries; all ten requests were sent while calculations were active. The final performance suite ran after the other test suites finished. [Raw local measurements](alpha10-performance-local.json) preserve all samples and runtime details.
 
 | Measurement | Local result |
 |---|---|
-| Signed real HTTP initial ACK | maximum 10.60 ms; median 2.63 ms |
-| Private screen delivery through Fake Discord | maximum 60.40 ms; median 15.76 ms |
-| Injection ping, separately measured | 3.06 ms |
-| Queue wait | 153 ms for each run |
-| Actual aggregate execution | 186.44–188.74 ms |
-| DB pool acquisition | maximum 0.149 ms |
-| Billing view | maximum 6.823 ms |
-| Node RSS / CPU over the measured interval | 250.1 MiB; 164,048 user + 24,123 system microseconds |
-| PostgreSQL workload statistics | 10 connections, 190,587 cache hits, 511 blocks read |
-| Existing global revision trigger contention | 50 writes in five batches of ten; maximum 15.89 ms, median 0.895 ms |
+| Signed real HTTP initial ACK | maximum 9.40 ms; median 2.59 ms |
+| Private screen delivery through Fake Discord | maximum 52.56 ms; median 13.76 ms |
+| Injection ping, separately measured | 2.80 ms |
+| Queue wait | 150 ms for each run |
+| Actual aggregate execution | 177.36–180.73 ms |
+| DB pool acquisition | maximum 0.078 ms |
+| Billing view | maximum 5.271 ms |
+| Node RSS / CPU over the measured interval | 249.3 MiB; 147,476 user + 20,709 system microseconds |
+| PostgreSQL workload statistics | 10 connections, 1,882 cache hits, 97 blocks read |
+| Existing global revision trigger contention | 50 writes in five batches of ten; maximum 14.79 ms, median 0.814 ms |
 
 The three aggregate passes amplify real query work for this small synthetic stress test; a production run normally performs one calculation. The pool/read/cache figures describe this fixture database interval, not a production utilization percentage. PostgreSQL backend CPU and a long-running Hosted steady state were not measured. The existing synthetic waiting-job ACK test is retained and is separate from this active-query evidence.
 

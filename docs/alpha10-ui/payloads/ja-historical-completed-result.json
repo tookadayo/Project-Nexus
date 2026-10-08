@@ -1,0 +1,88 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## 分析が終わりました"
+        },
+        {
+          "type": 10,
+          "content": "**サーバー全体を見る**\n完了\n2026-09-08 〜 2026-10-07（UTC）"
+        },
+        {
+          "type": 10,
+          "content": "**分析する場所**\n指定した場所: 1件"
+        },
+        {
+          "type": 10,
+          "content": "-# 計算した日時: <t:1791450000:f>"
+        },
+        {
+          "type": 10,
+          "content": "**データ状況**\n一部のみ確認できています"
+        },
+        {
+          "type": 10,
+          "content": "**過去の投稿データ**\n過去の投稿の記録は一部の参加者に限られます。運営メンバーやBotを含む投稿の総数と、Botの投稿が0件だったかどうかは確認できません。"
+        },
+        {
+          "type": 10,
+          "content": "**確認できた投稿**\n4件\n一部のみ確認できています\n対象 4件"
+        },
+        {
+          "type": 10,
+          "content": "**Bot・連携サービスの投稿**\nデータがありません\n対象件数を確認できません。"
+        },
+        {
+          "type": 10,
+          "content": "**気になる点**\n今回の分析から追加する要確認はありません。"
+        },
+        {
+          "type": 10,
+          "content": "-# 返信は本文の意味を判断しません。ボイス同席は会話、イベント申込は参加を意味しません。"
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "前回と比べる",
+              "custom_id": "private:61ccc8fe-4cdf-484c-ba75-8ac7f7c39a09.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "詳しく見る",
+              "custom_id": "private:608afce9-2ab2-4459-a6bf-653d5658521d.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "これまでの詳しい分析",
+              "custom_id": "private:73a2c658-5071-4e4b-aabc-a30722200e49.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "戻る",
+              "custom_id": "private:5a6ec65c-7a97-41db-b9f2-04857d462dd0.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

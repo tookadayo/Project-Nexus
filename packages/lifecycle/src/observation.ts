@@ -19,6 +19,10 @@ export async function openCollectionEpoch(
   await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"collection:" + s.organizationId + ":" + s.guildId},0))`.execute(
     tx,
   );
+  // Reclaimed pre-upgrade ingress remains processable, but cannot reopen or
+  // rotate a collection epoch before the new collector actually existed.
+  const active = (await sql<{active:boolean}>`SELECT EXISTS(SELECT 1 FROM location_population_collection WHERE ${tenant(s)} AND introduced_at<=${at}) AS active`.execute(tx)).rows[0]!.active;
+  if (!active) return null;
   const previous = (
     await sql<{
       id: string;
@@ -50,6 +54,8 @@ export async function closeCollectionEpoch(
 }
 export async function projectObservation(tx: Tx, s: Scope, e: Envelope) {
   const at = new Date(e.observedAt ?? e.at);
+  const active = (await sql<{active:boolean}>`SELECT EXISTS(SELECT 1 FROM location_population_collection WHERE ${tenant(s)} AND introduced_at<=${at}) AS active`.execute(tx)).rows[0]!.active;
+  if (!active) return;
   const previous = (
     await sql<{
       last_gateway_at: Date | null;

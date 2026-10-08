@@ -64,6 +64,8 @@ async function setup() {
     now = new Date(),
     // The fixture models a join today, including the first UTC hour.
     joined = new Date(Math.max(now.getTime() - 3600000, Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())));
+  // The fixture's synthetic Gateway begins with yesterday's connection event.
+  await sql`UPDATE location_population_collection SET introduced_at=${new Date(now.getTime()-86400000)} WHERE ${tenant(s)}`.execute(db);
   await settings.update(s, actor, 0, {
     enabled: true,
     setupVersion: 2,

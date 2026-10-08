@@ -17,9 +17,31 @@ import { infrastructure } from "../fixtures/infrastructure";
 import { PrivacyService } from "../../packages/security/src/privacy";
 import { analysisVault } from "../fixtures/analysis";
 import { analysisMetrics } from "../../packages/analytics/src/analysis";
+import { analysisDataIdentity } from "../../packages/analysis/src/identity";
 let infra: Awaited<ReturnType<typeof infrastructure>>,
   db: Database,
   service: AnalysisService;
+
+it("clips replies at the exclusive period end consistently with scoped reuse identity", async () => {
+  const f = await analysisFixture(db), message = "444444444444444440";
+  await sql`UPDATE message_observations SET first_reply_seconds=NULL WHERE ${tenant(f.s)} AND message_id=${message}`.execute(db);
+  await sql`UPDATE location_post_observations SET first_reply_seconds=NULL,reply_source=NULL WHERE ${tenant(f.s)} AND message_id=${message}`.execute(db);
+  const cfg = await f.settings.get(f.s), input = {type:"OVERALL" as const,days:30 as const}, window = {start:f.start,end:f.end};
+  const identity = await analysisDataIdentity(db,f.s,input,window,[f.channel]);
+  const metrics = () => analysisMetrics(db,f.s,cfg,"OVERALL",f.start,f.end,"exclusive-end",30);
+  const value = (r: Awaited<ReturnType<typeof metrics>>, key: string) => r.metrics.find(m=>m.key===key)!.evidence.value;
+  expect(value(await metrics(),"observed_replies")).toBe(4);
+  await sql`UPDATE message_observations SET first_reply_seconds=EXTRACT(epoch FROM ${f.end}::timestamptz-sent_at) WHERE ${tenant(f.s)} AND message_id=${message}`.execute(db);
+  await sql`UPDATE location_post_observations SET first_reply_seconds=EXTRACT(epoch FROM ${f.end}::timestamptz-sent_at),reply_source='DIRECT' WHERE ${tenant(f.s)} AND message_id=${message}`.execute(db);
+  expect(await analysisDataIdentity(db,f.s,input,window,[f.channel])).toBe(identity);
+  expect(value(await metrics(),"observed_replies")).toBe(4);
+  expect(value(await metrics(),"waiting_response")).toBe(3);
+  await sql`UPDATE message_observations SET first_reply_seconds=first_reply_seconds-0.001 WHERE ${tenant(f.s)} AND message_id=${message}`.execute(db);
+  await sql`UPDATE location_post_observations SET first_reply_seconds=first_reply_seconds-0.001 WHERE ${tenant(f.s)} AND message_id=${message}`.execute(db);
+  expect(await analysisDataIdentity(db,f.s,input,window,[f.channel])).not.toBe(identity);
+  expect(value(await metrics(),"observed_replies")).toBe(5);
+  expect(value(await metrics(),"waiting_response")).toBe(2);
+});
 beforeAll(async () => {
   infra = await infrastructure();
   db = connect(infra.databaseUrl);

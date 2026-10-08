@@ -21,6 +21,7 @@ jobs:
       - run: corepack pnpm test:e2e
       - run: corepack pnpm exec playwright test --config playwright.verification.config.ts
       - run: corepack pnpm exec playwright test --config playwright.checkout.config.ts
+      - run: corepack pnpm exec playwright test --config playwright.discord.config.ts
       - run: corepack pnpm test:integration
         env:
           NEXUS_TEST_INFRA: docker

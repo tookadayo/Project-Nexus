@@ -157,6 +157,11 @@ const copy = {
   scope: ["分析する場所", "Places to analyse"],
   notifications: ["通知", "Notifications"],
   team: ["運営メンバー", "Team members"],
+  historicalPostsTitle: ["過去の投稿データ", "Older post data"],
+  reasonHistoricalPosts: [
+    "過去の投稿の記録は一部の参加者に限られます。運営メンバーやBotを含む投稿の総数と、Botの投稿が0件だったかどうかは確認できません。",
+    "Older post records include only some participants. Total posts including team members and bots, and whether there were zero bot posts, are unavailable.",
+  ],
   reasonGap: [
     "途中で記録できない時間がありました。",
     "Collection was interrupted during this period.",
@@ -301,6 +306,8 @@ export function localized(locale: UiLocale, pair: readonly [string, string] | un
 }
 
 export function analysisEvidenceReason(locale: UiLocale, reason: string) {
+  if (reason === "LEGACY_PARTICIPANT_ONLY_COVERAGE")
+    return analysisCopy(locale, "reasonHistoricalPosts");
   return analysisCopy(
     locale,
     /COLLECTION_GAP/.test(reason)
@@ -315,4 +322,10 @@ export function analysisEvidenceReason(locale: UiLocale, reason: string) {
               ? "reasonAccess"
               : "reasonOther",
   );
+}
+
+export function hasHistoricalPostCoverage(
+  metrics: readonly { evidence: { coverageReasons: readonly string[] } }[],
+) {
+  return metrics.some(metric => metric.evidence.coverageReasons.includes("LEGACY_PARTICIPANT_ONLY_COVERAGE"));
 }

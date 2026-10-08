@@ -69,6 +69,7 @@ export async function analysisDataIdentity(
     UNION ALL SELECT 'roles',md5(to_jsonb(st)::text) FROM member_observable_state st WHERE ${tenant(s)} AND episode_id IN (SELECT id FROM relevant_episodes)
     UNION ALL SELECT 'reactions',md5(to_jsonb(r)::text) FROM reaction_state r WHERE ${tenant(s)} AND channel_id=ANY(${channels}::text[]) AND observed_at>=${from} AND observed_at<${to}
     UNION ALL SELECT 'polls',md5(to_jsonb(p)::text) FROM poll_participant_state p WHERE ${tenant(s)} AND channel_id=ANY(${channels}::text[]) AND observed_at>=${from} AND observed_at<${to}
+    UNION ALL SELECT 'population_collector',md5(to_jsonb(c)::text) FROM location_population_collection c WHERE ${tenant(s)}
     UNION ALL SELECT 'epochs',md5(to_jsonb(e)::text) FROM collection_epochs e WHERE ${tenant(s)} AND started_at<${to} AND (ended_at IS NULL OR ended_at>${from})
     UNION ALL SELECT 'gaps',md5(to_jsonb(g)::text) FROM telemetry_health g WHERE ${tenant(s)} AND started_at<${to} AND (ended_at IS NULL OR ended_at>${from})
     UNION ALL SELECT 'safety',md5(to_jsonb(f)::text) FROM adaptive_facts f WHERE ${tenant(s)} AND kind='safety.context' AND occurred_at>=${from} AND occurred_at<${to}

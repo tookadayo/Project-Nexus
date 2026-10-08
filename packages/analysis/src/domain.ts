@@ -30,7 +30,7 @@ export const analysisRequest = z
     "INVALID_ANALYSIS_WINDOW",
   );
 export type AnalysisRequest = z.infer<typeof analysisRequest>;
-export const analysisRecipeVersion = "analysis-observation-v2";
+export const analysisRecipeVersion = "analysis-observation-v3";
 export type AnalysisQuality =
   "COMPLETE" | "PARTIAL" | "NO_DATA" | "NOT_APPLICABLE" | "INSUFFICIENT_SAMPLE";
 export type AnalysisFailure =

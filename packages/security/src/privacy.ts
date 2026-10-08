@@ -58,6 +58,7 @@ export class PrivacyService {
             tx,
           );
           for (const table of [
+            "location_population_collection",
             "location_post_observations",
             "message_observations",
             "reaction_state",

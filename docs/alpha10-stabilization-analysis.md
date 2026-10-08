@@ -11,6 +11,7 @@ Design recorded before implementation, 2026-10-08 (Asia/Tokyo).
 - Saved results keep definition, configured scope, actual target IDs, data identity, and aggregation timestamp. Replies are measured as observed at the period end; later replies must not rewrite that historical state.
 - History uses a server-managed opaque cursor bound to tenant, actor and filters, ordered by requested time and ID. Comparisons filter compatible completed candidates in SQL, without a latest-25 cap.
 - Migration 049 adds confirmation/data metadata and cursor storage, leaving published migration 046 and all balances/ledger entries intact. Old results remain immutable and their earlier definition prevents comparison with corrected definitions.
+- Migration 050 records location collector introduction and legacy population provenance separately from reply-definition versions. Historical totals are observed lower bounds and unsupported zeros are unknown, including periods with no rows. Recipe v3 prevents earlier v2 completeness claims from serving as comparison baselines. The marker participates in scoped data identity.
 - Conflicts: old tests requiring language-only revision to invalidate confirmation must be updated to check meaningful changes instead. Legacy direct service calls without preview remain compatible, but Discord/Web confirmation must send the frozen window.
 - Unchanged: UTC monthly guild allowances (1/3/5/10/custom), Scale organization licenses/concurrency, disabled packs, Stripe live disabled, and no automatic publication or PR merge.
 

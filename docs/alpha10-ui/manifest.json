@@ -3,8 +3,8 @@
   "liveDiscordAcceptance": "NOT RUN",
   "source": "Actual generated Components V2 payloads; synthetic non-deployable signed references",
   "rendering": "HTML layout approximation; no native Discord client",
-  "fullGeneratedPayloadCases": 132,
-  "fullGeneratedScreenshots": 264,
+  "fullGeneratedPayloadCases": 138,
+  "fullGeneratedScreenshots": 276,
   "selectedArtifacts": [
     {
       "file": "payloads/ja-home.json",
@@ -133,6 +133,38 @@
     {
       "file": "images/after-en-places-last-mobile.png",
       "sha256": "52760f302208788e8ef8b49172b14db2e641bd32b26d0c1341bb940cb9064ff8"
+    },
+    {
+      "file": "payloads/ja-historical-basic-posts.json",
+      "sha256": "f60ba29eef8ca82e72e0693ea8a13886a4ac2fa01d564937b7fb634e8599af1e"
+    },
+    {
+      "file": "payloads/ja-historical-preview.json",
+      "sha256": "0658a9a11045d68965234d3b6fa02690abdf51383c3d8d3a3c5b32d5364f79fd"
+    },
+    {
+      "file": "payloads/ja-historical-completed-result.json",
+      "sha256": "d591e738b70e5612face2647a84ce7af335f7e4d7354c12d5398119395bbb085"
+    },
+    {
+      "file": "images/after-ja-historical-result-mobile.png",
+      "sha256": "98f86197c734bef0e76e16a3037b682cac8de8f94f7313a92865defcff661c08"
+    },
+    {
+      "file": "payloads/en-historical-basic-posts.json",
+      "sha256": "49976ccbcc3c5427b630c89f7c615fa7c49f8fa82ed6220159fc76f1047f20ba"
+    },
+    {
+      "file": "payloads/en-historical-preview.json",
+      "sha256": "2eb0d1d673f4e3fddab209b53d90aba0bcb9ca86776107e47cd2317faf889cbc"
+    },
+    {
+      "file": "payloads/en-historical-completed-result.json",
+      "sha256": "c5e4e1060fcf73477c9d1ba4d3b307f44595a64cc2f89b022815c03d0fc5610f"
+    },
+    {
+      "file": "images/after-en-historical-result-mobile.png",
+      "sha256": "7d769d710ee3630f66967027d7f3c7c40fd66adaf444972db02a487c0ad28fe3"
     }
   ]
 }

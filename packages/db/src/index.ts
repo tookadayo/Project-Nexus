@@ -80,6 +80,7 @@ export async function migrate(
       "047_channel_scope_observation",
       "048_billing_external_phases_and_financial_authority",
       "049_analysis_stabilization",
+      "050_location_population_coverage",
     ].entries()) {
       const version = index + 1;
       if (
