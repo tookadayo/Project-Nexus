@@ -104,7 +104,7 @@ export class Components {
     ].includes(String(intent.action))
       ? "modal:"
       : intent.privateSettings === true ||
-          ["billing", "plan", "billingPromotionRedeem"].includes(
+          ["billing", "plan", "billingPromotionRedeem", "analysisMenu", "analysisPreview", "analysisStart", "analysisHistory", "analysisResult", "analysisEvidence", "analysisCompare", "analysisAttention", "analysisRerun", "analysisAttentionUpdate","analysisAttentionList","analysisAttentionItem", "setupWizard", "setupWizardChange", "setupWizardNext", "setupWizardBack", "setupWizardConfirm","controlOpenDiagnostics"].includes(
             String(intent.action),
           )
         ? "private:"

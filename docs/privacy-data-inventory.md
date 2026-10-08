@@ -68,3 +68,20 @@ Deletion and retention tests cover the typed projections, daily rollups, inbox, 
 Current alpha.7 contracts and commerce: [contracts](billing/contract-hardening-alpha7.md)
 and [Stripe integration](billing/stripe-integration.md). Real Sandbox is tested;
 Stripe Live remains DISABLED. Card data and raw Webhook payloads are never stored.
+
+## alpha.10 detailed analysis records
+
+Runs keep tenant scope, completed UTC period, recipe/configuration/input identity,
+lease/recovery clocks and existing sealed requester routing. Results contain
+aggregate MetricEvidence, never message content or member lists/scores. Results
+expire within configured aggregate retention and accepting-plan history; current
+plan controls visibility. Downgrade does not delete configuration/results
+immediately. Accounting run/grant/reservation/ledger records remain operational
+provenance until guild deletion, not permanent result storage.
+
+Member deletion scrubs requester/manual-grant provenance and deletes that
+actor's 15-minute setup drafts. Guild deletion removes all analysis and draft
+records under the existing privacy lock. Expired result payloads/drafts are
+purged separately from accounting. Purchased-result retention is undecided
+because pack sales are disabled. No new individual behavior scoring, cross-server
+identity, content/DM/presence/audio analysis or provider sharing is added.

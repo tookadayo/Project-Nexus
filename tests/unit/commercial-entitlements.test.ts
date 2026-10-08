@@ -73,7 +73,7 @@ for (const plan of plans)
       "coverage_health",
     ] as const)
       expect(featureDecision(state, key).allowed).toBe(true);
-    expect(planRegistry[plan].revision).toBe(3);
+    expect(planRegistry[plan].revision).toBe(4);
   });
 it("Starter buys exploration, Growth operations, Scale five guilds with enforced team roles", () => {
   const starter = resolveEntitlements(

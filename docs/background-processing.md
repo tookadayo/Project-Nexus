@@ -7,3 +7,16 @@ The Discord action outbox serializes writes within a guild. Claims and preflight
 Edits/deletes can safely retry timeouts, 429s, and 5xx responses. A message **create** records its operation phase before REST and becomes UNKNOWN on timeout or uncertain 5xx/lease expiry. It is not automatically retried. Discord's bounded nonce deduplication is not treated as permanent exactly-once delivery. Role and follow-up writes retain conservative unknown-outcome handling. The existing REST limiter remains authoritative for route, major parameter, bucket and global cooldowns.
 
 OpenTelemetry spans cover `event.normalize`, `event.persist`, `event.project`, `metric.rollup`, `action.outbox` and `discord.rest`. Attributes accept only bounded operation categories. Operation duration/failure instruments use the same stages. NXS errors include the active trace correlation when configured; logs redact secrets, Discord IDs and pseudonymous keys. Integration Operations exposes scoped projection lag, durable inbox backlog, outbox backlog/unknown outcomes, and due refresh work. Production pool saturation/exporter dashboards remain deployment configuration rather than invented measurements.
+
+## alpha.10 detailed analysis
+
+`nexus-analysis` is separate from interaction processing. PostgreSQL owns the
+run, grant, reservation, immutable result and final usage outcome. The one-second
+dispatch scanner recovers committed requests after Redis loss, ages priorities
+and retries expired leases. Four workers use 120-second leases renewed every
+30 seconds. Guild concurrency is one; root organization concurrency follows
+1/1/2/4/4 plan limits. Aging is bounded at Scale priority and preserves FIFO.
+Calculation and fenced publication use separate transactions. A successful
+result/consumption commits together; terminal failure releases usage. No heavy
+calculation runs in the Discord acknowledgement path. See
+[the lifecycle and metrics](alpha10-analysis-operations.md).

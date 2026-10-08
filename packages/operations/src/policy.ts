@@ -6,7 +6,7 @@ import {
   EntitlementService,
   type Feature,
 } from "../../settings/src/billing/entitlements";
-import { canOperatePanel } from "../../security/src/index";
+import { canOperatePanel, canAdmin } from "../../security/src/index";
 export const nexusRoles = [
   "OWNER",
   "ADMIN",
@@ -30,12 +30,33 @@ export function rolePermissions(
   return role ? permissions[role] : permissions.ADMIN;
 }
 async function revokedMembership(tx: Tx, s: Scope, actor: Actor) {
-  if ((await sql`SELECT b.member_id FROM operations_role_bindings b JOIN operations_org_members m ON m.organization_id=b.root_organization_id AND m.id=b.member_id WHERE b.organization_id=${s.organizationId}::uuid AND b.guild_id=${s.guildId} AND b.actor_hash=${actor.key} AND m.state<>'ACTIVE'`.execute(tx)).rows.length) return true;
+  if (
+    (
+      await sql`SELECT b.member_id FROM operations_role_bindings b JOIN operations_org_members m ON m.organization_id=b.root_organization_id AND m.id=b.member_id WHERE b.organization_id=${s.organizationId}::uuid AND b.guild_id=${s.guildId} AND b.actor_hash=${actor.key} AND m.state<>'ACTIVE'`.execute(
+        tx,
+      )
+    ).rows.length
+  )
+    return true;
   // Also covers historical revoked members who never had a guild binding.
   // The digest function comes exclusively from live ServerAuthorization.
   if (!actor.organizationMemberDigest) return false;
-  const roots = (await sql<{root_organization_id:string}>`SELECT root_organization_id FROM operations_org_guilds WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId}`.execute(tx)).rows;
-  for (const root of roots) if ((await sql`SELECT id FROM operations_org_members WHERE organization_id=${root.root_organization_id}::uuid AND user_digest=${actor.organizationMemberDigest(root.root_organization_id)} AND state='REVOKED'`.execute(tx)).rows.length) return true;
+  const roots = (
+    await sql<{
+      root_organization_id: string;
+    }>`SELECT root_organization_id FROM operations_org_guilds WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId}`.execute(
+      tx,
+    )
+  ).rows;
+  for (const root of roots)
+    if (
+      (
+        await sql`SELECT id FROM operations_org_members WHERE organization_id=${root.root_organization_id}::uuid AND user_digest=${actor.organizationMemberDigest(root.root_organization_id)} AND state='REVOKED'`.execute(
+          tx,
+        )
+      ).rows.length
+    )
+      return true;
   return false;
 }
 export async function actorPermissions(
@@ -43,15 +64,16 @@ export async function actorPermissions(
   s: Scope,
   actor: Actor,
 ): Promise<readonly OperationPermission[]> {
+  if (await revokedMembership(tx, s, actor)) return [];
   const role = await nexusRole(tx, s, actor.key);
   if (role) return permissions[role];
-  if (await revokedMembership(tx,s,actor)) return [];
   const cfg = await new SettingsService(tx).get(s);
   if (
-    canOperatePanel(actor.permissions, actor.roles, [
-      cfg.adminRoleId,
-      ...cfg.managerRoleIds,
-    ])
+    (actor.source === "DISCORD_PANEL" ? canOperatePanel : canAdmin)(
+      actor.permissions,
+      actor.roles,
+      [cfg.adminRoleId, ...cfg.managerRoleIds],
+    )
   )
     return permissions.ADMIN;
   return actor.roles.some((role) =>
@@ -86,34 +108,15 @@ export async function operationsAccess(
   const entitlements = new EntitlementService(tx),
     state = await entitlements.effective(s);
   assert(!state.privacyDeleted, "PRIVACY_DELETED", 403);
-  assert(!(await revokedMembership(tx,s,actor)), "NEXUS_ROLE_REQUIRED", 403);
-  const role = await nexusRole(tx, s, actor.key),
-    cfg = await new SettingsService(tx).get(s);
-  // Once an explicit NEXUS role exists it limits operations, even if its holder
-  // also has a Discord administration role. Billing authorization is separate.
-  if (role)
-    assert(permissions[role].includes(permission), "NEXUS_ROLE_REQUIRED", 403);
-  else {
-    assert(
-      !(
-        await sql`SELECT b.member_id FROM operations_role_bindings b JOIN operations_org_members m ON m.organization_id=b.root_organization_id AND m.id=b.member_id WHERE b.organization_id=${s.organizationId}::uuid AND b.guild_id=${s.guildId} AND b.actor_hash=${actor.key} AND m.state<>'ACTIVE'`.execute(
-          tx,
-        )
-      ).rows.length,
-      "NEXUS_ROLE_REQUIRED",
-      403,
-    );
-    const allowed =
-      canOperatePanel(actor.permissions, actor.roles, [
-        cfg.adminRoleId,
-        ...cfg.managerRoleIds,
-      ]) ||
-      (permission === "READ" &&
-        actor.roles.some((role) =>
-          [...cfg.staffRoleIds, ...cfg.helperRoleIds].includes(role),
-        ));
-    assert(allowed, "ADMIN_REQUIRED", 403);
-  }
+  assert(!(await revokedMembership(tx, s, actor)), "NEXUS_ROLE_REQUIRED", 403);
+  const allowed = await actorPermissions(tx, s, actor);
+  assert(
+    allowed.includes(permission),
+    (await nexusRole(tx, s, actor.key))
+      ? "NEXUS_ROLE_REQUIRED"
+      : "ADMIN_REQUIRED",
+    403,
+  );
   if (feature) await entitlements.require(s, feature);
   return state;
 }

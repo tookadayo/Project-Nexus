@@ -111,3 +111,18 @@ Use normal names: 新しく参加 / Joined, 返信あり / Direct reply received
 Never label a forward as reply, reaction as connection/reach/impression, subscription as attendance, co-presence as conversation, or archived/locked as resolved. Use the configured co-presence threshold in factual copy. UNKNOWN, NO_ELIGIBLE, COLLECTING and insufficient sample have their own labels; unavailable denominators never produce 0%. Partial and lower-bound coverage accompany the value.
 
 Discord answers what needs action now; Web explains purpose, location, evidence, comparison, collection and configuration. Small servers favor observed counts; sufficient large samples can show ratios, medians and p75. Technical collection details belong to method/operations views, not normal Home copy.
+
+## alpha.10 Discord workflow
+
+Ordinary Home offers five main actions. Settings groups places, notifications,
+team and goals; support information owns runtime diagnostics. Japanese uses
+「要確認」「基本の分析」「詳しく分析する」「分析する場所」. The text label
+always carries meaning without emoji/color. Basic analytics always remains
+available independently of detailed-analysis quotas. Preview states the period,
+places, partial/unavailable data and usage effect before confirmation. Missing
+values are データなし / 一部のみ / 対象なし / まだ比較できません, never a measured
+zero. Setup skip preserves existing values and the final review precedes saving.
+
+New shared copy lives in `i18n/analysis.ts` and `i18n/components.ts`. Payload and
+copy regression tests reject internal jargon on ordinary Japanese surfaces,
+check English, mobile label lengths, component limits and Label-based modals.

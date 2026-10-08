@@ -59,3 +59,14 @@ validation from actual Stripe Sandbox execution. Historical hosted Sandbox
 evidence does not validate the new Elements flow. Live remains disabled and
 NOT READY; Hosted Beta remains NO-GO until deployment, Discord/native parity,
 privacy, legal/support, monitoring, outage and backup/restore acceptance exists.
+
+## alpha.10 status
+
+Basic analytics remains usable independently of detailed-run quotas. Durable
+analysis, recovery, aggregate evidence and usage are implemented and tested.
+One-time pack sales remain disabled: public prices and payment grant processing
+are not approved/enabled. Confirmed current alpha.9 billing risks additionally
+require departed Principal financial recovery and authoritative cleanup of
+abandoned provisional owner/customer bindings before expanding commerce.
+These existing issues do not justify enabling Live or asserting Hosted Beta
+readiness. See [the correctness review](alpha10-analysis-operations.md).

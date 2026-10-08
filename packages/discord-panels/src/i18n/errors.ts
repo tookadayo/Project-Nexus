@@ -1,6 +1,7 @@
 import type {ErrorCategory,UserFailure} from '../../../shared/src/error-types';
 const text:Record<'ja'|'en',Record<ErrorCategory,[string,string,string]>>={
  ja:{
+  ANALYSIS_USAGE:['詳しい分析の回数が残っていません','基本の分析は、回数を使わずいつでも確認できます。','基本の分析を見る'],
   PERMISSION:['この操作を行う権限がありません','必要なDiscord権限またはNEXUS管理ロールを確認してください。','権限を確認'],
   CHANNEL_PERMISSION:['このチャンネルに送信できません','NEXUSのチャンネル表示・送信権限を確認するか、別の通知先を選んでください。','通知先を変更'],
   REVISION_CONFLICT:['設定が更新されています','別の操作で設定が変更されました。最新状態を読み込んでから操作してください。','再読み込み'],
@@ -17,6 +18,7 @@ const text:Record<'ja'|'en',Record<ErrorCategory,[string,string,string]>>={
   INTERNAL:['処理を完了できませんでした','操作結果を確認できませんでした。参照IDをサポートへお伝えください。','状態を確認'],
  },
  en:{
+  ANALYSIS_USAGE:['No detailed analysis uses remain','Basic analysis is always available without using an analysis run.','View basic analysis'],
   PERMISSION:['You do not have permission for this action','Check the required Discord permissions or NEXUS manager role.','Check permissions'],
   CHANNEL_PERMISSION:['NEXUS cannot send to this channel','Check View and Send permissions, or choose another notification channel.','Choose another channel'],
   REVISION_CONFLICT:['Settings have changed','Another operation updated these settings. Load the current state before continuing.','Reload'],

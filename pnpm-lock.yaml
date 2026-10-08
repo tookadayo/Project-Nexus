@@ -123,6 +123,8 @@ importers:
 
   apps/worker: {}
 
+  packages/analysis: {}
+
   packages/analytics: {}
 
   packages/config: {}

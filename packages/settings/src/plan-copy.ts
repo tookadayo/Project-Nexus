@@ -1,5 +1,7 @@
 import type { EntitlementFeature, Plan, LimitKey } from "./plan-registry";
 export const limitCopy: Record<LimitKey, readonly [string, string]> = {
+  analysisRunsMonthly:['月間の詳しい分析回数','Detailed analyses per month'],
+  analysisConcurrency:['同時に処理できる詳しい分析','Concurrent detailed analyses'],
   guilds: ["サーバーの登録枠", "Server allowance"],
   historyDays: ["集計履歴の日数", "Aggregate history days"],
   monthlyObservedMembers: [

@@ -51,13 +51,14 @@ for (const [name, index, state] of scenarios)
         expect(obj.components.length).toBeLessThanOrEqual(5);
       for (const value of Object.values(obj))
         if (Array.isArray(value)) value.forEach(walk);
+        else if(value&&typeof value==='object')walk(value);
     }
     walk(panel);
     expect(count).toBeLessThanOrEqual(40);
     expect(texts.join("").length).toBeLessThanOrEqual(4000);
     expect(panel).toMatchSnapshot();
     if (state === "INTENT_UNAVAILABLE")
-      expect(texts.join("\n")).toContain("メンバー情報");
+      expect(texts.join("\n")).toContain("データを確認できません");
     if (state === "NO_DATA") expect(texts.join("\n")).not.toContain("0%");
   });
 it("error payload describes only the known failure and returns to its context", async () => {

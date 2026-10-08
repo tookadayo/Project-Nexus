@@ -1,6 +1,8 @@
 import { webEn } from "./web";
 export const en = {
   ...webEn,
+  "control.connection": "Connection",
+  "control.other": "More",
   "operations.journeys": "Journeys",
   "operations.model": "Community Model",
   "operations.integration": "Discord Integration",

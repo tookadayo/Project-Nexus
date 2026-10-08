@@ -1,0 +1,68 @@
+import type {
+  AnalysisRun,
+  AnalysisResult,
+} from "../../packages/analysis/src/index";
+import { metricEvidence } from "../../packages/shared/src/metric-evidence";
+const now = new Date("2026-10-08T00:00:00Z");
+export const run: AnalysisRun = {
+  id: "aa0c766f-1d0e-4ad9-a860-d2d9797f632f",
+  organization_id: "aa0c766f-1d0e-4ad9-a860-d2d9797f632f",
+  guild_id: "111111111111111111",
+  scheduler_organization_id: "aa0c766f-1d0e-4ad9-a860-d2d9797f632f",
+  analysis_type: "OVERALL",
+  status: "COMPLETED",
+  request_key: "fixture",
+  requested_by_actor_hash: "actor",
+  requested_by_user_ciphertext: null,
+  requested_at: now,
+  period_start: new Date("2026-09-08T00:00:00Z"),
+  period_end: now,
+  period_days: 30,
+  recipe_version: "v1",
+  scope_identity: "scope",
+  config_revision: 1,
+  data_revision: "1",
+  input_fingerprint: "a".repeat(64),
+  plan_at_request: "FREE",
+  priority_class: "FREE",
+  attempts: 1,
+  lease_token: null,
+  lease_until: null,
+  started_at: now,
+  completed_at: now,
+  failure_class: null,
+  retention_until: new Date("2026-11-08T00:00:00Z"),
+};
+const evidence = metricEvidence({
+  metricKey: "observed_posts",
+  definition: "v1",
+  definitionVersion: "v1",
+  value: null,
+  numerator: null,
+  denominator: null,
+  sampleSize: 0,
+  minimumSample: 1,
+  coverageState: "UNKNOWN",
+  coverageReasons: ["UNKNOWN"],
+  requiredSurfaces: ["messages"],
+  evidenceSources: ["MESSAGE_CREATE"],
+  windowStart: run.period_start.toISOString(),
+  windowEnd: now.toISOString(),
+  collectionEpochIds: [],
+});
+export const result: AnalysisResult = {
+  schemaVersion: 1,
+  summary: "PARTIAL",
+  metrics: [
+    { key: "observed_posts", quality: "NO_DATA", unit: "COUNT", evidence },
+  ],
+  concerns: [],
+  importantChanges: [],
+  recommendedActions: [],
+  dataQuality: "NO_DATA",
+  comparisonMetadata: {
+    recipeVersion: "v1",
+    scopeIdentity: "scope",
+    periodDays: 30,
+  },
+};

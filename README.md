@@ -1,8 +1,8 @@
 # NEXUS
 
-NEXUS は Discord Community Operations 製品です。サーバーの運営目的に合う計測方法を保存し、Discordで観測できた事実の範囲と確実性を示します。新しいメンバーへの対応、最初の返信やVoice同席、参加後の活動を確認し、運営queueと改善後の結果をつなげます。比較から原因を断定せず、個人の活動点数やスタッフ評価を作りません。
+NEXUS は Discord Community Operations 製品です。サーバーの運営目的に合う計測方法を保存し、Discordで観測できた事実の範囲と確実性を示します。新しいメンバーへの対応、最初の返信やVoice同席、参加後の活動を確認し、運営の対応と改善後の結果をつなげます。比較から原因を断定せず、個人の活動点数やスタッフ評価を作りません。
 
-現在のリリースは **0.6.0-alpha.9** です。バージョンはルートの `package.json` を唯一のリリース版ソースとし、`MAJOR.MINOR.PATCH-prerelease` の SemVer に従います。例: `0.6.0-alpha.2`、`0.6.0-beta.1`、`0.6.0-rc.1`、`0.6.0`。Build は Git の短縮 SHA です。パッケージ環境では `NEXUS_BUILD_SHA` を指定できます。
+現在のリリースは **0.6.0-alpha.10** です。バージョンはルートの `package.json` を唯一のリリース版ソースとし、`MAJOR.MINOR.PATCH-prerelease` の SemVer に従います。例: `0.6.0-alpha.2`、`0.6.0-beta.1`、`0.6.0-rc.1`、`0.6.0`。Build は Git の短縮 SHA です。パッケージ環境では `NEXUS_BUILD_SHA` を指定できます。
 
 ## Project Nexus 製品サイト
 
@@ -21,9 +21,12 @@ CLI で起動する場合は `corepack pnpm install`、`corepack pnpm migrate`�
 
 ## Discord Control Panel
 
-上位ページは **🏠 ホーム、👋 新しいメンバー、📥 対応、📊 分析、🧪 結果、⚙️ 設定** の6つです。Homeは応答待ちの投稿、参加資格のある人数、運営目的に合う活動と応答を表示します。各指標に対象期間・観測人数・範囲を付け、少人数では件数を、大人数では対応順と集計を中心に表示します。対応・新しいメンバー・分析・Webへは直接ボタンで移動できます。設定は現在の状態をまとめ、計測・通知・チーム・目標の詳細を操作した本人だけに表示します。通知のON/OFFはボタンで、待ち時間はModalで編集します。分析は目的に合う指標と計測根拠を表示します。設定で複数の運営目的、チャンネル用途、Forumタグの意味、ボイス同席の最低時間を明示します。構造の検出だけでは目的や意味を決めません。改善策はホームや分析で見つかった問題から開き、プレビュー後に確認して有効化します。
+Homeの主な操作は **要確認、基本の分析、新しい参加者、設定、その他** の5つです。Sectionの縦並びで、確認した件数・詳しい分析の残り回数・最近の実行を表示します。設定は分析する場所・通知・運営メンバー・目標に分け、接続とプライバシーを直接確認できます。実行環境の診断情報は「その他」のサポート情報にまとめています。従来のコマンド名も引き続き使えます。
 
-初回設定では分析範囲、運営、通知、目標の各項目を選択します。追加管理ロール、通知、目標を設定しない選択でも完了できます。旧 Guild には一度だけ設定確認が表示され、現在の設定を使うこともできます。管理ロール変更は確認画面を経て反映されます。管理・補助ロールはすべて解除できます。
+**基本の分析は回数を使わず、いつでも確認できます。** 集計・推移・既存チャートは、詳しい分析の残り回数が0でも利用できます。詳しい分析は、内容・対象期間・対象の場所・データ状況・回数を確認してから実行します。月間回数は Free 1 / Starter 3 / Growth 5 / Scale 10、Enterpriseは個別契約です。履歴・前回比較・要確認への追加をDiscordで行えます。PostgreSQLが実行と回数を管理し、専用の処理キューが実行します。成功時に1回だけ消費し、失敗時は予約を解除します。購入パックは1/3/5回の分類を用意していますが、価格未承認・販売無効です。
+
+初回設定は、分析する場所・通知・運営メンバー・目標の4段階です。戻る・任意項目のスキップ・最終確認があり、確定するまで設定を保存しません。スキップは既存の値を保持します。通常のModalはLabel構造を使用します。詳しい設計と制限は [alpha.10の実装記録](docs/alpha10-analysis-operations.md) を参照してください。
+
 
 対応ページでは返信が確認できない投稿を開き、確認中、30分・1時間・今日中の再確認、対応済みにできます。投稿の場所・識別子、対応種別、閾値、観測根拠・計測範囲と確認・再確認・解決時刻を保存します。本文は保存しません。対応済みや再確認待ちの投稿は通知しません。
 
@@ -53,13 +56,13 @@ Hosted Web は `NODE_ENV=production`、`NEXUS_WEB_AUTH_MODE=oauth`、`DISCORD_CL
 
 `NODE_ENV=production` と `NEXUS_WEB_AUTH_MODE=development` の組合せは起動時に拒否します。Basic認証は、production以外でdevelopmentを明示し、16文字以上の `NEXUS_WEB_PASSWORD` を設定した場合だけ使用できます。Dashboardは選択したサーバーの現在の権限とWeb接続を確認し、サーバー一覧全体の取得は `/servers` で行います。OAuthの自動更新は未実装で、有効期限後は再ログインが必要です。LogoutはローカルCookieを消し、Discordのトークン失効を試みます。
 
-表示用語と計測の定義は [Product language](docs/product-language.md)、対応範囲・残課題・検証結果は [alpha.5 quality audit](docs/archive/releases/NEXUS%20v0.6.0-alpha.5%20QUALITY%20AUDIT.md) を参照してください。Homeの比較期間はカレンダー週ではなく、観測を完了した参加期間です。
+表示用語と計測の定義は [Product language](docs/product-language.md)、対応範囲・残課題・検証結果は [alpha.5 quality audit](docs/archive/releases/NEXUS%20v0.6.0-alpha.5%20QUALITY%20AUDIT.md) を参照してください。基本分析の比較期間はカレンダー週ではなく、観測を完了した参加期間です。
 
-Webも既存のDB・Identity鍵・Bot設定を使用します。起動前に `corepack pnpm migrate` で044までのmigrationを適用してください。確認付きの `/nexus unlink` またはSettingsのサーバー接続解除でWeb接続だけを解除でき、設定・履歴・分析データは保持されます。構成・検証方法は [Server verification](docs/server-verification.md) を参照してください。
+Webも既存のDB・Identity鍵・Bot設定を使用します。起動前に `corepack pnpm migrate` で046までのmigrationを適用してください。確認付きの `/nexus unlink` またはSettingsのサーバー接続解除でWeb接続だけを解除でき、設定・履歴・分析データは保持されます。構成・検証方法は [Server verification](docs/server-verification.md) を参照してください。
 
-## Pricing & entitlements v2
+## Pricing & entitlements v4
 
-現行リリース: **NEXUS v0.6.0-alpha.9 — Owner-Gated Commerce & Checkout Experience**。[実装と検証](docs/alpha8-community-operations.md)、[市場での提供範囲](docs/research/alpha8-market-parity.md)、[Stripe integration](docs/billing/stripe-integration.md) を参照してください。以前の検証記録は各リリース文書に保存しています。
+現行リリース: **NEXUS v0.6.0-alpha.10 — Discord Analysis Operations**。[実装と検証](docs/alpha10-analysis-operations.md)、[市場での提供範囲](docs/research/alpha8-market-parity.md)、[Stripe integration](docs/billing/stripe-integration.md) を参照してください。以前の検証記録は各リリース文書に保存しています。
 
 Freeは基本観測・測定根拠・Discord内の7/30日チャート・受付フォーム1件を含みます。Starterは90日履歴、保存ビュー・セグメント・集計CSV・イベントカレンダー、Growthは対応一覧・版管理Playbook・定期チャートレポート・読取API・署名通知、Scaleは5サーバーの組織管理・チーム権限・独立承認・過去データの試行・限定書込APIを追加します。EnterpriseのSSO・SCIM等はPLANNEDです。価格は暫定値で、公開販売の承認は別に必要です。
 
@@ -71,7 +74,7 @@ Freeは基本観測・測定根拠・Discord内の7/30日チャート・受付�
 
 Web の `/privacy`、`/terms`、`/support` に Alpha 向けの方針を掲載しています。詳細データは設定に応じて 7・14・30 日、集計は 3・12・24 か月保持します。削除依頼は `/nexus privacy` から行えます。メッセージ本文、添付、DM 本文、プレゼンスは保存しません。Discord で観測できない閲覧だけの参加は測れません。新しい状態・集計テーブルにも既存の削除と保存期限を適用し、観測開始前の履歴を推定しません。
 
-製品利用状況の記録はコミュニティ分析と別に保存し、固定したイベント名、ハッシュ化した Guild 識別子、必要な場合の処理時間のみを記録します。Raw user ID、ユーザー名、トークン、本文を含めません。設定画面ではサポート用の診断情報をコピーできます。公開 Beta 前には方針文書の法的レビューを推奨します。フィードバック窓口は `NEXUS_FEEDBACK_URL` で指定します。
+製品利用状況の記録はコミュニティ分析と別に保存し、固定したイベント名、ハッシュ化した Guild 識別子、必要な場合の処理時間のみを記録します。Raw user ID、ユーザー名、トークン、本文を含めません。「その他」のサポート情報から、診断情報をコピーできます。公開 Beta 前には方針文書の法的レビューを推奨します。フィードバック窓口は `NEXUS_FEEDBACK_URL` で指定します。
 
 ## 検証
 

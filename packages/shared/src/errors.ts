@@ -5,6 +5,11 @@ import { errorReference, logFailure } from "./diagnostics";
 import type { ErrorCategory, FailureEffect, UserFailure } from "./error-types";
 const codes: Record<string, ErrorCategory> = {
   ADMIN_REQUIRED: "PERMISSION",
+  NEXUS_ROLE_REQUIRED: "PERMISSION",
+  ANALYSIS_USAGE_UNAVAILABLE: "ANALYSIS_USAGE",
+  ANALYSIS_PREVIEW_CHANGED: "REVISION_CONFLICT",
+  ANALYSIS_NO_DATA: "VALIDATION",
+  ANALYSIS_UNAVAILABLE: "VALIDATION",
   FORBIDDEN: "PERMISSION",
   ORIGIN_REJECTED: "PERMISSION",
   COMPONENT_OWNER: "PERMISSION",

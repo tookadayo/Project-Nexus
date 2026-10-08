@@ -1,6 +1,6 @@
 # NEXUS documentation
 
-Current release: **0.6.0-alpha.9** — Owner-Gated Commerce & Checkout Experience. PostgreSQL is the normalized billing and
+Current release: **0.6.0-alpha.10** — Discord Analysis Operations. PostgreSQL is the normalized billing and
 entitlement source of truth. Current documents retain their established paths
 where moving them would create unnecessary link churn.
 
@@ -30,6 +30,8 @@ where moving them would create unnecessary link churn.
 - [Stripe readiness validation](billing/stripe-readiness-validation.md)
 
 ## Architecture, product and evidence
+
+- [alpha.10 Discord UX, analysis lifecycle, usage and recovery](alpha10-analysis-operations.md)
 
 - [Measurement evidence contract](measurement-evidence-contract.md)
 - [Collection epochs](collection-epochs.md)

@@ -79,6 +79,12 @@ export class PrivacyService {
             );
           // Only an audit tombstone and disabled settings remain. Published flows can be deleted, never mutated.
           for (const table of [
+            "analysis_results",
+            "analysis_usage_ledger",
+            "analysis_reservations",
+            "analysis_runs",
+            "analysis_grants",
+            "setup_drafts",
             "report_templates",
             "operations_interventions",
             "playbooks",
@@ -135,6 +141,7 @@ export class PrivacyService {
             await sql`DELETE FROM product_telemetry WHERE guild_hash=${productGuildHash(s.guildId, process.env.LOOKUP_KEY)}`.execute(
               tx,
             );
+          await sql`DELETE FROM analysis_input_revisions WHERE ${tenant(s)}`.execute(tx);
           await sql`INSERT INTO deletion_requests(organization_id,guild_id,id,completed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,now())`.execute(
             tx,
           );
@@ -249,6 +256,9 @@ export class PrivacyService {
         tx,
       );
       await deleteBillingActor(tx, s, userId, this.vault);
+      await sql`UPDATE analysis_runs SET requested_by_actor_hash=NULL,requested_by_user_ciphertext=NULL WHERE ${tenant(s)} AND requested_by_actor_hash=${hash}`.execute(tx);
+      await sql`UPDATE analysis_grants SET created_by_actor_hash=NULL WHERE ${tenant(s)} AND created_by_actor_hash=${hash}`.execute(tx);
+      await sql`DELETE FROM setup_drafts WHERE ${tenant(s)} AND actor_hash=${hash}`.execute(tx);
       await sql`DELETE FROM api_credentials c USING operations_role_bindings b,operations_role_bindings subject WHERE subject.organization_id=${s.organizationId}::uuid AND subject.guild_id=${s.guildId} AND subject.actor_hash=${hash} AND b.root_organization_id=subject.root_organization_id AND b.member_id=subject.member_id AND c.organization_id=b.organization_id AND c.guild_id=b.guild_id AND c.actor_hash=b.actor_hash`.execute(
         tx,
       );
@@ -301,6 +311,9 @@ export class PrivacyService {
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"privacy:" + s.organizationId + ":" + s.guildId},0))`.execute(
         tx,
       );
+      await sql`DELETE FROM setup_drafts WHERE ${tenant(s)} AND expires_at<now()`.execute(tx);
+      // Keep immutable usage provenance; expire the aggregate result payload separately.
+      await sql`DELETE FROM analysis_results r USING analysis_runs a WHERE r.organization_id=a.organization_id AND r.guild_id=a.guild_id AND r.run_id=a.id AND a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND a.retention_until<now()`.execute(tx);
       await sql`DELETE FROM interaction_jobs WHERE ${tenant(s)} AND created_at<now()-interval '15 minutes'`.execute(
         tx,
       );

@@ -1,3 +1,4 @@
+import {componentCopy} from '../../../packages/discord-panels/src/i18n/components';
 import {
   ComponentType,
   TextInputStyle,
@@ -20,11 +21,11 @@ export function communityModal(
   const ja = locale === "ja";
   return {
     custom_id: customId,
-    title: ja ? "コミュニティの目的と用途" : "Community purposes",
+    title: componentCopy(locale==='ja'?'ja':'en','communityPurposesLabel'),
     components: [
       {
         type: ComponentType.Label,
-        label: ja ? "運営目的（複数選択）" : "Community purposes (multiple)",
+        label: componentCopy(locale==='ja'?'ja':'en','communityPurposesMultiple'),
         component: {
           type: ComponentType.CheckboxGroup,
           custom_id: "modes",
@@ -39,9 +40,7 @@ export function communityModal(
       },
       {
         type: ComponentType.Label,
-        label: ja
-          ? "用途を設定するチャンネル（任意）"
-          : "Channel to map (optional)",
+        label: componentCopy(locale==='ja'?'ja':'en','channelToMapOptional'),
         component: {
           type: ComponentType.ChannelSelect,
           custom_id: "channel",
@@ -53,9 +52,7 @@ export function communityModal(
       },
       {
         type: ComponentType.Label,
-        label: ja
-          ? "選んだチャンネルの用途"
-          : "Purpose of the selected channel",
+        label: componentCopy(locale==='ja'?'ja':'en','purposeOfTheSelectedChannel'),
         component: {
           type: ComponentType.RadioGroup,
           custom_id: "purpose",
@@ -69,9 +66,7 @@ export function communityModal(
       },
       {
         type: ComponentType.Label,
-        label: ja
-          ? "ボイス同席の基準（分、1〜60）"
-          : "Voice co-presence (minutes, 1–60)",
+        label: componentCopy(locale==='ja'?'ja':'en','voiceCopresenceMinutes160'),
         component: {
           type: ComponentType.TextInput,
           style: TextInputStyle.Short,

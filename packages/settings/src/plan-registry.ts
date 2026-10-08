@@ -87,12 +87,14 @@ export const limitKeys = [
   "webhooks",
   "apiRequestsMonthly",
   "intakePanels",
+  "analysisRunsMonthly",
+  "analysisConcurrency",
 ] as const;
 export type LimitKey = (typeof limitKeys)[number];
 export type PlanLimits = Record<LimitKey, number | null>;
 export type PlanDefinition = {
   id: Plan;
-  revision: 3;
+  revision: 4;
   features: readonly Feature[];
   limits: PlanLimits;
   availability: "AVAILABLE" | "CONTRACT";
@@ -165,7 +167,7 @@ function definition(
 ): PlanDefinition {
   return {
     id,
-    revision: 3,
+    revision: 4,
     features: [
       ...keys,
       ...Object.entries(legacyFeatureAliases)
@@ -197,6 +199,8 @@ export const planRegistry: Record<Plan, PlanDefinition> = {
     webhooks: 0,
     apiRequestsMonthly: 0,
     intakePanels: 1,
+    analysisRunsMonthly: 1,
+    analysisConcurrency: 1,
   }),
   STARTER: definition("STARTER", 15, starter, {
     guilds: 1,
@@ -209,6 +213,8 @@ export const planRegistry: Record<Plan, PlanDefinition> = {
     webhooks: 0,
     apiRequestsMonthly: 0,
     intakePanels: 5,
+    analysisRunsMonthly: 3,
+    analysisConcurrency: 1,
   }),
   GROWTH: definition("GROWTH", 49, growth, {
     guilds: 1,
@@ -221,6 +227,8 @@ export const planRegistry: Record<Plan, PlanDefinition> = {
     webhooks: 5,
     apiRequestsMonthly: 10000,
     intakePanels: 25,
+    analysisRunsMonthly: 5,
+    analysisConcurrency: 2,
   }),
   SCALE: definition("SCALE", 149, scale, {
     guilds: 5,
@@ -233,6 +241,8 @@ export const planRegistry: Record<Plan, PlanDefinition> = {
     webhooks: 20,
     apiRequestsMonthly: 100000,
     intakePanels: 100,
+    analysisRunsMonthly: 10,
+    analysisConcurrency: 4,
   }),
   ENTERPRISE: definition("ENTERPRISE", null, scale, {
     guilds: null,
@@ -245,6 +255,8 @@ export const planRegistry: Record<Plan, PlanDefinition> = {
     webhooks: null,
     apiRequestsMonthly: null,
     intakePanels: null,
+    analysisRunsMonthly: null,
+    analysisConcurrency: 4,
   }),
 };
 const planned: EntitlementFeature[] = ["ai_explanation"];

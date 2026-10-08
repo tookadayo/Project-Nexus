@@ -3,12 +3,14 @@ import { webJa } from "./web";
 export const ja = {
   ...en,
   ...webJa,
+  "control.connection": "接続",
+  "control.other": "その他",
   "operations.journeys": "参加後の変化",
-  "operations.model": "Community Model",
+  "operations.model": "サーバーの目的",
   "operations.integration": "Discordとの接続状態",
   "operations.coverage": "計測範囲",
   "operations.collection": "観測の連続性",
-  "control.model": "コミュニティモデル",
+  "control.model": "サーバーの目的",
   "polish.team": "チーム",
   "polish.goals": "目標",
   "polish.measurementScope": "計測範囲",
@@ -115,7 +117,7 @@ export const ja = {
   "root.start":
     "ホームで今日の状況と対応が必要な投稿を確認できます。分析で傾向を、結果で改善後の変化を確認できます。",
   "root.footer":
-    "分析と設定はこのパネルとWebダッシュボードで確認できます。欠損データをゼロとして扱いません。",
+    "分析と設定はこのパネルとWebWeb画面で確認できます。欠損データをゼロとして扱いません。",
   "root.control": "管理パネル",
   "root.reports": "レポート",
   "root.cohorts": "同じ時期に参加した人",
@@ -126,7 +128,7 @@ export const ja = {
   "root.firstConnection": "最初の交流",
   "root.attention": "要確認",
   "root.noAttention": "基準を満たす改善機会はまだありません。",
-  "root.openDashboard": "ダッシュボードを開く",
+  "root.openDashboard": "Web画面を開く",
   "root.viewOpportunity": "改善機会を見る",
   "root.actions": "アクション",
   "root.stateSetup": "セットアップが必要です",
@@ -148,7 +150,7 @@ export const ja = {
   "root.destinations": "次に進む場所",
   "root.destinationDetail":
     "**ホーム** 今日 · **新しいメンバー** 参加の流れ · **対応** 投稿 · **分析** 傾向 · **結果** 効果 · **設定** 管理",
-  "root.dashboardUnavailable": "ダッシュボードを利用できません",
+  "root.dashboardUnavailable": "Web画面を利用できません",
   "root.dashboardUnavailableDetail":
     "NEXUS_WEB_URL を設定してから、このパネルを更新してください。下の設定は利用できます。",
   "root.continueSetup": "セットアップを続ける",
@@ -488,7 +490,7 @@ export const ja = {
   "health.activationDefinition": "最初に確認する活動",
   "health.actionEngine": "改善策の実行",
   "health.experimentEngine": "効果の比較",
-  "health.webDashboard": "Web ダッシュボード",
+  "health.webDashboard": "Web画面",
   "health.fixConnection":
     "問題: 機能状態を取得できません。影響: セットアップと選択肢。次: /nexus setup を実行してください。",
   "health.fixPermissions":
@@ -504,7 +506,7 @@ export const ja = {
   "health.fixExperimentEngine":
     "問題: 結果テストが無効です。影響: アクションのテスト。次: 設定から測定機能を有効にしてください。",
   "health.fixWebDashboard":
-    "問題: NEXUS_WEB_URL が未設定または無効です。影響: Web 導線。次: ダッシュボード URL を設定してください。",
+    "問題: NEXUS_WEB_URL が未設定または無効です。影響: Web 導線。次: Web画面 URL を設定してください。",
   "success.published": "設定を公開しました",
   "success.active": "{name} v{version} が有効になりました",
   "success.newMembers": "新規メンバーに適用",
@@ -711,7 +713,7 @@ export const ja = {
   "control.setupProgress": "初期設定: {done} / 4 完了",
   "control.setupGuide":
     "設定で分析するチャンネル、運営、通知、新しいメンバーの目標を選んでください。任意の項目は後で設定できます。",
-  "control.attention": "対応",
+  "control.attention": "要確認",
   "control.attentionCount": "確認する投稿: {count} 件",
   "control.channelRange": "チャンネル {from}–{to} / {total}",
   "control.moves": "よくある移動",

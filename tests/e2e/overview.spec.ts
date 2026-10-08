@@ -420,7 +420,7 @@ test("keeps forbidden technical terms out of normal English and Japanese pages",
   for (const name of [
     "ホーム",
     "新しいメンバー",
-    "対応",
+    "要確認",
     "分析",
     "結果",
     "設定",

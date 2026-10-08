@@ -10,9 +10,9 @@ import {pricingMetadata} from '../../packages/settings/src/plan-registry.js';
 
 const now=new Date('2026-09-30T09:00:00Z'),day=86400000;
 const measured=(value:number|null,previous:number|null=null,state:Measurement['state']='READY'):Measurement=>({state,value,previous,sample:10,numerator:7,eligible:12,responded:10,activityFromDay:7,needed:0,from:'2026-09-20T09:00:00Z',through:'2026-09-27T09:00:00Z',observationDays:3});
-const community=(overrides:Record<string,unknown>={})=>({daily:{ready:true,todayJoined:0,todayConnected:0,attentionCount:0,timezone:'Asia/Tokyo'},attention:[],suggestion:null,...overrides}) as unknown as ControlData['community'];
+const community=(overrides:Record<string,unknown>={})=>({arrivalCount:0,daily:{ready:true,todayJoined:0,todayConnected:0,attentionCount:0,timezone:'Asia/Tokyo'},attention:[],suggestion:null,...overrides}) as unknown as ControlData['community'];
 const settings={analysisScope:{mode:'all',channelIds:[]},managerRoleIds:[],helperRoleIds:[],weeklySummaryEnabled:true,weeklySummaryChannelId:'111111111111111111',weeklySummaryDay:1,weeklySummaryHour:9,timezone:'Asia/Tokyo',helperEnabled:true,helperChannelId:'111111111111111111',firstResponseMinutes:20,goalPreset:null,newMemberGoals:['reply'],importantChannels:[],uiLanguage:'ja',detailedRetentionDays:30,revision:2,setupVersion:2,setupSteps:{scope:true,team:true,notifications:true,goals:true}} satisfies NonNullable<ControlData['settings']>;
-async function render(page:'overview'|'settings',data:ControlData,locale:'ja'|'en',section:'main'|'notifications'|'team'|'goals'='main'){
+async function render(page:'overview'|'settings'|'analysis',data:ControlData,locale:'ja'|'en',section:'main'|'notifications'|'team'|'goals'='main'){
  const intents:Record<string,unknown>[]=[];
  const panel=await controlPanel(async intent=>{intents.push(intent);return `test-${intents.length-1}`;},page,{updatedAt:now,...data},locale,section);
  const container=panel.components?.[0];if(container?.type!==ComponentType.Container)throw new Error('Missing container');
@@ -21,42 +21,42 @@ async function render(page:'overview'|'settings',data:ControlData,locale:'ja'|'e
 }
 it.each(['ja','en'] as const)('keeps missing, no members and true zero distinct on Home (%s)',async locale=>{
  const noMembers=await render('overview',{community:community()},locale);
- expect(noMembers.json).toContain(locale==='ja'?'今日参加したメンバーはいません':'No new members today');
- expect(noMembers.json).toContain(locale==='ja'?'対象メンバーはいません':'No eligible new members');
+ expect(noMembers.json).toContain(locale==='ja'?'過去30日の参加者: 0人':'Joined in the last 30 days: 0');
  expect(noMembers.json).toContain(locale==='ja'?'0件':'0 posts');
- expect(noMembers.json).toContain(locale==='ja'?'NEXUSが確認していること':'What NEXUS is watching');
- const zero=await render('overview',{community:community({daily:{ready:true,todayJoined:4,todayConnected:0,attentionCount:0}})},locale);
+ expect(noMembers.json).toContain(locale==='ja'?'基本の分析':'Basic analysis');
+ const zero=await render('analysis',{community:community({daily:{ready:true,todayJoined:4,todayConnected:0,attentionCount:0}})},locale);
  expect(zero.json).toContain(locale==='ja'?'0人':'0 people');
  const unavailable=await render('overview',{community:community({daily:{ready:false,todayJoined:null,todayConnected:null,attentionCount:null}})},locale);
- expect(unavailable.json).toContain(locale==='ja'?'データを取得できませんでした':'Observation coverage is unavailable');
+ expect(unavailable.json).toContain(locale==='ja'?'データを確認できません':'Data is unavailable');
  expect(unavailable.json).not.toContain(locale==='ja'?'0件':'0 posts');
 });
 it.each(['ja','en'] as const)('puts Attention first and offers a direct action before Today (%s)',async locale=>{
  const home=await render('overview',{community:community({daily:{ready:true,todayJoined:4,todayConnected:3,attentionCount:2},attention:[{channelId:'111111111111111111',waitingMinutes:42}]})},locale);
- const text=home.children.filter(item=>item.type===ComponentType.TextDisplay).map(item=>item.content).join('\n');
- expect(text.indexOf('42')).toBeLessThan(text.indexOf(locale==='ja'?'今日':'Today'));
- const firstAction=home.children.find(item=>item.type===ComponentType.ActionRow);
- expect(firstAction?.components[0]).toMatchObject({style:ButtonStyle.Primary,custom_id:expect.any(String)});
+ const sections=home.children.filter(item=>item.type===ComponentType.Section);
+ expect(sections).toHaveLength(3);
+ expect(sections[0]!.components[0]).toMatchObject({content:expect.stringContaining(locale==='ja'?'要確認':'Needs review')});
+ expect(sections[0]!.accessory).toMatchObject({style:ButtonStyle.Primary,custom_id:expect.any(String)});
  expect(home.intents.find(item=>item.page==='attention')).toMatchObject({action:'controlNavigate'});
 });
-it('offers three direct destinations, one dashboard link, More and a quiet refresh',async()=>{
+it('offers exactly five Home actions and three Section destinations',async()=>{
  const home=await render('overview',{community:community(),dashboardUrl:'https://nexus.example/dashboard/111111111111111111'},'en');
  for(const page of ['attention','newMembers','analysis'])expect(home.intents).toContainEqual({action:'controlNavigate',page});
- expect(home.buttons.filter(button=>button.style===ButtonStyle.Link)).toHaveLength(1);
- expect(home.rows.flatMap(row=>row.components).filter(item=>item.type===ComponentType.StringSelect)).toHaveLength(1);
+ expect(home.buttons).toHaveLength(2);
+ expect(home.children.filter(item=>item.type===ComponentType.Section)).toHaveLength(3);
+ expect(home.rows.flatMap(row=>row.components).filter(item=>item.type===ComponentType.StringSelect)).toHaveLength(0);
  expect(home.json).toContain('More');
- expect(home.buttons.find(button=>'label' in button&&button.label?.includes('Refresh'))).toMatchObject({style:ButtonStyle.Secondary});
+ expect(home.buttons.every(button=>button.style===ButtonStyle.Secondary)).toBe(true);
 });
 it.each(['ja','en'] as const)('only shows supported weekly comparisons and suggestions (%s)',async locale=>{
  const weekly={reply:measured(18,24),connection:measured(72,64),retention:measured(48,null)};
- const home=await render('overview',{community:community({weekly})},locale);
+ const home=await render('analysis',{community:community({weekly})},locale);
  expect(home.json).toContain(locale==='ja'?'前の比較期間より6分早い':'6 minutes faster than the previous comparison period');
  expect(home.json).toContain('+8pt');
  expect(home.json).not.toContain(locale==='ja'?'分析結果':'What NEXUS noticed');
- const suggested=await render('overview',{community:community({weekly,suggestion:{key:'reply_rescue',basis:{newcomerMinutes:32,continuingMinutes:18}},compare:{newcomers:{members:10},continuing:{members:10}}})},locale);
+ const suggested=await render('analysis',{community:community({weekly,suggestion:{key:'reply_rescue',basis:{newcomerMinutes:32,continuingMinutes:18}},compare:{newcomers:{members:10},continuing:{members:10}}})},locale);
  expect(suggested.intents.some(item=>item.action==='controlTryImprove')).toBe(true);
- expect(suggested.json).toContain(locale==='ja'?'比較の詳細を見る':'View evidence');
- const collecting=await render('overview',{community:community({weekly:{reply:measured(null,null,'COLLECTING'),connection:measured(null,null,'NO_ELIGIBLE_MEMBERS'),retention:measured(null,null,'UNAVAILABLE')}})},locale);
+ expect(suggested.json).toContain(locale==='ja'?'詳しく分析する':'Start detailed analysis');
+ const collecting=await render('analysis',{community:community({weekly:{reply:measured(null,null,'COLLECTING'),connection:measured(null,null,'NO_ELIGIBLE_MEMBERS'),retention:measured(null,null,'UNAVAILABLE')}})},locale);
  expect(collecting.json).not.toContain('+8pt');
  expect(collecting.json).toContain(locale==='ja'?'まだ比較できる':'Not enough data to compare');
 });
@@ -65,7 +65,8 @@ it.each(['ja','en'] as const)('keeps main settings as a summary with private det
  for(const section of ['scope','notifications','team','goals'])expect(main.intents).toContainEqual({action:'controlSettings',section,privateSettings:true});
  expect(main.intents).toContainEqual({action:'controlNavigate',page:'overview'});
  expect(main.rows.flatMap(row=>row.components).filter(item=>[ComponentType.ChannelSelect,ComponentType.RoleSelect].includes(item.type))).toHaveLength(0);
- expect(main.json).toContain('20');expect(main.json).toContain('111111111111111111');
+ expect(main.json).not.toMatch(/Redis|Gateway|Build SHA|Transport/);
+ expect(main.intents.some(item=>item.action==='setupWizard')).toBe(true);
  const notifications=await render('settings',{settings},locale,'notifications');
  expect(notifications.intents.some(item=>item.action==='controlNotificationEdit')).toBe(true);
  expect(notifications.intents.some(item=>item.action==='controlAlertDelay')).toBe(false);

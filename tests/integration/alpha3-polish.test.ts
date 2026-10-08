@@ -62,7 +62,8 @@ async function setup() {
     discord = new FakeDiscord(),
     tokens = new Components("polish-test"),
     now = new Date(),
-    joined = new Date(now.getTime() - 3600000);
+    // The fixture models a join today, including the first UTC hour.
+    joined = new Date(Math.max(now.getTime() - 3600000, Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())));
   await settings.update(s, actor, 0, {
     enabled: true,
     setupVersion: 2,
@@ -568,6 +569,7 @@ it("opens notification modals through signed HTTP and defers private settings wi
     db,
     vault,
     components: ctx.tokens,
+    discord: ctx.discord,
     publicKey,
     applicationId: "777777777777777777",
   });
