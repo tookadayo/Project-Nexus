@@ -1,6 +1,6 @@
 # NEXUS documentation
 
-Current release: **0.6.0-alpha.10** — Discord Analysis Operations. PostgreSQL is the normalized billing and
+Current release: **0.6.0-alpha.11** — Analysis clarity and follow-up. PostgreSQL is the normalized billing and
 entitlement source of truth. Current documents retain their established paths
 where moving them would create unnecessary link churn.
 
@@ -31,6 +31,7 @@ where moving them would create unnecessary link churn.
 
 ## Architecture, product and evidence
 
+- [alpha.11 analysis clarity, follow-up and focused verification](alpha11-analysis-clarity.md)
 - [alpha.10 Discord UX, analysis lifecycle, usage and recovery](alpha10-analysis-operations.md)
 
 - [Measurement evidence contract](measurement-evidence-contract.md)
