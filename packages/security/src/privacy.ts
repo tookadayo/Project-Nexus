@@ -58,6 +58,7 @@ export class PrivacyService {
             tx,
           );
           for (const table of [
+            "location_post_observations",
             "message_observations",
             "reaction_state",
             "reaction_resets",
@@ -79,6 +80,8 @@ export class PrivacyService {
             );
           // Only an audit tombstone and disabled settings remain. Published flows can be deleted, never mutated.
           for (const table of [
+            "analysis_history_cursors",
+            "analysis_preview_limits",
             "analysis_results",
             "analysis_usage_ledger",
             "analysis_reservations",
@@ -141,7 +144,9 @@ export class PrivacyService {
             await sql`DELETE FROM product_telemetry WHERE guild_hash=${productGuildHash(s.guildId, process.env.LOOKUP_KEY)}`.execute(
               tx,
             );
-          await sql`DELETE FROM analysis_input_revisions WHERE ${tenant(s)}`.execute(tx);
+          await sql`DELETE FROM analysis_input_revisions WHERE ${tenant(s)}`.execute(
+            tx,
+          );
           await sql`INSERT INTO deletion_requests(organization_id,guild_id,id,completed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,now())`.execute(
             tx,
           );
@@ -174,6 +179,18 @@ export class PrivacyService {
           tx,
         )
       ).rows.map((r) => r.id);
+      // Invalidate affected immutable aggregates before erasing their sources.
+      // History and financial usage remain recorded; unavailable payloads cannot
+      // be redisplayed, compared or reused after a participant privacy deletion.
+      await sql`UPDATE analysis_runs a SET invalidated_at=now(),invalidation_reason='PRIVACY_DELETED' WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND a.invalidated_at IS NULL AND (
+        EXISTS(SELECT 1 FROM location_post_observations p WHERE p.organization_id=a.organization_id AND p.guild_id=a.guild_id AND p.subject_hash=${hash} AND p.sent_at>=a.period_start AND p.sent_at<a.period_end AND (a.status<>'COMPLETED' OR cardinality(a.target_channel_ids)=0 OR p.channel_id=ANY(a.target_channel_ids)))
+        OR EXISTS(SELECT 1 FROM membership_episodes e WHERE e.organization_id=a.organization_id AND e.guild_id=a.guild_id AND e.identity_id=ANY(${ids}::uuid[]) AND (e.joined_at>=a.period_start AND e.joined_at<a.period_end OR EXISTS(SELECT 1 FROM lifecycle_events f WHERE f.organization_id=e.organization_id AND f.guild_id=e.guild_id AND f.episode_id=e.id AND f.occurred_at>=a.period_start AND f.occurred_at<a.period_end)))
+        OR EXISTS(SELECT 1 FROM reaction_state r WHERE r.organization_id=a.organization_id AND r.guild_id=a.guild_id AND (r.subject_hash=${hash} OR r.target_hash=${hash}) AND r.observed_at>=a.period_start AND r.observed_at<a.period_end)
+        OR EXISTS(SELECT 1 FROM poll_participant_state p WHERE p.organization_id=a.organization_id AND p.guild_id=a.guild_id AND p.subject_hash=${hash} AND p.observed_at>=a.period_start AND p.observed_at<a.period_end)
+      )`.execute(tx);
+      await sql`DELETE FROM attention_items i USING analysis_runs a WHERE i.organization_id=a.organization_id AND i.guild_id=a.guild_id AND a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND a.invalidated_at IS NOT NULL AND i.item_type='ANALYSIS_CONCERN' AND i.message_id LIKE 'analysis:'||a.id::text||':%'`.execute(
+        tx,
+      );
       await sql`DELETE FROM reaction_resets r USING lifecycle_events f JOIN membership_episodes e ON e.organization_id=f.organization_id AND e.guild_id=f.guild_id AND e.id=f.episode_id WHERE r.organization_id=${s.organizationId}::uuid AND r.guild_id=${s.guildId} AND r.organization_id=f.organization_id AND r.guild_id=f.guild_id AND r.message_id=f.data->>'messageId' AND e.identity_id=ANY(${ids}::uuid[])`.execute(
         tx,
       );
@@ -192,6 +209,15 @@ export class PrivacyService {
         await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)} AND (subject_hash=${hash} OR target_hash=${hash})`.execute(
           tx,
         );
+      await sql`DELETE FROM location_post_observations WHERE ${tenant(s)} AND subject_hash=${hash}`.execute(
+        tx,
+      );
+      await sql`DELETE FROM analysis_history_cursors WHERE ${tenant(s)} AND actor_hash=${hash}`.execute(
+        tx,
+      );
+      await sql`DELETE FROM analysis_preview_limits WHERE ${tenant(s)} AND actor_hash=${hash}`.execute(
+        tx,
+      );
       // Removing a participant invalidates the aggregate co-presence clock; restart observation conservatively.
       await sql`DELETE FROM adaptive_states WHERE ${tenant(s)} AND domain IN ('voice','voice-channel')`.execute(
         tx,
@@ -256,9 +282,15 @@ export class PrivacyService {
         tx,
       );
       await deleteBillingActor(tx, s, userId, this.vault);
-      await sql`UPDATE analysis_runs SET requested_by_actor_hash=NULL,requested_by_user_ciphertext=NULL WHERE ${tenant(s)} AND requested_by_actor_hash=${hash}`.execute(tx);
-      await sql`UPDATE analysis_grants SET created_by_actor_hash=NULL WHERE ${tenant(s)} AND created_by_actor_hash=${hash}`.execute(tx);
-      await sql`DELETE FROM setup_drafts WHERE ${tenant(s)} AND actor_hash=${hash}`.execute(tx);
+      await sql`UPDATE analysis_runs SET requested_by_actor_hash=NULL,requested_by_user_ciphertext=NULL WHERE ${tenant(s)} AND requested_by_actor_hash=${hash}`.execute(
+        tx,
+      );
+      await sql`UPDATE analysis_grants SET created_by_actor_hash=NULL WHERE ${tenant(s)} AND created_by_actor_hash=${hash}`.execute(
+        tx,
+      );
+      await sql`DELETE FROM setup_drafts WHERE ${tenant(s)} AND actor_hash=${hash}`.execute(
+        tx,
+      );
       await sql`DELETE FROM api_credentials c USING operations_role_bindings b,operations_role_bindings subject WHERE subject.organization_id=${s.organizationId}::uuid AND subject.guild_id=${s.guildId} AND subject.actor_hash=${hash} AND b.root_organization_id=subject.root_organization_id AND b.member_id=subject.member_id AND c.organization_id=b.organization_id AND c.guild_id=b.guild_id AND c.actor_hash=b.actor_hash`.execute(
         tx,
       );
@@ -311,9 +343,13 @@ export class PrivacyService {
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"privacy:" + s.organizationId + ":" + s.guildId},0))`.execute(
         tx,
       );
-      await sql`DELETE FROM setup_drafts WHERE ${tenant(s)} AND expires_at<now()`.execute(tx);
+      await sql`DELETE FROM setup_drafts WHERE ${tenant(s)} AND expires_at<now()`.execute(
+        tx,
+      );
       // Keep immutable usage provenance; expire the aggregate result payload separately.
-      await sql`DELETE FROM analysis_results r USING analysis_runs a WHERE r.organization_id=a.organization_id AND r.guild_id=a.guild_id AND r.run_id=a.id AND a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND a.retention_until<now()`.execute(tx);
+      await sql`DELETE FROM analysis_results r USING analysis_runs a WHERE r.organization_id=a.organization_id AND r.guild_id=a.guild_id AND r.run_id=a.id AND a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND a.retention_until<now()`.execute(
+        tx,
+      );
       await sql`DELETE FROM interaction_jobs WHERE ${tenant(s)} AND created_at<now()-interval '15 minutes'`.execute(
         tx,
       );
@@ -423,7 +459,10 @@ export class PrivacyService {
         await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)} AND ${sql.ref(table === "adaptive_states" ? "observed_at" : "occurred_at")}<${cutoff}`.execute(
           tx,
         );
-      await sql`DELETE FROM discord_surface_state WHERE ${tenant(s)} AND archived AND observed_at<${cutoff}`.execute(
+      await sql`DELETE FROM location_post_observations WHERE ${tenant(s)} AND sent_at<${cutoff}`.execute(
+        tx,
+      );
+      await sql`DELETE FROM discord_surface_state WHERE ${tenant(s)} AND archived AND deleted_at IS NULL AND observed_at<${cutoff}`.execute(
         tx,
       );
       await sql`DELETE FROM guild_capability_snapshots WHERE ${tenant(s)} AND checked_at<${cutoff} AND id<>(SELECT id FROM guild_capability_snapshots WHERE ${tenant(s)} ORDER BY checked_at DESC LIMIT 1)`.execute(

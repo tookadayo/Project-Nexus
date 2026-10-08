@@ -19,8 +19,9 @@ export async function analysisFixture(
   db: Database,
   plan = "FREE",
   withData = true,
+  scope?: {organizationId:string;guildId:string},
 ) {
-  const s = { organizationId: randomUUID(), guildId: "111111111111111111" },
+  const s = scope ?? { organizationId: randomUUID(), guildId: "111111111111111111" },
     user = "222222222222222222",
     channel = "933333333333333330",
     settings = new SettingsService(db);
