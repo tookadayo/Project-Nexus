@@ -79,7 +79,7 @@ it.each(["ja", "en"] as const)(
       await analysisPreviewPanel(
         issue,
         {
-          request: { type: "OVERALL", days: 30 },
+          request: { type: "OVERALL", days: 30, periodStart: run.period_start.toISOString(), periodEnd: run.period_end.toISOString() },
           scope: { mode: "all", channelIds: [] },
           availability: "INSUFFICIENT_DATA",
           quality: "NO_DATA",
@@ -90,7 +90,8 @@ it.each(["ja", "en"] as const)(
           duplicate: null,
           configRevision: 1,
           inputFingerprint: run.input_fingerprint,
-          estimate: "1–3",
+          estimate: null,consumeCount:1,correctionOf:null,
+          targetChannelCount: 1,
         },
         locale,
       ),

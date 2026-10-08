@@ -1,0 +1,75 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## Review analysis conditions"
+        },
+        {
+          "type": 10,
+          "content": "**Review corrected calculation**\nCorrect the earlier calculation method without using an analysis allowance."
+        },
+        {
+          "type": 10,
+          "content": "**Review the whole server**\n2026-09-08–2026-10-07 (UTC)"
+        },
+        {
+          "type": 10,
+          "content": "**Places to analyse**\nSelected channels\nSelected places: 1"
+        },
+        {
+          "type": 10,
+          "content": "**Data available**\nAvailable"
+        },
+        {
+          "type": 10,
+          "content": "**Observed posts**\nComplete enough"
+        },
+        {
+          "type": 10,
+          "content": "**Detailed analyses remaining: 0**\nAnalysis uses: 0 → 0\nOne use is consumed when a result is saved."
+        },
+        {
+          "type": 10,
+          "content": "-# Completion time cannot be estimated yet."
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 1,
+              "label": "Start analysis",
+              "custom_id": "private:d46e3a3c-4d9f-4561-89f2-cd83d853275f.aaaaaaaaaaaaaaaaaaaaaa",
+              "disabled": false
+            }
+          ]
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Back",
+              "custom_id": "private:019ec255-2976-4aa2-bba0-05af435e0196.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Open settings",
+              "custom_id": "private:6884d7ba-23b5-448e-8acc-77ce80daf506.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

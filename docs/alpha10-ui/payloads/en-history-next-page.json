@@ -1,0 +1,186 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## Detailed analysis history"
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### Review the whole server\nCompleted\nResult from an earlier calculation method\n2026-09-08–2026-10-07 (UTC) · <t:1791417600:R>"
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 2,
+            "label": "View result",
+            "custom_id": "private:c137ec00-1de2-4465-8bf5-76477b58f3bb.aaaaaaaaaaaaaaaaaaaaaa",
+            "disabled": false
+          }
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### Review the whole server\nCompleted\nResult from an earlier calculation method\n2026-09-08–2026-10-07 (UTC) · <t:1791417599:R>"
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 2,
+            "label": "View result",
+            "custom_id": "private:5a298a1f-0037-4ad6-8067-d3333b79ad75.aaaaaaaaaaaaaaaaaaaaaa",
+            "disabled": false
+          }
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### Review the whole server\nCompleted\nResult from an earlier calculation method\n2026-09-08–2026-10-07 (UTC) · <t:1791417598:R>"
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 2,
+            "label": "View result",
+            "custom_id": "private:266d9ffa-8d4d-4499-81ee-5d1002b1c4b3.aaaaaaaaaaaaaaaaaaaaaa",
+            "disabled": false
+          }
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### Review the whole server\nCompleted\nResult from an earlier calculation method\n2026-09-08–2026-10-07 (UTC) · <t:1791417597:R>"
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 2,
+            "label": "View result",
+            "custom_id": "private:5ba59d4b-4e4b-4cff-8460-0217fb58e217.aaaaaaaaaaaaaaaaaaaaaa",
+            "disabled": false
+          }
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### Review the whole server\nCompleted\nResult from an earlier calculation method\n2026-09-08–2026-10-07 (UTC) · <t:1791417596:R>"
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 2,
+            "label": "View result",
+            "custom_id": "private:1d40a9d7-73cd-497f-aadb-dfdb788f31dc.aaaaaaaaaaaaaaaaaaaaaa",
+            "disabled": false
+          }
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 3,
+              "custom_id": "private:fc9e92c9-c7fb-4190-89e2-594e0bd22789.aaaaaaaaaaaaaaaaaaaaaa",
+              "placeholder": "Choose an analysis",
+              "options": [
+                {
+                  "label": "Detailed analysis history",
+                  "value": "all",
+                  "default": true
+                },
+                {
+                  "label": "Review the whole server",
+                  "value": "OVERALL",
+                  "default": false
+                },
+                {
+                  "label": "Review new participants",
+                  "value": "NEW_MEMBERS",
+                  "default": false
+                },
+                {
+                  "label": "Review questions and support",
+                  "value": "SUPPORT",
+                  "default": false
+                },
+                {
+                  "label": "Review events",
+                  "value": "EVENTS",
+                  "default": false
+                },
+                {
+                  "label": "Review voice use",
+                  "value": "VOICE",
+                  "default": false
+                },
+                {
+                  "label": "Announcement responses",
+                  "value": "ANNOUNCEMENTS",
+                  "default": false
+                },
+                {
+                  "label": "Creative and reference posts",
+                  "value": "SHOWCASE",
+                  "default": false
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Previous 5",
+              "custom_id": "private:20cc6456-77fc-4970-95d6-b2be22bb45e8.aaaaaaaaaaaaaaaaaaaaaa",
+              "disabled": false
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Next 5",
+              "custom_id": "private:a4a1a266-5285-497f-bd4b-26698d184cb1.aaaaaaaaaaaaaaaaaaaaaa",
+              "disabled": false
+            }
+          ]
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Back",
+              "custom_id": "private:a1a9ecb9-6faa-4d68-a360-871cf98f52a8.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Refresh",
+              "custom_id": "private:101baa21-da46-4978-804f-63c68383f1c6.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

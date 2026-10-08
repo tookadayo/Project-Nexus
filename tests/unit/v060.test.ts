@@ -227,7 +227,7 @@ it("uses six top pages and offers explicit setup skips and role confirmation", a
   for (const section of ["scope", "team", "notifications", "goals"] as const)
     await controlPanel(issue, "settings", { settings }, "en", section);
   for (const action of [
-    "controlScopeDefault",
+    "setupWizard",
     "controlSkipTeam",
     "controlSkipNotifications",
     "controlSkipGoals",

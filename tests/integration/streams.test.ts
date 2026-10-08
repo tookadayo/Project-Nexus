@@ -55,6 +55,7 @@ it("runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
   const vault = new IdentityVault("aa".repeat(32), "bb".repeat(32)),
     tokens = new Components("slice-component-key");
   await ensureGuild(db, s);
+  await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,visibility_state,observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${channel},0,'VISIBLE',now())`.execute(db);
   await sql`INSERT INTO guild_subscriptions(organization_id,guild_id,plan_key) VALUES(${s.organizationId}::uuid,${s.guildId},'GROWTH')`.execute(
     db,
   );
@@ -146,9 +147,8 @@ it("runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
     if (type === 3 && userId === admin && !messageId)
       messageId = adminMessageId;
     if (messageId === "reply") messageId = "930000000000000999";
-    const privateResponse =
-      Components.kind(String(data.custom_id ?? "")) === "ephemeral";
-    discord.replyTarget = privateResponse ? "reply" : (messageId ?? null);
+    // Every interaction receives a private reply, including buttons on shared panels.
+    discord.replyTarget = "reply";
     const id = String(BigInt("631111111111111111") + BigInt(++sequence));
     const body = JSON.stringify({
       id,
@@ -181,11 +181,7 @@ it("runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
       },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual(
-      type === 3 && !privateResponse
-        ? { type: 6 }
-        : { type: 5, data: { flags: 64 } },
-    );
+    expect(res.json()).toEqual({ type: 5, data: { flags: 64 } });
     await expect
       .poll(
         async () =>
@@ -217,8 +213,7 @@ it("runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
       )
     ).rows[0]!.message_id;
     await deliver(admin, { name: "nexus", options: [{ name: "settings" }] }, 2);
-    adminMessageId = "930000000000000999";
-    discord.panels.set(adminMessageId, discord.panels.get("reply"));
+    adminMessageId = "reply";
     await deliver(admin, { custom_id: control("Advanced") });
     await deliver(admin, {
       custom_id: control("Choose community template"),
@@ -407,32 +402,30 @@ it("runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
         pageControl = control;
     }
     expect(pageControl).toBeDefined();
+    const sharedBefore = JSON.stringify(discord.panels.get(fixed.message_id));
     await deliver(
       admin,
       { custom_id: pageControl!.custom_id },
       3,
       fixed.message_id,
     );
-    expect(JSON.stringify(discord.panels.get(fixed.message_id))).toContain(
-      "Analysis",
-    );
-    expect(discord.calls.filter((call) => call === "sendPanel")).toHaveLength(
-      1,
-    );
-    const settingControl = controls(discord.panels.get(fixed.message_id)).find(
-      (item) => item.placeholder === "Choose a page" && item.type === 3,
-    )!;
+    expect(JSON.stringify(discord.panels.get("reply"))).toContain("Basic analysis");
+    expect(JSON.stringify(discord.panels.get(fixed.message_id))).toBe(sharedBefore);
+    expect(discord.calls.filter((call) => call === "sendPanel")).toHaveLength(1);
+    let settingControl:Record<string,unknown>|undefined;
+    for(const item of controls(discord.panels.get(fixed.message_id))){
+      const intent=await tokens.read(db,s,String(item.custom_id),vault.hash(s,admin));
+      if(intent.action==="controlNavigate"&&intent.page==="settings"&&!intent.section)settingControl=item;
+    }
     expect(settingControl).toBeDefined();
     await deliver(
       user,
-      { custom_id: settingControl.custom_id, values: ["settings"] },
+      { custom_id: settingControl!.custom_id, values: ["settings"] },
       3,
       fixed.message_id,
     );
     expect(JSON.stringify(discord.panels.get("reply"))).toContain("permission");
-    expect(JSON.stringify(discord.panels.get(fixed.message_id))).toContain(
-      "Analysis",
-    );
+    expect(JSON.stringify(discord.panels.get(fixed.message_id))).toBe(sharedBefore);
     const latest = await settings.get(s);
     await settings.update(
       s,
@@ -447,19 +440,20 @@ it("runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
       { helperChannelId: channel },
     );
     await deliver(admin, {
-      custom_id: settingControl.custom_id,
+      custom_id: settingControl!.custom_id,
       values: ["settings"],
     });
-    await deliver(admin, { custom_id: control("Notifications") });
     adminMessageId = "reply";
+    await deliver(admin, { custom_id: control("Notifications") });
     await deliver(admin, { custom_id: control("Send test alert") });
+    expect(discord.calls.filter((call) => call === "sendPanel")).toHaveLength(1);
+    expect(JSON.stringify(discord.panels.get("reply"))).toContain("What will be sent");
+    await deliver(admin, { custom_id: control("Send test notification") });
     expect(JSON.stringify(discord.panels.get("930000000000000002"))).toContain(
       "NEXUS test alert",
     );
-    await deliver(admin, {
-      custom_id: control("Choose a setting"),
-      values: ["advanced"],
-    });
+    await deliver(admin, {custom_id:control("Choose a page"),values:["settings"]});
+    await deliver(admin, {custom_id:control("More"),values:["advanced"]});
     const before = JSON.stringify(discord.panels.get(fixed.message_id));
     await deliver(admin, { custom_id: control("Advanced settings") });
     expect(JSON.stringify(discord.panels.get(fixed.message_id))).toBe(before);
@@ -481,6 +475,7 @@ it("uses real Streams, reclaims a crashed delivery and deduplicates lifecycle an
   const user = "111111111111111114",
     helper = "111111111111111115",
     channel = "111111111111111116";
+  await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,visibility_state,observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${channel},0,'VISIBLE',now())`.execute(db);
   const now = Date.now();
   const join = new Date(now - 8 * 86400000);
   discord.members.set(user, {
@@ -788,6 +783,7 @@ it("recovers a deleted consumer group and records stream loss as incomplete cove
 it("does not starve fresh messages behind unresolved reply references", async () => {
   const s = scopeForGuild("741111111111111111");
   await ensureGuild(db, s);
+  await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,visibility_state,observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},'741111111111111115',0,'VISIBLE',now())`.execute(db);
   const vault = new IdentityVault("aa".repeat(32), "bb".repeat(32));
   const settings = new SettingsService(db);
   const discord = new FakeDiscord();

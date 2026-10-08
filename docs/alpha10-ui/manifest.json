@@ -1,0 +1,138 @@
+{
+  "beforeCommit": "71a27f937e8dd534c40c767033d91a492cdce44c",
+  "liveDiscordAcceptance": "NOT RUN",
+  "source": "Actual generated Components V2 payloads; synthetic non-deployable signed references",
+  "rendering": "HTML layout approximation; no native Discord client",
+  "fullGeneratedPayloadCases": 132,
+  "fullGeneratedScreenshots": 264,
+  "selectedArtifacts": [
+    {
+      "file": "payloads/ja-home.json",
+      "sha256": "544524498d207769f5c3454ce2e814f425bc63a72a968f5ef32e7993b43f00bd"
+    },
+    {
+      "file": "payloads/ja-current-completed.json",
+      "sha256": "aec867875c2f4674c22e2eefb7a5442cc2359d4a4756c7e0ea76e56516283e44"
+    },
+    {
+      "file": "payloads/ja-history-next-page.json",
+      "sha256": "c5ab163c59d33976547e3e25ace7f72d900d9afe3039c5971d19f13187391354"
+    },
+    {
+      "file": "payloads/ja-representative-S7-setup.json",
+      "sha256": "aefb00a1f442710c3beb42b5c2bb217b1e4167a8051f855f68c4e1d1bcec4710"
+    },
+    {
+      "file": "payloads/ja-representative-S7-places-last-page.json",
+      "sha256": "00cc75cd405c47f328f76ba9dee87e8fff4d39eb3ce3b94de4c8cf22da64ac39"
+    },
+    {
+      "file": "payloads/ja-places-last-page.json",
+      "sha256": "a509a9c44d12de894f893c1c9a98c228ca8ec6f93d214a49f654ecfad400f5c6"
+    },
+    {
+      "file": "payloads/ja-zero-uses-home.json",
+      "sha256": "54f0262824155ca66a9eaa672e3bc87331f3fe8e99e9e06e6f0e9d071d52ccc6"
+    },
+    {
+      "file": "payloads/ja-verified-zero.json",
+      "sha256": "d1567be9b3e741a10a539d752d045a909dfb888c891c2324ffb7c951fc845fab"
+    },
+    {
+      "file": "payloads/ja-detailed-result.json",
+      "sha256": "50e3e0705e9ec2fd3fd22c29f2a79e74ca95e33476685b3b7fd62c061ca76602"
+    },
+    {
+      "file": "payloads/ja-permission-missing.json",
+      "sha256": "cf9ed9f9ee13981234aac21607efbe67329ce7e2331305e189184c09b64770b3"
+    },
+    {
+      "file": "payloads/ja-correction-free.json",
+      "sha256": "92c8b7ef51f79ecb381a1062af23be01e356ce6ed9eac21e9353f88c462e21b1"
+    },
+    {
+      "file": "payloads/ja-old-correction-review.json",
+      "sha256": "558a9da1e3209050784eca48be0fa41ea807ed6ac6a41881d23a15fcb6e78751"
+    },
+    {
+      "file": "payloads/en-home.json",
+      "sha256": "445c56636d2efdd4eee586f6e17335b62711ae5f5de81f0ddb8905f08f60b20d"
+    },
+    {
+      "file": "payloads/en-current-completed.json",
+      "sha256": "c424509e95bb96d23d29851403d0af8aa6361d3d2bbb8deefbf564ec60452c55"
+    },
+    {
+      "file": "payloads/en-history-next-page.json",
+      "sha256": "07fca6128de70672c2c1cb9936305a06cbb20c717408bc047e59974c8f1979b8"
+    },
+    {
+      "file": "payloads/en-representative-S7-setup.json",
+      "sha256": "ef9c9d4794b25c0b19fdde9a78843507b2d3c573d9cd9e83aed30ce6814ee50b"
+    },
+    {
+      "file": "payloads/en-representative-S7-places-last-page.json",
+      "sha256": "85cd4a85d288969ddf811521a8f13b335570d7702047944051f33b00de96fdc7"
+    },
+    {
+      "file": "payloads/en-places-last-page.json",
+      "sha256": "da5fb86ec01c26fbbe82b5527e65506e1b6551815527f9c925144f129d5ef90e"
+    },
+    {
+      "file": "payloads/en-zero-uses-home.json",
+      "sha256": "bff541ac6dd3e7209e0f7cc3e0336988d3242c06b63d5c06248442ce0d46f0d4"
+    },
+    {
+      "file": "payloads/en-verified-zero.json",
+      "sha256": "c35d24de40ae993ab765348d5b20d249267f7c8e5c7b343de0b678fccb15fc14"
+    },
+    {
+      "file": "payloads/en-detailed-result.json",
+      "sha256": "79cccd0a925e1dece137e19db30bc0f7ac3336f0ce940e5aecdde476b9575e26"
+    },
+    {
+      "file": "payloads/en-permission-missing.json",
+      "sha256": "f9f630c6e49fe4b49a3563c6b1cdd8b7cdf989bbcba0dc9f29b1c9cbf283c0fb"
+    },
+    {
+      "file": "payloads/en-correction-free.json",
+      "sha256": "5142c74924568d2008b11a9fd342912bf9097baaf2c1b1bd5a54f6264e683edc"
+    },
+    {
+      "file": "payloads/en-old-correction-review.json",
+      "sha256": "2ae7d3700d66c89ba1d35776891aad70936f4920827df5a5a915974357f53d77"
+    },
+    {
+      "file": "payloads/before-ja-home.json",
+      "sha256": "3fd25cd15e5bab4b53ae9e8960498878d4651f144828fa43b0f4702935b09eef"
+    },
+    {
+      "file": "payloads/before-en-home.json",
+      "sha256": "ba1b8ca2a1c2088ceb278409afa35edb6f80d04b0571ca20e85371c64d21b1f8"
+    },
+    {
+      "file": "images/before-ja-home-mobile.png",
+      "sha256": "ad1642193b722fa65461c8e6b91c0caa6984f9236a3c83399a05b10a56d88ffd"
+    },
+    {
+      "file": "images/after-ja-home-mobile.png",
+      "sha256": "deb8e4780ce7c5af6b5621138e3956754323a6e4d5e7459e64f9eecf44d48178"
+    },
+    {
+      "file": "images/after-en-home-desktop.png",
+      "sha256": "73d2fad46069e46ce2aaa97da2996f94a81a160ba7c2ccda66079a71a763266d"
+    },
+    {
+      "file": "images/after-ja-current-completed-mobile.png",
+      "sha256": "aae53c32aa9e2bcc98a719918b041f0873537bec6adc4753a1c1a7db5fb18ab6"
+    },
+    {
+      "file": "images/after-en-history-next-mobile.png",
+      "sha256": "aac2c460f7480819f0ddaed35547be54cae48782699a897350837e5cd3a015a0"
+    },
+    {
+      "file": "images/after-en-places-last-mobile.png",
+      "sha256": "52760f302208788e8ef8b49172b14db2e641bd32b26d0c1341bb940cb9064ff8"
+    }
+  ]
+}

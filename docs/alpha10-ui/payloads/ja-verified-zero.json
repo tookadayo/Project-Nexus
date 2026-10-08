@@ -1,0 +1,94 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## 投稿と返信"
+        },
+        {
+          "type": 10,
+          "content": "**基本の分析**\n基本の分析は、回数を使わずいつでも確認できます。"
+        },
+        {
+          "type": 10,
+          "content": "-# 2026-09-08 〜 2026-10-07（UTC） · 指定した場所: 1件"
+        },
+        {
+          "type": 10,
+          "content": "**確認できた投稿**\n0件\nそろっています"
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 3,
+              "custom_id": "private:2b9afb8d-3fa5-4168-a604-a3b24e86e96a.aaaaaaaaaaaaaaaaaaaaaa",
+              "placeholder": "状況を見る",
+              "options": [
+                {
+                  "label": "全体の状況",
+                  "value": "overall",
+                  "default": false
+                },
+                {
+                  "label": "投稿と返信",
+                  "value": "posts",
+                  "default": true
+                },
+                {
+                  "label": "お知らせ・リアクション・投票",
+                  "value": "announcements",
+                  "default": false
+                },
+                {
+                  "label": "ボイス",
+                  "value": "voice",
+                  "default": false
+                },
+                {
+                  "label": "イベント",
+                  "value": "events",
+                  "default": false
+                },
+                {
+                  "label": "新しい参加者",
+                  "value": "newMembers"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 1,
+              "label": "詳しく分析する",
+              "custom_id": "private:a510fc61-833f-44d2-ade5-7c4fb80284ca.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "新しい参加者",
+              "custom_id": "private:3a7c3c57-76c6-4ab3-bf51-b8c2a22c5338.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "ホーム",
+              "custom_id": "private:929fbafc-fa2d-40d9-9f30-29c6512bed89.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

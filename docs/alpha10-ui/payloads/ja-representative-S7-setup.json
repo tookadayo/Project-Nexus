@@ -1,0 +1,78 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## NEXUSを設定します"
+        },
+        {
+          "type": 10,
+          "content": "**この設定で始めます**\n"
+        },
+        {
+          "type": 10,
+          "content": "**分析する場所**\n選んだチャンネル\n指定した場所: 319件\n<#800000000000070001>\n<#800000000000070002>\n<#800000000000070003>\n<#800000000000070004>\n<#800000000000070005>\nほか314件"
+        },
+        {
+          "type": 10,
+          "content": "**通知**\n無効\n未設定"
+        },
+        {
+          "type": 10,
+          "content": "**運営メンバー**\n未設定"
+        },
+        {
+          "type": 10,
+          "content": "**見たい内容**\n未設定"
+        },
+        {
+          "type": 10,
+          "content": "**通知**\n変更なし（スキップ）"
+        },
+        {
+          "type": 10,
+          "content": "**運営メンバー**\n変更なし（スキップ）"
+        },
+        {
+          "type": 10,
+          "content": "**見たい内容**\n変更なし（スキップ）"
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "場所の一覧を確認",
+              "custom_id": "private:a7361880-636a-48d1-b4b8-b644add36cd0.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 1,
+              "label": "この内容で設定",
+              "custom_id": "private:dd6d8889-28ab-468e-8fd5-dbaf94f39a07.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "戻る",
+              "custom_id": "private:df6a67df-50b6-4143-b9af-d51f9ee01ce8.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -4,11 +4,18 @@ import {
   analysisResultPanel,
   analysisHistoryPanel,
   analysisComparisonPanel,
+  analysisAttentionConfirmationPanel,
 } from "../../packages/discord-panels/src/views/analysis";
-import { setupWizardPanel } from "../../packages/discord-panels/src/views/setup-wizard";
-import { analysisTypes } from "../../packages/analysis/src/index";
+import { setupWizardPanel,setupPlacesPanel } from "../../packages/discord-panels/src/views/setup-wizard";
+import { analysisTypes,analysisRecipeVersion } from "../../packages/analysis/src/index";
 import { run, result } from "../fixtures/analysis-panels";
-import { componentCount } from "../../packages/discord-panels/src/primitives";
+import {resolveAnalysisScope} from "../../packages/shared/src/channel-scope";
+import {mkdirSync,writeFileSync} from "node:fs";
+import {resolve} from "node:path";
+import {randomUUID} from "node:crypto";
+import {basicAnalysisPanel} from "../../packages/discord-panels/src/views/basic-analysis";
+import {stabilizationUi,stabilizationServers} from "../fixtures/stabilization-servers";
+import { componentCount,validatePanel,type Panel } from "../../packages/discord-panels/src/primitives";
 import { errorPanel } from "../../packages/discord-panels/src/views/errors.js";
 import { guidedSetupPanel } from "../../packages/discord-panels/src/views/setup.js";
 import {
@@ -21,6 +28,7 @@ import {
   type ControlData,
 } from "../../packages/discord-panels/src/views/control.js";
 import { ComponentType } from "discord-api-types/v10";
+const issueFixture=async()=>`private:${randomUUID()}.${"a".repeat(22)}`;
 const now = new Date("2026-09-30T09:00:00Z");
 const weekly = {
   reply: {
@@ -154,14 +162,17 @@ const escape = (value: string) =>
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+let renderLocale:"ja"|"en"="en";
 function markdown(value: string) {
   return escape(
     value
+      .replace(/<#7[0-9]{17}>/g,"#🎨創作と資料_作品を投稿するためのとても長い架空のチャンネル名")
       .replace(/<#111111111111111114>/g, "#general")
       .replace(/<#111111111111111113>/g, "#staff-alerts")
       .replace(/<@&111111111111111111>/g, "@Managers")
       .replace(/<@&111111111111111112>/g, "@Helpers")
-      .replace(/<t:\d+:R>/g, "3 seconds ago"),
+      .replace(/<t:(\d+):[fFdDtT]>/g,(_match,seconds)=>new Intl.DateTimeFormat(renderLocale,{dateStyle:"medium",timeStyle:"short",timeZone:"UTC"}).format(new Date(Number(seconds)*1000))+" UTC")
+      .replace(/<t:\d+:R>/g, renderLocale==="ja"?"3秒前":"3 seconds ago"),
   )
     .split("\n")
     .map((line) =>
@@ -191,7 +202,7 @@ function component(node: Record<string, unknown>): string {
 }
 const output: Record<
   string,
-  { html: string; count: number; characters: number }
+  { html: string; count: number; characters: number;payload:Panel }
 > = {};
 for (const locale of ["ja", "en"] as const)
   for (const name of [
@@ -208,6 +219,7 @@ for (const locale of ["ja", "en"] as const)
     "link",
     "unlink",
   ] as const) {
+    renderLocale=locale;
     const page = [
       "home",
       "no-data",
@@ -261,7 +273,7 @@ for (const locale of ["ja", "en"] as const)
     const panel =
       name === "error"
         ? await errorPanel(
-            async () => "preview",
+            issueFixture,
             {
               category: "DATABASE_FAILURE",
               effect: "UNKNOWN",
@@ -281,13 +293,13 @@ for (const locale of ["ja", "en"] as const)
             )
           : name === "unlink"
             ? await disconnectPanel(
-                async () => "preview",
+                issueFixture,
                 "fixture-version",
                 locale,
               )
             : name === "setup"
               ? await guidedSetupPanel(
-                  async () => "preview",
+                  issueFixture,
                   {
                     required: true,
                     recommendedMode: "fallback",
@@ -306,7 +318,7 @@ for (const locale of ["ja", "en"] as const)
                   locale,
                 )
               : await controlPanel(
-                  async () => "preview",
+                  issueFixture,
                   page as Parameters<typeof controlPanel>[1],
                   data,
                   locale,
@@ -317,11 +329,12 @@ for (const locale of ["ja", "en"] as const)
         .map((node) => component(node as unknown as Record<string, unknown>))
         .join(""),
       count: componentCount({ components: panel.components }),
-      characters: JSON.stringify(panel).length,
+      characters: JSON.stringify(panel).length,payload:panel,
     };
   }
 for (const locale of ["ja", "en"] as const) {
-  const issue = async () => "preview",
+  renderLocale=locale;
+  const issue = issueFixture,
     panels = {
       "detailed-menu": await analysisMenuPanel(
         issue,
@@ -338,7 +351,7 @@ for (const locale of ["ja", "en"] as const) {
       "detailed-preview": await analysisPreviewPanel(
         issue,
         {
-          request: { type: "OVERALL", days: 30 },
+          request: { type: "OVERALL", days: 30, periodStart: run.period_start.toISOString(), periodEnd: run.period_end.toISOString() },
           scope: { mode: "all", channelIds: [] },
           availability: "INSUFFICIENT_DATA",
           quality: "NO_DATA",
@@ -349,7 +362,8 @@ for (const locale of ["ja", "en"] as const) {
           duplicate: null,
           configRevision: 1,
           inputFingerprint: run.input_fingerprint,
-          estimate: "1–3",
+          estimate: null,consumeCount:1,correctionOf:null,
+          targetChannelCount: 1,
         },
         locale,
       ),
@@ -398,7 +412,41 @@ for (const locale of ["ja", "en"] as const) {
         .map((node) => component(node as unknown as Record<string, unknown>))
         .join(""),
       count: componentCount({ components: panel.components }),
-      characters: JSON.stringify(panel).length,
+      characters: JSON.stringify(panel).length,payload:panel,
     };
 }
+for (const locale of ["ja","en"] as const) {
+ renderLocale=locale;
+ const issue=issueFixture,known={...result.metrics[0]!,quality:"COMPLETE" as const,evidence:{...result.metrics[0]!.evidence,value:0,observationState:"OBSERVED" as const,coverageState:"COMPLETE" as const}};
+ const records:Record<string,Panel>={
+  "current-completed":await analysisResultPanel(issue,{run:{...run,recipe_version:analysisRecipeVersion,target_channel_ids:["111111111111111114"],calculated_at:new Date("2026-10-08T09:00:00Z"),conditions:{type:"OVERALL",periodStart:run.period_start.toISOString(),periodEnd:run.period_end.toISOString()}},result:{...result,summary:"OBSERVED",dataQuality:"COMPLETE",metrics:[["observed_posts",18],["observed_replies",12],["first_reply_seconds",120],["voice_copresence",4],["event_signups",6]].map(([key,value])=>({...known,key:String(key),unit:key==="first_reply_seconds"?"SECONDS":"COUNT",evidence:{...known.evidence,value:Number(value),sampleSize:18}})),baseline:{runId:"00000000-0000-4000-8000-000000000001",changes:[{key:"first_reply_seconds",before:240,after:120,unit:"SECONDS"},{key:"observed_posts",before:12,after:18,unit:"COUNT"}]} }},locale),
+  "correction-free":await analysisPreviewPanel(issue,{request:{type:"OVERALL",days:30,periodStart:run.period_start.toISOString(),periodEnd:run.period_end.toISOString(),correctionOf:run.id},scope:{mode:"include",channelIds:["111111111111111114"]},availability:"AVAILABLE",quality:"COMPLETE",metrics:[known],periodStart:run.period_start,periodEnd:run.period_end,usage:{remaining:0,reserved:0,consumed:0},duplicate:null,configRevision:1,inputFingerprint:run.input_fingerprint,estimate:null,targetChannelCount:1,consumeCount:0,correctionOf:run.id},locale),
+  "old-correction-review":await analysisResultPanel(issue,{run:{...run,scope_bug_impact:"POSSIBLE_CATEGORY_PARENT"},result},locale),
+  "zero-uses-home":await controlPanel(issue,"overview",{analysis:{remaining:0,latest:null,attentionCount:0}},locale),
+  "verified-zero":await basicAnalysisPanel(issue,{basicAnalysis:{result:{...result,metrics:[known]},from:run.period_start,to:run.period_end,channelCount:1}},locale,"posts"),
+  "permission-missing":await errorPanel(issue,"permission",locale,undefined,"CHANNEL_PERMISSION_MISSING"),
+  "waiting":await analysisResultPanel(issue,{run:{...run,status:"QUEUED"},result:null},locale),
+  "failed":await analysisResultPanel(issue,{run:{...run,status:"FAILED"},result:null},locale),
+  "history-next-page":await analysisHistoryPanel(issue,{runs:Array.from({length:5},(_,i)=>({...run,id:randomUUID(),requested_at:new Date(run.requested_at.getTime()-i*1000)})),nextCursor:randomUUID(),previousCursor:randomUUID()},locale),
+  "places-last-page":await setupPlacesPanel(issue,{id:run.id,settings_revision:1,version:1,step:4,applied_at:null,draft:{analysisScope:{mode:"include",channelIds:Array.from({length:230},(_,i)=>String(777777777777777770n+BigInt(i)))},helperEnabled:false,helperChannelId:null,managerRoleIds:[],newMemberGoals:[],skipped:[]}},locale,22),
+  "attention-confirmation":await analysisAttentionConfirmationPanel(issue,{run,result:{...result,concerns:[{key:"waiting_response",metricKey:"waiting_response",reason:"WAITING_RESPONSE",value:3,evidence:known.evidence}]}},"waiting_response",false,locale),
+ };
+ for(let index=0;index<8;index++){
+  const fixture=stabilizationServers[index]!,adaptive=stabilizationUi(index),scope=resolveAnalysisScope(fixture.model,fixture.scope,adaptive.capabilities.channels),channelCount=scope.actualChannelIds.length;
+  const quality=index===6?"PARTIAL" as const:"COMPLETE" as const;
+  const metrics=[["observed_posts",18],["observed_replies",12],["new_members",3],["first_reply_seconds",120],["waiting_response",1],["showcase_posts",6],["observed_comments",9],["observed_reactions",14],["announcement_posts",2],["poll_participants",5],["voice_copresence",4],["event_signups",6],["event_attendance",4]].map(([key,value])=>({...known,key:String(key),quality,unit:key==="first_reply_seconds"?"SECONDS" as const:"COUNT" as const,evidence:{...known.evidence,value:Number(value),sampleSize:18,coverageState:quality}}));
+  const representativeResult={...result,summary:"OBSERVED" as const,dataQuality:quality,metrics};
+  const data={community:{...community,adaptive} as ControlData["community"],analysis:{remaining:0,latest:null,attentionCount:0},basicAnalysis:{result:representativeResult,from:run.period_start,to:run.period_end,channelCount}};
+  records[`representative-${fixture.id}`]=await controlPanel(issue,"analysis",data,locale);
+  records[`representative-${fixture.id}-home`]=await controlPanel(issue,"overview",data,locale);
+  const type=fixture.model.channels.some(c=>c.purpose==="SUPPORT")?"SUPPORT":fixture.model.channels.some(c=>c.purpose==="SHOWCASE")?"SHOWCASE":index===4?"VOICE":index===5?"EVENTS":"OVERALL";
+  records[`representative-${fixture.id}-preview`]=await analysisPreviewPanel(issue,{request:{type,days:30,periodStart:run.period_start.toISOString(),periodEnd:run.period_end.toISOString()},scope:fixture.scope,availability:index===6?"PARTIAL":"AVAILABLE",quality,metrics,periodStart:run.period_start,periodEnd:run.period_end,usage:{remaining:0,reserved:0,consumed:0},duplicate:null,configRevision:1,inputFingerprint:run.input_fingerprint,estimate:null,consumeCount:1,correctionOf:null,targetChannelCount:channelCount},locale);
+  if(index===6)records[`representative-${fixture.id}-places-last-page`]=await setupPlacesPanel(issue,{id:randomUUID(),settings_revision:1,version:1,step:4,applied_at:null,draft:{analysisScope:fixture.scope,communityModel:fixture.model,helperEnabled:false,helperChannelId:null,managerRoleIds:[],newMemberGoals:[],skipped:[]}},locale,Math.floor((fixture.scope.channelIds.length-1)/10));
+  records[`representative-${fixture.id}-setup`]=await setupWizardPanel(issue,{id:randomUUID(),settings_revision:1,version:1,step:4,applied_at:null,draft:{analysisScope:fixture.scope,communityModel:fixture.model,helperEnabled:false,helperChannelId:null,managerRoleIds:[],newMemberGoals:[],skipped:["notifications","team","goals"]}},locale);
+ }
+ for(const [name,panel] of Object.entries(records))output[`${locale}-${name}`]={html:(panel.components??[]).map(node=>component(node as unknown as Record<string,unknown>)).join(""),count:componentCount({components:panel.components}),characters:JSON.stringify(panel).length,payload:panel};
+}
+const exportDir=resolve(process.env.NEXUS_PANEL_EXPORT_DIR??"test-results/discord-payloads");mkdirSync(exportDir,{recursive:true});
+for(const [name,item] of Object.entries(output)){validatePanel(item.payload);writeFileSync(resolve(exportDir,`${name}.json`),JSON.stringify(item.payload,null,2)+"\n");}
+writeFileSync(resolve(exportDir,"manifest.json"),JSON.stringify({liveDiscordAcceptance:"NOT RUN",rendering:"HTML approximation generated from actual Components V2 payloads",cases:Object.keys(output)},null,2)+"\n");
 process.stdout.write(JSON.stringify(output));

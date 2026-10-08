@@ -1,0 +1,50 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 15548997,
+      "components": [
+        {
+          "type": 10,
+          "content": "## NEXUS cannot send to this channel\n-# Check View and Send permissions, or choose another notification channel."
+        },
+        {
+          "type": 14,
+          "divider": true,
+          "spacing": 1
+        },
+        {
+          "type": 10,
+          "content": "**Operation result**\nWhether a change was applied could not be confirmed. Check the current state before repeating the action."
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 1,
+              "label": "Choose another channel",
+              "custom_id": "private:3ede9e11-84c0-40d1-87c3-db61e2bf967f.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Check status",
+              "custom_id": "private:0107383a-3f4d-45c0-93f4-bf50be0097cb.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Home · Back",
+              "custom_id": "private:e4aa7bae-fc52-44a9-82fc-b7302f6d7d7b.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

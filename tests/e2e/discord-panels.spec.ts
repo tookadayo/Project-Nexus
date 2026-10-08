@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
+import {mkdirSync} from "node:fs";
 test("Discord Components V2 layout approximations fit and remain within Discord limits", async ({
   page,
 }) => {
@@ -10,6 +11,8 @@ test("Discord Components V2 layout approximations fit and remain within Discord 
       { encoding: "utf8" },
     ),
   ) as Record<string, { html: string; count: number }>;
+  const screenshotDir=process.env.NEXUS_DISCORD_SCREENSHOT_DIR??"test-results";
+  mkdirSync(screenshotDir,{recursive:true});
   for (const [name, preview] of Object.entries(previews)) {
     expect(preview.count, `${name} component count`).toBeLessThanOrEqual(40);
     await page.setViewportSize({ width: 700, height: 1000 });
@@ -18,7 +21,7 @@ test("Discord Components V2 layout approximations fit and remain within Discord 
     );
     await page.screenshot({
       caret: "initial",
-      path: `test-results/polish-discord-${name}.png`,
+      path: `${screenshotDir}/polish-discord-${name}.png`,
       fullPage: true,
     });
     expect(
@@ -34,7 +37,7 @@ test("Discord Components V2 layout approximations fit and remain within Discord 
     ).toBe(true);
     await page.screenshot({
       caret: "initial",
-      path: `test-results/polish-discord-${name}-mobile.png`,
+      path: `${screenshotDir}/polish-discord-${name}-mobile.png`,
       fullPage: true,
     });
   }

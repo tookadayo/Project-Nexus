@@ -6,57 +6,60 @@ import {measurementState,weeklyMeasurements,type Measurement} from '../../packag
 import {canOperatePanel,Components} from '../../packages/security/src/index.js';
 import {signalRegistry,validateSignal} from '../../packages/events/src/registry.js';
 import {notificationModal} from '../../apps/interaction/src/settings-modal.js';
+import {run,result} from "../fixtures/analysis-panels";
 import {pricingMetadata} from '../../packages/settings/src/plan-registry.js';
 
 const now=new Date('2026-09-30T09:00:00Z'),day=86400000;
 const measured=(value:number|null,previous:number|null=null,state:Measurement['state']='READY'):Measurement=>({state,value,previous,sample:10,numerator:7,eligible:12,responded:10,activityFromDay:7,needed:0,from:'2026-09-20T09:00:00Z',through:'2026-09-27T09:00:00Z',observationDays:3});
 const community=(overrides:Record<string,unknown>={})=>({arrivalCount:0,daily:{ready:true,todayJoined:0,todayConnected:0,attentionCount:0,timezone:'Asia/Tokyo'},attention:[],suggestion:null,...overrides}) as unknown as ControlData['community'];
 const settings={analysisScope:{mode:'all',channelIds:[]},managerRoleIds:[],helperRoleIds:[],weeklySummaryEnabled:true,weeklySummaryChannelId:'111111111111111111',weeklySummaryDay:1,weeklySummaryHour:9,timezone:'Asia/Tokyo',helperEnabled:true,helperChannelId:'111111111111111111',firstResponseMinutes:20,goalPreset:null,newMemberGoals:['reply'],importantChannels:[],uiLanguage:'ja',detailedRetentionDays:30,revision:2,setupVersion:2,setupSteps:{scope:true,team:true,notifications:true,goals:true}} satisfies NonNullable<ControlData['settings']>;
-async function render(page:'overview'|'settings'|'analysis',data:ControlData,locale:'ja'|'en',section:'main'|'notifications'|'team'|'goals'='main'){
+async function render(page:'overview'|'settings'|'analysis'|'community',data:ControlData,locale:'ja'|'en',section:'main'|'notifications'|'team'|'goals'='main'){
  const intents:Record<string,unknown>[]=[];
  const panel=await controlPanel(async intent=>{intents.push(intent);return `test-${intents.length-1}`;},page,{updatedAt:now,...data},locale,section);
  const container=panel.components?.[0];if(container?.type!==ComponentType.Container)throw new Error('Missing container');
  const rows=container.components.filter(item=>item.type===ComponentType.ActionRow);
  return {panel,json:JSON.stringify(panel),intents,children:container.components,rows,buttons:rows.flatMap(row=>row.components).filter(component=>component.type===ComponentType.Button)};
 }
-it.each(['ja','en'] as const)('keeps missing, no members and true zero distinct on Home (%s)',async locale=>{
+it.each(['ja','en'] as const)('keeps confirmed zero and unavailable observations distinct across Home and activity (%s)',async locale=>{
  const noMembers=await render('overview',{community:community()},locale);
- expect(noMembers.json).toContain(locale==='ja'?'過去30日の参加者: 0人':'Joined in the last 30 days: 0');
- expect(noMembers.json).toContain(locale==='ja'?'0件':'0 posts');
+ expect(noMembers.json).toContain(locale==='ja'?'現在、対応が必要な項目はありません。':'No items currently require action.');
  expect(noMembers.json).toContain(locale==='ja'?'基本の分析':'Basic analysis');
- const zero=await render('analysis',{community:community({daily:{ready:true,todayJoined:4,todayConnected:0,attentionCount:0}})},locale);
- expect(zero.json).toContain(locale==='ja'?'0人':'0 people');
+ const metric={...result.metrics[0]!,quality:'COMPLETE' as const,evidence:{...result.metrics[0]!.evidence,value:0,observationState:'OBSERVED' as const,coverageState:'COMPLETE' as const}};
+ const zero=await render('analysis',{basicAnalysis:{result:{...result,metrics:[metric]},from:run.period_start,to:run.period_end,channelCount:1}},locale);
+ expect(zero.json).toContain(locale==='ja'?'0件':'0 items');
  const unavailable=await render('overview',{community:community({daily:{ready:false,todayJoined:null,todayConnected:null,attentionCount:null}})},locale);
- expect(unavailable.json).toContain(locale==='ja'?'データを確認できません':'Data is unavailable');
- expect(unavailable.json).not.toContain(locale==='ja'?'0件':'0 posts');
+ expect(unavailable.json).toContain(locale==='ja'?'現在の状況を確認できません':'The current situation is unavailable');
+ expect(unavailable.json).not.toContain(locale==='ja'?'対応が必要な項目はありません':'No items currently require action');
 });
-it.each(['ja','en'] as const)('puts Attention first and offers a direct action before Today (%s)',async locale=>{
+it.each(['ja','en'] as const)('keeps activity, review and detailed analysis in stable positions (%s)',async locale=>{
  const home=await render('overview',{community:community({daily:{ready:true,todayJoined:4,todayConnected:3,attentionCount:2},attention:[{channelId:'111111111111111111',waitingMinutes:42}]})},locale);
  const sections=home.children.filter(item=>item.type===ComponentType.Section);
  expect(sections).toHaveLength(3);
- expect(sections[0]!.components[0]).toMatchObject({content:expect.stringContaining(locale==='ja'?'要確認':'Needs review')});
- expect(sections[0]!.accessory).toMatchObject({style:ButtonStyle.Primary,custom_id:expect.any(String)});
+ expect(sections[0]!.components[0]).toMatchObject({content:expect.stringContaining(locale==='ja'?'基本の分析':'Basic analysis')});
+ expect(sections[1]!.components[0]).toMatchObject({content:expect.stringContaining(locale==='ja'?'要確認':'Needs review')});
+ expect(sections[2]!.accessory).toMatchObject({style:ButtonStyle.Primary,custom_id:expect.any(String)});
  expect(home.intents.find(item=>item.page==='attention')).toMatchObject({action:'controlNavigate'});
 });
 it('offers exactly five Home actions and three Section destinations',async()=>{
  const home=await render('overview',{community:community(),dashboardUrl:'https://nexus.example/dashboard/111111111111111111'},'en');
- for(const page of ['attention','newMembers','analysis'])expect(home.intents).toContainEqual({action:'controlNavigate',page});
+ expect(home.intents).toContainEqual({action:'analysisMenu'});
+ for(const page of ['attention','analysis'])expect(home.intents).toContainEqual({action:'controlNavigate',page});
  expect(home.buttons).toHaveLength(2);
  expect(home.children.filter(item=>item.type===ComponentType.Section)).toHaveLength(3);
  expect(home.rows.flatMap(row=>row.components).filter(item=>item.type===ComponentType.StringSelect)).toHaveLength(0);
  expect(home.json).toContain('More');
  expect(home.buttons.every(button=>button.style===ButtonStyle.Secondary)).toBe(true);
 });
-it.each(['ja','en'] as const)('only shows supported weekly comparisons and suggestions (%s)',async locale=>{
+it.each(['ja','en'] as const)('only shows supported weekly comparisons and suggestions in measurement details (%s)',async locale=>{
  const weekly={reply:measured(18,24),connection:measured(72,64),retention:measured(48,null)};
- const home=await render('analysis',{community:community({weekly})},locale);
+ const home=await render('community',{community:community({weekly})},locale);
  expect(home.json).toContain(locale==='ja'?'前の比較期間より6分早い':'6 minutes faster than the previous comparison period');
  expect(home.json).toContain('+8pt');
  expect(home.json).not.toContain(locale==='ja'?'分析結果':'What NEXUS noticed');
- const suggested=await render('analysis',{community:community({weekly,suggestion:{key:'reply_rescue',basis:{newcomerMinutes:32,continuingMinutes:18}},compare:{newcomers:{members:10},continuing:{members:10}}})},locale);
+ const suggested=await render('community',{community:community({weekly,suggestion:{key:'reply_rescue',basis:{newcomerMinutes:32,continuingMinutes:18}},compare:{newcomers:{members:10},continuing:{members:10}}})},locale);
  expect(suggested.intents.some(item=>item.action==='controlTryImprove')).toBe(true);
  expect(suggested.json).toContain(locale==='ja'?'詳しく分析する':'Start detailed analysis');
- const collecting=await render('analysis',{community:community({weekly:{reply:measured(null,null,'COLLECTING'),connection:measured(null,null,'NO_ELIGIBLE_MEMBERS'),retention:measured(null,null,'UNAVAILABLE')}})},locale);
+ const collecting=await render('community',{community:community({weekly:{reply:measured(null,null,'COLLECTING'),connection:measured(null,null,'NO_ELIGIBLE_MEMBERS'),retention:measured(null,null,'UNAVAILABLE')}})},locale);
  expect(collecting.json).not.toContain('+8pt');
  expect(collecting.json).toContain(locale==='ja'?'まだ比較できる':'Not enough data to compare');
 });

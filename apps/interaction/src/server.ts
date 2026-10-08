@@ -312,13 +312,11 @@ export async function handleGatewayInteraction(
       return;
     }
   }
-  const privateResponse = Boolean(
-    customId && Components.kind(customId) === "ephemeral",
-  );
+  // A permanent panel is an entry point. Each click opens the actor's own
+  // deferred reply, including legacy nav/custom IDs, rather than editing it.
+  const privateResponse = input.isMessageComponent();
   try {
-    if (input.isMessageComponent() && !privateResponse)
-      await input.deferUpdate();
-    else await input.deferReply({ flags: 64 });
+    await input.deferReply({ flags: 64 });
     opts.health?.acknowledged();
   } catch {
     opts.health?.failed("ack_failed");
@@ -406,14 +404,9 @@ export async function handleGatewayInteraction(
       interactionLocale: input.locale,
       guildLocale: input.guildLocale ?? undefined,
     });
-    if (input.isMessageComponent() && !privateResponse)
-      await input
-        .followUp({ content: t(locale, "interaction.saveFailed"), flags: 64 })
-        .catch(() => {});
-    else
-      await input
-        .editReply({ content: t(locale, "interaction.saveFailed") })
-        .catch(() => {});
+    await input
+      .editReply({ content: t(locale, "interaction.saveFailed"),allowedMentions:{parse:[]} })
+      .catch(() => {});
   }
 }
 export function createInteractionServer(opts: {
@@ -637,10 +630,7 @@ export function createInteractionServer(opts: {
     } as const;
     const contextName = input.data.name as
       keyof typeof contextAction | undefined;
-    const privateResponse = Boolean(
-      input.data.custom_id &&
-      Components.kind(input.data.custom_id) === "ephemeral",
-    );
+    const privateResponse = input.type === 3;
     const job: InteractionJob = {
       privateResponse: privateResponse || input.type === 5,
       id: input.id,

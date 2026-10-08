@@ -1,0 +1,84 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## NEXUS\n-# This server’s activity"
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### Basic analysis\nView posts, replies and new participants.\nBasic analysis is always available without using an analysis run."
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 2,
+            "label": "View activity",
+            "custom_id": "private:f98af860-bd1f-41f5-b480-2819c4a2e78e.aaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### Needs review\nThe current situation is unavailable. Check the connection."
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 2,
+            "label": "View reviews",
+            "custom_id": "private:036e3305-452e-45fe-8e74-092060a03090.aaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### Detailed analysis\nSummarise changes and points to review for your configured purposes.\nDetailed analyses remaining: 0\nLatest detailed analysis: Not run yet"
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 1,
+            "label": "Start detailed analysis",
+            "custom_id": "private:de41d52e-6452-4e38-a2a1-dfba421d2850.aaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "type": 10,
+          "content": "-# Replies do not describe message meaning. Voice co-presence does not prove conversation; event signup does not prove attendance."
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Open settings",
+              "custom_id": "private:267415d6-aa0e-4fd7-adfb-b26428356946.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "More",
+              "custom_id": "private:746ae6da-621f-447b-b376-9530e462340e.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

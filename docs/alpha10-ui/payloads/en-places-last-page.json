@@ -1,0 +1,91 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## Review selected places"
+        },
+        {
+          "type": 10,
+          "content": "**Selected places: 230**\nOnly the places selected now are saved. Future additions are not included automatically."
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777990>**\nNot configured"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777991>**\nNot configured"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777992>**\nNot configured"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777993>**\nNot configured"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777994>**\nNot configured"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777995>**\nNot configured"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777996>**\nNot configured"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777997>**\nNot configured"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777998>**\nNot configured"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777999>**\nNot configured"
+        },
+        {
+          "type": 10,
+          "content": "**Places to analyse**\n221–230 / 230 places"
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Back",
+              "custom_id": "private:7690cc2c-c0d2-4985-b21a-ca17a82acf37.aaaaaaaaaaaaaaaaaaaaaa",
+              "disabled": false
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Next",
+              "custom_id": "private:5bc6af4a-d668-4796-93a6-4b7e5662b229.aaaaaaaaaaaaaaaaaaaaaa",
+              "disabled": true
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Review your settings",
+              "custom_id": "private:f1170453-1db6-41af-9786-9a0aafbfbce3.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

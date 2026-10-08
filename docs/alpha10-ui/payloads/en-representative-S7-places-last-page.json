@@ -1,0 +1,87 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## Review selected places"
+        },
+        {
+          "type": 10,
+          "content": "**Selected places: 319**\nOnly the places selected now are saved. Future additions are not included automatically."
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070321>**\nGeneral conversation"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070322>**\nShowcase"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070323>**\nGeneral conversation"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070324>**\nGeneral conversation"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070325>**\nGeneral conversation"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070326>**\nGeneral conversation"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070327>**\nGeneral conversation"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070328>**\nGeneral conversation"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070329>**\nShowcase"
+        },
+        {
+          "type": 10,
+          "content": "**Places to analyse**\n311–319 / 319 places"
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Back",
+              "custom_id": "private:68a32aa6-1d2d-4828-9d56-cf439c6dde38.aaaaaaaaaaaaaaaaaaaaaa",
+              "disabled": false
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Next",
+              "custom_id": "private:70113e61-60b5-4f12-a93d-1db820f48e78.aaaaaaaaaaaaaaaaaaaaaa",
+              "disabled": true
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Review your settings",
+              "custom_id": "private:57810867-fdf6-4b8d-b1e6-30f75bbc8c33.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
