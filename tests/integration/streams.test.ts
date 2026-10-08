@@ -394,25 +394,35 @@ it("runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
       )
     ).rows[0]!;
     adminMessageId = publicPanelId;
-    const pageControl = controls(discord.panels.get(fixed.message_id)).find(
-      (item) => item.placeholder === "Choose a page",
-    )!;
+    const pageControls = controls(discord.panels.get(fixed.message_id));
+    let pageControl: Record<string, unknown> | undefined;
+    for (const control of pageControls) {
+      const intent = await tokens.read(
+        db,
+        s,
+        String(control.custom_id),
+        vault.hash(s, admin),
+      );
+      if (intent.action === "controlNavigate" && intent.page === "analysis")
+        pageControl = control;
+    }
     expect(pageControl).toBeDefined();
     await deliver(
       admin,
-      { custom_id: pageControl.custom_id, values: ["analysis"] },
+      { custom_id: pageControl!.custom_id },
       3,
       fixed.message_id,
     );
     expect(JSON.stringify(discord.panels.get(fixed.message_id))).toContain(
-      "Insights",
+      "Analysis",
     );
     expect(discord.calls.filter((call) => call === "sendPanel")).toHaveLength(
       1,
     );
     const settingControl = controls(discord.panels.get(fixed.message_id)).find(
-      (item) => item.placeholder === "Choose a page",
+      (item) => item.placeholder === "Choose a page" && item.type === 3,
     )!;
+    expect(settingControl).toBeDefined();
     await deliver(
       user,
       { custom_id: settingControl.custom_id, values: ["settings"] },
@@ -421,7 +431,7 @@ it("runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
     );
     expect(JSON.stringify(discord.panels.get("reply"))).toContain("permission");
     expect(JSON.stringify(discord.panels.get(fixed.message_id))).toContain(
-      "Insights",
+      "Analysis",
     );
     const latest = await settings.get(s);
     await settings.update(

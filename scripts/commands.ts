@@ -44,7 +44,7 @@ const commands = [
     "unlink",
     "Disconnect the Web Dashboard after confirmation",
     "接続解除",
-    "確認後にWeb Dashboardの接続を解除します",
+    "確認後にWeb画面の接続を解除します",
   ],
 ] as const;
 export function buildNexusCommand() {
@@ -67,9 +67,9 @@ export function buildNexusCommand() {
   command.addSubcommand((sub) =>
     sub
       .setName("overview")
-      .setDescription("Community snapshot and observation coverage")
+      .setDescription("Open the NEXUS Home")
       .setDescriptionLocalizations({
-        ja: "コミュニティの観測とCoverageを確認",
+        ja: "サーバーの状況とデータの有無を確認",
       }),
   );
   for (const name of ["chart", "compare"] as const)

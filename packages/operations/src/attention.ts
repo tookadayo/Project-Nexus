@@ -24,7 +24,8 @@ export type AttentionType =
   | "EVENT_OPERATION"
   | "INTEGRATION_HEALTH"
   | "METRIC_TREND"
-  | "OPERATIONS_REQUEST";
+  | "OPERATIONS_REQUEST"
+  | "ANALYSIS_CONCERN";
 export type AttentionState =
   | "OPEN"
   | "ACKNOWLEDGED"
@@ -344,9 +345,12 @@ export class AttentionOperations {
     at = new Date(),
     snoozeUntil: Date | null = null,
     resolutionReason = "MANUAL",
+    authorize?: (tx:Tx)=>Promise<void>,
+    expectedVersion?:number,
   ) {
     return this.db.transaction().execute(async (tx) => {
       await privacyReadLock(tx, s);
+      await authorize?.(tx);
       const item = (
         await sql<{
           status: AttentionState;
@@ -357,6 +361,7 @@ export class AttentionOperations {
       ).rows[0];
       assert(item, "ATTENTION_NOT_FOUND", 404);
       if (item.status === status) return { status, duplicate: true };
+      assert(expectedVersion===undefined||item.version===expectedVersion,'REVISION_CONFLICT',409);
       assert(
         !["RESOLVED", "DISMISSED"].includes(item.status),
         "ATTENTION_NOT_ACTIVE",

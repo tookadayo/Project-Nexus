@@ -16,6 +16,10 @@ import {
   scopeForGuild,
 } from "../../packages/security/src/index.js";
 import { SettingsService } from "../../packages/settings/src/index.js";
+import {
+  SetupWizard,
+  type SetupDraft,
+} from "../../packages/operations/src/setup-wizard.js";
 import { OnboardingService } from "../../packages/onboarding/src/index.js";
 import { templateFlow } from "../../packages/onboarding/src/flow.js";
 import { FakeDiscord } from "../fixtures/discord.js";
@@ -967,35 +971,47 @@ it("completes setup with optional choices and confirms manager role grants", asy
     null,
     900,
   );
-  expect(
-    JSON.stringify(
-      await worker.dispatch(s, {
-        ...base,
-        id: "655555555555555575",
-        command: "",
-        customId: review,
-        messageId,
-      }),
+  const setupPreview = await worker.dispatch(s, {
+    ...base,
+    id: "655555555555555575",
+    command: "",
+    customId: review,
+    messageId,
+  });
+  expect(JSON.stringify(setupPreview)).toContain("1 / 4");
+  expect((await settings.get(s)).revision).toBe(old.revision);
+  const wizard = new SetupWizard(db),
+    reviewActor = {
+      key: vault.hash(s, userId),
+      permissions: "8",
+      roles: [],
+      source: "DISCORD_PANEL" as const,
+      requestId: randomUUID(),
+    };
+  let draft = (
+    await sql<SetupDraft>`SELECT * FROM setup_drafts WHERE ${tenant(s)} AND actor_hash=${reviewActor.key} ORDER BY created_at DESC LIMIT 1`.execute(
+      db,
+    )
+  ).rows[0]!;
+  for (let index = 0; index < 4; index++)
+    draft = await wizard.move(s, reviewActor, draft.id, draft.version, "next");
+  expect((await settings.get(s)).revision).toBe(old.revision);
+  await worker.dispatch(s, {
+    ...base,
+    id: "655555555555555579",
+    command: "",
+    customId: await tokens.issue(
+      db,
+      s,
+      {
+        action: "setupWizardConfirm",
+        draftId: draft.id,
+        version: draft.version,
+      },
+      reviewActor.key,
+      900,
     ),
-  ).toContain("Setup 1/4");
-  for (const [index, step] of (
-    ["scope", "team", "notifications", "goals"] as const
-  ).entries()) {
-    const revision = (await settings.get(s)).revision,
-      token = await tokens.issue(
-        db,
-        s,
-        { action: "setupNext", step, revision },
-        null,
-        900,
-      );
-    await worker.dispatch(s, {
-      ...base,
-      id: `65555555555555557${index + 6}`,
-      command: "",
-      customId: token,
-    });
-  }
+  });
   const upgraded = await settings.get(s);
   expect(upgraded.setupVersion).toBe(2);
   expect(upgraded.managerRoleIds).toEqual(old.managerRoleIds);
@@ -1004,7 +1020,7 @@ it("completes setup with optional choices and confirms manager role grants", asy
     id: "655555555555555580",
     command: "status",
   });
-  expect(JSON.stringify(status)).toContain("0.6.0-alpha.9");
+  expect(JSON.stringify(status)).toContain("0.6.0-alpha.10");
   expect(JSON.stringify(status)).not.toContain("PID");
 });
 it("distinguishes setup approval from safe skip during a legacy guild review", async () => {
@@ -1074,40 +1090,68 @@ it("distinguishes setup approval from safe skip during a legacy guild review", a
     ),
   });
   expect((await settings.get(s)).setupVersion).toBe(1);
-  let serial = 671;
-  let oldToken = "";
-  for (const [step, mode] of [
-    ["scope", "complete"],
-    ["team", "skip"],
-    ["notifications", "complete"],
-    ["goals", "skip"],
-  ] as const) {
-    const current = await settings.get(s),
-      customId = await tokens.issue(
-        db,
-        s,
-        { action: "setupNext", step, mode, revision: current.revision },
-        null,
-        900,
-      );
-    if (step === "scope") oldToken = customId;
+  const before = await settings.get(s),
+    wizard = new SetupWizard(db);
+  let draft = (
+    await sql<SetupDraft>`SELECT * FROM setup_drafts WHERE ${tenant(s)} AND actor_hash=${actor.key} ORDER BY created_at DESC LIMIT 1`.execute(
+      db,
+    )
+  ).rows[0]!;
+  const oldToken = await tokens.issue(
+    db,
+    s,
+    { action: "setupWizardNext", draftId: draft.id, version: draft.version },
+    actor.key,
+    900,
+  );
+  for (const [index, skip] of [false, false, true, true].entries()) {
     await worker.dispatch(s, {
       ...base,
-      id: `656666666666666${serial++}`,
-      customId,
+      id: `656666666666666${671 + index}`,
+      customId: await tokens.issue(
+        db,
+        s,
+        {
+          action: "setupWizardNext",
+          draftId: draft.id,
+          version: draft.version,
+          skip,
+        },
+        actor.key,
+        900,
+      ),
     });
+    draft = await wizard.get(s, actor, draft.id);
   }
+  expect(draft.step).toBe(4);
+  expect(draft.draft.skipped).toEqual(["team", "goals"]);
+  expect(await settings.get(s)).toEqual(before);
+  await worker.dispatch(s, {
+    ...base,
+    id: "656666666666666677",
+    customId: await tokens.issue(
+      db,
+      s,
+      {
+        action: "setupWizardConfirm",
+        draftId: draft.id,
+        version: draft.version,
+      },
+      actor.key,
+      900,
+    ),
+  });
   const done = await settings.get(s);
   expect(done.setupVersion).toBe(2);
   expect(done.analysisScope).toEqual({
     mode: "include",
     channelIds: [channelId],
   });
-  expect(done.managerRoleIds).toEqual([]);
-  expect(done.helperRoleIds).toEqual([]);
+  expect(done.managerRoleIds).toEqual([roleId]);
+  expect(done.helperRoleIds).toEqual([roleId]);
   expect(done.helperEnabled).toBe(true);
-  expect(done.goalPreset).toBeNull();
-  expect(done.newMemberGoals).toEqual([]);
+  expect(done.goalPreset).toBe("multiplayer");
+  expect(done.newMemberGoals).toEqual(["reply"]);
   await expect(
     worker.dispatch(s, {
       ...base,

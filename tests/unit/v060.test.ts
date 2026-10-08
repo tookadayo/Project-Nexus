@@ -29,7 +29,7 @@ const manifest = (file: string) =>
   JSON.parse(readFileSync(file, "utf8")) as { version: string };
 it("uses one SemVer source for every workspace package", () => {
   expect(VERSION).toMatch(/^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$/);
-  expect(VERSION).toBe("0.6.0-alpha.9");
+  expect(VERSION).toBe("0.6.0-alpha.10");
   expect(manifest("package.json").version).toBe(VERSION);
   expect(
     readFileSync("README.md", "utf8").match(
@@ -190,6 +190,8 @@ it("uses six top pages and offers explicit setup skips and role confirmation", a
     "panel",
     "diagnostics",
     "advanced",
+    "connection",
+    "other",
   ]);
   const intents: Record<string, unknown>[] = [];
   const issue = async (value: Record<string, unknown>) => {
@@ -234,9 +236,10 @@ it("uses six top pages and offers explicit setup skips and role confirmation", a
     expect(intents.some((item) => item.action === action)).toBe(true);
   await controlPanel(
     issue,
-    "overview",
+    "settings",
     { settings: { ...settings, setupVersion: 1 } },
     "en",
+    "other",
   );
   expect(intents.some((item) => item.action === "controlKeepSettings")).toBe(
     true,

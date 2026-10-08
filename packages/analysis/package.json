@@ -1,0 +1,9 @@
+{
+  "name": "@nexus/analysis",
+  "version": "0.6.0-alpha.10",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit -p ../../tsconfig.json"
+  }
+}

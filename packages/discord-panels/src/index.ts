@@ -6,6 +6,7 @@ import type {Issue} from './types.js';
 export * from './formatting.js';
 export * from './i18n/index.js';
 export * from './primitives.js';
+export * from './modal-primitives.js';
 export * from './status.js';
 export * from './theme.js';
 export * from './types.js';

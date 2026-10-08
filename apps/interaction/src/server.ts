@@ -1,3 +1,6 @@
+import { operationsAccess } from "../../../packages/operations/src/policy";
+import { assert } from "../../../packages/shared/src/index";
+import { questionModal } from "./question-modal.js";
 import { notificationModal } from "./settings-modal.js";
 import { promotionModal } from "./billing-modal";
 import { OperationsIntake } from "../../../packages/operations/src/intake";
@@ -10,7 +13,6 @@ import {
   verifyInteraction,
   scopeForGuild,
   Components,
-  canOperatePanel,
 } from "../../../packages/security/src/index.js";
 import { SettingsService } from "../../../packages/settings/src/index.js";
 import {
@@ -235,20 +237,10 @@ export async function handleGatewayInteraction(
             intent.action !== "controlModelEdit"
           )
             throw new Error("INVALID_MODAL_ACTION");
-          const roles =
-            input.member && "roles" in input.member
-              ? Array.isArray(input.member.roles)
-                ? input.member.roles
-                : [...input.member.roles.cache.keys()]
-              : [];
-          if (
-            !canOperatePanel(
-              input.memberPermissions?.bitfield.toString() ?? "0",
-              roles,
-              [settings.adminRoleId, ...settings.managerRoleIds],
-            )
-          )
-            throw new Error("ADMIN_REQUIRED");
+          if(!opts.discord)throw new Error('AUTHORIZATION_UNAVAILABLE');
+          const authorization=await new ServerAuthorization(opts.discord,new SettingsService(opts.db),opts.vault).snapshot(s,userId,'DISCORD_PANEL',input.id);
+          assert(!authorization.member.bot&&Date.now()-authorization.checkedAt<=10000,'AUTHORIZATION_EXPIRED',403);
+          await opts.db.transaction().execute(tx=>operationsAccess(tx,s,authorization.actor,'CONFIGURE'));
           if (intent.action === "controlModelEdit") {
             const id = await opts.components.issue(
               opts.db,
@@ -273,40 +265,7 @@ export async function handleGatewayInteraction(
             { ...intent, action: "editNodeSave" },
             opts.vault.hash(s, userId),
           );
-          return {
-            title: t(locale, "modal.title").slice(0, 45),
-            custom_id: id,
-            components: [
-              {
-                type: 1 as const,
-                components: [
-                  {
-                    type: 4 as const,
-                    style: 1 as const,
-                    custom_id: "question",
-                    label: t(locale, "modal.question").slice(0, 45),
-                    value: String(intent.question),
-                    required: true,
-                    max_length: 500,
-                  },
-                ],
-              },
-              {
-                type: 1 as const,
-                components: [
-                  {
-                    type: 4 as const,
-                    style: 2 as const,
-                    custom_id: "options",
-                    label: t(locale, "modal.options").slice(0, 45),
-                    value: String(intent.options),
-                    required: true,
-                    max_length: 2000,
-                  },
-                ],
-              },
-            ],
-          };
+          return questionModal(id, locale, intent);
         })(),
         1200,
       );
@@ -615,16 +574,10 @@ export function createInteractionServer(opts: {
                 type: 4,
                 data: { flags: 64, content: t(locale, "modal.expired") },
               };
-            if (
-              !canOperatePanel(input.member.permissions, input.member.roles, [
-                settings.adminRoleId,
-                ...settings.managerRoleIds,
-              ])
-            )
-              return {
-                type: 4,
-                data: { flags: 64, content: t(locale, "modal.admin") },
-              };
+            if(!opts.discord)throw new Error('AUTHORIZATION_UNAVAILABLE');
+            const authorization=await new ServerAuthorization(opts.discord,new SettingsService(tx),opts.vault).snapshot(s,input.member.user.id,'DISCORD_PANEL',input.id);
+            assert(!authorization.member.bot&&Date.now()-authorization.checkedAt<=10000,'AUTHORIZATION_EXPIRED',403);
+            await operationsAccess(tx,s,authorization.actor,'CONFIGURE');
             if (intent.action === "controlModelEdit") {
               const id = await opts.components!.issue(
                 tx,
@@ -661,40 +614,7 @@ export function createInteractionServer(opts: {
             );
             return {
               type: 9,
-              data: {
-                title: t(locale, "modal.title").slice(0, 45),
-                custom_id: customId,
-                components: [
-                  {
-                    type: 1,
-                    components: [
-                      {
-                        type: 4,
-                        style: 1,
-                        custom_id: "question",
-                        label: t(locale, "modal.question").slice(0, 45),
-                        value: String(intent.question),
-                        required: true,
-                        max_length: 500,
-                      },
-                    ],
-                  },
-                  {
-                    type: 1,
-                    components: [
-                      {
-                        type: 4,
-                        style: 2,
-                        custom_id: "options",
-                        label: t(locale, "modal.options").slice(0, 45),
-                        value: String(intent.options),
-                        required: true,
-                        max_length: 2000,
-                      },
-                    ],
-                  },
-                ],
-              },
+              data: questionModal(customId, locale, intent),
             };
           }),
           1200,

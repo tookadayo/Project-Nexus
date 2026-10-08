@@ -1,3 +1,4 @@
+import {componentCopy} from '../i18n/components';
 import {
   ButtonStyle,
   ComponentType,
@@ -22,6 +23,7 @@ import {
   evidenceFraction,
   evidenceNote,
 } from "../../../shared/src/measurement-view";
+import {analysisCopy} from '../i18n/analysis';
 import { recipeNames } from "../../../shared/src/operations-copy";
 export async function adaptiveControlPanel(
   issue: Issue,
@@ -36,33 +38,21 @@ export async function adaptiveControlPanel(
     children: PanelChild[] = [];
   const title =
     page === "overview"
-      ? ja
-        ? "サーバー概要"
-        : "Server overview"
+      ? componentCopy(locale,'serverOverview')
       : page === "newMembers"
-        ? ja
-          ? "新しいメンバー"
-          : "New members"
+        ? componentCopy(locale,'newMembers')
         : page === "analysis"
-          ? ja
-            ? "分析"
-            : "Insights"
-          : ja
-            ? "計測方法"
-            : "Measurement method";
+          ? componentCopy(locale,'analysis')
+          : componentCopy(locale,'measurementMethod');
   const intentsAvailable =
     !m.integration || m.integration.intents.members === "AVAILABLE";
   if (m.integration?.severe)
     children.push(
       callout(
-        ja ? "計測を一部停止しています" : "Some measurements are paused",
+        componentCopy(locale,'someMeasurementsArePaused'),
         intentsAvailable
-          ? ja
-            ? "Discordとの接続を確認できません。この期間は比較に使用しません。"
-            : "The Discord connection is unavailable. This period is excluded from comparisons."
-          : ja
-            ? "必要なメンバー情報を正常に受信できていません。この期間は比較に使用しません。"
-            : "Required member information is unavailable. This period is excluded from comparisons.",
+          ? componentCopy(locale,'theDiscordConnectionIsUnavailableThisPeriod')
+          : componentCopy(locale,'requiredMemberInformationIsUnavailableThisPeriod'),
       ),
     );
   if (page === "overview") {
@@ -70,40 +60,32 @@ export async function adaptiveControlPanel(
       oldest = c.attention[0]?.waitingMinutes;
     children.push(
       callout(
-        ja ? "対応待ち" : "Attention",
+        componentCopy(locale,'attention'),
         count === null || count === undefined
-          ? ja
-            ? "新しい対応対象を確認できません"
-            : "New attention items cannot be observed"
-          : `${count} ${ja ? "件" : "items"}${oldest !== undefined ? ` · ${ja ? "最長" : "Oldest"} ${oldest} ${ja ? "分" : "min"}` : ""}`,
+          ? componentCopy(locale,'newAttentionItemsCannotBeObserved')
+          : `${count} ${componentCopy(locale,'items')}${oldest !== undefined ? ` · ${componentCopy(locale,'oldest')} ${oldest} ${componentCopy(locale,'min')}` : ""}`,
       ),
     );
     if (!large)
       children.push(
         metricGrid([
           {
-            label: ja ? "今日、新しく参加" : "Joined today",
+            label: componentCopy(locale,'joinedToday'),
             value:
               intentsAvailable &&
               c.daily.todayJoined !== null &&
               c.daily.todayJoined !== undefined
                 ? String(c.daily.todayJoined)
-                : ja
-                  ? "確認できません"
-                  : "Unknown",
+                : componentCopy(locale,'unknown'),
           },
           {
-            label: ja
-              ? "今日、最初の交流を確認"
-              : "First connection observed today",
+            label: componentCopy(locale,'firstConnectionObservedToday'),
             value:
               intentsAvailable &&
               c.daily.todayConnected !== null &&
               c.daily.todayConnected !== undefined
                 ? String(c.daily.todayConnected)
-                : ja
-                  ? "確認できません"
-                  : "Unknown",
+                : componentCopy(locale,'unknown'),
           },
         ]),
       );
@@ -111,16 +93,14 @@ export async function adaptiveControlPanel(
       children.push(
         metricGrid([
           {
-            label: ja ? "登録済みの対応" : "Saved open backlog",
+            label: componentCopy(locale,'savedOpenBacklog'),
             value: String(c.operations.openBacklog),
           },
           {
-            label: ja ? "対応完了時間の中央値" : "Median resolution time",
+            label: componentCopy(locale,'medianResolutionTime'),
             value:
               c.operations.medianResolutionSeconds === null
-                ? ja
-                  ? "まだ比較できません"
-                  : "Not ready"
+                ? componentCopy(locale,'notReady')
                 : `${Math.round(c.operations.medianResolutionSeconds / 60)} min`,
           },
           {
@@ -148,11 +128,11 @@ export async function adaptiveControlPanel(
     )
     .slice(0, page === "overview" ? (large ? 3 : 2) : 5);
   for (const metric of selected) {
-    const copy = metricCopy(metric, ja ? "ja" : "en");
+    const copy = metricCopy(metric, (locale==='ja'?'ja':'en'));
     children.push(
       callout(
         copy.label,
-        `${(large && ["directReplies", "postResponse"].includes(metric.key) ? evidenceFraction(metric.evidence, ja ? "ja" : "en") : undefined) ?? evidenceValue(metric.evidence, ja ? "ja" : "en")}${metric.evidence?.value !== null && metric.evidence?.value !== undefined ? copy.unit : ""}${large && metric.evidence?.sampleSize && metric.evidence.sampleSize >= 5 && metric.medianMinutes !== null && metric.medianMinutes !== undefined ? ` · ${ja ? "中央値" : "Median"} ${Math.round(metric.medianMinutes)} min${metric.p75Minutes !== null && metric.p75Minutes !== undefined ? ` · p75 ${Math.round(metric.p75Minutes)} min` : ""}` : ""}\n${evidenceNote(metric.evidence, ja ? "ja" : "en")}${page === "analysis" ? `\n${copy.definition}` : ""}`,
+        `${(large && ["directReplies", "postResponse"].includes(metric.key) ? evidenceFraction(metric.evidence, (locale==='ja'?'ja':'en')) : undefined) ?? evidenceValue(metric.evidence, (locale==='ja'?'ja':'en'))}${metric.evidence?.value !== null && metric.evidence?.value !== undefined ? copy.unit : ""}${large && metric.evidence?.sampleSize && metric.evidence.sampleSize >= 5 && metric.medianMinutes !== null && metric.medianMinutes !== undefined ? ` · ${componentCopy(locale,'median')} ${Math.round(metric.medianMinutes)} min${metric.p75Minutes !== null && metric.p75Minutes !== undefined ? ` · p75 ${Math.round(metric.p75Minutes)} min` : ""}` : ""}\n${evidenceNote(metric.evidence, (locale==='ja'?'ja':'en'))}${page === "analysis" ? `\n${copy.definition}` : ""}`,
       ),
     );
   }
@@ -162,23 +142,21 @@ export async function adaptiveControlPanel(
       children.push(
         callout(
           `${row.fromLabel[ja ? 0 : 1]} → ${row.toLabel[ja ? 0 : 1]}`,
-          `${evidenceValue(row.evidence, ja ? "ja" : "en", true)}${row.evidence.denominator !== null && row.evidence.numerator !== null ? ` · ${row.evidence.numerator} / ${row.evidence.denominator}` : ""}\n${evidenceNote(row.evidence, ja ? "ja" : "en")}`,
+          `${evidenceValue(row.evidence, (locale==='ja'?'ja':'en'), true)}${row.evidence.denominator !== null && row.evidence.numerator !== null ? ` · ${row.evidence.numerator} / ${row.evidence.denominator}` : ""}\n${evidenceNote(row.evidence, (locale==='ja'?'ja':'en'))}`,
         ),
       );
     if (!journeys.length)
       children.push(
         callout(
-          ja ? "計測方法を確認してください" : "Choose a measurement recipe",
-          ja
-            ? "Dashboardでサーバーの目的を確認すると、参加後の変化を表示できます。"
-            : "Confirm the community purpose in Dashboard to see participation transitions.",
+          componentCopy(locale,'chooseAMeasurementRecipe'),
+          componentCopy(locale,'confirmTheCommunityPurposeInWebScreen'),
         ),
       );
   }
   if (page === "community")
     children.push(
       callout(
-        ja ? "このサーバーで確認すること" : "What this server measures",
+        componentCopy(locale,'whatThisServerMeasures'),
         m.recipe?.definition
           ? (recipeNames[m.recipe.definition.preset]?.[ja ? 0 : 1] ??
               m.recipe.preset)
@@ -187,22 +165,20 @@ export async function adaptiveControlPanel(
               .join(" · "),
       ),
       callout(
-        ja ? "確認しないもの" : "Not observed",
-        ja
-          ? "メッセージ本文・DM・Voice音声・オンライン状態"
-          : "Message content, DMs, voice audio, and online status",
+        componentCopy(locale,'notObserved'),
+        componentCopy(locale,'messageContentDmsVoiceAudioAndOnline'),
       ),
     );
   const total = m.capabilities?.coverage;
   children.push(
     footer(
-      `${m.window.from.slice(0, 10)} — ${m.window.through.slice(0, 10)} · ${ja ? "確認できるチャンネル" : "Observed channels"} ${total?.observableChannels ?? "—"}${total?.totalState === "KNOWN" ? ` / ${total.knownTotalChannels}` : ja ? " · サーバー全体の数は確認できません" : " · Server-wide total unavailable"}`,
+      `${m.window.from.slice(0, 10)} — ${m.window.through.slice(0, 10)} · ${componentCopy(locale,'observedChannels')} ${total?.observableChannels ?? "—"}${total?.totalState === "KNOWN" ? ` / ${total.knownTotalChannels}` : componentCopy(locale,'serverwideTotalUnavailable')}`,
     ),
   );
   const rows: ActionRow[] = [
     await actionRow(issue, [
       {
-        label: ja ? "対応を見る" : "Attention",
+        label: componentCopy(locale,'attentionLabel'),
         action: "controlNavigate",
         data: { page: "attention" },
         publicEntry: true,
@@ -210,13 +186,13 @@ export async function adaptiveControlPanel(
         style: ButtonStyle.Primary,
       },
       {
-        label: ja ? "新規メンバー" : "New members",
+        label: componentCopy(locale,'newMembersLabel'),
         action: "controlNavigate",
         data: { page: "newMembers" },
         publicEntry: true,
       },
       {
-        label: ja ? "分析" : "Insights",
+        label: componentCopy(locale,'analysis'),
         action: "controlNavigate",
         data: { page: "analysis" },
         publicEntry: true,
@@ -236,7 +212,6 @@ export async function adaptiveControlPanel(
             "newMembers",
             "attention",
             "analysis",
-            "results",
             "settings",
           ] as const
         ).map((value) => ({
@@ -266,10 +241,11 @@ export async function adaptiveControlPanel(
     links.components.push({
       type: ComponentType.Button,
       style: ButtonStyle.Link,
-      label: "Dashboard",
+      label: t(locale,"control.openWeb"),
       url: data.dashboardUrl,
     });
   rows.push(links);
+  if(page==='analysis')rows.push(await actionRow(issue,[{label:analysisCopy(locale,'detailedAction'),action:'analysisMenu',publicEntry:true,style:ButtonStyle.Primary}]));
   return nexusPanel({
     title,
     accent: m.integration?.severe ? "warning" : large ? "nexus" : "healthy",

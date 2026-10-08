@@ -150,7 +150,10 @@ it("promotion and lock panels contain clear results without campaign internals",
       ),
     ).toContain("GROWTH");
     const modal = promotionModal("private:redeem", locale);
-    expect(modal.components[0]!.components[0]!.max_length).toBe(128);
+    const label=modal.components[0]!;
+    expect(label.type).toBe(18);
+    if(label.type!==18||label.component.type!==4)throw new Error('Expected Label + TextInput');
+    expect(label.component.max_length).toBe(128);
     expect(JSON.stringify(modal)).not.toContain("NXP-");
   }
 });

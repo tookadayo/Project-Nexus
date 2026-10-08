@@ -3,6 +3,10 @@ export const measurementDefinitions: Record<
   string,
   { version: string; surfaces: string[]; sources: string[] }
 > = {
+  analysisPosts: {version:"eligible-observed-post-count-v1",surfaces:["members","messages","textVisibility"],sources:["MESSAGE_CREATE"]},
+  analysisReplies: {version:"eligible-observed-post-reply-count-v1",surfaces:["members","messages","textVisibility"],sources:["MESSAGE_CREATE:REPLY"]},
+  analysisReplyLatency: {version:"eligible-observed-post-reply-median-v1",surfaces:["members","messages","textVisibility"],sources:["MESSAGE_CREATE:REPLY"]},
+  analysisWaiting: {version:"eligible-posts-no-observed-reply-after-one-day-v1",surfaces:["members","messages","textVisibility"],sources:["MESSAGE_CREATE","MESSAGE_CREATE:REPLY"]},
   new_members: {
     version: "eligible-members-v3",
     surfaces: ["members"],

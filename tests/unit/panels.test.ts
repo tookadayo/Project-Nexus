@@ -4,7 +4,6 @@ import {
   coverageLabel,
   controlPanel,
   controlPages,
-  settingsSections,
   panelPlacementWarning,
   diagnosticsPanel,
   errorPanel,
@@ -380,7 +379,8 @@ describe("NEXUS Discord design system", () => {
     ]);
     expect(
       intents.filter((intent) => intent.action === "controlNavigate"),
-    ).toHaveLength(controlPages.length + 5);
+    ).toHaveLength(10);
+    expect(intents.filter(intent=>intent.action==='controlNavigate'&&intent.page==='results')).toHaveLength(0);
     expect(
       intents.some(
         (intent) => intent.action === "settings" || intent.action === "improve",
@@ -426,8 +426,8 @@ describe("NEXUS Discord design system", () => {
         "notifications",
       ),
     );
-    for (const section of settingsSections.filter((value) => value !== "main"))
-      expect(panel).toContain(section);
+    for (const section of ['scope','notifications','team','goals','privacy','connection','other'])expect(panel).toContain(section);
+    for (const hidden of ['diagnostics','advanced','model'])expect(panel).not.toContain(`"value":"${hidden}"`);
     expect(panel).toContain("返信待ち通知");
     expect(panel).toContain("テスト通知");
     const summary = await controlPanel(

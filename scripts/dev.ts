@@ -1,3 +1,4 @@
+import { analysisRuntime } from "../apps/worker/src/analysis";
 import { AttentionOperations } from "../packages/operations/src/attention.js";
 import { CommunityOperationsWorker } from "../apps/worker/src/community-operations";
 import { loadEnvFile } from "node:process";
@@ -190,6 +191,7 @@ const connection = {
   ...(url.protocol === "rediss:" ? { tls: {} } : {}),
 };
 const queue = new Queue<Scope>("nexus-work", { connection });
+const analysis = analysisRuntime(db, vault, discord, connection);
 const sdk = process.env.OTEL_EXPORTER_OTLP_ENDPOINT
   ? new NodeSDK({ serviceName: "nexus" })
   : null;
@@ -358,6 +360,7 @@ async function stop() {
   stopped = true;
   await running;
   await gateway.stop();
+  await analysis.close();
   await worker.close();
   await queue.close();
   if (cfg.NEXUS_INTERACTION_TRANSPORT === "webhook") await http.close();

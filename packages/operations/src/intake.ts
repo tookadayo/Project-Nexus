@@ -1,3 +1,4 @@
+import {modalTextInput} from "../../discord-panels/src/modal-primitives";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { APIModalInteractionResponseCallbackData } from "discord-api-types/v10";
@@ -244,19 +245,7 @@ export class OperationsIntake {
       return {
         title: panel.title.slice(0, 45),
         custom_id: customId,
-        components: fields.map((field) => ({
-          type: 1 as const,
-          components: [
-            {
-              type: 4 as const,
-              custom_id: field.field_key,
-              label: field.label,
-              style: 2 as const,
-              required: field.required,
-              max_length: field.max_length,
-            },
-          ],
-        })),
+        components: fields.map((field) => modalTextInput(field.label, field.field_key, {paragraph:true,required:field.required,maxLength:field.max_length})),
       };
     });
   }

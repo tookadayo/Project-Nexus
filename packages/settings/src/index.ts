@@ -2,7 +2,7 @@ export * from "./billing/index";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
 import { sql, tenant, json, type Database, type Tx } from "../../db/src/index";
-import { canAdmin, canOperatePanel } from "../../security/src/index";
+import { actorPermissions } from "../../operations/src/policy";
 import { assert, type Scope } from "../../shared/src/index";
 import { saveRecipe, currentRecipe } from "./recipes";
 import { recipeDefinition } from "../../shared/src/measurement-recipes";
@@ -243,11 +243,7 @@ export class SettingsService {
       );
       const current = await this.get(s, tx);
       assert(
-        (actor.source === "DISCORD_PANEL" ? canOperatePanel : canAdmin)(
-          actor.permissions,
-          actor.roles,
-          [current.adminRoleId, ...current.managerRoleIds],
-        ),
+        (await actorPermissions(tx,s,actor)).includes('CONFIGURE'),
         "ADMIN_REQUIRED",
         403,
       );

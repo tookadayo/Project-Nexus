@@ -182,6 +182,7 @@ export async function collectionEpochs(
   s: Scope,
   from: Date,
   to: Date,
+  limit?:number,
 ): Promise<CollectionEpoch[]> {
   const rows = (
     await sql<{
@@ -192,7 +193,7 @@ export async function collectionEpochs(
       start_reason: string;
       end_reason: string | null;
       capability_snapshot_id: string | null;
-    }>`SELECT * FROM collection_epochs WHERE ${tenant(s)} AND started_at<${to} AND (ended_at IS NULL OR ended_at>${from}) ORDER BY started_at`.execute(
+    }>`SELECT * FROM collection_epochs WHERE ${tenant(s)} AND started_at<${to} AND (ended_at IS NULL OR ended_at>${from}) ORDER BY started_at ${limit?sql`LIMIT ${limit}`:sql``}`.execute(
       tx,
     )
   ).rows;

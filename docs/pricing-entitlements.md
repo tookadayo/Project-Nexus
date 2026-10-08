@@ -1,4 +1,4 @@
-# Pricing and entitlements v3 — 0.6.0-alpha.8
+# Pricing and entitlements v4 — 0.6.0-alpha.10
 
 NEXUS sells history, analysis depth and community operations. No Discord surface
 requires a paid plan merely to observe it. Correct UNKNOWN/PARTIAL states, Metric
@@ -31,7 +31,7 @@ from product capabilities. Configured Sandbox exposes real hosted purchase CTAs;
 production hides unapproved prices and requires every Live launch gate. Tax,
 public prices and production purchase availability require separate approval.
 
-`plan-registry.ts` separates canonical features from numeric limits, at revision 3. Existing purchased commercial Offering revision 2 remains immutable: new capability benefits do not mutate its financial identity. Limits cover guilds, historyDays, monthlyObservedMembers, customRecipes,
+`plan-registry.ts` separates canonical features from numeric limits, at revision 4. Existing purchased commercial Offering revision 2 remains immutable: new capability benefits do not mutate its financial identity. Limits cover guilds, historyDays, monthlyObservedMembers, customRecipes,
 automationRules, scheduledReports, teamSeats, webhooks and apiRequestsMonthly.
 The member allowance is secondary operational accounting, currently a **soft**
 guard: it does not drop measurement, report zeros or automatically charge overage.
@@ -74,3 +74,18 @@ This change does not extend physical retention or the public retention promise.
 Current alpha.8 implementation: [community operations](alpha8-community-operations.md)
 and [Stripe integration](billing/stripe-integration.md). Real Sandbox is tested;
 Stripe Live remains DISABLED.
+
+## Detailed analysis usage (alpha.10)
+
+Basic observations, existing charts and plan-appropriate history remain available
+regardless of detailed-analysis balance. A confirmed detailed analysis reserves
+one use; preview, reads, history and comparison consume none. Included uses per
+UTC calendar month are Free 1, Starter 3, Growth 5 and Scale 10. Enterprise is
+individually contracted and requires an internal audited grant. Included uses
+expire next month; upgrades increase that month's existing allowance, and
+downgrades retain already granted usage/configuration. Successful result commit
+consumes once; terminal failure releases without extending the original expiry.
+
+One-time pack catalog quantities are 1/3/5, separate from subscriptions. Pack
+sales are disabled, no prices are approved and no new Stripe objects are created.
+See [analysis lifecycle, recovery and limitations](alpha10-analysis-operations.md).

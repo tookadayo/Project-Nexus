@@ -1,10 +1,12 @@
+import { setupInteraction } from "./setup-interactions";
+import { analysisInteraction } from "./analysis-interactions";
+import {analysisUsage} from "../../../packages/analysis/src/index";
 import { AttentionOperations } from "../../../packages/operations/src/attention.js";
 import { OperationsIntake } from "../../../packages/operations/src/intake";
 import { operationsAccess } from "../../../packages/operations/src/policy";
 import { ExploreService } from "../../../packages/analytics/src/explore";
 import { chartQuerySchema } from "../../../packages/analytics/src/chart-spec";
 import { renderChartPng } from "../../../packages/analytics/src/chart-renderer";
-import { adaptivePresentation } from "../../../packages/presentation/src/adaptive";
 import {
   connectionCodePanel,
   disconnectPanel,
@@ -428,44 +430,9 @@ export class InteractionWorker {
       await this.db
         .transaction()
         .execute((tx) => operationsAccess(tx, s, actor, "READ"));
-      const overview = await adaptivePresentation(
-        this.db,
-        s,
-        current,
-        30,
-        new Date(),
-        0,
-      );
-      const summary = overview.metrics.filter((metric) =>
-        [
-          "directReplies",
-          "postResponse",
-          "voiceCopresence",
-          "eventSubscriptions",
-          "eventAttendance",
-        ].includes(metric.key),
-      );
-      const changes = await this.db.transaction().execute(async (tx) => {
-        await privacyReadLock(tx, s);
-        assert(
-          !(await new EntitlementService(tx).effective(s)).privacyDeleted,
-          "PRIVACY_DELETED",
-          403,
-        );
-        return (
-          await sql<{
-            n: number;
-            latest: Date | null;
-          }>`SELECT count(*)::int AS n,max(occurred_at) AS latest FROM attention_events WHERE ${tenant(s)} AND occurred_at>=now()-interval '7 days'`.execute(
-            tx,
-          )
-        ).rows[0]!;
-      });
-      return {
-        content: `**Community Snapshot**\n${summary.map((metric) => `${metric.definition}: ${metric.evidence?.value ?? "UNKNOWN"} · ${metric.evidence?.coverageState ?? "UNKNOWN"}`).join("\n")}\nCoverage: ${overview.coverage.ratio === null ? "UNKNOWN" : Math.round(overview.coverage.ratio * 100) + "%"}\n${locale === "ja" ? "記録された対応状況の変化（7日）" : "Recorded attention changes (7 days)"}: ${changes.n}${changes.latest ? " · " + changes.latest.toISOString() : ""}\n${locale === "ja" ? "イベント申込は出席ではありません。" : "Event signup is not attendance."}`,
-        allowed_mentions: { parse: [] },
-      };
+      return this.communityPanel((intent,publicEntry=false)=>this.tokens.issue(this.db,s,intent,publicEntry?null:actorHash,publicEntry?31536000:900),s,locale,'overview');
     }
+
     if (
       [
         "chart",
@@ -651,6 +618,14 @@ export class InteractionWorker {
         publicEntry && !setupFlow && !privateSettings ? null : actorHash,
         publicEntry && !setupFlow && !privateSettings ? 31536000 : 900,
       );
+    if(action==='setup'||action==='controlReviewSetup'||action.startsWith('setupWizard')||action.startsWith('analysis')) {
+      assert(!member.bot && Date.now()-authorization.checkedAt<=10000,"GUILD_MEMBER_REQUIRED",403);
+    }
+    if(action==='setup'||action==='controlReviewSetup')return setupInteraction(this.db,this.discord,s,actor,issue,locale,{action:'setupWizard'});
+    if (['analysisMenu','analysisPreview','analysisStart','analysisRerun','analysisHistory','analysisResult','analysisEvidence','analysisCompare','analysisAttention','analysisAttentionList','analysisAttentionItem','analysisAttentionUpdate'].includes(action)) {
+      return analysisInteraction(this.db,s,actor,issue,locale,intent,input.values,input.customId??input.id);
+    }
+    if (action.startsWith('setupWizard'))return setupInteraction(this.db,this.discord,s,actor,issue,locale,intent,input.values);
     const adminActions = [
       "controlRules",
       "controlNotificationSave",
@@ -761,10 +736,10 @@ export class InteractionWorker {
       adminActions.includes(action) ||
       ["link", "unlink", "unlinkConfirm", "unlinkCancel"].includes(action)
     )
-      assert(admin, "ADMIN_REQUIRED", 403);
+      await this.db.transaction().execute(tx=>operationsAccess(tx,s,actor,['controlNavigate','controlRefresh','controlAnalysis','controlChannelPage','controlAttentionPage','controlSettings','controlRules','overview','lifecycle','cohorts','diagnose','experiments','reports','status','settings','billing','panel'].includes(action)?'READ':['contextAdd','contextResolve','controlResolve','controlAcknowledge','controlSnoozeMenu','controlSnooze'].includes(action)?'OPERATE':'CONFIGURE'));
     onStage("operation");
     if (["controlModelSave", "controlModelRefresh"].includes(action)) {
-      assert(admin, "ADMIN_REQUIRED", 403);
+      await this.db.transaction().execute(tx=>operationsAccess(tx,s,actor,'CONFIGURE'));
       if (action === "controlModelRefresh")
         await requestCapabilityRefresh(this.db, s, "manual");
       else {
@@ -1064,35 +1039,6 @@ export class InteractionWorker {
         )
       ).rows[0];
       assert(active?.message_id === input.messageId, "COMPONENT_EXPIRED");
-    }
-    if (action === "setup") {
-      void recordProductEvent(this.db, s, "setup_started").catch(() => {});
-      if (!current.enabled)
-        await this.settings.update(s, actor, current.revision, {
-          enabled: true,
-        });
-      const review = await this.settings.get(s);
-      if (
-        review.setupVersion === 1 &&
-        Object.values(review.setupSteps).every(Boolean)
-      )
-        await this.settings.update(s, actor, review.revision, {
-          setupSteps: {
-            scope: false,
-            team: false,
-            notifications: false,
-            goals: false,
-          },
-        });
-      try {
-        await new CapabilityService(this.db, this.discord).refresh(
-          s,
-          current.onboardingMode,
-        );
-      } catch {
-        /* Guided setup explains the unavailable connection state. */
-      }
-      return this.communityPanel(issue, s, locale, "settings", "scope");
     }
     if (action === "setupHome")
       return this.communityPanel(issue, s, locale, "overview");
@@ -2180,21 +2126,6 @@ export class InteractionWorker {
         "overall",
         z.number().int().min(0).max(1000).parse(intent.index),
       );
-    if (action === "controlReviewSetup") {
-      if (
-        current.setupVersion === 1 &&
-        Object.values(current.setupSteps).every(Boolean)
-      )
-        await this.settings.update(s, actor, current.revision, {
-          setupSteps: {
-            scope: false,
-            team: false,
-            notifications: false,
-            goals: false,
-          },
-        });
-      return this.communityPanel(issue, s, publicLocale, "settings", "scope");
-    }
     if (action.startsWith("control")) {
       if (!setupFlow && !privateSettings) {
         const saved = (
@@ -2940,6 +2871,14 @@ export class InteractionWorker {
         panelChannelId: installed?.channel_id ?? null,
         setupSteps: current.setupSteps,
       };
+    }
+    if (page === 'overview') {
+      data.analysis=await this.db.transaction().execute(async tx=>{
+        await privacyReadLock(tx,s);
+        const usage=await analysisUsage(tx,s),latest=(await sql<{completed_at:Date}>`SELECT completed_at FROM analysis_runs WHERE ${tenant(s)} AND status='COMPLETED' AND retention_until>now() ORDER BY completed_at DESC LIMIT 1`.execute(tx)).rows[0]?.completed_at??null;
+        const count=(await sql<{n:number}>`SELECT count(*)::int AS n FROM attention_items WHERE ${tenant(s)} AND item_type='ANALYSIS_CONCERN' AND status IN ('OPEN','ACKNOWLEDGED','IN_PROGRESS')`.execute(tx)).rows[0]!.n;
+        return {remaining:usage.remaining,latest,attentionCount:count};
+      });
     }
     if (page === "settings") {
       const current = await this.settings.get(s);

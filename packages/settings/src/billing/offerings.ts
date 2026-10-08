@@ -39,7 +39,7 @@ export async function billingOffering(
       final_price_minor: number | null;
       tax_behavior: BillingOffering["taxBehavior"];
       enabled: boolean;
-    }>`SELECT id,plan_key,plan_revision,provider,provider_product_id,provider_price_id,provider_offering_id,billing_interval,billing_interval_count,currency,final_price_minor,tax_behavior,enabled FROM billing_offerings WHERE id=${id}::uuid FOR SHARE`.execute(
+    }>`SELECT id,plan_key,plan_revision,provider,provider_product_id,provider_price_id,provider_offering_id,billing_interval,billing_interval_count,currency,final_price_minor,tax_behavior,enabled FROM billing_offerings WHERE id=${id}::uuid AND product_kind='SUBSCRIPTION' FOR SHARE`.execute(
       db,
     )
   ).rows[0];
