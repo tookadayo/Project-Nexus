@@ -199,31 +199,46 @@ it("measures real concurrent aggregate SQL, signed network ACKs and private scre
       expect(
         (await service.result(f.s, f.actor, runs[index]!.id)).run.status,
       ).toBe("COMPLETED");
+    // Keep the main 80k location / 28 member post fixture unchanged. This
+    // separate probe measures the shared revision row, not overlapping bulk
+    // post locks (the former all-post UPDATE exposed a CI tuple-recheck deadlock).
+    const probeMessageIds = Array.from({length:10},(_,index)=>String(799999999999999900n+BigInt(index))),
+      probeEpisode = (await sql<{episode_id:string}>`SELECT episode_id FROM message_observations WHERE organization_id=${first.s.organizationId}::uuid AND guild_id=${first.s.guildId} LIMIT 1`.execute(db)).rows[0]!.episode_id;
+    await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data)
+     SELECT ${first.s.organizationId}::uuid,${first.s.guildId},gen_random_uuid(),${probeEpisode}::uuid,'message.sent',${new Date(first.end.getTime()-3600000)},'PRODUCTION',jsonb_build_object('channelId',${first.channel}::text,'messageId',message_id,'firstReplyLatencySeconds',0)
+     FROM unnest(${probeMessageIds}::text[]) AS probe(message_id)`.execute(db);
+    const revisionBefore = (await sql<{revision:number}>`SELECT revision::int AS revision FROM analysis_input_revisions WHERE organization_id=${first.s.organizationId}::uuid AND guild_id=${first.s.guildId}`.execute(db)).rows[0]!.revision;
     const revisionWriteMs: number[] = [];
     for (let batch = 0; batch < 5; batch++)
       await Promise.all(
-        Array.from({ length: 10 }, async () => {
+        probeMessageIds.map(async messageId => {
           const started = performance.now();
-          await sql`UPDATE message_observations SET first_reply_seconds=COALESCE(first_reply_seconds,0)+1 WHERE organization_id=${first.s.organizationId}::uuid AND guild_id=${first.s.guildId}`.execute(
+          const updated = await sql<{message_id:string;first_reply_seconds:number}>`UPDATE message_observations SET first_reply_seconds=first_reply_seconds+1 WHERE organization_id=${first.s.organizationId}::uuid AND guild_id=${first.s.guildId} AND message_id=${messageId} RETURNING message_id,first_reply_seconds`.execute(
             db,
           );
           revisionWriteMs.push(performance.now() - started);
+          expect(updated.rows).toEqual([{message_id:messageId,first_reply_seconds:batch+1}]);
         }),
       );
+    expect(revisionWriteMs).toHaveLength(50);
+    const probeRows = (await sql<{message_id:string;first_reply_seconds:number}>`SELECT message_id,first_reply_seconds FROM message_observations WHERE organization_id=${first.s.organizationId}::uuid AND guild_id=${first.s.guildId} AND message_id=ANY(${probeMessageIds}::text[]) ORDER BY message_id`.execute(db)).rows,
+      revisionAfter = (await sql<{revision:number}>`SELECT revision::int AS revision FROM analysis_input_revisions WHERE organization_id=${first.s.organizationId}::uuid AND guild_id=${first.s.guildId}`.execute(db)).rows[0]!.revision;
+    expect(probeRows).toEqual(probeMessageIds.map(message_id=>({message_id,first_reply_seconds:5})));
+    expect(revisionAfter-revisionBefore).toBe(50);
     const database = (
       await sql`SELECT version() AS version,(SELECT numbackends FROM pg_stat_database WHERE datname=current_database()) AS connections,(SELECT blks_hit FROM pg_stat_database WHERE datname=current_database()) AS cache_hits,(SELECT blks_read FROM pg_stat_database WHERE datname=current_database()) AS blocks_read`.execute(
         db,
       )
     ).rows[0];
     const result = {
-      environment: "LOCAL",
+      environment: process.env.GITHUB_ACTIONS === "true" ? "GITHUB_ACTIONS" : process.env.CI ? "CI" : "LOCAL",
       platform: platform(),
       cpuModel: cpus()[0]?.model,
       cpuCount: cpus().length,
       ramBytes: totalmem(),
       node: process.version,
       postgres: database,
-      redis: "local Redis binary; isolated port; persistence disabled",
+      redis: process.env.NEXUS_TEST_INFRA === "docker" ? "isolated Redis 8 Docker container" : "local Redis binary; isolated port; persistence disabled",
       fixture: { guilds: 4, locationPosts: rowsPerGuild * 4, memberPosts: 28 },
       concurrentAnalyses: 4,
       interactions: 10,
@@ -243,8 +258,12 @@ it("measures real concurrent aggregate SQL, signed network ACKs and private scre
       globalRevisionContention: {
         concurrentWrites: 10,
         totalWrites: 50,
+        successfulStatements: revisionWriteMs.length,
+        probeRows: probeMessageIds.length,
+        perPostIncrements: 5,
+        revisionDelta: revisionAfter-revisionBefore,
         source:
-          "message_observations UPDATE with existing statement revision trigger",
+          "distinct message_observations row per writer; existing shared statement revision trigger",
         writeMs: revisionWriteMs,
       },
       nodeRssBytes: process.memoryUsage().rss,

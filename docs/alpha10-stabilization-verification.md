@@ -80,24 +80,26 @@ An intermediate combined run exposed macOS orphan PostgreSQL SysV resources and 
 
 The next published checkpoint `38130bc9fac42b2ed82502db84f182b2e5b6dc1e` passed all 400 integration cases in PR CI, while push CI failed the existing API quota test with 52 successful authentications instead of 60. Independent reproduction identified pool acquisition rather than quota rejection: 62 simultaneous authentications normally produce 60 successes and two `API_RATE_LIMIT` errors, but adding 12 ms of database work under the shared credential row lock produces 42 successes and 20 connection-acquisition timeouts, with the quota counter still 42. The repaired test keeps every one of the 62 attempts and the exact 60/2 assertions. It fills 58 permits in batches within the unchanged ten-connection pool, then races four requests for the final two permits, verifies both rejection reasons and the minute/month counters of 60. Production limits and the 500 ms pool deadline are unchanged. Final success requires the new commit's complete CI, rather than treating either checkpoint as final.
 
+Checkpoint `3a5e1aa9f2ab23ddd8b09baf5f5d160a904e2526` passed all required gates in PR CI, but push CI exposed a PostgreSQL `40P01` deadlock in the performance probe. Each of ten concurrent probe writers updated the same seven post rows, and the database diagnostic identified a cycle while rechecking an updated tuple in `message_observations`. This is evidence of a limitation for overlapping multirow updates, not a successful measurement of isolated revision-row contention. The revised probe seeds ten separate posts after the main analysis/network measurements, updates one distinct post per writer in five batches of ten, and requires every statement to return its one updated row, every post to increase by five, 50 successful statements and an exact shared revision increase of 50. Production triggers, ten-way concurrency and the 500 ms pool acquisition deadline remain unchanged. The normal direct-reply projection targets one lifecycle fact/post; bulk overlapping updates are not claimed safe by this probe. CI measurement metadata now identifies GitHub Actions and Docker Redis explicitly.
+
 ## Performance and acceptance limits
 
 [Active aggregate test](../tests/performance/analysis-active.test.ts) performs four actual production aggregate calculations against 80,000 location posts, three SQL passes per run, while ten signed HTTP interactions traverse real loopback networking and actual interaction/action workers. It records network ACK, injection ping separately, private screen completion through a fake Discord adapter, queue wait, run duration, pool acquisition, Node CPU/RSS, PostgreSQL connections/cache/read statistics and ten Billing reads interleaved with the interactions. Database samples show up to four active aggregate queries; all ten requests were sent while calculations were active. The final performance suite ran after the other test suites finished. [Raw local measurements](alpha10-performance-local.json) preserve all samples and runtime details.
 
 | Measurement | Local result |
 |---|---|
-| Signed real HTTP initial ACK | maximum 9.40 ms; median 2.59 ms |
-| Private screen delivery through Fake Discord | maximum 52.56 ms; median 13.76 ms |
-| Injection ping, separately measured | 2.80 ms |
-| Queue wait | 150 ms for each run |
-| Actual aggregate execution | 177.36–180.73 ms |
-| DB pool acquisition | maximum 0.078 ms |
-| Billing view | maximum 5.271 ms |
-| Node RSS / CPU over the measured interval | 249.3 MiB; 147,476 user + 20,709 system microseconds |
-| PostgreSQL workload statistics | 10 connections, 1,882 cache hits, 97 blocks read |
-| Existing global revision trigger contention | 50 writes in five batches of ten; maximum 14.79 ms, median 0.814 ms |
+| Signed real HTTP initial ACK | maximum 9.78 ms; median 2.59 ms |
+| Private screen delivery through Fake Discord | maximum 69.00 ms; median 14.05 ms |
+| Injection ping, separately measured | 3.03 ms |
+| Queue wait | 181 ms for each run |
+| Actual aggregate execution | 200.65–210.51 ms |
+| DB pool acquisition | maximum 0.145 ms |
+| Billing view | maximum 7.874 ms |
+| Node RSS / CPU over the measured interval | 252.1 MiB; 167,080 user + 22,949 system microseconds |
+| PostgreSQL workload statistics | 10 connections, 191,975 cache hits, 508 blocks read |
+| Existing global revision trigger contention | ten separate post rows, five batches of ten writers; 50 successful statements and revision delta 50; maximum 31.68 ms, median 0.449 ms |
 
-The three aggregate passes amplify real query work for this small synthetic stress test; a production run normally performs one calculation. The pool/read/cache figures describe this fixture database interval, not a production utilization percentage. PostgreSQL backend CPU and a long-running Hosted steady state were not measured. The existing synthetic waiting-job ACK test is retained and is separate from this active-query evidence.
+The three aggregate passes amplify real query work for this small synthetic stress test; a production run normally performs one calculation. PostgreSQL read/cache statistics are cumulative counters for the fixture database and include setup and the separate revision probe; they are not aggregate-only deltas or a production utilization percentage. PostgreSQL backend CPU and a long-running Hosted steady state were not measured. The existing synthetic waiting-job ACK test is retained and is separate from this active-query evidence.
 
 The verified development machine is Apple M5, ten CPUs and 32 GB RAM. This is an observed configuration, not a minimum or a guarantee for hundreds of servers. Hosted sizing requires a separately authorized trial with production-like network and provider behavior. ACK meets a different objective from completed screen delivery. A fake Discord delivery timing does not measure the Discord network.
 
