@@ -1,10 +1,12 @@
 import {NextRequest,NextResponse} from 'next/server';
-import {openSession} from '../session';
+import {publicSessions} from '../public-session-store';
 import {webOrigin} from '../../../../../packages/config/src/web-origin';
-export async function GET(req:NextRequest){
- const session=openSession(req.cookies.get('nexus_session')?.value),response=NextResponse.redirect(new URL('/auth/login',webOrigin(req)));
+import {sameOrigin} from '../origin';
+export async function GET(){return new NextResponse('<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>NEXUS</title><main><h1>ログアウト / Sign out</h1><form method="post"><button>ログアウト / Sign out</button></form><p>このセッションを終了します。他の管理者やサーバーのデータは削除しません。 / Ends this session. Other administrators and server data are kept.</p><a href="/servers">戻る / Back</a></main></html>',{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"}});}
+export async function POST(req:NextRequest){
+ if(!sameOrigin(req))return NextResponse.json({error:'FORBIDDEN'},{status:403});
+ await publicSessions().revoke(req.cookies.get('nexus_session')?.value);
+ const response=NextResponse.redirect(new URL('/auth/login',webOrigin(req)),303);
  for(const name of ['nexus_session','nexus_guild','nexus_oauth_state','nexus_oauth_next','nexus_checkout_login','nexus_checkout_receipt'])response.cookies.delete(name);
- const id=process.env.DISCORD_APPLICATION_ID,secret=process.env.DISCORD_CLIENT_SECRET;
- if(session&&id&&secret)try{await fetch('https://discord.com/api/v10/oauth2/token/revoke',{method:'POST',headers:{Authorization:`Basic ${Buffer.from(`${id}:${secret}`).toString('base64')}`,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({token:session.accessToken}),cache:'no-store',signal:AbortSignal.timeout(2000)});}catch{/* Local cookies are cleared even when Discord is unavailable. Never log credentials. */}
  return response;
 }

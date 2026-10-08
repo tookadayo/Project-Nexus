@@ -1,3 +1,4 @@
+import {betaInteractionAdmission} from '../../../packages/security/src/beta-interactions';
 import { operationsAccess } from "../../../packages/operations/src/policy";
 import { assert } from "../../../packages/shared/src/index";
 import { questionModal } from "./question-modal.js";
@@ -91,6 +92,7 @@ const interaction = z.object({
   message: z.object({ id: snowflake }).optional(),
 });
 export type InteractionJob = {
+  betaGeneration?:number;
   id: string;
   applicationId: string;
   token: string;
@@ -379,6 +381,7 @@ export async function handleGatewayInteraction(
     await saveThenWake(
       () =>
         opts.db.transaction().execute(async (tx) => {
+          await betaInteractionAdmission(tx,s,job,opts.components,opts.vault.hash(s,userId));
           await ensureGuild(tx, s);
           await saveDiagnostic(tx, s, opts.vault, {
             id: input.id,
@@ -676,6 +679,7 @@ export function createInteractionServer(opts: {
             await sql`SET LOCAL transaction_timeout='1700ms'`.execute(tx);
             await sql`SET LOCAL statement_timeout='1200ms'`.execute(tx);
             await sql`SET LOCAL lock_timeout='500ms'`.execute(tx);
+            await betaInteractionAdmission(tx,s,job,opts.components,opts.vault.hash(s,input.member.user.id));
             await ensureGuild(tx, s);
             await saveDiagnostic(tx, s, opts.vault, {
               id: input.id,

@@ -1,3 +1,5 @@
+import { betaAccess } from "../../../packages/security/src/hosted-beta";
+import { hostedBetaEnabled } from "../../../packages/config/src/hosted-beta";
 import Fastify from "fastify";
 import {
   scopeSchema,
@@ -29,6 +31,7 @@ export function createApi(
   },
   vault?: IdentityVault,
 ) {
+  if (hostedBetaEnabled() && !db) throw new Error("BETA_STATE_REQUIRED");
   const app = Fastify({ logger: false });
   app.setErrorHandler((error, req, reply) => {
     const failure = userFailure(
@@ -55,6 +58,19 @@ export function createApi(
         failure,
       });
   });
+  if (db)
+    app.addHook("preHandler", async (req) => {
+      const s = scopeSchema.safeParse({
+        organizationId: (req.params as Record<string, unknown>)?.organizationId,
+        guildId: (req.params as Record<string, unknown>)?.guildId,
+      });
+      if (s.success)
+        await db
+          .transaction()
+          .execute((tx) =>
+            betaAccess(tx, s.data, req.method === "GET" ? "read" : "work"),
+          );
+    });
   app.get("/health", async () => {
     if (!runtime) return { status: "ok" };
     const state = runtime();
@@ -195,7 +211,10 @@ export function createApi(
   app.get<{ Params: { organizationId: string; guildId: string } }>(
     "/v1/organizations/:organizationId/guilds/:guildId/overview",
     async (req, reply) => {
-      const scope = scopeSchema.safeParse(req.params);
+      const scope = scopeSchema.safeParse({
+        organizationId: (req.params as Record<string, unknown>)?.organizationId,
+        guildId: (req.params as Record<string, unknown>)?.guildId,
+      });
       if (!scope.success)
         return reply.code(400).send({ error: "invalid scope" });
       const token = String(req.headers.authorization ?? "").replace(

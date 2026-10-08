@@ -1,3 +1,4 @@
+import {hostedBetaEnabled} from '../../../packages/config/src/hosted-beta';
 import Console, { type ProductData } from "./console";
 import type {
   ActionsPresentation,
@@ -26,7 +27,7 @@ export default async function Page({
   const selectedCookie = cookieStore.get("nexus_guild")?.value;
   if (guildId && !/^\d{17,20}$/.test(guildId)) redirect("/servers");
   const sessionCookie = cookieStore.get("nexus_session")?.value;
-  if (guildId && authMode() === "oauth" && !openSession(sessionCookie))
+  if (guildId && authMode() === "oauth" && !await openSession(sessionCookie))
     redirect(`/auth/login?next=/dashboard/${guildId}`);
   if (guildId && selectedCookie !== guildId)
     redirect(`/auth/select?guild=${guildId}`);
@@ -49,12 +50,13 @@ export default async function Page({
   if (guildId && context?.guildId !== guildId) redirect("/servers");
   if (!context) {
     if (authMode() === "oauth" && !sessionCookie) redirect("/auth/login");
-    if (authMode() === "oauth" && !openSession(sessionCookie))
+    if (authMode() === "oauth" && !await openSession(sessionCookie))
       redirect("/auth/expired");
     redirect("/servers");
   }
   if (!context.operationsCanConfigure) redirect("/operations?view=attention");
   const data: ProductData = {
+    hostedBeta:hostedBetaEnabled(),
     failures: {},
     home: null,
     journey: null,

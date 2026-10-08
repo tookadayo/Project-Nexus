@@ -1,3 +1,6 @@
+import {betaMaintenanceAction,betaReadAction} from '../../../packages/security/src/beta-interactions';
+import {betaAccess} from '../../../packages/security/src/hosted-beta';
+import {hostedBetaEnabled} from '../../../packages/config/src/hosted-beta';
 import { setupInteraction } from "./setup-interactions";
 import { analysisInteraction } from "./analysis-interactions";
 import {analysisUsage} from "../../../packages/analysis/src/index";
@@ -409,6 +412,7 @@ export class InteractionWorker {
       ? await this.tokens.read(this.db, s, input.customId, actorHash)
       : { action: input.command };
     const action = String(intent.action ?? "");
+    if(!betaMaintenanceAction(action))await this.db.transaction().execute(tx=>betaAccess(tx,s,betaReadAction(action)?'read':'work',betaReadAction(action)?undefined:input.betaGeneration??null));
     if (action === "intakeSubmit") {
       const result = await new OperationsIntake(
         this.db,
@@ -741,7 +745,7 @@ export class InteractionWorker {
       adminActions.includes(action) ||
       ["link", "unlink", "unlinkConfirm", "unlinkCancel"].includes(action)
     )
-      await this.db.transaction().execute(tx=>operationsAccess(tx,s,actor,['controlNavigate','controlRefresh','controlAnalysis','controlChannelPage','controlAttentionPage','controlSettings','controlRules','overview','lifecycle','cohorts','diagnose','experiments','reports','status','settings','billing','panel'].includes(action)?'READ':['contextAdd','contextResolve','controlResolve','controlAcknowledge','controlSnoozeMenu','controlSnooze'].includes(action)?'OPERATE':'CONFIGURE'));
+      await this.db.transaction().execute(tx=>operationsAccess(tx,s,actor,['controlNavigate','controlRefresh','controlAnalysis','controlChannelPage','controlAttentionPage','controlSettings','controlRules','overview','lifecycle','cohorts','diagnose','experiments','reports','status','settings','billing','panel'].includes(action)?'READ':['contextAdd','contextResolve','controlResolve','controlAcknowledge','controlSnoozeMenu','controlSnooze'].includes(action)?'OPERATE':'CONFIGURE',undefined,betaMaintenanceAction(action)));
     onStage("operation");
     if(action==="controlTestAlertPreview"){
       assert(current.helperChannelId,"CHANNEL_REQUIRED");
@@ -817,7 +821,7 @@ export class InteractionWorker {
     }
     if (action === "unlink") {
       const connection = await this.verification.connection(s);
-      return disconnectPanel(issue, connection.version, locale);
+      return disconnectPanel(issue, connection.version, locale,hostedBetaEnabled());
     }
     if (action === "unlinkConfirm") {
       assert(input.customId, "CONFIRMATION_REQUIRED");
@@ -841,8 +845,8 @@ export class InteractionWorker {
           callout(
             "NEXUS",
             locale === "ja"
-              ? "データは保持されています。再接続には /nexus link を実行してください。"
-              : "Your data is preserved. Run /nexus link to reconnect.",
+              ? hostedBetaEnabled()?"新しい収集を停止し、このサーバーのデータ削除を受け付けました。":"データは保持されています。再接続には /nexus link を実行してください。"
+              : hostedBetaEnabled()?"New collection is stopped. Data deletion for this server has been requested.":"Your data is preserved. Run /nexus link to reconnect.",
           ),
         ],
       });

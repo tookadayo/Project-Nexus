@@ -8,7 +8,7 @@ import { assert } from "../../../../../packages/shared/src/index";
 import type { Tx } from "../../../../../packages/db/src/index";
 
 export async function personalBillingIdentity() {
-  const session = openSession((await cookies()).get("nexus_session")?.value);
+  const session = await openSession((await cookies()).get("nexus_session")?.value);
   assert(session, "SESSION_EXPIRED", 401);
   await validateOAuthSession(session);
   const services = serverServices();

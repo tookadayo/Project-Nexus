@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
       "NOT_STARTED",
     );
   if (
-    !openSession(req.cookies.get("nexus_session")?.value) &&
+    !await openSession(req.cookies.get("nexus_session")?.value) &&
     authMode() !== "development"
   )
     return failureResponse(

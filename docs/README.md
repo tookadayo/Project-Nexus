@@ -1,6 +1,6 @@
 # NEXUS documentation
 
-Current release: **0.6.0-alpha.11** — Analysis clarity and follow-up. PostgreSQL is the normalized billing and
+Current release: **0.6.0-alpha.12** — Local operations and invited Beta foundations. PostgreSQL is the normalized billing and
 entitlement source of truth. Current documents retain their established paths
 where moving them would create unnecessary link churn.
 
@@ -46,6 +46,9 @@ where moving them would create unnecessary link churn.
 
 ## Operations and security
 
+- [alpha.12 implementation and focused verification](alpha12-hosted-beta.md)
+- [alpha.12 local operator procedures (Mac / Windows 11)](alpha12-operator-operations.md)
+- [alpha.12 authentication and data lifecycle inventory](alpha12-data-inventory.md)
 - [Server verification](server-verification.md)
 - [Backup and restore](backup-restore-operations.md)
 - [Privacy inventory](privacy-data-inventory.md)

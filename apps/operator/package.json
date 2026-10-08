@@ -1,0 +1,9 @@
+{
+  "name": "@nexus/operator",
+  "version": "0.6.0-alpha.12",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit -p ../../tsconfig.json"
+  }
+}

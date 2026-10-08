@@ -17,7 +17,7 @@ import { Components } from "../../packages/security/src/index";
 import { analysisInteraction } from "../../apps/worker/src/analysis-interactions";
 import { validatePanel } from "../../packages/discord-panels/src/primitives";
 import { analysisFixture } from "../fixtures/analysis";
-import { infrastructure } from "../fixtures/infrastructure";
+import { isolatedPostgres as infrastructure } from "../fixtures/postgres";
 let infra: Awaited<ReturnType<typeof infrastructure>>,
   db: Database,
   service: AnalysisService;

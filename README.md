@@ -2,7 +2,7 @@
 
 NEXUS は Discord Community Operations 製品です。サーバーの運営目的に合う計測方法を保存し、Discordで確認できた投稿・返信・参加の範囲と、集計できていないデータを示します。新しいメンバーへの対応、最初の返信やVoice同席、参加後の活動を確認し、運営の対応とその後の結果をつなげます。比較から原因を断定せず、個人の活動点数やスタッフ評価を作りません。
 
-現在のリリースは **0.6.0-alpha.11** です。バージョンはルートの `package.json` を唯一のリリース版ソースとし、`MAJOR.MINOR.PATCH-prerelease` の SemVer に従います。例: `0.6.0-alpha.2`、`0.6.0-beta.1`、`0.6.0-rc.1`、`0.6.0`。Build は Git の短縮 SHA です。パッケージ環境では `NEXUS_BUILD_SHA` を指定できます。
+現在のリリースは **0.6.0-alpha.12** です。バージョンはルートの `package.json` を唯一のリリース版ソースとし、`MAJOR.MINOR.PATCH-prerelease` の SemVer に従います。例: `0.6.0-alpha.2`、`0.6.0-beta.1`、`0.6.0-rc.1`、`0.6.0`。Build は Git の短縮 SHA です。パッケージ環境では `NEXUS_BUILD_SHA` を指定できます。
 
 ## Project Nexus 製品サイト
 
@@ -56,15 +56,17 @@ Hosted Beta は準備中です。外部テスターには Bot Token やローカ
 
 Hosted Web は `NODE_ENV=production`、`NEXUS_WEB_AUTH_MODE=oauth`、`DISCORD_CLIENT_SECRET`、HTTPS の `NEXUS_WEB_URL` を設定し、`${NEXUS_WEB_URL}/auth/callback` を Discord OAuth redirect URI に登録します。OAuth セッション期限切れは再ログイン画面へ進み、可能な場合は以前の Guild に戻ります。
 
-`NODE_ENV=production` と `NEXUS_WEB_AUTH_MODE=development` の組合せは起動時に拒否します。Basic認証は、production以外でdevelopmentを明示し、16文字以上の `NEXUS_WEB_PASSWORD` を設定した場合だけ使用できます。Dashboardは選択したサーバーの現在の権限とWeb接続を確認し、サーバー一覧全体の取得は `/servers` で行います。OAuthの自動更新は未実装で、有効期限後は再ログインが必要です。LogoutはローカルCookieを消し、Discordのトークン失効を試みます。
+`NODE_ENV=production` と `NEXUS_WEB_AUTH_MODE=development` の組合せは起動時に拒否します。Basic認証は、production以外でdevelopmentを明示し、16文字以上の `NEXUS_WEB_PASSWORD` を設定した場合だけ使用できます。Dashboardは選択したサーバーの現在の権限とWeb接続を確認し、サーバー一覧全体の取得は `/servers` で行います。alpha12は暗号化したserver-side tokenと永続sessionを使い、期限・失効・並行refreshを管理します。更新不能や撤回では再ログインを案内します。Logoutはそのsessionを永続失効し、個人のOAuth接続解除は別の確認操作です。
 
 表示用語と計測の定義は [Product language](docs/product-language.md)、対応範囲・残課題・検証結果は [alpha.5 quality audit](docs/archive/releases/NEXUS%20v0.6.0-alpha.5%20QUALITY%20AUDIT.md) を参照してください。基本分析の比較期間はカレンダー週ではなく、観測を完了した参加期間です。
 
-Webも既存のDB・Identity鍵・Bot設定を使用します。起動前に `corepack pnpm migrate` で046までのmigrationを適用してください。確認付きの `/nexus unlink` またはSettingsのサーバー接続解除でWeb接続だけを解除でき、設定・履歴・分析データは保持されます。構成・検証方法は [Server verification](docs/server-verification.md) を参照してください。
+Webも既存のDB・Identity鍵・Bot設定を使用します。別途承認された更新では全旧workerを停止し、`corepack pnpm migrate` で051まで適用してください。Hosted Betaでは `/nexus unlink` またはSettingsのサーバー接続解除が対象Guildの受付・grantを失効し、速やかなデータ削除を開始します。一時停止や個人のOAuth接続解除とは別の操作です。構成・検証方法は [Server verification](docs/server-verification.md) を参照してください。
+
+alpha12の運営画面は別プロセスで `127.0.0.1:3210` のみにbindします。公開Next/APIに運営ルートはありません。所有者がローカルTTYで運営パスワードを設定し、Guild IDを照合して招待・有効化します。初回有効化から30日、同時に有効なGuildは最大10件です。Bot導入だけでは収集を開始しません。操作フォームは日英の追加・一覧・詳細・停止/再開・延長・上限・履歴を備えます。ローカル実装・限定検証は公開可能の判定とは別です。[実装と検証](docs/alpha12-hosted-beta.md)、[運営手順](docs/alpha12-operator-operations.md)、[データ台帳](docs/alpha12-data-inventory.md)を参照してください。
 
 ## Pricing & entitlements v4
 
-現行リリース: **NEXUS v0.6.0-alpha.10 — Discord Analysis Operations**。[実装と検証](docs/alpha10-analysis-operations.md)、[市場での提供範囲](docs/research/alpha8-market-parity.md)、[Stripe integration](docs/billing/stripe-integration.md) を参照してください。以前の検証記録は各リリース文書に保存しています。
+詳しい分析の基盤: **NEXUS v0.6.0-alpha.10 — Discord Analysis Operations**。[実装と検証](docs/alpha10-analysis-operations.md)、[市場での提供範囲](docs/research/alpha8-market-parity.md)、[Stripe integration](docs/billing/stripe-integration.md) を参照してください。以前の検証記録は各リリース文書に保存しています。
 
 Freeは基本観測・測定根拠・Discord内の7/30日チャート・受付フォーム1件を含みます。Starterは90日履歴、保存ビュー・セグメント・集計CSV・イベントカレンダー、Growthは対応一覧・版管理Playbook・定期チャートレポート・読取API・署名通知、Scaleは5サーバーの組織管理・チーム権限・独立承認・過去データの試行・限定書込APIを追加します。EnterpriseのSSO・SCIM等はPLANNEDです。価格は暫定値で、公開販売の承認は別に必要です。
 

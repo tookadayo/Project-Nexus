@@ -4,6 +4,8 @@ import { isDiscordFailure } from "../../discord/src/rest";
 import { errorReference, logFailure } from "./diagnostics";
 import type { ErrorCategory, FailureEffect, UserFailure } from "./error-types";
 const codes: Record<string, ErrorCategory> = {
+  BETA_UNAVAILABLE:'BETA_ACCESS',
+  BETA_USAGE_LIMIT:'BETA_USAGE',
   ADMIN_REQUIRED: "PERMISSION",
   NEXUS_ROLE_REQUIRED: "PERMISSION",
   ANALYSIS_USAGE_UNAVAILABLE: "ANALYSIS_USAGE",

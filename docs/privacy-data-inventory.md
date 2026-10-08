@@ -1,5 +1,11 @@
 # Privacy data inventory — alpha.8
 
+alpha12 adds separate local operator authentication, durable public OAuth
+sessions, scoped invitations/finite grants and deletion tombstone recovery.
+Their actual retention, access and disconnect/delete paths are mapped in the
+[alpha12 data inventory](alpha12-data-inventory.md); existing shorter detailed
+retention is not extended by Beta history grace.
+
 Commercial hardening adds a separate billing domain. Billing providers receive no
 community activity or message data. These operational records do not imply an
 invoice archive or established legal financial retention policy.

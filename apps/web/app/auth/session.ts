@@ -1,16 +1,14 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  randomBytes,
-  timingSafeEqual,
-} from "node:crypto";
+import {timingSafeEqual} from "node:crypto";
+import {publicSessions} from './public-session-store';
+import type {PublicSession} from '../../../../packages/security/src/public-sessions';
+import {betaAccess} from '../../../../packages/security/src/hosted-beta';
+import {hostedBetaEnabled} from '../../../../packages/config/src/hosted-beta';
 import {
   apiToken,
   scopeForGuild,
 } from "../../../../packages/security/src/scoping";
 import { discordInstallUrl } from "../../../../packages/discord/src/install";
-import { manageableConnection } from "./server-access";
+import { manageableConnection,serverServices } from "./server-access";
 import type { VerificationState } from "../../../../packages/security/src/server-verification";
 import { webAuthMode } from "../../../../packages/config/src/web-auth";
 import { webOrigin } from "../../../../packages/config/src/web-origin";
@@ -27,63 +25,29 @@ export type AuthorizedGuild = {
   availability?: "AVAILABLE" | "UNAVAILABLE";
   failure?: UserFailure;
 };
-type Session = { accessToken: string; userId: string; expiresAt: number };
+type Session = PublicSession;
 export async function validateOAuthSession(session: Session) {
+ try {
   const identified = await oauthDiscord(
     "https://discord.com/api/v10/users/@me",
     `Bearer ${session.accessToken}`,
   );
   const identity = (await identified.json()) as { id?: string };
   if (identity.id !== session.userId) throw new Error("SESSION_EXPIRED");
+ }catch(error){
+  if(error instanceof Error&&error.message==='SESSION_EXPIRED')await publicSessions().revoke(session.reference);
+  throw error;
+ }
 }
 export const authMode = () => webAuthMode();
 export const oauthRedirectUri = () =>
   new URL("/auth/callback", webOrigin()).toString();
 export const secureCookies = () => webOrigin().startsWith("https://");
-const key = () => {
-  const secret = process.env.NEXUS_SESSION_SECRET;
-  if (!secret || secret.length < 32)
-    throw new Error("NEXUS_SESSION_SECRET must be at least 32 characters");
-  return createHash("sha256").update(secret).digest();
-};
-export function sealSession(session: Session) {
-  const iv = randomBytes(12),
-    cipher = createCipheriv("aes-256-gcm", key(), iv),
-    data = Buffer.concat([
-      cipher.update(JSON.stringify(session), "utf8"),
-      cipher.final(),
-    ]);
-  return Buffer.concat([iv, cipher.getAuthTag(), data]).toString("base64url");
+export async function sealSession(session:Session&{refreshToken?:string}) {
+ return publicSessions().create(session.userId,{accessToken:session.accessToken,refreshToken:session.refreshToken},(session.expiresAt-Date.now())/1000);
 }
-export function openSession(value: string | undefined): Session | null {
-  if (!value || value.length > 8192) return null;
-  try {
-    const bytes = Buffer.from(value, "base64url");
-    if (bytes.length < 30) return null;
-    const decipher = createDecipheriv(
-      "aes-256-gcm",
-      key(),
-      bytes.subarray(0, 12),
-    );
-    decipher.setAuthTag(bytes.subarray(12, 28));
-    const session = JSON.parse(
-      Buffer.concat([
-        decipher.update(bytes.subarray(28)),
-        decipher.final(),
-      ]).toString(),
-    ) as Session;
-    if (
-      typeof session.accessToken !== "string" ||
-      !session.accessToken ||
-      !/^\d{17,20}$/.test(session.userId) ||
-      !Number.isFinite(session.expiresAt) ||
-      session.expiresAt <= Date.now()
-    )
-      return null;
-    return session;
-  } catch {
-    return null;
-  }
+export async function openSession(value:string|undefined):Promise<Session|null> {
+ return value?publicSessions().read(value):null;
 }
 export function validOAuthState(
   expected: string | undefined,
@@ -252,7 +216,7 @@ export async function dashboardContext(
       operationsCanConfigure: true,
     };
   }
-  const session = openSession(sessionCookie);
+  const session = await openSession(sessionCookie);
   if (!session) return null;
   if (!guildCookie || !/^\d{17,20}$/.test(guildCookie)) return null;
   // One identity request checks that the OAuth grant has not been revoked.
@@ -271,6 +235,7 @@ export async function dashboardContext(
   if (!process.env.API_KEY)
     throw new Error("API_KEY is required for OAuth dashboard access");
   const scope = scopeForGuild(selected.id);
+  if(hostedBetaEnabled())await serverServices().db.transaction().execute(tx=>betaAccess(tx,scope,"read"));
   return {
     base,
     organizationId: scope.organizationId,

@@ -1,3 +1,4 @@
+import {betaAccess,betaWork} from '../../../packages/security/src/hosted-beta';
 import { traceStep } from "../../../packages/shared/src/observability.js";
 import { deliveryFence } from "../../../packages/operations/src/delivery-policy";
 import { operationsLock } from "../../../packages/operations/src/policy";
@@ -80,7 +81,7 @@ export class ActionWorker {
     private readonly refreshPanel?: (s: Scope) => Promise<Panel>,
   ) {}
   async tick(s: Scope): Promise<boolean> {
-    return traceStep("action.outbox", {}, () => this.execute(s));
+    return traceStep("action.outbox", {}, () => betaWork(this.db,s,()=>this.execute(s)));
   }
   private async execute(s: Scope): Promise<boolean> {
     // A crashed worker may have performed a REST operation; never blindly retry its expired lease.
@@ -496,6 +497,7 @@ export class ActionWorker {
     return true;
   }
   private async live(s: Scope, action: Action, tx: Tx = this.db) {
+    await betaAccess(tx,s);
     return (
       (
         await sql`SELECT id FROM action_outbox WHERE ${tenant(s)} AND id=${action.id}::uuid AND state='RUNNING' AND lease_token=${action.leaseToken}::uuid AND lease_until>now() AND NOT EXISTS(SELECT 1 FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash IS NULL AND completed_at IS NOT NULL)`.execute(

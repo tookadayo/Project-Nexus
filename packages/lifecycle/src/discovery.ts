@@ -1,3 +1,4 @@
+import {betaAccess,betaWork} from '../../security/src/hosted-beta';
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -100,7 +101,8 @@ export class DiscoveryWorker {
     if (!job) return false;
     const s = { organizationId: job.organization_id, guildId: job.guild_id };
     try {
-      const source = await this.discord.capabilityState(s.guildId, (id) =>
+      return await betaWork(this.db,s,async()=>{
+      const source = await this.discord.capabilityState!(s.guildId, (id) =>
           this.vault.hash(s, id),
         ),
         prior = await latestCapability(this.db, s);
@@ -147,6 +149,7 @@ export class DiscoveryWorker {
       );
       await this.db.transaction().execute(async (tx) => {
         await privacyReadLock(tx, s);
+        await betaAccess(tx,s);
         if (
           !(
             await sql`SELECT guild_id FROM guilds WHERE ${tenant(s)} AND NOT EXISTS(SELECT 1 FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash IS NULL AND completed_at IS NOT NULL)`.execute(
@@ -275,7 +278,12 @@ export class DiscoveryWorker {
         );
       });
       return true;
+      });
     } catch (error) {
+      if(error instanceof Error&&error.message==='BETA_UNAVAILABLE'){
+       await sql`UPDATE capability_refresh_jobs SET lease_token=NULL,lease_until=NULL,due_at=clock_timestamp()+interval '30 minutes' WHERE ${tenant(s)} AND lease_token=${lease}::uuid`.execute(this.db);
+       return false;
+      }
       const { isDiscordFailure } = await import("../../discord/src/rest");
       const category = isDiscordFailure(error)
         ? error.status === 429
@@ -294,6 +302,7 @@ export class DiscoveryWorker {
         : 30000 * 2 ** Math.min(job.attempts, 6);
       await this.db.transaction().execute(async (tx) => {
         await privacyReadLock(tx, s);
+        try{await betaAccess(tx,s);}catch(error){if(error instanceof Error&&error.message==='BETA_UNAVAILABLE')return;throw error;}
         if (
           !(
             await sql`SELECT guild_id FROM capability_refresh_jobs WHERE ${tenant(s)} AND lease_token=${lease}::uuid`.execute(

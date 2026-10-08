@@ -1,3 +1,6 @@
+import { betaLock, requestBetaDeletion } from "./hosted-beta";
+import { hostedBetaEnabled } from "../../config/src/hosted-beta";
+import type { Tx } from "../../db/src/index";
 import { randomUUID } from "node:crypto";
 import { sql, tenant, type Database } from "../../db/src/index.js";
 import {
@@ -41,129 +44,15 @@ export class PrivacyService {
         actor,
         current.revision,
         async (_before, tx) => {
-          await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"privacy:" + s.organizationId + ":" + s.guildId},0))`.execute(
-            tx,
-          );
-          await sql`DELETE FROM server_verification_challenges WHERE ${tenant(s)}`.execute(
-            tx,
-          );
-          await sql`DELETE FROM server_web_links WHERE ${tenant(s)}`.execute(
-            tx,
-          );
-          await deleteBillingCommunity(tx, s);
-          await sql`DELETE FROM operations_organizations WHERE id=${s.organizationId}::uuid AND home_guild_id=${s.guildId}`.execute(
-            tx,
-          );
-          await sql`DELETE FROM operations_org_guilds WHERE ${tenant(s)}`.execute(
-            tx,
-          );
-          for (const table of [
-            "location_population_collection",
-            "location_post_observations",
-            "message_observations",
-            "reaction_state",
-            "reaction_resets",
-            "poll_answer_state",
-            "poll_participant_state",
-            "voice_sessions",
-            "member_daily_activity",
-            "lifecycle_daily_rollups",
-            "adaptive_states",
-            "adaptive_facts",
-            "discord_surface_state",
-            "collection_epochs",
-            "discord_integration_health",
-            "guild_capability_snapshots",
-            "capability_refresh_jobs",
-          ])
-            await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)}`.execute(
-              tx,
-            );
-          // Only an audit tombstone and disabled settings remain. Published flows can be deleted, never mutated.
-          for (const table of [
-            "analysis_history_cursors",
-            "analysis_preview_limits",
-            "analysis_results",
-            "analysis_usage_ledger",
-            "analysis_reservations",
-            "analysis_runs",
-            "analysis_grants",
-            "setup_drafts",
-            "report_templates",
-            "operations_interventions",
-            "playbooks",
-            "operations_intake_panels",
-            "integration_destinations",
-            "webhook_endpoints",
-            "api_credentials",
-            "api_guild_usage_months",
-            "operations_domain_events",
-            "operations_coverage_heads",
-            "operations_plan_heads",
-            "operations_audit_events",
-            "event_operation_templates",
-            "operations_role_bindings",
-            "operations_team_bindings",
-            "saved_metric_views",
-            "operational_segments",
-            "suggestion_feedback",
-            "weekly_summary_deliveries",
-            "helper_alerts",
-            "attention_items",
-            "retention_tracking",
-            "retention_cohorts",
-            "eligible_retention_cohorts",
-            "gateway_ingest",
-            "usage_counters",
-            "guild_subscriptions",
-            "guild_capabilities",
-            "guild_config_heads",
-            "guild_config_revisions",
-            "measurement_recipe_heads",
-            "measurement_recipe_versions",
-            "data_coverage_snapshots",
-            "action_outbox",
-            "interaction_jobs",
-            "interaction_diagnostics",
-            "component_tokens",
-            "settings_panels",
-            "guild_command_sync",
-            "event_inbox",
-            "telemetry_health",
-            "telemetry_cursor",
-            "daily_guild_metrics",
-            "member_interaction_pairs",
-            "member_identity_map",
-            "flow_versions",
-            "audit_logs",
-            "deletion_requests",
-          ])
-            await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)}`.execute(
-              tx,
-            );
-          if (process.env.LOOKUP_KEY)
-            await sql`DELETE FROM product_telemetry WHERE guild_hash=${productGuildHash(s.guildId, process.env.LOOKUP_KEY)}`.execute(
-              tx,
-            );
-          await sql`DELETE FROM analysis_input_revisions WHERE ${tenant(s)}`.execute(
-            tx,
-          );
-          await sql`INSERT INTO deletion_requests(organization_id,guild_id,id,completed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,now())`.execute(
-            tx,
-          );
-          await audit(
-            tx,
-            s,
-            { ...actor, key: "deleted-admin", encryptedUserId: undefined },
-            "guild.deleted",
-            null,
-            { completed: true },
-          );
-          return settingsSchema.parse({ enabled: false });
+          return this.eraseGuild(tx, s, actor);
         },
         true,
       );
       await this.scrubQueue(s, null);
+      if (hostedBetaEnabled())
+        await sql`UPDATE beta_deletion_jobs SET state='DONE',completed_at=now(),last_error=NULL WHERE ${tenant(s)} AND state='ERASED'`.execute(
+          this.db,
+        );
       return;
     }
     await this.db.transaction().execute(async (tx) => {
@@ -335,6 +224,177 @@ export class PrivacyService {
       );
     });
     await this.scrubQueue(s, hash);
+  }
+  private async eraseGuild(tx: Tx, s: Scope, actor: Actor) {
+    await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"privacy:" + s.organizationId + ":" + s.guildId},0))`.execute(
+      tx,
+    );
+    if (hostedBetaEnabled()) {
+      await betaLock(tx, s, true);
+      await requestBetaDeletion(tx, s, "DELETE_REQUEST");
+    }
+    await sql`DELETE FROM server_verification_challenges WHERE ${tenant(s)}`.execute(
+      tx,
+    );
+    await sql`DELETE FROM server_web_links WHERE ${tenant(s)}`.execute(tx);
+    await deleteBillingCommunity(tx, s);
+    await sql`DELETE FROM operations_organizations WHERE id=${s.organizationId}::uuid AND home_guild_id=${s.guildId}`.execute(
+      tx,
+    );
+    await sql`DELETE FROM operations_org_guilds WHERE ${tenant(s)}`.execute(tx);
+    for (const table of [
+      "location_population_collection",
+      "location_post_observations",
+      "message_observations",
+      "reaction_state",
+      "reaction_resets",
+      "poll_answer_state",
+      "poll_participant_state",
+      "voice_sessions",
+      "member_daily_activity",
+      "lifecycle_daily_rollups",
+      "adaptive_states",
+      "adaptive_facts",
+      "discord_surface_state",
+      "collection_epochs",
+      "discord_integration_health",
+      "guild_capability_snapshots",
+      "capability_refresh_jobs",
+    ])
+      await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)}`.execute(tx);
+    // Only an audit tombstone and disabled settings remain. Published flows can be deleted, never mutated.
+    for (const table of [
+      "analysis_history_cursors",
+      "analysis_preview_limits",
+      "analysis_results",
+      "analysis_usage_ledger",
+      "analysis_reservations",
+      "analysis_runs",
+      "analysis_grants",
+      "setup_drafts",
+      "report_templates",
+      "operations_interventions",
+      "playbooks",
+      "operations_intake_panels",
+      "integration_destinations",
+      "webhook_endpoints",
+      "api_credentials",
+      "api_guild_usage_months",
+      "operations_domain_events",
+      "operations_coverage_heads",
+      "operations_plan_heads",
+      "operations_audit_events",
+      "event_operation_templates",
+      "operations_role_bindings",
+      "operations_team_bindings",
+      "saved_metric_views",
+      "operational_segments",
+      "suggestion_feedback",
+      "weekly_summary_deliveries",
+      "helper_alerts",
+      "attention_items",
+      "retention_tracking",
+      "retention_cohorts",
+      "eligible_retention_cohorts",
+      "gateway_ingest",
+      "usage_counters",
+      "guild_subscriptions",
+      "guild_capabilities",
+      "guild_config_heads",
+      "guild_config_revisions",
+      "measurement_recipe_heads",
+      "measurement_recipe_versions",
+      "data_coverage_snapshots",
+      "action_outbox",
+      "interaction_jobs",
+      "interaction_diagnostics",
+      "component_tokens",
+      "settings_panels",
+      "guild_command_sync",
+      "event_inbox",
+      "telemetry_health",
+      "telemetry_cursor",
+      "daily_guild_metrics",
+      "member_interaction_pairs",
+      "member_identity_map",
+      "flow_versions",
+      "audit_logs",
+      "deletion_requests",
+    ])
+      await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)}`.execute(tx);
+    if (process.env.LOOKUP_KEY)
+      await sql`DELETE FROM product_telemetry WHERE guild_hash=${productGuildHash(s.guildId, process.env.LOOKUP_KEY)}`.execute(
+        tx,
+      );
+    await sql`DELETE FROM analysis_input_revisions WHERE ${tenant(s)}`.execute(
+      tx,
+    );
+    await sql`INSERT INTO deletion_requests(organization_id,guild_id,id,completed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,now())`.execute(
+      tx,
+    );
+    await audit(
+      tx,
+      s,
+      { ...actor, key: "deleted-admin", encryptedUserId: undefined },
+      "guild.deleted",
+      null,
+      { completed: true },
+    );
+    if (hostedBetaEnabled()) {
+      await sql`UPDATE operator_requests SET result=result-'guild_name' WHERE guild_id=${s.guildId}`.execute(
+        tx,
+      );
+      await sql`UPDATE beta_guild_invitations SET status='DELETED',generation=generation+1,grant_id=NULL,guild_name='',bot_present=false,updated_at=now() WHERE ${tenant(s)}`.execute(
+        tx,
+      );
+      await sql`UPDATE beta_deletion_jobs SET state='ERASED',last_error=NULL WHERE ${tenant(s)} AND state<>'DONE'`.execute(
+        tx,
+      );
+    }
+    return settingsSchema.parse({ enabled: false });
+  }
+  // Restricted lifecycle worker entry. A durable scoped deletion intent is
+  // mandatory; no caller can use operator authentication as a Guild admin.
+  async deleteBetaGuild(s: Scope, id: string) {
+    const pending = await this.db.transaction().execute(async (tx) => {
+      await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"privacy:" + s.organizationId + ":" + s.guildId},0))`.execute(
+        tx,
+      );
+      await betaLock(tx, s, true);
+      await sql`SELECT pg_advisory_xact_lock(hashtextextended(${s.organizationId + ":" + s.guildId},0))`.execute(
+        tx,
+      );
+      const job = (
+        await sql<{
+          state: string;
+        }>`SELECT state FROM beta_deletion_jobs WHERE ${tenant(s)} AND id=${id}::uuid AND state IN ('PENDING','ERASED') FOR UPDATE SKIP LOCKED`.execute(
+          tx,
+        )
+      ).rows[0];
+      if (!job) return false;
+      if (job.state === "PENDING") {
+        const disabled = await this.eraseGuild(tx, s, {
+          key: "deleted-system",
+          permissions: "0",
+          roles: [],
+          source: "SYSTEM",
+          requestId: randomUUID(),
+        });
+        await sql`INSERT INTO guild_settings(organization_id,guild_id,settings) VALUES(${s.organizationId}::uuid,${s.guildId},${JSON.stringify(disabled)}::jsonb) ON CONFLICT(organization_id,guild_id) DO UPDATE SET settings=EXCLUDED.settings,revision=guild_settings.revision+1`.execute(
+          tx,
+        );
+      }
+      return true;
+    });
+    // A failed stream/cache scrub leaves ERASED durable, and can be retried
+    // without reviving data or repeating reservation consumption.
+    if (pending) {
+      await this.scrubQueue(s, null);
+      await sql`UPDATE beta_deletion_jobs SET state='DONE',completed_at=now(),last_error=NULL WHERE ${tenant(s)} AND id=${id}::uuid AND state='ERASED'`.execute(
+        this.db,
+      );
+    }
+    return pending;
   }
   async purge(s: Scope) {
     const cfg = await this.settings.get(s);

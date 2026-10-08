@@ -88,6 +88,7 @@ type Admin = {
   capability: Record<string, unknown> | null;
 };
 export type ProductData = {
+  hostedBeta?:boolean;
   integration?: IntegrationData | null;
   failures?: Record<string, UserFailure>;
   home: HomePresentation | null;
@@ -1737,6 +1738,7 @@ export default function Console({
             guildId={data.selectedGuildId}
             locale={locale}
             development={data.developmentAuth === true}
+            beta={data.hostedBeta===true}
           />
         )}
         <article className="surface">

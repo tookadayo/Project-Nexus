@@ -1,3 +1,5 @@
+import {betaAccess,betaLock} from '../../security/src/hosted-beta';
+import {privacyReadLock} from '../../db/src/index';
 export * from "./billing/index";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
@@ -233,6 +235,12 @@ export class SettingsService {
     redactAudit = false,
   ): Promise<SettingsView> {
     return this.db.transaction().execute(async (tx) => {
+      if(redactAudit){
+        // All mutating paths acquire privacy, Beta, then settings locks.
+        // A deletion must never wait for privacy while owning the settings lock.
+        await sql`SELECT pg_advisory_xact_lock(hashtextextended(${'privacy:'+s.organizationId+':'+s.guildId},0))`.execute(tx);
+        await betaLock(tx,s,true);
+      }else{await privacyReadLock(tx,s);await betaAccess(tx,s);}
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${s.organizationId + ":" + s.guildId},0))`.execute(
         tx,
       );

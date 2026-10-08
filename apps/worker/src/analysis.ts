@@ -1,3 +1,5 @@
+import {betaAccess,betaWork} from '../../../packages/security/src/hosted-beta';
+import {hostedBetaEnabled} from '../../../packages/config/src/hosted-beta';
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
 import { z } from "zod";
 import { assert } from "../../../packages/shared/src/index";
@@ -81,6 +83,8 @@ export class AnalysisDispatcher {
   async tick() {
     const rows = await this.service.recover();
     for (const run of rows) {
+     try{await betaWork(this.db,{organizationId:run.organization_id,guildId:run.guild_id},async()=>{
+      await this.db.transaction().execute(tx=>betaAccess(tx,{organizationId:run.organization_id,guildId:run.guild_id},'work',run.beta_generation));
       const id = "analysis-" + run.id,
         existing = await this.queue.getJob(id),
         priority = analysisPriority(run.priority_class, run.requested_at);
@@ -124,6 +128,7 @@ export class AnalysisDispatcher {
       await sql`UPDATE analysis_runs SET enqueued_at=COALESCE(enqueued_at,now()),updated_at=now() WHERE id=${run.id}::uuid AND status='QUEUED'`.execute(
         this.db,
       );
+     });}catch(error){if(!(error instanceof Error)||error.message!=='BETA_UNAVAILABLE')throw error;}
     }
     const counts = await this.queue.getJobCounts(
       "wait",
@@ -161,7 +166,7 @@ export function analysisRuntime(
   const worker = new Worker(
     analysisPolicy.queue,
     (job) => processor.process(job.data),
-    { connection, concurrency: 4 },
+    { connection, concurrency: hostedBetaEnabled()?1:4 },
   );
   worker.on("error", (error) =>
     logFailure({ action: "analysis", stage: "queue_worker", error }),

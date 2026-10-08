@@ -1,3 +1,7 @@
+import {finalizeUsage} from './usage';
+export {finalizeUsage} from './usage';
+import {betaAccess,betaAnalysisCapacity} from '../../security/src/hosted-beta';
+import {hostedBetaEnabled} from '../../config/src/hosted-beta';
 import { randomUUID } from "node:crypto";
 import { logFailure } from "../../shared/src/diagnostics";
 import { z } from "zod";
@@ -479,6 +483,8 @@ export class AnalysisService {
     analysisEvent("analysis_requested");
     const accepted = await this.db.transaction().execute(async (tx) => {
       await privacyReadLock(tx, s);
+      const beta=await betaAccess(tx,s);
+      if(beta)await sql`SELECT pg_advisory_xact_lock(763212)`.execute(tx);
       const state = await operationsAccess(tx, s, actor, "ANALYZE");
       const root =
         (
@@ -542,6 +548,7 @@ export class AnalysisService {
           return { run: duplicate, reused: true };
         }
       }
+      if(beta)await betaAnalysisCapacity(tx,s,beta);
       const pending = (
         await sql<{
           guild: number;
@@ -589,10 +596,11 @@ export class AnalysisService {
             tx,
           )
         ).rows[0]!;
-      await sql`UPDATE analysis_runs SET confirmation_fingerprint=${p.confirmationFingerprint},data_identity=${p.dataIdentity},target_channel_ids=${p.targetChannelIds}::text[],conditions=${json(p.conditions)},scope_bug_impact='CORRECTED_DEFINITION',correction_of=${data.correctionOf ?? null}::uuid WHERE id=${id}::uuid`.execute(
+      await sql`UPDATE analysis_runs SET beta_generation=${beta?.generation??null},confirmation_fingerprint=${p.confirmationFingerprint},data_identity=${p.dataIdentity},target_channel_ids=${p.targetChannelIds}::text[],conditions=${json(p.conditions)},scope_bug_impact='CORRECTED_DEFINITION',correction_of=${data.correctionOf ?? null}::uuid WHERE id=${id}::uuid`.execute(
         tx,
       );
       Object.assign(run, {
+        beta_generation:beta?.generation??null,
         confirmation_fingerprint: p.confirmationFingerprint,
         data_identity: p.dataIdentity,
         target_channel_ids: p.targetChannelIds,
@@ -1067,6 +1075,9 @@ export class AnalysisService {
     let released = false;
     const claimed = await this.db.transaction().execute(async (tx) => {
       await privacyReadLock(tx, s);
+      let betaAllowed=true;
+      try{await betaAccess(tx,s,'work',known.beta_generation??null);}catch(error){if(error instanceof Error&&error.message==='BETA_UNAVAILABLE')betaAllowed=false;else throw error;}
+      if(hostedBetaEnabled())await sql`SELECT pg_advisory_xact_lock(763212)`.execute(tx);
       const link = (
         await sql<{
           root_organization_id: string;
@@ -1087,7 +1098,7 @@ export class AnalysisService {
       ).rows[0];
       if (!run) return null;
       const state = await new EntitlementService(tx).effective(s);
-      if (state.privacyDeleted) {
+      if (state.privacyDeleted||!betaAllowed) {
         released = await finalizeUsage(tx, s, id, "RELEASED");
         await sql`UPDATE analysis_runs SET status='CANCELED',failure_class='AUTHORIZATION',failed_at=now(),updated_at=now() WHERE id=${id}::uuid`.execute(
           tx,
@@ -1109,6 +1120,7 @@ export class AnalysisService {
         )
       ).rows[0]!;
       if (
+        hostedBetaEnabled()&&(await sql<{n:number}>`SELECT count(*)::int AS n FROM analysis_runs WHERE status=ANY(${liveStates}::text[]) AND lease_until>clock_timestamp()`.execute(tx)).rows[0]!.n>=1 ||
         active.guild >= analysisPolicy.guildConcurrency ||
         active.org >= (rootState.limits.analysisConcurrency ?? 1)
       ) {
@@ -1153,6 +1165,7 @@ export class AnalysisService {
         .setIsolationLevel("repeatable read")
         .execute(async (tx) => {
           await privacyReadLock(tx, s);
+          await betaAccess(tx,s,'work',run.beta_generation??null);
           const state = await new EntitlementService(tx).effective(s);
           assert(!state.privacyDeleted, "PRIVACY_DELETED", 403);
           await sql`SET LOCAL statement_timeout='60s'`.execute(tx);
@@ -1202,6 +1215,7 @@ export class AnalysisService {
         });
       await this.db.transaction().execute(async (tx) => {
         await privacyReadLock(tx, s);
+        await betaAccess(tx,s,'work',run.beta_generation??null);
         await analysisLock(tx, s);
         await authorize?.(tx);
         assert(
@@ -1349,26 +1363,4 @@ export class AnalysisService {
       )
     ).rows;
   }
-}
-async function finalizeUsage(
-  tx: Tx,
-  s: Scope,
-  id: string,
-  outcome: "CONSUMED" | "RELEASED",
-) {
-  const r = (
-    await sql<{
-      grant_id: string;
-    }>`UPDATE analysis_reservations SET state=${outcome},finalized_at=now() WHERE ${tenant(s)} AND run_id=${id}::uuid AND state='RESERVED' RETURNING grant_id`.execute(
-      tx,
-    )
-  ).rows[0];
-  if (!r) return false;
-  await sql`UPDATE analysis_grants SET reserved=reserved-1,consumed=consumed+${outcome === "CONSUMED" ? 1 : 0} WHERE id=${r.grant_id}::uuid`.execute(
-    tx,
-  );
-  await sql`INSERT INTO analysis_usage_ledger(run_id,organization_id,guild_id,grant_id,outcome) VALUES(${id}::uuid,${s.organizationId}::uuid,${s.guildId},${r.grant_id}::uuid,${outcome})`.execute(
-    tx,
-  );
-  return true;
 }

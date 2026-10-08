@@ -1,0 +1,95 @@
+# alpha12 data lifecycle inventory
+
+2026-10-08. This maps the existing [privacy inventory](privacy-data-inventory.md)
+and the new Beta/authentication records to actual code. It is an engineering
+inventory, not a legal compliance finding or a final published Privacy Policy.
+Production changes and provider portal registration are not part of this task.
+
+## Sources, stores and retention
+
+PostgreSQL remains canonical. `PrivacyService.purge` retains the existing
+configured detailed windows (7/14/30 days), aggregate windows (3/12/24 months)
+and stricter visibility/result deadlines. The eligible post-invitation history
+grace is an additional upper bound of 30 days after expiry, not an extension of
+any individual dataset's deadline. No raw 60-day rule is introduced.
+
+| Data / purpose                  | Source and canonical store / derivatives                                                                                                                                                                            | Ordinary retention and access                                                                                                                                                                                      | Stop, unlink, deletion and restore                                                                                                                                                                                                                                                      |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public sign-in                  | Discord `identify guilds` OAuth; digest, keyed user digest, encrypted user/access/refresh tokens in `public_oauth_sessions`                                                                                         | Idle 12h / absolute 7d defaults, provider access expiry/refresh response authoritative; only public server-side auth reads tokens. Expired records or revocations older than 1d are purged.                        | Logout persists this-session revocation, clears token; personal disconnect clears that user's tokens/identity and revokes all their sessions. Another admin's Guild is unaffected. All restored sessions are revoked before traffic.                                                    |
+| Operator credentials            | Owner local TTY; salt/hash, credential epoch and independent CSRF key in private local file                                                                                                                         | Until owner reset; POSIX private file/directory or Windows restricted ACL. Operator only; no source/default/plain password/browser storage.                                                                        | Reset changes epoch immediately; DB session revocation/audit follows when available. File/key backup must be separately protected.                                                                                                                                                      |
+| Operator session / login budget | Operator process; session digest, epoch, CSRF digest, creation/use/absolute expiry/revocation in `operator_sessions`; single-account window/failure count in `operator_login_budget`                                | Idle 15min / absolute 8h; throttling defaults 5 failures/15min. Expired/revoked session cleanup; budget window rolls without storing guesses or per-IP identity.                                                   | Logout/reset rejects old IDs across restarts. Public tokens do not authorize these records. Restored operator sessions are revoked.                                                                                                                                                     |
+| Guild invitation                | Explicit Guild ID and minimal Bot-readable name/presence/verification clock; `beta_guild_invitations` with state/generation/activation/expiry/finite limits and existing grant ID                                   | Operator display and shared admission service; immutable first activation starts 30d. Name is not authorization. Last check is displayed as a dated observation.                                                   | Pause/expiry stops ordinary work; revoke/unlink/Bot removal queues prompt deletion. Deleted row keeps minimal scope/state/times but clears name, Bot presence and grant reference. Tombstone forbids reactivation of erased data.                                                       |
+| Entitlements / usage            | Existing `entitlement_grants`, `analysis_grants`, `analysis_reservations`, `analysis_usage_ledger`, `usage_counters` and billing projection                                                                         | Scoped finite feature/period grant, UTC month/day requests and immutable consume/release provenance; no card/payment/raw provider record added                                                                     | Stop cancels only unused RESERVED analysis usage once; completed consumption remains. Guild deletion removes scoped provenance/grants through existing billing privacy. Personal deletion scrubs creator/requester provenance without consuming/releasing again.                        |
+| Routing identity / membership   | Discord membership and flags; tenant HMAC + encrypted ID in `member_identity_map`, `membership_episodes`, flow/native state                                                                                         | Active routing retained while legitimately needed; departed state follows detailed retention. Closed/raw snapshots expire; not all routing state has a fixed 30d TTL. Lifecycle/security services only.            | Personal deletion removes the scoped identity, cascading episodes/native jobs/facts. Guild deletion removes map/config/flows; required cascades cover native snapshots. Restore uses member lookup tombstones and matching vault keys; missing identity evidence keeps restore offline. |
+| Normalized activity metadata    | Allowlisted Gateway message/reply/reaction/poll/voice/scheduled-event metadata, no content/audio; `gateway_ingest`, `event_inbox`, lifecycle/adaptive/message/location/reaction/poll/voice tables                   | Detailed retention; collection epochs and definition/coverage evidence are preserved without converting missingness to zero. Gateway/projector/analytics services only.                                            | Uninvited events are rejected before storage/stream submission, with no per-event denial log. Pause closes current work; old generation payloads cannot recover/project. Member/Guild erase and scoped Redis stream scrub remove copies.                                                |
+| Projections and analyses        | Typed daily/member/channel projections, `daily_guild_metrics`, cohorts, `analysis_runs/results`, immutable recipes and coverage snapshots                                                                           | Member-linked daily detail uses short detailed retention. Aggregate purge and accepting/current entitlement history cap reads; result `retention_until` expires payload separately from usage provenance.          | Personal erasure invalidates affected aggregate runs/results for redisplay/comparison/reuse. Guild erase deletes raw and derived scoped records. Paused history still requires live authority, valid retention and entitlement.                                                         |
+| Attention / Operations / Intake | Existing target metadata/evidence, encrypted explicit intake answers, saved views/playbooks/report/config, outbox and role/team references                                                                          | Existing access roles and short detail/configuration policies; intake is explicit form data, not collected Message Content. Config stays while needed unless deleted.                                              | Existing scoped privacy removes member intake/Attention references and Guild config/derived/outbox data. Already delivered messages cannot be retroactively rolled back by SQL; UNKNOWN sends retain existing bounded reconciliation rules.                                             |
+| Jobs and transient delivery     | Persistent interaction jobs have encrypted payload; outbox reply tokens/receipts, component tokens, discovery jobs; BullMQ wakeups reference scope/run/job IDs; Redis normalized event stream is an additional copy | Interaction jobs / reply-edit outbox expire after 15min; component/receipt deadlines retain existing behavior. No new long-lived raw job copy.                                                                     | Canonical rows are erased and normalized streams scrubbed. Remaining minimal BullMQ IDs cannot resolve erased jobs or pass admission; ordinary workers do not replay old generations. Real Redis acceptance remains NOT RUN in this development task.                                   |
+| Operator audit / replay         | `operator_audit` and `operator_requests`: fixed actor/action/result, UTC time, target/request UUID, bounded reason and minimal state changes                                                                        | 30d purge; state audit excludes Guild display names, token/password/body/stack. Requests persist bounded replay result; reasons are human-entered and must not contain secrets. Operator only.                     | Guild deletion clears replayed display name. Minimum IDs/state support scoped reconciliation, not reconstruction of deleted content. Repeated uninvited events create no unbounded diagnostic trail.                                                                                    |
+| Product reliability             | Existing allowlisted `product_telemetry` with keyed Guild identity and durations/categories, operational redacted logs                                                                                              | Telemetry 90d; experiment assignment 90d; detailed audit/diagnostics follow existing short windows. Log sink rotation/retention is an operator release requirement, not configured here.                           | Guild purge/delete removes telemetry via existing lookup key; no raw user ID/content/token enters new audit. Operator error fallback emits a fixed audit-unavailable message, not exception bodies.                                                                                     |
+| Deletion intent / tombstone     | `deletion_requests`, `beta_deletion_jobs`; canonical scope, reason category, requested/progress/retry clocks, minimal member lookup HMAC                                                                            | Persist while needed to prevent resurrection and cover restoreable backups; no new automated tombstone purge without proof that covered backups have expired. Access limited to privacy/restore/operator services. | PENDING → ERASED after DB erase → DONE after scoped stream scrub. Five attempts/one day bounds automatic retry; explicit audited retry remains targeted. No normal ACTIVE admission gate blocks this work.                                                                              |
+| Backup / restore copy           | Existing encrypted DB backups plus independently encrypted minimal tombstone export; separate keys                                                                                                                  | Backup generation/expiration, off-host access, latest deletion-journal durability and log retention require environment-specific confirmation before Beta. They are not configured or extended here.               | Reapply newest protected Guild/member tombstones before any ingress/outbound/public service. Revoke all restored sessions. Missing archive/keys/identity or incomplete scrub means remain offline. Export is explicit, not continuous replication.                                      |
+
+## Request-to-erasure paths
+
+| Request                          | Authority and scope                                                                             | Durable actions / erasure entry                                                                                                                               |
+| -------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Public logout                    | Existing public opaque session plus same-Origin POST                                            | `PublicSessions.revoke`; no grant-wide provider revocation and no Guild delete                                                                                |
+| Personal OAuth disconnect        | Live provider identity; same-Origin confirmation                                                | `revokeUser` removes this subject's encrypted OAuth identity/tokens and all sessions, then one provider revocation attempt; other admins/Guild grants survive |
+| Personal community-data deletion | Existing `PrivacyService.delete`, actor hash must match this user in this tenant/Guild          | Target member raw/derived/identity/provenance scrub, invalidation of affected immutable results, scoped stream scrub and minimal deletion record              |
+| Guild unlink                     | `ServerVerification.disconnect`, fresh current manage/admin authority and confirmation revision | `requestBetaDeletion(UNLINK)` closes generation, revokes scoped grant/API credentials and queues system erasure; paused/expired admission does not block it   |
+| Bot removed                      | Discord.js GuildDelete (removal), not temporary GuildUnavailable                                | `requestBetaDeletion(BOT_REMOVED)`; no automatic invitation from Bot installation                                                                             |
+| Operator revoke/unlink/delete    | Separate local operator auth, exact scope, current generation/reason/request key                | Scoped canonical intent and same existing privacy erasure; no arbitrary financial mutation or cross-tenant edit                                               |
+| Grace ended                      | Limited lifecycle system job, current persisted expiry                                          | Scoped `RETENTION_EXPIRED` deletion, independent of ordinary work admission                                                                                   |
+| Offline restore                  | OS-local owner, explicit offline prerequisite, protected archive and matching vault keys        | `applyDeletionTombstones` revokes restored sessions and re-runs scoped Guild/member privacy; failed evidence refuses to claim success                         |
+
+Public Guild authentication and invitation admission are distinct from login.
+Stopping one Guild does not unnecessarily log out its administrators from another
+Guild. Personal OAuth deletion does not imply deleting unrelated Bot-observed
+membership data; community-data deletion uses its separate verified scope.
+Conversely, a valid public session cannot override a Guild deletion tombstone.
+
+Collection denies when the DB/current authorization is unavailable. If a Bot
+removal or deletion request occurs while persistence is unavailable, recovery
+must reconcile that obligation before re-opening collection; a missing write is
+not proof of completion. Queue state, external delivery and DB state must be
+checked separately. No automatic retry of a possibly successful external send or
+OAuth rotation was added to a database transaction retry.
+
+## Official requirements and publication preparation
+
+Official sources were checked on 2026-10-08. The
+[Discord Developer Terms](https://support-dev.discord.com/hc/en-us/articles/8562894815383-Discord-Developer-Terms-of-Service)
+and [Developer Policy](https://support-dev.discord.com/hc/en-us/articles/8563934450327-Discord-Developer-Policy)
+inform purpose limits, user privacy, security and deletion duties. The code map
+above implements scoped access, exclusion of content/DM/audio and prompt erasure;
+it does not establish legal compliance or permission to retain all API data for
+30 days. Incident handling and deployment-specific retention/backup controls
+still need operational evidence.
+
+The current [Discord OAuth2 specification](https://docs.discord.com/developers/topics/oauth2)
+defines the form-encoded refresh exchange and returned token/expires/scope values.
+It also explains that revocation affects the user's authorization grant; ordinary
+logout therefore uses local durable session revocation. No invented refresh-token
+lifetime is applied. Actual provider consent/rotation and application credentials
+are not exercised in this task.
+
+[OWASP password storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html),
+[session management](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)
+and [CSRF prevention](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)
+were used to check the chosen salted scrypt parameters, opaque server-side
+sessions, expiry/revocation and request protections. NEXUS timeout/usage defaults
+are project settings, not OWASP or Discord-approved operating guarantees.
+
+The later final Privacy Policy needs: owner/contact and complaint route; dataset
+purposes/sources/permissions; access roles and processors; actual retention and
+backup expiry; individual versus Guild disconnect/delete instructions; latest
+tombstone/restore controls; incident notification and request handling; languages
+and publication version. Support and Terms must explain invitation-only free
+Beta, finite caps, early stop and data treatment without claiming paid service or
+causal/individual scoring. URL/Developer Portal registration, legal review,
+cross-jurisdiction requirements and the final public text remain separate work.
+
+See [operator procedures](alpha12-operator-operations.md) and
+[implementation/verification](alpha12-hosted-beta.md). These records do not
+authorize live operations or declare Beta GO.

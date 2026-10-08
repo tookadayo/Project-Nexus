@@ -1,6 +1,8 @@
 import type {ErrorCategory,UserFailure} from '../../../shared/src/error-types';
 const text:Record<'ja'|'en',Record<ErrorCategory,[string,string,string]>>={
  ja:{
+  BETA_ACCESS:['このサーバーは現在利用できません','招待の有効期間・停止状態を運営に確認してください。削除や連携解除は専用の操作から行えます。','招待状態を確認'],
+  BETA_USAGE:['分析の利用上限に達しました','このサーバーの日次または月次の上限に達しています。保存済みの結果は履歴から確認できます。','履歴を見る'],
   ANALYSIS_USAGE:['詳しい分析の回数が残っていません','基本の分析は、回数を使わずいつでも確認できます。','基本の分析を見る'],
   ANALYSIS_RESULT:['結果を表示できません','保存期限・データの削除・処理状況を確認してください。履歴から表示できる結果を選べます。','履歴を見る'],
   PERMISSION:['この操作を行う権限がありません','必要なDiscord権限またはNEXUS管理ロールを確認してください。','権限を確認'],
@@ -19,6 +21,8 @@ const text:Record<'ja'|'en',Record<ErrorCategory,[string,string,string]>>={
   INTERNAL:['処理を完了できませんでした','操作結果を確認できませんでした。参照IDをサポートへお伝えください。','状態を確認'],
  },
  en:{
+  BETA_ACCESS:['This server is currently unavailable','Ask the operator to check its invitation period and pause state. Use the dedicated unlink or deletion action when needed.','Check invitation'],
+  BETA_USAGE:['The analysis limit has been reached','This server reached its daily or monthly analysis limit. Saved results remain available in history.','Open history'],
   ANALYSIS_USAGE:['No detailed analysis uses remain','Basic analysis is always available without using an analysis run.','View basic analysis'],
   ANALYSIS_RESULT:['This result is unavailable','Check its retention period, removed data or processing status. Open history to find an available result.','Open history'],
   PERMISSION:['You do not have permission for this action','Check the required Discord permissions or NEXUS manager role.','Check permissions'],

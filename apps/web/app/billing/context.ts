@@ -18,7 +18,7 @@ export async function billingContext(
   requireVerification = true,
 ) {
   const cookie = await cookies(),
-    session = openSession(cookie.get("nexus_session")?.value),
+    session = await openSession(cookie.get("nexus_session")?.value),
     guildId = selectedGuildId ?? cookie.get("nexus_guild")?.value;
   assert(session, "SESSION_EXPIRED", 401);
   assert(guildId && /^\d{17,20}$/.test(guildId), "BILLING_GUILD_REQUIRED", 403);
@@ -135,7 +135,7 @@ export async function billingContext(
   };
 }
 export async function internalBillingContext(reason: string) {
-  const session = openSession((await cookies()).get("nexus_session")?.value);
+  const session = await openSession((await cookies()).get("nexus_session")?.value);
   assert(session, "SESSION_EXPIRED", 401);
   await validateOAuthSession(session);
   const services = serverServices(),
