@@ -83,14 +83,18 @@ export async function POST(request: NextRequest) {
                 ? "CANCEL"
                 : "VIEW",
     );
-    if (input.action === "payment")
-      return NextResponse.json(
-        await context.billing.pendingPayment(
-          context.scope,
-          new StripeBillingProvider(),
-        ),
-        { headers: { "Cache-Control": "no-store" } },
+    if (input.action === "payment") {
+      const payment = await context.billing.pendingPayment(
+        context.scope,
+        new StripeBillingProvider(),
       );
+      await context.services.db
+        .transaction()
+        .execute(context.revalidateManagement);
+      return NextResponse.json(payment, {
+        headers: { "Cache-Control": "no-store" },
+      });
+    }
     if (input.action === "reserve")
       return NextResponse.json(
         await new PromotionReservationService(
@@ -115,6 +119,7 @@ export async function POST(request: NextRequest) {
           provider,
           input.idempotencyKey,
           "AT_PERIOD_END",
+          context.revalidateManagement,
         );
       else {
         const target = await checkoutOffering(
@@ -136,6 +141,7 @@ export async function POST(request: NextRequest) {
             effective: upgrade ? "IMMEDIATE" : "AT_PERIOD_END",
             proration: upgrade ? "PROVIDER_CALCULATED" : "NONE",
           },
+          context.revalidateManagement,
         );
       }
       await context.billing.reconcileLatest(context.scope, provider);
@@ -179,8 +185,15 @@ export async function POST(request: NextRequest) {
             operation: "PORTAL",
             idempotencyKey: input.idempotencyKey,
             customer,
+            externalBoundary: "ADAPTER",
+            revalidate: context.revalidateManagement,
           },
-          ({ idempotencyKey, customer: trustedCustomer }) => {
+          ({
+            idempotencyKey,
+            customer: trustedCustomer,
+            beforeMutation,
+            afterMutation,
+          }) => {
             assert(
               trustedCustomer,
               "BILLING_CUSTOMER_REFERENCE_UNAVAILABLE",
@@ -190,6 +203,8 @@ export async function POST(request: NextRequest) {
               scope: context.scope,
               customer: trustedCustomer,
               idempotencyKey,
+              beforeMutation,
+              afterMutation,
             });
           },
         ),

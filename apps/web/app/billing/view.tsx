@@ -55,6 +55,9 @@ export async function BillingView({
           <a href="/billing/manage">
             {copy(locale, "支払いを管理", "Manage billing")}
           </a>
+          <a href="/billing/payments">
+            {copy(locale, "自分が管理している支払い", "My payments")}
+          </a>
           <a href="/billing/promotions">
             {copy(locale, "プロモーション", "Promotions")}
           </a>

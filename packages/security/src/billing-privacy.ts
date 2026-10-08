@@ -54,6 +54,7 @@ export async function deleteBillingCommunity(tx: Tx, s: Scope) {
   await sql`UPDATE billing_audit_log SET guild_id=NULL,actor_hash=NULL,metadata=metadata-'reason' WHERE ${tenant(s)}`.execute(
     tx,
   );
+  await sql`UPDATE billing_authorization_history SET actor_hash=NULL WHERE organization_id=${s.organizationId}::uuid AND NOT EXISTS(SELECT 1 FROM billing_subscription_assignments a WHERE a.organization_id=${s.organizationId}::uuid)`.execute(tx);
 }
 export async function deleteBillingActor(
   tx: Tx,
@@ -73,6 +74,7 @@ export async function deleteBillingActor(
   await sql`DELETE FROM billing_authorizations WHERE organization_id=${s.organizationId}::uuid AND actor_hash=${org}`.execute(
     tx,
   );
+  await sql`UPDATE billing_authorization_history SET actor_hash=NULL WHERE organization_id=${s.organizationId}::uuid AND actor_hash=${org}`.execute(tx);
   const operations = (
     await sql<{
       id: string;

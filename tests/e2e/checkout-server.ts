@@ -63,6 +63,9 @@ const owners = new Map(ids.map((id, i) => [id, i < 2 ? user : other])),
   subscriptions = new Map<string, Record<string, unknown>>(),
   idempotency = new Map<string, string>();
 let checkoutCalls = 0;
+let portalCalls = 0,
+  cancelCalls = 0;
+const departed = new Set<string>();
 const price = {
   id: "price_fixture_growth",
   object: "price",
@@ -139,8 +142,8 @@ app.get("/fixture/discord/guilds/:id/roles", async (req) => {
   ];
 });
 app.get("/fixture/discord/guilds/:id/members/:user", async (req, reply) => {
-  const { id } = req.params as { id: string };
-  return installed.has(id)
+  const { id, user: member } = req.params as { id: string; user: string };
+  return installed.has(id) && !departed.has(id + ":" + member)
     ? { roles: [], joined_at: "2026-01-01T00:00:00Z", user: { bot: false } }
     : reply.code(404).send({});
 });
@@ -152,6 +155,27 @@ app.post("/fixture/owner", async (req) => {
 app.post("/fixture/install", async () => {
   installed.add(ids[1]);
   return { ok: true };
+});
+app.post("/fixture/departed", async (req) => {
+  const { guildId, userId } = req.body as { guildId: string; userId: string };
+  departed.add(guildId + ":" + userId);
+  return { ok: true };
+});
+app.get("/fixture/billing-account", async (req) => {
+  const scope = scopeForGuild((req.query as { guildId: string }).guildId);
+  return (
+    await sql`SELECT id AS "accountId" FROM billing_accounts WHERE organization_id=${scope.organizationId}::uuid`.execute(
+      db,
+    )
+  ).rows[0];
+});
+app.get("/fixture/billing-customer-history", async (req) => {
+  const scope = scopeForGuild((req.query as { guildId: string }).guildId);
+  return (
+    await sql`SELECT count(*) FILTER(WHERE c.archived_at IS NOT NULL)::int AS archived,count(*) FILTER(WHERE c.archived_at IS NULL)::int AS current FROM billing_provider_customers c JOIN billing_accounts b ON b.id=c.account_id WHERE b.organization_id=${scope.organizationId}::uuid`.execute(
+      db,
+    )
+  ).rows[0];
 });
 app.get("/fixture/stripe/v1/prices/:id", async () => price);
 app.get("/fixture/stripe/v1/products/:id", async () => ({
@@ -168,6 +192,8 @@ app.post("/fixture/stripe/v1/customers", async (req) => ({
 app.get("/fixture/stripe/v1/customers/:id", async (req) => ({
   id: (req.params as { id: string }).id,
   livemode: false,
+  default_source: null,
+  invoice_settings: { default_payment_method: null },
 }));
 app.get("/fixture/stripe/v1/subscriptions", async (req) => ({
   object: "list",
@@ -179,6 +205,12 @@ app.get("/fixture/stripe/v1/subscriptions", async (req) => ({
 app.get("/fixture/stripe/v1/subscriptions/:id", async (req) =>
   subscriptions.get((req.params as { id: string }).id),
 );
+app.post("/fixture/stripe/v1/subscriptions/:id", async (req) => {
+  const sub = subscriptions.get((req.params as { id: string }).id)!;
+  sub.cancel_at_period_end = true;
+  cancelCalls++;
+  return sub;
+});
 app.get("/fixture/stripe/v1/billing_portal/configurations/:id", async () => ({
   id: "bpc_fixture",
   active: true,
@@ -188,9 +220,10 @@ app.get("/fixture/stripe/v1/billing_portal/configurations/:id", async () => ({
     subscription_cancel: { enabled: true, mode: "at_period_end" },
   },
 }));
-app.post("/fixture/stripe/v1/billing_portal/sessions", async () => ({
-  url: "https://billing.stripe.com/p/session/fixture",
-}));
+app.post("/fixture/stripe/v1/billing_portal/sessions", async () => {
+  portalCalls++;
+  return { url: "https://billing.stripe.com/p/session/fixture" };
+});
 app.post("/fixture/stripe/v1/checkout/sessions", async (req) => {
   const body = req.body as URLSearchParams,
     key = req.headers["idempotency-key"] as string;
@@ -202,6 +235,7 @@ app.post("/fixture/stripe/v1/checkout/sessions", async (req) => {
       livemode: false,
       mode: "subscription",
       status: "open",
+      payment_status: "unpaid",
       client_secret: id + "_secret_fixture",
       expires_at: Number(body.get("expires_at")),
       customer: body.get("customer"),
@@ -216,6 +250,27 @@ app.post("/fixture/stripe/v1/checkout/sessions", async (req) => {
 app.get("/fixture/stripe/v1/checkout/sessions/:id", async (req) =>
   sessions.get((req.params as { id: string }).id),
 );
+app.get("/fixture/stripe/v1/checkout/sessions", async (req) => ({
+  object: "list",
+  has_more: false,
+  data: [...sessions.values()].filter(
+    (session) =>
+      session.customer === (req.query as { customer: string }).customer,
+  ),
+}));
+for (const path of [
+  "invoices",
+  "payment_methods",
+  "payment_intents",
+  "setup_intents",
+  "charges",
+  "customers/:id/sources",
+])
+  app.get("/fixture/stripe/v1/" + path, async () => ({
+    object: "list",
+    has_more: false,
+    data: [],
+  }));
 app.post("/fixture/stripe/v1/checkout/sessions/:id/expire", async (req) => {
   const session = sessions.get((req.params as { id: string }).id)!;
   session.status = "expired";
@@ -336,7 +391,11 @@ app.post("/fixture/higher-grant", async (req) => {
     );
   return { plan: (await billing.status(scope)).plan };
 });
-app.get("/fixture/count", async () => ({ checkoutCalls }));
+app.get("/fixture/count", async () => ({
+  checkoutCalls,
+  portalCalls,
+  cancelCalls,
+}));
 await app.listen({ host: "127.0.0.1", port });
 let stopping = false;
 async function stop() {

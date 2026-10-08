@@ -38,6 +38,8 @@ export type SessionOperation = {
   policy?: unknown;
   checkoutUi?: "HOSTED" | "ELEMENTS";
   principalActorHash?: string;
+  /** Stripe adapters mark each write after their read-only provider preflight. */
+  externalBoundary?: "ADAPTER";
   /** Trusted caller rechecks live owner/session/verification inside each claim transaction. */
   revalidate?: (tx: Tx) => Promise<void>;
 };
@@ -51,7 +53,8 @@ export type BillingExecutionContext = {
   currentOffering?: BillingOffering;
   checkoutExpiresAt?: string;
   onCustomerCreated?: (customerRef: string) => Promise<void>;
-  beforeMutation?: () => Promise<void>;
+  beforeMutation: (phase?: string) => Promise<void>;
+  afterMutation: (phase: string) => Promise<void>;
 };
 type SessionResult = (
   | { kind?: "HOSTED"; url: string; clientSecret?: never }
@@ -108,6 +111,17 @@ export class BillingOperationService {
     const claim = await this.db.transaction().execute(async (tx) => {
       await billingScopeLock(tx, s);
       await input.revalidate?.(tx);
+      if (input.operation === "PORTAL") {
+        const abandonment =
+          await sql`SELECT id FROM billing_operations WHERE organization_id=${s.organizationId}::uuid AND provider='STRIPE' AND operation='CHECKOUT' AND abandon_started_at IS NOT NULL`.execute(
+            tx,
+          );
+        assert(
+          !abandonment.rows.length,
+          "BILLING_ABANDONMENT_IN_PROGRESS",
+          409,
+        );
+      }
       const previous = (
         await sql<{
           operation: string;
@@ -348,15 +362,19 @@ export class BillingOperationService {
         await new BillingService(tx, this.vault).assertNewCheckout(
           s,
           input.provider,
+          row.id,
         );
       if (input.operation === "CHECKOUT" && input.provider === "STRIPE") {
         const other =
-          await sql`SELECT c.id FROM billing_provider_customers c JOIN billing_accounts a ON a.id=c.account_id WHERE a.organization_id=${s.organizationId}::uuid AND c.provider='STRIPE' AND c.reference_guild_id IS DISTINCT FROM ${s.guildId}`.execute(
+          await sql`SELECT c.id FROM billing_provider_customers c JOIN billing_accounts a ON a.id=c.account_id WHERE a.organization_id=${s.organizationId}::uuid AND c.provider='STRIPE' AND c.archived_at IS NULL AND c.reference_guild_id IS DISTINCT FROM ${s.guildId}`.execute(
             tx,
           );
         assert(!other.rows.length, "BILLING_SCOPE_CONFLICT", 409);
-        const otherOperation=await sql`SELECT id FROM billing_operations WHERE organization_id=${s.organizationId}::uuid AND guild_id<>${s.guildId} AND provider='STRIPE' AND operation='CHECKOUT' AND (state='RECONCILE_REQUIRED' OR (state='PENDING' AND external_started_at IS NOT NULL) OR (state='FINALIZED' AND checkout_completed_at IS NULL AND checkout_abandoned_at IS NULL AND checkout_expires_at>now()))`.execute(tx);
-        assert(!otherOperation.rows.length,"BILLING_SCOPE_CONFLICT",409);
+        const otherOperation =
+          await sql`SELECT id FROM billing_operations WHERE organization_id=${s.organizationId}::uuid AND guild_id<>${s.guildId} AND provider='STRIPE' AND operation='CHECKOUT' AND (state='RECONCILE_REQUIRED' OR (state='PENDING' AND (external_started_at IS NOT NULL OR lease_until>clock_timestamp())) OR (state='FINALIZED' AND checkout_completed_at IS NULL AND checkout_abandoned_at IS NULL AND checkout_expires_at>now()))`.execute(
+            tx,
+          );
+        assert(!otherOperation.rows.length, "BILLING_SCOPE_CONFLICT", 409);
       }
       if (
         subscription &&
@@ -365,7 +383,7 @@ export class BillingOperationService {
         // A fresh UUID cannot make an unknown external mutation safe to retry.
         // Pre-alpha.7 unknown mutations lack a binding ID and block this scoped provider conservatively.
         const unresolved =
-          await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND provider=${input.provider} AND operation IN ('CHANGE','CANCEL') AND (state='RECONCILE_REQUIRED' OR (state='PENDING' AND external_started_at IS NOT NULL)) AND (subscription_id=${subscription.bindingId}::uuid OR subscription_id IS NULL)`.execute(
+          await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND id<>${row.id}::uuid AND provider=${input.provider} AND operation IN ('CHANGE','CANCEL') AND (state='RECONCILE_REQUIRED' OR (state='PENDING' AND (external_started_at IS NOT NULL OR lease_until>clock_timestamp()))) AND (subscription_id=${subscription.bindingId}::uuid OR subscription_id IS NULL)`.execute(
             tx,
           );
         assert(!unresolved.rows.length, "BILLING_RECONCILE_REQUIRED", 409);
@@ -382,7 +400,7 @@ export class BillingOperationService {
       }
       const claimed = await sql<{
         checkout_expires_at: Date | null;
-      }>`UPDATE billing_operations SET state='PENDING',lease_token=${token}::uuid,lease_until=now()+interval '2 minutes',external_started_at=now(),checkout_expires_at=CASE WHEN operation='CHECKOUT' AND provider='STRIPE' THEN CASE WHEN external_started_at IS NULL THEN now()+interval '35 minutes' ELSE COALESCE(checkout_expires_at,now()+interval '35 minutes') END ELSE checkout_expires_at END WHERE id=${row.id}::uuid AND (lease_until IS NULL OR lease_until<now()) RETURNING checkout_expires_at`.execute(
+      }>`UPDATE billing_operations SET state='PENDING',lease_token=${token}::uuid,lease_until=now()+interval '2 minutes',error_category=NULL,checkout_expires_at=CASE WHEN operation='CHECKOUT' AND provider='STRIPE' THEN now()+interval '35 minutes' ELSE checkout_expires_at END WHERE id=${row.id}::uuid AND (lease_until IS NULL OR lease_until<now()) RETURNING checkout_expires_at`.execute(
         tx,
       );
       assert(claimed.rows.length, "BILLING_OPERATION_BUSY", 409);
@@ -392,13 +410,37 @@ export class BillingOperationService {
           "BILLING_PRINCIPAL_INVALID",
           403,
         );
-        const principal = (
+        let principal:
+          | {
+              actor_hash: string;
+              authority_state: string;
+              checkout_operation_id: string | null;
+            }
+          | undefined = (
           await sql<{
             actor_hash: string;
-          }>`SELECT actor_hash FROM billing_authorizations WHERE organization_id=${s.organizationId}::uuid AND role='PRIMARY_BILLING_PRINCIPAL' AND revoked_at IS NULL FOR UPDATE`.execute(
+            authority_state: string;
+            checkout_operation_id: string | null;
+          }>`SELECT actor_hash,authority_state,checkout_operation_id FROM billing_authorizations WHERE organization_id=${s.organizationId}::uuid AND role='PRIMARY_BILLING_PRINCIPAL' AND revoked_at IS NULL FOR UPDATE`.execute(
             tx,
           )
         ).rows[0];
+        if (
+          principal?.authority_state === "PROVISIONAL" &&
+          principal.checkout_operation_id !== row.id &&
+          !customer
+        ) {
+          const unstarted =
+            await sql`SELECT id FROM billing_operations WHERE id=${principal.checkout_operation_id}::uuid AND external_started_at IS NULL AND (lease_until IS NULL OR lease_until<=now()) AND state IN ('PENDING','FAILED')`.execute(
+              tx,
+            );
+          if (unstarted.rows.length) {
+            await sql`UPDATE billing_authorizations SET revoked_at=now(),authority_state='RELEASED' WHERE organization_id=${s.organizationId}::uuid AND actor_hash=${principal.actor_hash} AND checkout_operation_id=${principal.checkout_operation_id}::uuid`.execute(
+              tx,
+            );
+            principal = undefined;
+          }
+        }
         assert(
           !principal || principal.actor_hash === input.principalActorHash,
           "BILLING_OWNERSHIP_REVIEW",
@@ -406,10 +448,14 @@ export class BillingOperationService {
         );
         // Unclaimed historical Customer bindings require operator review.
         assert(principal || !customer, "BILLING_OWNERSHIP_REVIEW", 409);
-        if (!principal)
-          await sql`INSERT INTO billing_authorizations(organization_id,actor_hash,role,checkout_operation_id) VALUES(${s.organizationId}::uuid,${input.principalActorHash},'PRIMARY_BILLING_PRINCIPAL',${row.id}::uuid) ON CONFLICT(organization_id,actor_hash) DO UPDATE SET role='PRIMARY_BILLING_PRINCIPAL',revoked_at=NULL,checkout_operation_id=EXCLUDED.checkout_operation_id`.execute(
+        if (!principal) {
+          await sql`INSERT INTO billing_accounts(id,organization_id) VALUES(${randomUUID()}::uuid,${s.organizationId}::uuid) ON CONFLICT(organization_id) DO NOTHING`.execute(
             tx,
           );
+          await sql`INSERT INTO billing_authorizations(organization_id,account_id,actor_hash,role,checkout_operation_id,authority_state) SELECT ${s.organizationId}::uuid,id,${input.principalActorHash},'PRIMARY_BILLING_PRINCIPAL',${row.id}::uuid,'PROVISIONAL' FROM billing_accounts WHERE organization_id=${s.organizationId}::uuid AND deleted_at IS NULL ON CONFLICT(organization_id,actor_hash) DO UPDATE SET role='PRIMARY_BILLING_PRINCIPAL',revoked_at=NULL,account_id=EXCLUDED.account_id,checkout_operation_id=EXCLUDED.checkout_operation_id,authority_state='PROVISIONAL'`.execute(
+            tx,
+          );
+        }
       }
       await billingAudit(
         tx,
@@ -435,7 +481,58 @@ export class BillingOperationService {
       };
     });
     if (claim.cached) return claim.cached;
-    let providerCalled = false;
+    const beforeMutation = async (phase = "PROVIDER") => {
+      assert(
+        /^[A-Z_]{1,50}$/.test(phase),
+        "BILLING_EXTERNAL_PHASE_INVALID",
+        500,
+      );
+      // Marker commits before the adapter can invoke Stripe. A stale process cannot cross this fence.
+      await this.db.transaction().execute(async (tx) => {
+        await billingScopeLock(tx, s);
+        const current =
+          await sql`SELECT id FROM billing_operations WHERE id=${claim.id}::uuid AND ${tenant(s)} AND state='PENDING' AND lease_token=${token}::uuid AND lease_until>clock_timestamp() FOR UPDATE`.execute(
+            tx,
+          );
+        assert(current.rows.length, "BILLING_OPERATION_LEASE_EXPIRED", 409);
+        await input.revalidate?.(tx);
+        if (input.operation === "PORTAL") {
+          const abandonment =
+            await sql`SELECT id FROM billing_operations WHERE organization_id=${s.organizationId}::uuid AND provider='STRIPE' AND operation='CHECKOUT' AND abandon_started_at IS NOT NULL`.execute(
+              tx,
+            );
+          assert(
+            !abandonment.rows.length,
+            "BILLING_ABANDONMENT_IN_PROGRESS",
+            409,
+          );
+        }
+        if (input.operation === "CHECKOUT")
+          await new BillingService(tx, this.vault).assertNewCheckout(
+            s,
+            input.provider,
+            claim.id,
+          );
+        const marked =
+          await sql`UPDATE billing_operations SET external_started_at=COALESCE(external_started_at,clock_timestamp()),external_phase=${phase} WHERE id=${claim.id}::uuid AND state='PENDING' AND lease_token=${token}::uuid AND lease_until>clock_timestamp() RETURNING id`.execute(
+            tx,
+          );
+        assert(marked.rows.length, "BILLING_OPERATION_LEASE_EXPIRED", 409);
+        await sql`INSERT INTO billing_operation_external_steps(operation_id,phase,lease_token) VALUES(${claim.id}::uuid,${phase},${token}::uuid) ON CONFLICT(operation_id,phase) DO UPDATE SET lease_token=EXCLUDED.lease_token,started_at=now(),completed_at=NULL`.execute(
+          tx,
+        );
+      });
+    };
+    const afterMutation = async (phase: string) => {
+      await this.db.transaction().execute(async (tx) => {
+        await billingScopeLock(tx, s);
+        const saved =
+          await sql`UPDATE billing_operation_external_steps p SET completed_at=clock_timestamp() FROM billing_operations o WHERE p.operation_id=o.id AND o.id=${claim.id}::uuid AND p.phase=${phase} AND p.lease_token=${token}::uuid AND o.lease_token=${token}::uuid AND o.state='PENDING' AND o.lease_until>clock_timestamp() RETURNING o.id`.execute(
+            tx,
+          );
+        assert(saved.rows.length, "BILLING_OPERATION_LEASE_EXPIRED", 409);
+      });
+    };
     try {
       // Recheck after the durable claim and immediately before the provider call.
       if (input.revalidate)
@@ -455,7 +552,8 @@ export class BillingOperationService {
           );
         assert(valid.rows.length, "PROMOTION_CHECKOUT_WINDOW_TOO_SHORT", 409);
       }
-      providerCalled = true;
+      // Legacy/non-Stripe executors treat invocation as the external boundary. Stripe opts into per-write hooks.
+      if (input.externalBoundary !== "ADAPTER") await beforeMutation();
       const providerResult = await execute({
         operationId: claim.id,
         idempotencyKey: input.idempotencyKey,
@@ -465,20 +563,14 @@ export class BillingOperationService {
         subscription: claim.subscription,
         currentOffering: claim.currentOffering,
         checkoutExpiresAt: claim.checkoutExpiresAt,
-        beforeMutation: input.revalidate
-          ? async () => {
-              await this.db.transaction().execute(async (tx) => {
-                await billingScopeLock(tx, s);
-                await input.revalidate!(tx);
-                if(input.operation === "CHECKOUT") await new BillingService(tx,this.vault).assertNewCheckout(s,input.provider,claim.id);
-              });
-            }
-          : undefined,
+        beforeMutation,
+        afterMutation,
         onCustomerCreated: async (ref) => {
           await new BillingService(this.db, this.vault).bindCreatedCustomer(
             s,
             claim.id,
             ref,
+            token,
           );
         },
       });
@@ -514,8 +606,9 @@ export class BillingOperationService {
       assert(cacheUntil.getTime() > Date.now(), "BILLING_SESSION_EXPIRED", 409);
       const saved = await this.db.transaction().execute(async (tx) => {
         await billingScopeLock(tx, s);
+        await input.revalidate?.(tx);
         const saved =
-          await sql`UPDATE billing_operations SET state=${["CHANGE", "CANCEL"].includes(input.operation) ? "RECONCILE_REQUIRED" : "FINALIZED"},result_ciphertext=${this.vault.seal(s, JSON.stringify(result))},result_expires_at=${cacheUntil},checkout_expires_at=${checkout ? result.expiresAt! : null}::timestamptz,provider_reference_digest=${result.providerCheckoutRef ? this.vault.digest("billing-checkout-reference:" + input.provider, result.providerCheckoutRef) : null},lease_token=NULL,lease_until=NULL,error_category=NULL WHERE id=${claim.id}::uuid AND lease_token=${token}::uuid AND lease_until>now() RETURNING id`.execute(
+          await sql`UPDATE billing_operations SET state=${["CHANGE", "CANCEL"].includes(input.operation) ? "RECONCILE_REQUIRED" : "FINALIZED"},result_ciphertext=${this.vault.seal(s, JSON.stringify(result))},result_expires_at=${cacheUntil},checkout_expires_at=${checkout ? result.expiresAt! : null}::timestamptz,provider_reference_digest=${result.providerCheckoutRef ? this.vault.digest("billing-checkout-reference:" + input.provider, result.providerCheckoutRef) : null},lease_token=NULL,lease_until=NULL,error_category=NULL WHERE id=${claim.id}::uuid AND lease_token=${token}::uuid AND lease_until>clock_timestamp() RETURNING id`.execute(
             tx,
           );
         if (saved.rows.length && checkout && result.providerCustomerRef)
@@ -547,22 +640,28 @@ export class BillingOperationService {
       assert(saved.rows.length, "BILLING_OPERATION_LEASE_EXPIRED", 409);
       return { ...result, cacheUntil: cacheUntil.toISOString() };
     } catch (error) {
-      const definitive =
-        !providerCalled ||
-        error instanceof DefinitiveBillingFailure ||
-        (isDomainError(error) &&
-          [
-            "BILLING_PROVIDER_NOT_CONFIGURED",
-            "BILLING_CHECKOUT_DISABLED",
-            "BILLING_MANAGEMENT_DISABLED",
-          ].includes(error.code));
-      await sql`UPDATE billing_operations SET state=${definitive ? "FAILED" : "RECONCILE_REQUIRED"},error_category=${definitive ? "BILLING_DEFINITIVE_FAILURE" : "BILLING_OUTCOME_UNKNOWN"},external_started_at=CASE WHEN ${definitive} THEN NULL ELSE external_started_at END,checkout_expires_at=CASE WHEN ${definitive} AND operation='CHECKOUT' THEN NULL ELSE checkout_expires_at END,lease_token=NULL,lease_until=NULL WHERE id=${claim.id}::uuid AND lease_token=${token}::uuid`.execute(
-        this.db,
-      );
-      if (definitive && input.principalActorHash)
-        await sql`DELETE FROM billing_authorizations WHERE organization_id=${s.organizationId}::uuid AND checkout_operation_id=${claim.id}::uuid AND role='PRIMARY_BILLING_PRINCIPAL' AND NOT EXISTS(SELECT 1 FROM billing_operations WHERE id=${claim.id}::uuid AND state<>'FAILED')`.execute(
-          this.db,
+      await this.db.transaction().execute(async (tx) => {
+        await billingScopeLock(tx, s);
+        const row = (
+          await sql<{
+            external_started_at: Date | null;
+            completed: boolean;
+          }>`SELECT o.external_started_at,EXISTS(SELECT 1 FROM billing_operation_external_steps p WHERE p.operation_id=o.id AND p.completed_at IS NOT NULL) AS completed FROM billing_operations o WHERE o.id=${claim.id}::uuid AND o.lease_token=${token}::uuid FOR UPDATE`.execute(
+            tx,
+          )
+        ).rows[0];
+        if (!row) return;
+        const definitive =
+          !row.external_started_at ||
+          (!row.completed && error instanceof DefinitiveBillingFailure);
+        await sql`UPDATE billing_operations SET state=${definitive ? "FAILED" : "RECONCILE_REQUIRED"},error_category=${definitive ? "BILLING_DEFINITIVE_FAILURE" : "BILLING_OUTCOME_UNKNOWN"},external_started_at=CASE WHEN ${definitive} THEN NULL ELSE external_started_at END,checkout_expires_at=CASE WHEN ${definitive} AND operation='CHECKOUT' THEN NULL ELSE checkout_expires_at END,lease_token=NULL,lease_until=NULL WHERE id=${claim.id}::uuid AND lease_token=${token}::uuid`.execute(
+          tx,
         );
+        if (definitive && input.principalActorHash)
+          await sql`UPDATE billing_authorizations SET revoked_at=now(),authority_state='RELEASED' WHERE organization_id=${s.organizationId}::uuid AND checkout_operation_id=${claim.id}::uuid AND role='PRIMARY_BILLING_PRINCIPAL' AND authority_state='PROVISIONAL'`.execute(
+            tx,
+          );
+      });
       // Preserve the public DomainError code/status from read-only preflight.
       throw error instanceof DefinitiveBillingFailure && error.cause
         ? error.cause
