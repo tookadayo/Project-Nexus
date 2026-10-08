@@ -1,3 +1,4 @@
+import { analysisChannelScope } from "../../lifecycle/src/discovery.js";
 import { sql, tenant, type Database } from "../../db/src/index";
 import { GuildScheduledEventEntityType } from "discord-api-types/v10";
 import type { Scope } from "../../shared/src/index";
@@ -144,12 +145,11 @@ export async function adaptivePresentation(
       db,
     )
   ).rows[0]!;
+  const resolvedScope = await analysisChannelScope(db,s,cfg);
   const scopeFilter = (data: string) => {
-    if (cfg.analysisScope.mode === "all") return sql`true`;
     const ref = sql.ref(data);
-    return sql`(${ref}->>'channelId' IS NULL OR ${cfg.analysisScope.mode}='all' OR (${cfg.analysisScope.mode}='include')=(COALESCE((SELECT parent_id FROM discord_surface_state ch WHERE ch.organization_id=${s.organizationId}::uuid AND ch.guild_id=${s.guildId} AND ch.channel_id=${ref}->>'channelId'),${ref}->>'channelId')=ANY(${cfg.analysisScope.channelIds}::text[])))`;
-  };
-  const staffFilter = (hash: string) =>
+    return sql`(${ref}->>'channelId' IS NULL OR ${ref}->>'channelId'=ANY(${resolvedScope.actualChannelIds}::text[]))`;
+  };  const staffFilter = (hash: string) =>
     roles.length
       ? sql`NOT EXISTS(SELECT 1 FROM member_identity_map m JOIN membership_episodes e ON e.organization_id=m.organization_id AND e.guild_id=m.guild_id AND e.identity_id=m.id JOIN member_observable_state st ON st.organization_id=e.organization_id AND st.guild_id=e.guild_id AND st.episode_id=e.id WHERE m.organization_id=${s.organizationId}::uuid AND m.guild_id=${s.guildId} AND m.lookup_hash=${sql.ref(hash)} AND st.roles&&${roles}::text[])`
       : sql`true`;
@@ -201,7 +201,7 @@ export async function adaptivePresentation(
       median: number | null;
       p75: number | null;
       p90: number | null;
-    }>`WITH eligible AS MATERIALIZED (SELECT ep.id,COALESCE(ep.engagement_started_at,ep.joined_at) AS eligible_at FROM membership_episodes ep WHERE ep.organization_id=${s.organizationId}::uuid AND ep.guild_id=${s.guildId} AND ep.context='PRODUCTION' AND ep.screening_observed_at IS NOT NULL AND ep.guest_observed_at IS NOT NULL AND NOT ep.screening_pending AND NOT ep.is_guest AND COALESCE(ep.engagement_started_at,ep.joined_at)>=${from} AND COALESCE(ep.engagement_started_at,ep.joined_at)<${now} AND ${roles.length ? sql`NOT EXISTS(SELECT 1 FROM member_observable_state st WHERE st.organization_id=ep.organization_id AND st.guild_id=ep.guild_id AND st.episode_id=ep.id AND st.roles&&${roles}::text[])` : sql`true`}), first_posts AS (SELECT DISTINCT ON(ep.id) CASE WHEN f.sent_at+f.first_reply_seconds*interval '1 second'<=${now} THEN f.first_reply_seconds ELSE NULL END AS first_reply_seconds FROM message_observations f JOIN eligible ep ON ep.id=f.episode_id WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.sent_at>=${from} AND f.sent_at<=${now} AND f.sent_at>=ep.eligible_at AND f.sent_at<ep.eligible_at+interval '3 days' AND ${cfg.analysisScope.mode === "all" ? sql`true` : sql`(${cfg.analysisScope.mode === "include"})=(COALESCE((SELECT parent_id FROM discord_surface_state WHERE organization_id=f.organization_id AND guild_id=f.guild_id AND channel_id=f.channel_id),f.channel_id)=ANY(${cfg.analysisScope.channelIds}::text[]))`} ORDER BY ep.id,f.sent_at,f.fact_id) SELECT count(*) FILTER(WHERE first_reply_seconds IS NOT NULL)::integer AS sample,count(*)::integer AS eligible_posts,percentile_cont(.5) WITHIN GROUP(ORDER BY first_reply_seconds/60)::double precision AS median,percentile_cont(.75) WITHIN GROUP(ORDER BY first_reply_seconds/60)::double precision AS p75,percentile_cont(.9) WITHIN GROUP(ORDER BY first_reply_seconds/60)::double precision AS p90 FROM first_posts`.execute(
+    }>`WITH eligible AS MATERIALIZED (SELECT ep.id,COALESCE(ep.engagement_started_at,ep.joined_at) AS eligible_at FROM membership_episodes ep WHERE ep.organization_id=${s.organizationId}::uuid AND ep.guild_id=${s.guildId} AND ep.context='PRODUCTION' AND ep.screening_observed_at IS NOT NULL AND ep.guest_observed_at IS NOT NULL AND NOT ep.screening_pending AND NOT ep.is_guest AND COALESCE(ep.engagement_started_at,ep.joined_at)>=${from} AND COALESCE(ep.engagement_started_at,ep.joined_at)<${now} AND ${roles.length ? sql`NOT EXISTS(SELECT 1 FROM member_observable_state st WHERE st.organization_id=ep.organization_id AND st.guild_id=ep.guild_id AND st.episode_id=ep.id AND st.roles&&${roles}::text[])` : sql`true`}), first_posts AS (SELECT DISTINCT ON(ep.id) CASE WHEN f.sent_at+f.first_reply_seconds*interval '1 second'<=${now} THEN f.first_reply_seconds ELSE NULL END AS first_reply_seconds FROM message_observations f JOIN eligible ep ON ep.id=f.episode_id WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.sent_at>=${from} AND f.sent_at<=${now} AND f.sent_at>=ep.eligible_at AND f.sent_at<ep.eligible_at+interval '3 days' AND f.channel_id=ANY(${resolvedScope.actualChannelIds}::text[]) ORDER BY ep.id,f.sent_at,f.fact_id) SELECT count(*) FILTER(WHERE first_reply_seconds IS NOT NULL)::integer AS sample,count(*)::integer AS eligible_posts,percentile_cont(.5) WITHIN GROUP(ORDER BY first_reply_seconds/60)::double precision AS median,percentile_cont(.75) WITHIN GROUP(ORDER BY first_reply_seconds/60)::double precision AS p75,percentile_cont(.9) WITHIN GROUP(ORDER BY first_reply_seconds/60)::double precision AS p90 FROM first_posts`.execute(
       db,
     )
   ).rows[0]!;
@@ -272,15 +272,13 @@ export async function adaptivePresentation(
   ).rows;
   for (const post of postGroups) {
     const key =
-      post.purpose === "LFG" && modes.includes("LFG_PLAY")
+      post.purpose === "LFG"
         ? "lfgPosts"
-        : post.purpose === "SUPPORT" && modes.includes("SUPPORT_QA")
+        : post.purpose === "SUPPORT"
           ? "supportPosts"
-          : ["BUG_REPORT", "FEEDBACK"].includes(post.purpose) &&
-              modes.includes("DEVELOPMENT_FEEDBACK")
+          : ["BUG_REPORT", "FEEDBACK"].includes(post.purpose)
             ? "feedbackPosts"
-            : post.surface === "MEDIA_POST" &&
-                modes.includes("CONTENT_SHOWCASE")
+            : post.purpose === "SHOWCASE"
               ? "showcasePosts"
               : null;
     if (!key) continue;
@@ -295,6 +293,7 @@ export async function adaptivePresentation(
       surface: post.surface,
       purpose: post.purpose,
     });
+    if (!["SUPPORT","BUG_REPORT","LFG"].includes(post.purpose)) continue;
     add(
       "postsAwaitingResponse",
       post.unanswered,
@@ -335,7 +334,7 @@ export async function adaptivePresentation(
       (
         await sql<{
           count: number;
-        }>`SELECT count(*)::integer AS count FROM discord_surface_state ch WHERE ${tenant(s)} AND (${cfg.analysisScope.mode}='all' OR (${cfg.analysisScope.mode}='include')=(COALESCE(parent_id,channel_id)=ANY(${cfg.analysisScope.channelIds}::text[]))) AND ${staffFilter("ch.owner_hash")} AND EXISTS(SELECT 1 FROM jsonb_array_elements(${JSON.stringify(cfg.communityModel.forumTags)}::jsonb) t WHERE t->>'channelId'=parent_id AND t->>'meaning'='RESOLVED' AND t->>'tagId'=ANY(tag_ids))`.execute(
+        }>`SELECT count(*)::integer AS count FROM discord_surface_state ch WHERE ${tenant(s)} AND channel_id=ANY(${resolvedScope.actualChannelIds}::text[]) AND channel_type=11 AND deleted_at IS NULL AND visibility_state='VISIBLE' AND ${staffFilter("ch.owner_hash")} AND EXISTS(SELECT 1 FROM jsonb_array_elements(${JSON.stringify(cfg.communityModel.forumTags)}::jsonb) t WHERE t->>'channelId'=parent_id AND t->>'meaning'='RESOLVED' AND t->>'tagId'=ANY(tag_ids)) AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(${JSON.stringify(cfg.communityModel.forumTags)}::jsonb) t WHERE t->>'channelId'=parent_id AND t->>'meaning'='UNRESOLVED' AND t->>'tagId'=ANY(tag_ids))`.execute(
           db,
         )
       ).rows[0]?.count ?? 0;
@@ -437,8 +436,10 @@ export async function adaptivePresentation(
         null,
       );
   }
+  const conflictingTags = (await sql<{n:number}>`SELECT count(*)::int AS n FROM adaptive_facts WHERE ${tenant(s)} AND occurred_at>=${from} AND occurred_at<=${now} AND data->>'tagConflict'='true' AND ${scopeFilter("data")}`.execute(db)).rows[0]!.n;
   const caveats = [
     "Only observable channels and delivered metadata are represented. Private and archived thread coverage can be partial.",
+    ...(conflictingTags ? ["Conflicting administrator-mapped status tags were observed. Review tag settings; resolution is unknown."] : []),
   ];
   if (!cfg.communityModel.confirmed)
     caveats.push(

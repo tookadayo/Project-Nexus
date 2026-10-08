@@ -57,7 +57,7 @@ export function createGateway(redis:Redis,vault:IdentityVault,onError:()=>void=(
  client.on('raw',(packet:Dispatch,shardId:number)=>{
   if(packet.t==='READY'){const data=packet.d as {session_id:string};sessions.set(shardId,data.session_id);}
   const session=sessions.get(shardId);if(!session)return;
-  try{const events=normalizeMany(packet,shardId,session,vault);if(events.length){const guildId=events[0]!.guildId,next=(pending.get(guildId)??Promise.resolve()).then(()=>registerGuild(guildId)).then(async()=>{for(const event of events)await publisher.publish(event);}).catch(onError);pending.set(guildId,next);void next.finally(()=>{if(pending.get(guildId)===next)pending.delete(guildId);});}}catch{onError();}
+  try{const events=normalizeMany(packet,shardId,session,vault);for(const event of events)if((event.kind==='message.sent'||event.kind==='channel.post_observed')&&event.channelId){const channel=client.channels.cache.get(event.channelId);if(channel&&'guildId' in channel&&channel.guildId===event.guildId){event.channelType=channel.type;event.parentId='parentId' in channel?channel.parentId:null;}}if(events.length){const guildId=events[0]!.guildId,next=(pending.get(guildId)??Promise.resolve()).then(()=>registerGuild(guildId)).then(async()=>{for(const event of events)await publisher.publish(event);}).catch(onError);pending.set(guildId,next);void next.finally(()=>{if(pending.get(guildId)===next)pending.delete(guildId);});}}catch{onError();}
  });
  client.on(Events.GuildCreate,guild=>{void registerGuild(guild.id).then(()=>health('telemetry.connected',guild.shardId,'BOT_INSTALLED')).catch(onError);});
  client.on(Events.ClientReady,()=>{void health('telemetry.connected',undefined,'PROCESS_RESTART');});

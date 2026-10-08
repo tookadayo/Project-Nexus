@@ -23,6 +23,7 @@ export const eventSchema = z
       "member.left",
       "member.roles_updated",
       "message.sent",
+      "channel.post_observed",
       "reaction.added",
       "reaction.removed",
       "reaction.removed_all",
@@ -96,6 +97,7 @@ export const eventSchema = z
     pending: z.boolean().optional(),
     memberFlags: z.number().int().nonnegative().optional(),
     humanVerified: z.boolean().optional(),
+    authorKind: z.enum(["BOT", "WEBHOOK"]).optional(),
     targetHash: hash.optional(),
     mentionHashes: z.array(hash).max(100).optional(),
     emojiHash: hash.optional(),
@@ -208,6 +210,7 @@ function normalizeManyInternal(
         parent_id: id.nullable().optional(),
         owner_id: id.optional(),
         applied_tags: z.array(id).optional(),
+        available_tags: z.array(z.object({id})).optional(),
         thread_metadata: z
           .object({
             archived: z.boolean(),
@@ -228,7 +231,7 @@ function normalizeManyInternal(
         archived: c.data.thread_metadata?.archived,
         locked: c.data.thread_metadata?.locked,
         createdAt: c.data.thread_metadata?.create_timestamp,
-        tagIds: c.data.applied_tags,
+        tagIds: c.data.applied_tags ?? c.data.available_tags?.map(t=>t.id),
       });
   };
   if (packet.t === "GUILD_CREATE" || packet.t === "GUILD_UPDATE") {
@@ -376,8 +379,6 @@ function normalizeManyInternal(
       .safeParse(packet.d);
     if (
       !data.success ||
-      data.data.author.bot ||
-      data.data.webhook_id ||
       ![MessageType.Default, MessageType.Reply].includes(data.data.type)
     )
       return [];
@@ -389,6 +390,10 @@ function normalizeManyInternal(
           MessageReferenceType.Default &&
         (!r?.channel_id || r.channel_id === d.channel_id) &&
         (!r?.guild_id || r.guild_id === s.guildId);
+    if (d.author.bot || d.webhook_id) {
+      emit({kind:"channel.post_observed",at:d.timestamp,messageId:d.id,channelId:d.channel_id,messageType:d.type,authorKind:d.webhook_id ? "WEBHOOK" : "BOT"});
+      return events;
+    }
     emit({
       kind: "message.sent",
       at: d.timestamp,

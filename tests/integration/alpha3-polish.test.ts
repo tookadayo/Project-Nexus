@@ -69,6 +69,7 @@ async function setup() {
     setupVersion: 2,
     setupSteps: { scope: true, team: true, notifications: true, goals: true },
     helperChannelId: channel,
+    communityModel: { modes: [], confirmed: true, channels: [{ channelId: channel, purpose: "SUPPORT" }], forumTags: [], voiceThresholdSeconds: 300 },
     managerRoleIds: [managerRole],
   });
   discord.members.set(newcomer, {

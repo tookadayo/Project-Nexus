@@ -11,7 +11,7 @@ import {
 import { assert, type Scope } from "../../shared/src/index";
 import { SettingsService, type Actor } from "../../settings/src/index";
 import { EntitlementService } from "../../settings/src/billing/entitlements";
-import { latestCapability } from "../../lifecycle/src/discovery";
+import { latestCapability, analysisChannelScope } from "../../lifecycle/src/discovery";
 import { operationsAccess } from "../../operations/src/policy";
 import {
   buildMetricEvidence,
@@ -110,6 +110,7 @@ export class ExploreService {
           "RECIPE_NOT_FOUND",
           404,
         );
+      const resolvedScope = await analysisChannelScope(tx,s,cfg);
       const firstFull = start,
         lastFull = end;
       // Interior days use existing lossless observation counts; edges use exact raw
@@ -127,7 +128,7 @@ export class ExploreService {
      AND (${query.filter.roleIds.length === 0} OR member_state.roles&&${query.filter.roleIds}::text[] OR member_state.roles_observed_at IS NULL)
      AND (${!query.filter.recipeVersionId} OR o.recipe_id=${query.filter.recipeVersionId ?? ""})
    ), scoped AS (SELECT * FROM eligible WHERE
-    (${cfg.analysisScope.mode === "all"} OR channel_id='' OR (${cfg.analysisScope.mode === "include"})=(surface_channel=ANY(${cfg.analysisScope.channelIds}::text[])))
+    (channel_id='' OR channel_id=ANY(${resolvedScope.actualChannelIds}::text[]))
     AND (${query.filter.channelIds.length === 0} OR surface_channel=ANY(${query.filter.channelIds}::text[]) OR channel_id=ANY(${query.filter.channelIds}::text[]))
     AND (${query.filter.categoryIds.length === 0} OR category_id=ANY(${query.filter.categoryIds}::text[]) OR channel_type IS NULL)
     AND (${query.metric !== "forum"} OR channel_type=15 OR channel_type IS NULL)

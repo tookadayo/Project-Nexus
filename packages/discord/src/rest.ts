@@ -310,7 +310,7 @@ export class DiscordRest implements DiscordPort {
         tagIds: (c.available_tags ?? []).map((t) => t.id),
       })),
       threads: (threads?.threads ?? [])
-        .filter((t) => t.parent_id)
+        .filter((t) => t.parent_id && t.type !== 12)
         .map((t) => ({
           id: t.id,
           parentId: t.parent_id!,

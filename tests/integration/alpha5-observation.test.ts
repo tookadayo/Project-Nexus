@@ -163,6 +163,7 @@ it("does not timestamp a current REST member snapshot as historical eligibility"
       messageType: 0,
       at: messageAt.toISOString(),
     };
+  await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,visibility_state,observed_at) VALUES(${scope.organizationId}::uuid,${scope.guildId},${base.channelId},0,'VISIBLE',${messageAt})`.execute(db);
   await service.process(base);
   await service.process(base);
   const row = (

@@ -1,6 +1,7 @@
 import { sql, tenant, type Tx } from "../../db/src/index";
 import type { Scope } from "../../shared/src/index";
 import type { CapabilitySnapshot } from "../../shared/src/community-model";
+import { resolveAnalysisScope } from "../../shared/src/channel-scope";
 import type { Settings } from "../../settings/src/index";
 import {
   metricEvidence,
@@ -154,13 +155,8 @@ export function metricCoverage(
       continue;
     }
     const types = visibilityChannelTypes(key);
-    const channels = snapshot.channels.filter(
-      (c) =>
-        types.includes(c.type) &&
-        (cfg.analysisScope.mode === "all" ||
-          (cfg.analysisScope.mode === "include") ===
-            cfg.analysisScope.channelIds.includes(c.id)),
-    );
+    const scope = resolveAnalysisScope(cfg.communityModel,cfg.analysisScope,snapshot.channels);
+    const channels = snapshot.channels.filter(c => types.includes(c.type) && scope.resolutions.some(r => r.actualChannelId === c.id && (r.selected || r.collectionEligibility === "PERMISSION_MISSING")));
     if (channels.some((c) => !c.observable)) {
       reasons.push("VIEW_CHANNEL_MISSING");
       states.push("PARTIAL");

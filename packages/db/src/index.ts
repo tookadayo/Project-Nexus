@@ -77,6 +77,9 @@ export async function migrate(
       "044_market_parity_plan_catalog",
       "045_owner_checkout_authority",
       "046_analysis_operations",
+      "047_channel_scope_observation",
+      "048_billing_external_phases_and_financial_authority",
+      "049_analysis_stabilization",
     ].entries()) {
       const version = index + 1;
       if (

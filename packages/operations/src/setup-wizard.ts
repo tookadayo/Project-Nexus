@@ -8,14 +8,16 @@ import {
 } from "../../settings/src/index";
 import { assert, type Scope } from "../../shared/src/index";
 import { operationsAccess } from "./policy";
+import { analysisScopeSchema,expandCategorySelection,resolveChannel } from "../../shared/src/channel-scope";
+import { communityModelSchema, channelPurposes, type CapabilitySnapshot } from "../../shared/src/community-model";
+import {analysisChannelScope} from "../../lifecycle/src/discovery";
 const id = z.string().regex(/^\d{17,20}$/),
   steps = ["scope", "notifications", "team", "goals"] as const;
 const draftSchema = z
   .object({
-    analysisScope: z.object({
-      mode: z.enum(["all", "include", "exclude"]),
-      channelIds: z.array(id).max(200),
-    }),
+    analysisScope: analysisScopeSchema,
+    communityModel: communityModelSchema.optional(),
+    purposeChannelIds: z.array(id).max(1000).optional(),
     helperChannelId: id.nullable(),
     helperEnabled: z.boolean(),
     managerRoleIds: z.array(id).max(20),
@@ -51,7 +53,7 @@ export class SetupWizard {
       const cfg = await new SettingsService(tx).get(s),
         id = randomUUID();
       return (
-        await sql<SetupDraft>`INSERT INTO setup_drafts(id,organization_id,guild_id,actor_hash,settings_revision,draft) VALUES(${id}::uuid,${s.organizationId}::uuid,${s.guildId},${actor.key},${cfg.revision},${json({ analysisScope: cfg.analysisScope, helperChannelId: cfg.helperChannelId, helperEnabled: cfg.helperEnabled, managerRoleIds: cfg.managerRoleIds, newMemberGoals: cfg.newMemberGoals, skipped: [] })}) RETURNING *`.execute(
+        await sql<SetupDraft>`INSERT INTO setup_drafts(id,organization_id,guild_id,actor_hash,settings_revision,draft) VALUES(${id}::uuid,${s.organizationId}::uuid,${s.guildId},${actor.key},${cfg.revision},${json({ analysisScope: cfg.analysisScope, communityModel: cfg.communityModel, helperChannelId: cfg.helperChannelId, helperEnabled: cfg.helperEnabled, managerRoleIds: cfg.managerRoleIds, newMemberGoals: cfg.newMemberGoals, skipped: [] })}) RETURNING *`.execute(
           tx,
         )
       ).rows[0]!;
@@ -89,16 +91,37 @@ export class SetupWizard {
       ).rows[0];
       assert(row && row.version === version, "REVISION_CONFLICT", 409);
       const draft = draftSchema.parse(row.draft);
-      if (field === "mode" && row.step === 0)
-        draft.analysisScope = {
-          mode: z.enum(["all", "include", "exclude"]).parse(values[0]),
-          channelIds: [],
-        };
-      else if (field === "channels" && row.step === 0)
-        draft.analysisScope.channelIds = z
-          .array(idSchema())
-          .max(25)
-          .parse(values);
+      if (row.step === 0 && ["mode","channels","removeChannels","category","purpose"].includes(field)) {
+        const snapshot = (await sql<{snapshot:CapabilitySnapshot}>`SELECT snapshot FROM guild_capability_snapshots WHERE ${tenant(s)} ORDER BY checked_at DESC LIMIT 1`.execute(tx)).rows[0]?.snapshot;
+        const available = snapshot?.channels.filter(c=>resolveChannel(draft.communityModel??communityModelSchema.parse({}),{mode:"all",channelIds:[]},snapshot.channels,c.id).selected && [0,2,5,13,15,16].includes(c.type)) ?? [];
+        if (field === "mode") {
+          const mode = z.enum(["all","include"]).parse(values[0]);
+          assert(mode!=="all" || snapshot,"CHANNEL_LIST_UNAVAILABLE");
+          const excluded=draft.analysisScope.excludedChannelIds??[];
+          draft.analysisScope = {mode:"include", channelIds:mode==="all" ? available.filter(c=>!excluded.includes(c.id)).map(c=>c.id) : [], excludedChannelIds:excluded};
+          draft.purposeChannelIds=draft.analysisScope.channelIds;
+        } else if (field === "purpose") {
+          const purpose = z.enum(channelPurposes).parse(values[0]);
+          assert(draft.analysisScope.mode === "include" && draft.analysisScope.channelIds.length,"INVALID_ANALYSIS_SCOPE");
+          const model = draft.communityModel ?? (await new SettingsService(tx).get(s)).communityModel;
+          const selected = new Set(draft.purposeChannelIds??draft.analysisScope.channelIds);
+          assert(selected.size,"INVALID_ANALYSIS_SCOPE");
+          draft.communityModel = communityModelSchema.parse({...model, confirmed:true,channels:[...model.channels.filter(c=>!selected.has(c.channelId)),...[...selected].map(channelId=>({channelId,purpose}))]});
+          draft.purposeChannelIds=[];
+        } else {
+          const ids=z.array(idSchema()).max(25).parse(values);
+          let selected=ids;
+          if (field === "category") {
+            assert(snapshot && ids.every(category=>snapshot.channels.some(c=>c.id===category&&c.type===4)),"CHANNEL_NOT_FOUND");
+            selected=expandCategorySelection(snapshot.channels,ids).filter(id=>available.some(c=>c.id===id));
+          } else if (field !== "removeChannels") assert(ids.every(channel=>available.some(c=>c.id===channel)),"CHANNEL_PERMISSION_MISSING");
+          assert(draft.analysisScope.mode === "include","INVALID_ANALYSIS_SCOPE");
+          if(field==="removeChannels")draft.analysisScope.excludedChannelIds=[...new Set([...(draft.analysisScope.excludedChannelIds??[]),...selected])];
+          draft.analysisScope.channelIds=field==="removeChannels" ? draft.analysisScope.channelIds.filter(id=>!selected.includes(id)) : [...new Set([...draft.analysisScope.channelIds,...selected.filter(id=>!(draft.analysisScope.excludedChannelIds??[]).includes(id))])];
+          draft.analysisScope=analysisScopeSchema.parse(draft.analysisScope);
+          draft.purposeChannelIds=field==="removeChannels" ? (draft.purposeChannelIds??[]).filter(id=>!selected.includes(id)) : selected.filter(id=>draft.analysisScope.channelIds.includes(id));
+        }
+      }
       else if (field === "notifications" && row.step === 1) {
         draft.helperChannelId = idSchema().parse(values[0]);
         draft.helperEnabled = true;
@@ -133,7 +156,12 @@ export class SetupWizard {
       assert(row && row.version === version, "REVISION_CONFLICT", 409);
       const draft = draftSchema.parse(row.draft);
       if (direction === "skip") {
-        assert(row.step > 0 && row.step < 4, "INVALID_SETUP_STEP");
+        assert(row.step >= 0 && row.step < 4, "INVALID_SETUP_STEP");
+        const current = await new SettingsService(tx).get(s);
+        if(row.step===0){draft.analysisScope=current.analysisScope;draft.communityModel=current.communityModel;draft.purposeChannelIds=[];}
+        if(row.step===1){draft.helperChannelId=current.helperChannelId;draft.helperEnabled=current.helperEnabled;}
+        if(row.step===2)draft.managerRoleIds=current.managerRoleIds;
+        if(row.step===3)draft.newMemberGoals=current.newMemberGoals;
         draft.skipped = [...new Set([...draft.skipped, steps[row.step]!])];
       }
       if (row.step === 0 && direction === "next")
@@ -172,8 +200,13 @@ export class SetupWizard {
           "REVISION_CONFLICT",
           409,
         );
-        const { skipped: _skipped, ...patch } = draftSchema.parse(saved.draft);
+        const { skipped: _skipped, purposeChannelIds:_purposeChannelIds, ...patch } = draftSchema.parse(saved.draft);
+        if(patch.analysisScope.mode==="include"){
+          const resolved=await analysisChannelScope(tx,s,{communityModel:patch.communityModel??current.communityModel,analysisScope:patch.analysisScope});
+          assert(patch.analysisScope.channelIds.every(id=>resolved.resolutions.some(c=>c.actualChannelId===id&&["ELIGIBLE","CATEGORY"].includes(c.collectionEligibility))),"CHANNEL_PERMISSION_MISSING");
+        }
         void _skipped;
+        void _purposeChannelIds;
         await sql`UPDATE setup_drafts SET applied_at=now(),version=version+1 WHERE id=${id}::uuid`.execute(
           tx,
         );

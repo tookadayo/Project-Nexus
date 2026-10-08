@@ -196,7 +196,7 @@ it.each(["SUPPORT", "LFG"] as const)(
       newly_created: true,
     });
     await f.send("MESSAGE_CREATE", {
-      id: message,
+      id: thread,
       channel_id: thread,
       author: { id: user },
       type: 0,

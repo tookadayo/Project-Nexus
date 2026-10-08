@@ -37,6 +37,10 @@ afterAll(async () => {
 async function fixture() {
   const s = { organizationId: randomUUID(), guildId: "111111111111111177" };
   await ensureGuild(db, s);
+  // Saved operations remain usable through a Gateway gap when their actual
+  // observed place and administrator-confirmed purpose remain available.
+  await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,visibility_state,observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${channel},0,'VISIBLE',${now})`.execute(db);
+  await new SettingsService(db).update(s,{key:"fixture",permissions:"8",roles:[],source:"SYSTEM",requestId:"saved-attention"},0,{communityModel:{modes:[],confirmed:true,channels:[{channelId:channel,purpose:"SUPPORT"}],forumTags:[],voiceThresholdSeconds:300}});
   const operations = new AttentionOperations(db);
   await operations.addObserved(
     s,

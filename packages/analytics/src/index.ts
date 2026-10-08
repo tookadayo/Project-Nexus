@@ -23,7 +23,7 @@ export type MetricEvent = {
   data: Record<string, unknown>;
 };
 export type Overview = Record<string, MetricValue>;
-import { latestCapability } from "../../lifecycle/src/discovery.js";
+import { latestCapability, analysisChannelScope } from "../../lifecycle/src/discovery.js";
 import type { MetricEvidence } from "../../shared/src/metric-evidence.js";
 import { buildMetricEvidence, evidenceContext } from "./evidence.js";
 const day = 86400000;
@@ -212,6 +212,7 @@ export class AnalyticsService {
     const defaultWindow = from === undefined;
     from ??= new Date(asOf.getTime() - 30 * day);
     const cfg = await this.settings.get(s);
+    const resolvedScope = await analysisChannelScope(this.db,s,cfg);
     const episodes = (
       await sql<{
         id: string;
@@ -228,7 +229,7 @@ export class AnalyticsService {
         occurred_at: Date;
         context: string;
         data: Record<string, unknown>;
-      }>`SELECT episode_id,kind,occurred_at,context,data FROM lifecycle_events WHERE ${tenant(s)} AND context='PRODUCTION' AND occurred_at>=${from} AND occurred_at<=${asOf}`.execute(
+      }>`SELECT episode_id,kind,occurred_at,context,data FROM lifecycle_events WHERE ${tenant(s)} AND context='PRODUCTION' AND occurred_at>=${from} AND occurred_at<=${asOf} AND (data->>'channelId' IS NULL OR data->>'channelId'=ANY(${resolvedScope.actualChannelIds}::text[]))`.execute(
         this.db,
       )
     ).rows;
@@ -592,6 +593,7 @@ export class AnalyticsService {
       .setIsolationLevel("repeatable read")
       .execute(async (tx) => {
         const cfg = await this.settings.get(s, tx);
+        const resolvedScope = await analysisChannelScope(tx,s,cfg);
         const episodes = (
           await sql<{
             id: string;
@@ -608,7 +610,7 @@ export class AnalyticsService {
             occurred_at: Date;
             context: string;
             data: Record<string, unknown>;
-          }>`SELECT episode_id,kind,occurred_at,context,data FROM lifecycle_events WHERE ${tenant(s)} AND context='PRODUCTION' AND occurred_at>=${from} AND occurred_at<=${asOf}`.execute(
+          }>`SELECT episode_id,kind,occurred_at,context,data FROM lifecycle_events WHERE ${tenant(s)} AND context='PRODUCTION' AND occurred_at>=${from} AND occurred_at<=${asOf} AND (data->>'channelId' IS NULL OR data->>'channelId'=ANY(${resolvedScope.actualChannelIds}::text[]))`.execute(
             tx,
           )
         ).rows;

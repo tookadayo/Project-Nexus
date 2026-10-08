@@ -1,3 +1,4 @@
+import { analysisChannelScope } from "../../lifecycle/src/discovery";
 import {
   comparisonEligibility,
   type MetricEvidence,
@@ -84,6 +85,7 @@ export async function responseRecommendations(
 ): Promise<Recommendation[]> {
   if (current.health.severe || current.safety || !current.recipe?.definition)
     return [];
+  const resolvedScope = await analysisChannelScope(tx,s,cfg);
   const previousFrom = new Date(
       current.from.getTime() - (current.to.getTime() - current.from.getTime()),
     ),
@@ -95,7 +97,7 @@ export async function responseRecommendations(
         previous_n: number;
         current_median: number | null;
         previous_median: number | null;
-      }>`SELECT COALESCE(f.data->>'parentId',f.data->>'channelId') AS channel_id,f.data->>'purpose' AS purpose,count(*) FILTER(WHERE f.occurred_at>=${current.from})::integer AS current_n,count(*) FILTER(WHERE f.occurred_at<${current.from})::integer AS previous_n,percentile_cont(.5) WITHIN GROUP(ORDER BY (f.data->>'latencySeconds')::numeric/60) FILTER(WHERE f.occurred_at>=${current.from}) AS current_median,percentile_cont(.5) WITHIN GROUP(ORDER BY (f.data->>'latencySeconds')::numeric/60) FILTER(WHERE f.occurred_at<${current.from}) AS previous_median FROM adaptive_facts f WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.kind='thread.response_received' AND f.data->>'purpose' IN ('SUPPORT','LFG') AND f.occurred_at>=${previousFrom} AND f.occurred_at<${current.to} AND (${cfg.analysisScope.mode}='all' OR (${cfg.analysisScope.mode}='include')=(COALESCE(f.data->>'parentId',f.data->>'channelId')=ANY(${cfg.analysisScope.channelIds}::text[]))) GROUP BY COALESCE(f.data->>'parentId',f.data->>'channelId'),f.data->>'purpose' HAVING count(*) FILTER(WHERE f.occurred_at>=${current.from})>=5 AND count(*) FILTER(WHERE f.occurred_at<${current.from})>=5`.execute(
+      }>`SELECT COALESCE(f.data->>'parentId',f.data->>'channelId') AS channel_id,f.data->>'purpose' AS purpose,count(*) FILTER(WHERE f.occurred_at>=${current.from})::integer AS current_n,count(*) FILTER(WHERE f.occurred_at<${current.from})::integer AS previous_n,percentile_cont(.5) WITHIN GROUP(ORDER BY (f.data->>'latencySeconds')::numeric/60) FILTER(WHERE f.occurred_at>=${current.from}) AS current_median,percentile_cont(.5) WITHIN GROUP(ORDER BY (f.data->>'latencySeconds')::numeric/60) FILTER(WHERE f.occurred_at<${current.from}) AS previous_median FROM adaptive_facts f WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.kind='thread.response_received' AND f.data->>'purpose' IN ('SUPPORT','LFG') AND f.occurred_at>=${previousFrom} AND f.occurred_at<${current.to} AND f.data->>'channelId'=ANY(${resolvedScope.actualChannelIds}::text[]) GROUP BY COALESCE(f.data->>'parentId',f.data->>'channelId'),f.data->>'purpose' HAVING count(*) FILTER(WHERE f.occurred_at>=${current.from})>=5 AND count(*) FILTER(WHERE f.occurred_at<${current.from})>=5`.execute(
         tx,
       )
     ).rows;

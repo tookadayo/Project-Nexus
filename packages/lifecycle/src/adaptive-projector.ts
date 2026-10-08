@@ -5,9 +5,10 @@ import { sql, tenant, json, type Tx } from "../../db/src/index";
 import type { Scope } from "../../shared/src/index";
 import {
   surfaceFor,
-  purposeFor,
   strongResponseAllowed,
+  forumTagResolution,
 } from "../../shared/src/community-model";
+import { resolveChannel, type ScopeChannel } from "../../shared/src/channel-scope";
 import type { Envelope } from "../../events/src/index";
 import {
   projectReactionState,
@@ -54,6 +55,7 @@ const factData = z
     actionType: z.number().int().optional(),
     tagIds: z.array(id).optional(),
     resolved: z.boolean().optional(),
+    tagConflict: z.boolean().optional(),
     entityType: z.number().int().optional(),
     status: z.number().int().optional(),
   })
@@ -105,21 +107,43 @@ export async function resolveSurface(tx: Tx, s: Scope, channelId: string) {
       parent_type: number | null;
       creation_observed: boolean;
       visibility_state: string;
-    }>`SELECT c.*,p.channel_type AS parent_type FROM discord_surface_state c LEFT JOIN discord_surface_state p ON p.organization_id=c.organization_id AND p.guild_id=c.guild_id AND p.channel_id=c.parent_id WHERE c.organization_id=${s.organizationId}::uuid AND c.guild_id=${s.guildId} AND c.channel_id=${channelId}`.execute(
+      deleted_at: Date | null;
+      collection_forbidden: boolean;
+      parent_parent_id:string|null;
+      parent_visibility_state:string|null;
+      parent_deleted_at:Date|null;
+      parent_collection_forbidden:boolean|null;
+    }>`SELECT c.*,p.channel_type AS parent_type,p.parent_id AS parent_parent_id,p.visibility_state AS parent_visibility_state,p.deleted_at AS parent_deleted_at,p.collection_forbidden AS parent_collection_forbidden FROM discord_surface_state c LEFT JOIN discord_surface_state p ON p.organization_id=c.organization_id AND p.guild_id=c.guild_id AND p.channel_id=c.parent_id WHERE c.organization_id=${s.organizationId}::uuid AND c.guild_id=${s.guildId} AND c.channel_id=${channelId}`.execute(
       tx,
     )
   ).rows[0];
   return {
     surface:
-      c?.visibility_state === "VISIBLE"
+      c?.visibility_state === "VISIBLE" && !c.deleted_at && !c.collection_forbidden
         ? surfaceFor(c.channel_type, c.parent_type ?? undefined)
         : ("UNKNOWN" as const),
-    parentId: c?.parent_id ?? null,
+    parentId: c && [10,11].includes(c.channel_type) ? c.parent_id : null,
+    categoryId: c && [10,11].includes(c.channel_type) ? c.parent_parent_id : c?.parent_id ?? null,
+    channelType: c?.channel_type,
+    metadata: (c ? [{id:channelId,type:c.channel_type,parentId:c.parent_id,observable:c.visibility_state === "VISIBLE",deleted:Boolean(c.deleted_at),collectionForbidden:c.collection_forbidden},...(c.parent_id && c.parent_type !== null ? [{id:c.parent_id,type:c.parent_type,parentId:c.parent_parent_id,observable:c.parent_visibility_state === "VISIBLE",deleted:Boolean(c.parent_deleted_at),collectionForbidden:c.parent_collection_forbidden ?? false}] : [])] : []) as ScopeChannel[],
     ownerHash: c?.owner_hash ?? null,
     createdAt: c?.created_at ?? null,
     tagIds: c?.tag_ids ?? [],
     creationObserved: c?.creation_observed ?? false,
   };
+}
+export async function projectLocationPost(tx: Tx,s: Scope,e: Envelope,cfg: Settings,subjectHash:string|null) {
+  if (!e.channelId || !e.messageId || !["message.sent","channel.post_observed"].includes(e.kind)) return;
+  const surface = await resolveSurface(tx,s,e.channelId), resolved = resolveChannel(cfg.communityModel,cfg.analysisScope,surface.metadata,e.channelId);
+  if (!resolved.selected) return;
+  const kind = e.authorKind ?? (e.humanVerified === true ? "HUMAN" : "UNKNOWN");
+  await sql`INSERT INTO location_post_observations(organization_id,guild_id,message_id,channel_id,sent_at,author_kind,subject_hash,reference_id,message_type) VALUES(${s.organizationId}::uuid,${s.guildId},${e.messageId},${e.channelId},${new Date(e.at)},${kind},${subjectHash},${e.referenceId ?? null},${e.messageType ?? 0}) ON CONFLICT DO NOTHING`.execute(tx);
+  if (kind !== "HUMAN" || !subjectHash) return;
+  const direct = isDirectReply(e), forum = resolved.surface === "FORUM_POST" || resolved.surface === "MEDIA_POST";
+  if (direct)
+    await sql`UPDATE location_post_observations SET first_reply_seconds=EXTRACT(epoch FROM ${new Date(e.at)}::timestamptz-sent_at),reply_source='DIRECT' WHERE ${tenant(s)} AND channel_id=${e.channelId} AND message_id=${e.referenceId!} AND subject_hash IS NOT NULL AND subject_hash<>${subjectHash} AND sent_at<=${new Date(e.at)} AND (first_reply_seconds IS NULL OR first_reply_seconds>EXTRACT(epoch FROM ${new Date(e.at)}::timestamptz-sent_at))`.execute(tx);
+  if (forum)
+    await sql`UPDATE location_post_observations SET first_reply_seconds=EXTRACT(epoch FROM ${new Date(e.at)}::timestamptz-sent_at),reply_source='THREAD' WHERE ${tenant(s)} AND channel_id=${e.channelId} AND message_id=${e.channelId} AND subject_hash IS NOT NULL AND subject_hash<>${subjectHash} AND sent_at<=${new Date(e.at)} AND (first_reply_seconds IS NULL OR first_reply_seconds>EXTRACT(epoch FROM ${new Date(e.at)}::timestamptz-sent_at))`.execute(tx);
 }
 export async function projectStructure(
   tx: Tx,
@@ -128,6 +152,10 @@ export async function projectStructure(
   cfg: Settings,
 ) {
   const at = new Date(e.at);
+  // A typed Gateway cache observation can establish a missing actual location
+  // before discovery finishes. Receipt alone never supplies a guessed type.
+  if (["message.sent", "channel.post_observed"].includes(e.kind) && e.channelId && [0, 5, 10, 11].includes(e.channelType ?? -1))
+    await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,parent_id,channel_type,observed_at,visibility_state,visibility_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${e.channelId},${e.parentId ?? null},${e.channelType!},${at},'VISIBLE',${at}) ON CONFLICT DO NOTHING`.execute(tx);
   if (
     e.kind === "telemetry.connected" ||
     e.kind === "telemetry.disconnected" ||
@@ -164,31 +192,30 @@ export async function projectStructure(
     ].includes(e.kind)
   ) {
     if (!e.channelId) return true;
+    if (e.channelType === 12 && !e.kind.endsWith("deleted")) return true;
     if (e.channelObfuscated) {
-      await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,observed_at,visibility_state,visibility_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${e.channelId},${e.channelType ?? -1},${at},'OBFUSCATED',${at}) ON CONFLICT(organization_id,guild_id,channel_id) DO UPDATE SET visibility_state='OBFUSCATED',visibility_observed_at=EXCLUDED.visibility_observed_at,owner_hash=NULL,tag_ids='{}',creation_observed=false,observed_at=EXCLUDED.observed_at WHERE discord_surface_state.observed_at<=EXCLUDED.observed_at`.execute(
+      await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,observed_at,visibility_state,visibility_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${e.channelId},${e.channelType ?? -1},${at},'OBFUSCATED',${at}) ON CONFLICT(organization_id,guild_id,channel_id) DO UPDATE SET visibility_state='OBFUSCATED',visibility_observed_at=EXCLUDED.visibility_observed_at,owner_hash=NULL,tag_ids='{}',creation_observed=false,observed_at=EXCLUDED.observed_at WHERE discord_surface_state.observed_at<=EXCLUDED.observed_at AND discord_surface_state.deleted_at IS NULL`.execute(
         tx,
       );
       await requestCapabilityRefresh(tx, s, "permission", at);
       return true;
     }
     if (e.kind.endsWith("deleted"))
-      await sql`DELETE FROM discord_surface_state WHERE ${tenant(s)} AND channel_id=${e.channelId} AND observed_at<=${at}`.execute(
+      await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,observed_at,deleted_at,visibility_state) VALUES(${s.organizationId}::uuid,${s.guildId},${e.channelId},${e.channelType ?? -1},${at},${at},'UNOBSERVABLE') ON CONFLICT(organization_id,guild_id,channel_id) DO UPDATE SET deleted_at=EXCLUDED.deleted_at,visibility_state='UNOBSERVABLE',owner_hash=NULL,tag_ids='{}',observed_at=EXCLUDED.observed_at WHERE discord_surface_state.observed_at<=EXCLUDED.observed_at AND discord_surface_state.deleted_at IS NULL`.execute(
         tx,
       );
     else
-      await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,parent_id,channel_type,owner_hash,archived,locked,created_at,tag_ids,observed_at,creation_observed,visibility_state,visibility_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${e.channelId},${e.parentId ?? null},${e.channelType ?? -1},${e.ownerHash ?? null},${e.archived ?? false},${e.locked ?? false},${e.createdAt ? new Date(e.createdAt) : e.kind === "thread.created" ? at : null},${e.tagIds ?? []}::text[],${at},${e.kind === "thread.created"},'VISIBLE',${at}) ON CONFLICT(organization_id,guild_id,channel_id) DO UPDATE SET visibility_state=EXCLUDED.visibility_state,visibility_observed_at=EXCLUDED.visibility_observed_at,creation_observed=discord_surface_state.creation_observed OR EXCLUDED.creation_observed,channel_type=EXCLUDED.channel_type,parent_id=EXCLUDED.parent_id,owner_hash=COALESCE(EXCLUDED.owner_hash,discord_surface_state.owner_hash),archived=EXCLUDED.archived,locked=EXCLUDED.locked,created_at=COALESCE(discord_surface_state.created_at,EXCLUDED.created_at),tag_ids=EXCLUDED.tag_ids,observed_at=EXCLUDED.observed_at WHERE discord_surface_state.observed_at<=EXCLUDED.observed_at`.execute(
+      await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,parent_id,channel_type,owner_hash,archived,locked,created_at,tag_ids,observed_at,creation_observed,visibility_state,visibility_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${e.channelId},${e.parentId ?? null},${e.channelType ?? -1},${e.ownerHash ?? null},${e.archived ?? false},${e.locked ?? false},${e.createdAt ? new Date(e.createdAt) : e.kind === "thread.created" ? at : null},${e.tagIds ?? []}::text[],${at},${e.kind === "thread.created"},'VISIBLE',${at}) ON CONFLICT(organization_id,guild_id,channel_id) DO UPDATE SET visibility_state=EXCLUDED.visibility_state,visibility_observed_at=EXCLUDED.visibility_observed_at,creation_observed=discord_surface_state.creation_observed OR EXCLUDED.creation_observed,channel_type=EXCLUDED.channel_type,parent_id=EXCLUDED.parent_id,owner_hash=COALESCE(EXCLUDED.owner_hash,discord_surface_state.owner_hash),archived=EXCLUDED.archived,locked=EXCLUDED.locked,created_at=COALESCE(discord_surface_state.created_at,EXCLUDED.created_at),tag_ids=EXCLUDED.tag_ids,observed_at=EXCLUDED.observed_at WHERE discord_surface_state.observed_at<=EXCLUDED.observed_at AND discord_surface_state.deleted_at IS NULL`.execute(
         tx,
       );
-    const parent = e.parentId ?? e.channelId,
-      resolved = cfg.communityModel.forumTags.some(
-        (t) =>
-          t.channelId === parent &&
-          t.meaning === "RESOLVED" &&
-          e.tagIds?.includes(t.tagId),
-      );
+    const parent = [10,11].includes(e.channelType ?? -1) ? e.parentId : null,
+      tagState = parent ? forumTagResolution(cfg.communityModel,parent,e.tagIds ?? []) : {resolved:false,conflict:false},
+      resolved = tagState.resolved;
     if (e.kind === "thread.created" || e.kind === "thread.updated") {
       const surface = await resolveSurface(tx, s, e.channelId),
-        purpose = purposeFor(cfg.communityModel, e.channelId, e.parentId);
+        resolution = resolveChannel(cfg.communityModel,cfg.analysisScope,surface.metadata,e.channelId),
+        purpose = resolution.effectivePurpose;
+      if (!resolution.selected) return true;
       await adaptiveFact(
         tx,
         s,
@@ -199,6 +226,7 @@ export async function projectStructure(
           parentId: e.parentId,
           tagIds: e.tagIds,
           resolved,
+          tagConflict: tagState.conflict,
           surface: surface.surface,
           purpose,
         },
@@ -443,14 +471,12 @@ export async function projectAdaptiveMember(
     channelId = e.channelId ?? null,
     surface = channelId ? await resolveSurface(tx, s, channelId) : null,
     purpose = channelId
-      ? purposeFor(cfg.communityModel, channelId, surface?.parentId)
+      ? resolveChannel(cfg.communityModel,cfg.analysisScope,surface?.metadata ?? [],channelId).effectivePurpose
       : "OTHER",
-    scopeId = surface?.parentId ?? channelId;
+    scopeId = channelId;
   const allowed =
     !scopeId ||
-    cfg.analysisScope.mode === "all" ||
-    (cfg.analysisScope.mode === "include") ===
-      cfg.analysisScope.channelIds.includes(scopeId);
+    resolveChannel(cfg.communityModel,cfg.analysisScope,surface?.metadata ?? [],scopeId).selected;
   if (!allowed || purpose === "STAFF") return true;
   if (e.kind === "auto_moderation.executed") {
     await adaptiveFact(

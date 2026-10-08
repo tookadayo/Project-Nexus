@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { CommunityModel, CapabilitySnapshot } from "./community-model";
+import type { AnalysisScope } from "./channel-scope";
 export const recipePresets = [
   "SOCIAL",
   "LFG_GAMING",
@@ -76,7 +77,7 @@ export type RecipeDefinition = {
   returnThroughDay: number;
   channels: CommunityModel["channels"];
   forumTags: CommunityModel["forumTags"];
-  scope: { mode: "all" | "include" | "exclude"; channelIds: string[] };
+  scope: AnalysisScope;
   operations: z.infer<typeof operationsContextSchema>;
 };
 const transition = (

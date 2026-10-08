@@ -48,6 +48,7 @@ const db = connect(`postgresql://nexus:nexus@127.0.0.1:${pgPort}/postgres`);
 await migrate(db);
 const s = scopeForGuild("321111111111111111");
 await ensureGuild(db, s);
+await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,visibility_state,observed_at) SELECT ${s.organizationId}::uuid,${s.guildId},id,0,'VISIBLE',now() FROM (VALUES ('621111111111111111'),('621111111111111112')) channels(id)`.execute(db);
 await sql`INSERT INTO guild_capability_snapshots VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${json(
   buildCapabilitySnapshot({
     features: [],
@@ -100,7 +101,7 @@ await settings.update(
     communityModel: {
       modes: ["SOCIAL"],
       confirmed: true,
-      channels: [],
+      channels: [{ channelId: "621111111111111111", purpose: "SUPPORT" }],
       forumTags: [],
       voiceThresholdSeconds: 300,
     },
