@@ -58,7 +58,7 @@ async function fixture(organizationId = randomUUID()) {
     );
   }
   const customerRef = "fixture-customer:" + scope.guildId;
-  await sql`INSERT INTO billing_provider_customers(id,account_id,provider,reference_digest,reference_ciphertext,reference_guild_id) VALUES(${randomUUID()}::uuid,${account}::uuid,'STRIPE',${vault.digest("billing-customer-reference:STRIPE", customerRef)},${vault.seal(scope, customerRef)},${scope.guildId}) ON CONFLICT(account_id,provider) DO NOTHING`.execute(
+  await sql`INSERT INTO billing_provider_customers(id,account_id,provider,reference_digest,reference_ciphertext,reference_guild_id) VALUES(${randomUUID()}::uuid,${account}::uuid,'STRIPE',${vault.digest("billing-customer-reference:STRIPE", customerRef)},${vault.seal(scope, customerRef)},${scope.guildId}) ON CONFLICT(account_id,provider) WHERE archived_at IS NULL DO NOTHING`.execute(
     db,
   );
   return {
@@ -936,6 +936,7 @@ it.each(["CHANGE", "CANCEL"] as const)(
     let calls = 0;
     class MutationStripe extends FixtureStripe {
       override async changeSubscription(input: ChangeSubscriptionRequest) {
+        await input.beforeMutation?.("CHANGE");
         calls++;
         expect(input.subscription.subscriptionRef).toBe(
           "fixture-subscription:" + f.scope.guildId,
@@ -947,6 +948,7 @@ it.each(["CHANGE", "CANCEL"] as const)(
       override async cancel(
         input: CancelSubscriptionRequest,
       ): Promise<{ scheduledAt: string | null }> {
+        await input.beforeMutation?.("CANCEL");
         calls++;
         expect(input.policy).toBe("AT_PERIOD_END");
         expect(input.idempotencyKey).toBe(key);

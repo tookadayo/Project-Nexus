@@ -13,7 +13,11 @@ import { assert, type Scope } from "../../shared/src/index";
 import { SettingsService, type Actor } from "../../settings/src/index";
 import { currentRecipe } from "../../settings/src/recipes";
 import { EntitlementService } from "../../settings/src/billing/entitlements";
-import { operationsAccess, operationsAudit } from "../../operations/src/policy";
+import {
+  operationsAccess,
+  operationsAudit,
+  actorPermissions,
+} from "../../operations/src/policy";
 import { comparisonEligibility } from "../../shared/src/metric-evidence";
 import type { InternalBillingActor } from "../../security/src/billing-authorization";
 import { AttentionOperations } from "../../operations/src/attention";
@@ -34,6 +38,12 @@ import {
 } from "./domain";
 import { analysisPolicy } from "./policy";
 import { analysisEvent, analysisTiming } from "./telemetry";
+import { analysisChannelScope } from "../../lifecycle/src/discovery";
+import {
+  analysisDataIdentity,
+  confirmationIdentity,
+  meaningfulSettings,
+} from "./identity";
 export * from "./domain";
 export * from "./policy";
 function inputIdentity(
@@ -43,7 +53,6 @@ function inputIdentity(
   to: Date,
   scope: string,
   recipe: string,
-  config: number,
   data: string,
   result: AnalysisResult,
 ) {
@@ -55,7 +64,6 @@ function inputIdentity(
     to.toISOString(),
     scope,
     recipe,
-    config,
     data,
     result.metrics.map((m) => [m.key, m.quality, m.evidence.coverageReasons]),
   ]);
@@ -100,27 +108,208 @@ export async function analysisUsage(tx: Tx, s: Scope) {
       remaining: number;
       reserved: number;
       consumed: number;
-    }>`SELECT COALESCE(sum(quantity-reserved-consumed),0)::int AS remaining,COALESCE(sum(reserved),0)::int AS reserved,COALESCE(sum(consumed),0)::int AS consumed FROM analysis_grants WHERE ${tenant(s)} AND (expires_at IS NULL OR expires_at>now())`.execute(
+    }>`SELECT COALESCE(sum(quantity-reserved-consumed),0)::int AS remaining,COALESCE(sum(reserved),0)::int AS reserved,COALESCE(sum(consumed),0)::int AS consumed FROM analysis_grants WHERE ${tenant(s)} AND source<>'BUG_CORRECTION' AND (expires_at IS NULL OR expires_at>now())`.execute(
       tx,
     )
   ).rows[0]!;
   return row;
 }
+function resolvedScopeIdentity(
+  cfg: Awaited<ReturnType<SettingsService["get"]>>,
+  resolved: Awaited<ReturnType<typeof analysisChannelScope>>,
+) {
+  return fingerprint([
+    meaningfulSettings(cfg),
+    {
+      mode: cfg.analysisScope.mode,
+      channelIds: [...cfg.analysisScope.channelIds].sort(),
+      excludedChannelIds: [
+        ...(cfg.analysisScope.excludedChannelIds ?? []),
+      ].sort(),
+    },
+    resolved.selectedChannelIds
+      .map((id) => {
+        const c = resolved.resolutions.find((c) => c.actualChannelId === id);
+        return [
+          id,
+          c?.channelType,
+          c?.effectivePurpose,
+          c?.collectionEligibility,
+        ];
+      })
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+  ]);
+}
+async function validateRunConditions(
+  tx: Tx,
+  s: Scope,
+  run: AnalysisRun,
+  cfg: Awaited<ReturnType<SettingsService["get"]>>,
+) {
+  const resolved = await analysisChannelScope(tx, s, cfg),
+    recipe = await currentRecipe(tx, s);
+  const version = analysisRecipeVersion + ":" + (recipe?.id ?? "default");
+  assert(
+    cfg.enabled &&
+      version === run.recipe_version &&
+      (run.confirmation_fingerprint
+        ? confirmationIdentity(
+            s,
+            {
+              type: run.analysis_type,
+              days: run.period_days as 7 | 30 | 90,
+              ...(run.correction_of ? { correctionOf: run.correction_of } : {}),
+            },
+            { start: run.period_start, end: run.period_end },
+            resolvedScopeIdentity(cfg, resolved),
+            version,
+            cfg,
+          ) === run.confirmation_fingerprint
+        : cfg.revision === run.config_revision),
+    "ANALYSIS_CONFIGURATION_CHANGED",
+    409,
+  );
+  return resolved;
+}
+function observedChanges(current: AnalysisResult, previous: AnalysisResult) {
+  return current.metrics.flatMap((metric) => {
+    const before = previous.metrics.find((m) => m.key === metric.key);
+    return before &&
+      comparisonEligibility(metric.evidence, before.evidence).comparable &&
+      metric.evidence.value !== null &&
+      before.evidence.value !== null
+      ? [
+          {
+            key: metric.key,
+            before: before.evidence.value,
+            after: metric.evidence.value,
+            unit: metric.unit,
+          },
+        ]
+      : [];
+  });
+}
+async function availableStoredTargets(tx: Tx, s: Scope) {
+  const cfg = await new SettingsService(tx).get(s),
+    resolved = await analysisChannelScope(tx, s, cfg);
+  return resolved.resolutions
+    .filter((c) => c.collectionEligibility === "ELIGIBLE")
+    .map((c) => c.actualChannelId);
+}
+async function storedRun(tx: Tx, s: Scope, id: string, historyDays: number) {
+  const run = (
+    await sql<AnalysisRun>`SELECT * FROM analysis_runs WHERE ${tenant(s)} AND id=${id}::uuid AND retention_until>now() AND requested_at>=now()-make_interval(days=>${historyDays})`.execute(
+      tx,
+    )
+  ).rows[0];
+  assert(run, "ANALYSIS_NOT_FOUND", 404);
+  assert(!run.invalidated_at, "ANALYSIS_DATA_REMOVED", 410);
+  const available = new Set(await availableStoredTargets(tx, s));
+  assert(
+    (run.target_channel_ids ?? []).every((id) => available.has(id)),
+    "ANALYSIS_TARGET_UNAVAILABLE",
+    403,
+  );
+  return run;
+}
+async function visibleStoredResult(
+  tx: Tx,
+  s: Scope,
+  result: AnalysisResult | null,
+  historyDays: number,
+) {
+  if (!result?.baseline) return result;
+  const targets = await availableStoredTargets(tx, s);
+  const visible = (
+    await sql`SELECT id FROM analysis_runs WHERE ${tenant(s)} AND id=${result.baseline.runId}::uuid AND invalidated_at IS NULL AND retention_until>now() AND requested_at>=now()-make_interval(days=>${historyDays}) AND target_channel_ids<@${targets}::text[]`.execute(
+      tx,
+    )
+  ).rows.length;
+  if (visible) return result;
+  const copy = structuredClone(result);
+  delete copy.baseline;
+  return copy;
+}
+async function comparisonResult(
+  tx: Tx,
+  s: Scope,
+  run: AnalysisRun,
+  result: AnalysisResult,
+  historyDays: number,
+) {
+  const compatible = result.metrics
+    .filter((m) => m.evidence.comparable && m.evidence.value !== null)
+    .map((m) => ({
+      key: m.key,
+      definitionVersion: m.evidence.definitionVersion,
+    }));
+  if (!compatible.length) return null;
+  const targets = await availableStoredTargets(tx, s);
+  return (
+    (
+      await sql<{
+        run_id: string;
+        result: AnalysisResult;
+      }>`SELECT r.run_id,r.result FROM analysis_runs a JOIN analysis_results r ON r.run_id=a.id AND r.organization_id=a.organization_id AND r.guild_id=a.guild_id WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND a.status='COMPLETED' AND a.invalidated_at IS NULL AND a.id<>${run.id}::uuid AND a.period_end<=${run.period_start} AND a.analysis_type=${run.analysis_type} AND a.recipe_version=${run.recipe_version} AND a.scope_identity=${run.scope_identity} AND a.period_days=${run.period_days} AND a.retention_until>now() AND a.target_channel_ids<@${targets}::text[] AND a.requested_at>=now()-make_interval(days=>${historyDays}) AND EXISTS(SELECT 1 FROM jsonb_array_elements(r.result->'metrics') m JOIN jsonb_array_elements(${json(compatible)}) c ON m->>'key'=c->>'key' AND m->'evidence'->>'definitionVersion'=c->>'definitionVersion' WHERE m->'evidence'->'comparisonBlockers'='[]'::jsonb AND jsonb_typeof(m->'evidence'->'value')='number') ORDER BY a.period_end DESC,a.requested_at DESC,a.id DESC LIMIT 1`.execute(
+        tx,
+      )
+    ).rows[0] ?? null
+  );
+}
 async function prepare(tx: Tx, s: Scope, input: AnalysisRequest) {
   const cfg = await new SettingsService(tx).get(s),
     state = await new EntitlementService(tx).effective(s),
     recipe = await currentRecipe(tx, s),
-    window = completedWindow(input.days);
+    window = input.periodStart
+      ? { start: new Date(input.periodStart), end: new Date(input.periodEnd!) }
+      : completedWindow(input.days);
+  assert(
+    window.end <= new Date() &&
+      window.end.getUTCHours() === 0 &&
+      window.end.getUTCMinutes() === 0 &&
+      window.end.getUTCSeconds() === 0 &&
+      window.end.getUTCMilliseconds() === 0,
+    "INVALID_ANALYSIS_WINDOW",
+    400,
+  );
   assert(!state.privacyDeleted, "PRIVACY_DELETED", 403);
+  if (input.correctionOf) {
+    const original = (
+      await sql<AnalysisRun>`SELECT * FROM analysis_runs WHERE ${tenant(s)} AND id=${input.correctionOf}::uuid AND status='COMPLETED' AND invalidated_at IS NULL AND retention_until>now() AND requested_at>=now()-make_interval(days=>${state.limits.historyDays ?? 3650}) AND scope_bug_impact='POSSIBLE_CATEGORY_PARENT' AND recipe_version LIKE 'analysis-observation-v1:%' AND EXISTS(SELECT 1 FROM analysis_usage_ledger l WHERE l.run_id=analysis_runs.id AND l.outcome='CONSUMED')`.execute(
+        tx,
+      )
+    ).rows[0];
+    assert(
+      original &&
+        original.analysis_type === input.type &&
+        original.period_days === input.days &&
+        original.period_start.getTime() === window.start.getTime() &&
+        original.period_end.getTime() === window.end.getTime(),
+      "ANALYSIS_CORRECTION_INVALID",
+      409,
+    );
+  }
   const withinHistory =
     state.limits.historyDays === null || input.days <= state.limits.historyDays;
-  const scopeIdentity = fingerprint([
-    cfg.analysisScope.mode,
-    [...cfg.analysisScope.channelIds].sort(),
-    cfg.communityModel,
-  ]);
+  const resolved = await analysisChannelScope(tx, s, cfg);
+  const scopeIdentity = resolvedScopeIdentity(cfg, resolved);
   const recipeVersion = analysisRecipeVersion + ":" + (recipe?.id ?? "default");
   const dataRevision = await revision(tx, s);
+  const dataIdentity = await analysisDataIdentity(
+    tx,
+    s,
+    input,
+    window,
+    resolved.actualChannelIds,
+  );
+  const confirmationFingerprint = confirmationIdentity(
+    s,
+    input,
+    window,
+    scopeIdentity,
+    recipeVersion,
+    cfg,
+  );
   const result = await analysisMetrics(
     tx,
     s,
@@ -143,16 +332,30 @@ async function prepare(tx: Tx, s: Scope, input: AnalysisRequest) {
   if (
     input.type === "SUPPORT" &&
     (!cfg.communityModel.confirmed ||
-      !cfg.communityModel.modes.includes("SUPPORT_QA") ||
-      !cfg.communityModel.channels.some((c) => c.purpose === "SUPPORT"))
+      !resolved.resolutions.some(
+        (c) =>
+          c.selected && ["SUPPORT", "BUG_REPORT"].includes(c.effectivePurpose),
+      ))
   )
     availability = "REQUIRES_SETUP";
   if (
     input.type === "VOICE" &&
-    !cfg.communityModel.modes.some((m) => m === "VOICE" || m === "LFG_PLAY")
+    !cfg.communityModel.modes.some((m) => m === "VOICE" || m === "LFG_PLAY") &&
+    !resolved.resolutions.some(
+      (c) => c.selected && [2, 13].includes(c.channelType ?? -1),
+    )
   )
     availability = "REQUIRES_SETUP";
-  if (input.type === "EVENTS" && !cfg.communityModel.modes.includes("EVENTS"))
+  if (
+    (input.type === "ANNOUNCEMENTS" || input.type === "SHOWCASE") &&
+    (!cfg.communityModel.confirmed ||
+      !resolved.resolutions.some(
+        (c) =>
+          c.selected &&
+          c.effectivePurpose ===
+            (input.type === "ANNOUNCEMENTS" ? "ANNOUNCEMENT" : "SHOWCASE"),
+      ))
+  )
     availability = "REQUIRES_SETUP";
   return {
     cfg,
@@ -161,6 +364,30 @@ async function prepare(tx: Tx, s: Scope, input: AnalysisRequest) {
     scopeIdentity,
     recipeVersion,
     dataRevision,
+    dataIdentity,
+    confirmationFingerprint,
+    targetChannelIds: resolved.actualChannelIds,
+    conditions: {
+      kind: input.type,
+      ...(input.correctionOf
+        ? {
+            correctionOf: input.correctionOf,
+            correctionReason: "CATEGORY_PARENT_RESOLUTION",
+          }
+        : {}),
+      periodStart: window.start.toISOString(),
+      periodEnd: window.end.toISOString(),
+      settings: meaningfulSettings(cfg),
+      places: resolved.resolutions
+        .filter((c) => resolved.selectedChannelIds.includes(c.actualChannelId))
+        .map((c) => ({
+          id: c.actualChannelId,
+          purpose: c.effectivePurpose,
+          parentChannelId: c.parentChannelId,
+          categoryId: c.categoryId,
+          type: c.channelType,
+        })),
+    },
     result,
     availability,
     fingerprint: inputIdentity(
@@ -170,8 +397,7 @@ async function prepare(tx: Tx, s: Scope, input: AnalysisRequest) {
       window.end,
       scopeIdentity,
       recipeVersion,
-      cfg.revision,
-      dataRevision,
+      dataIdentity,
       result,
     ),
   };
@@ -195,6 +421,18 @@ export class AnalysisService {
   }
   async preview(s: Scope, actor: Actor, input: unknown) {
     const data = analysisRequest.parse(input);
+    await this.db.transaction().execute(async (tx) => {
+      await operationsAccess(tx, s, actor, "READ");
+      await sql`DELETE FROM analysis_preview_limits WHERE minute<now()-interval '2 minutes'`.execute(
+        tx,
+      );
+      const admitted = (
+        await sql`INSERT INTO analysis_preview_limits(organization_id,guild_id,actor_hash,minute,requests) VALUES(${s.organizationId}::uuid,${s.guildId},${actor.key},date_trunc('minute',now()),1) ON CONFLICT(organization_id,guild_id,actor_hash,minute) DO UPDATE SET requests=analysis_preview_limits.requests+1 WHERE analysis_preview_limits.requests<${analysisPolicy.previewRequestsPerMinute} RETURNING requests`.execute(
+          tx,
+        )
+      ).rows.length;
+      assert(admitted, "ANALYSIS_PREVIEW_BUSY", 429);
+    });
     return this.db
       .transaction()
       .setIsolationLevel("repeatable read")
@@ -207,13 +445,18 @@ export class AnalysisService {
             await sql<{
               id: string;
               status: AnalysisRun["status"];
-            }>`SELECT id,status FROM analysis_runs WHERE ${tenant(s)} AND input_fingerprint=${p.fingerprint} AND status IN ('QUEUED','PREPARING','RUNNING','FINALIZING','COMPLETED') AND retention_until>now() ORDER BY requested_at DESC LIMIT 1`.execute(
+            }>`SELECT id,status FROM analysis_runs WHERE ${tenant(s)} AND input_fingerprint=${p.fingerprint} AND recipe_version=${p.recipeVersion} AND invalidated_at IS NULL AND status IN ('QUEUED','PREPARING','RUNNING','FINALIZING','COMPLETED') AND retention_until>now() ORDER BY requested_at DESC LIMIT 1`.execute(
               tx,
             )
           ).rows[0] ?? null;
         return {
-          request: data,
+          request: {
+            ...data,
+            periodStart: p.window.start.toISOString(),
+            periodEnd: p.window.end.toISOString(),
+          },
           scope: p.cfg.analysisScope,
+          targetChannelCount: p.targetChannelIds.length,
           availability: p.availability,
           quality: p.result.dataQuality,
           metrics: p.result.metrics,
@@ -222,8 +465,10 @@ export class AnalysisService {
           usage,
           duplicate,
           configRevision: p.cfg.revision,
-          inputFingerprint: p.fingerprint,
-          estimate: data.days === 90 ? "3–10" : "1–3",
+          inputFingerprint: p.confirmationFingerprint,
+          estimate: null,
+          consumeCount: data.correctionOf ? (0 as const) : (1 as const),
+          correctionOf: data.correctionOf ?? null,
         };
       });
   }
@@ -239,7 +484,19 @@ export class AnalysisService {
     z.string().min(1).max(128).parse(key);
     analysisEvent("analysis_requested");
     const accepted = await this.db.transaction().execute(async (tx) => {
+      await privacyReadLock(tx, s);
       const state = await operationsAccess(tx, s, actor, "ANALYZE");
+      const root =
+        (
+          await sql<{
+            root_organization_id: string;
+          }>`SELECT root_organization_id FROM operations_org_guilds WHERE ${tenant(s)} AND state='ACTIVE'`.execute(
+            tx,
+          )
+        ).rows[0]?.root_organization_id ?? s.organizationId;
+      await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"analysis-org:" + root},0))`.execute(
+        tx,
+      );
       await analysisLock(tx, s);
       const prior = (
         await sql<AnalysisRun>`SELECT * FROM analysis_runs WHERE ${tenant(s)} AND request_key=${key}`.execute(
@@ -252,13 +509,24 @@ export class AnalysisService {
           "IDEMPOTENCY_CONFLICT",
           409,
         );
+        assert(
+          (prior.correction_of ?? null) === (data.correctionOf ?? null),
+          "IDEMPOTENCY_CONFLICT",
+          409,
+        );
+        assert(
+          !data.periodStart ||
+            (prior.period_start.toISOString() === data.periodStart &&
+              prior.period_end.toISOString() === data.periodEnd),
+          "IDEMPOTENCY_CONFLICT",
+          409,
+        );
         return { run: prior, reused: true };
       }
       const p = await prepare(tx, s, data);
       if (expected) {
         assert(
-          expected.revision === p.cfg.revision &&
-            expected.fingerprint === p.fingerprint,
+          expected.fingerprint === p.confirmationFingerprint,
           "ANALYSIS_PREVIEW_CHANGED",
           409,
         );
@@ -272,7 +540,7 @@ export class AnalysisService {
       );
       if (!rerun) {
         const duplicate = (
-          await sql<AnalysisRun>`SELECT * FROM analysis_runs WHERE ${tenant(s)} AND input_fingerprint=${p.fingerprint} AND status IN ('QUEUED','PREPARING','RUNNING','FINALIZING','COMPLETED') AND retention_until>now() ORDER BY requested_at DESC LIMIT 1`.execute(
+          await sql<AnalysisRun>`SELECT * FROM analysis_runs WHERE ${tenant(s)} AND input_fingerprint=${p.fingerprint} AND recipe_version=${p.recipeVersion} AND invalidated_at IS NULL AND status IN ('QUEUED','PREPARING','RUNNING','FINALIZING','COMPLETED') AND retention_until>now() ORDER BY requested_at DESC LIMIT 1`.execute(
             tx,
           )
         ).rows[0];
@@ -280,24 +548,43 @@ export class AnalysisService {
           return { run: duplicate, reused: true };
         }
       }
+      const pending = (
+        await sql<{
+          guild: number;
+          org: number;
+        }>`SELECT count(*) FILTER(WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId})::int AS guild,count(*) FILTER(WHERE COALESCE(l.root_organization_id,a.organization_id)=${root}::uuid)::int AS org FROM analysis_runs a LEFT JOIN operations_org_guilds l ON l.organization_id=a.organization_id AND l.guild_id=a.guild_id AND l.state='ACTIVE' WHERE a.status='QUEUED' AND ((a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId}) OR COALESCE(l.root_organization_id,a.organization_id)=${root}::uuid)`.execute(
+          tx,
+        )
+      ).rows[0]!;
+      assert(
+        pending.guild < analysisPolicy.guildPending &&
+          pending.org < analysisPolicy.organizationPending,
+        "ANALYSIS_BUSY",
+        429,
+      );
       await included(tx, s, state.limits.analysisRunsMonthly);
+      if (data.correctionOf) {
+        await sql`INSERT INTO analysis_grants(id,organization_id,guild_id,source,source_identity,quantity) VALUES(${randomUUID()}::uuid,${s.organizationId}::uuid,${s.guildId},'BUG_CORRECTION',${data.correctionOf},1) ON CONFLICT(organization_id,guild_id,source,source_identity) DO NOTHING`.execute(
+          tx,
+        );
+        const correction = (
+          await sql<{
+            consumed: number;
+          }>`SELECT consumed FROM analysis_grants WHERE ${tenant(s)} AND source='BUG_CORRECTION' AND source_identity=${data.correctionOf}`.execute(
+            tx,
+          )
+        ).rows[0]!;
+        assert(correction.consumed === 0, "ANALYSIS_CORRECTION_USED", 409);
+      }
       const grant = (
         await sql<{
           id: string;
           source: string;
-        }>`SELECT id,source FROM analysis_grants WHERE ${tenant(s)} AND quantity>reserved+consumed AND (expires_at IS NULL OR expires_at>now()) ORDER BY expires_at NULLS LAST,created_at,id LIMIT 1 FOR UPDATE`.execute(
+        }>`SELECT id,source FROM analysis_grants WHERE ${tenant(s)} AND ${data.correctionOf ? sql`source='BUG_CORRECTION' AND source_identity=${data.correctionOf}` : sql`source<>'BUG_CORRECTION'`} AND quantity>reserved+consumed AND (expires_at IS NULL OR expires_at>now()) ORDER BY expires_at NULLS LAST,created_at,id LIMIT 1 FOR UPDATE`.execute(
           tx,
         )
       ).rows[0];
       assert(grant, "ANALYSIS_USAGE_UNAVAILABLE", 409);
-      const root =
-        (
-          await sql<{
-            root_organization_id: string;
-          }>`SELECT root_organization_id FROM operations_org_guilds WHERE ${tenant(s)} AND state='ACTIVE'`.execute(
-            tx,
-          )
-        ).rows[0]?.root_organization_id ?? s.organizationId;
       const retentionDays = Math.min(
         p.cfg.aggregateRetentionMonths * 31,
         state.limits.historyDays ?? 3650,
@@ -308,6 +595,16 @@ export class AnalysisService {
             tx,
           )
         ).rows[0]!;
+      await sql`UPDATE analysis_runs SET confirmation_fingerprint=${p.confirmationFingerprint},data_identity=${p.dataIdentity},target_channel_ids=${p.targetChannelIds}::text[],conditions=${json(p.conditions)},scope_bug_impact='CORRECTED_DEFINITION',correction_of=${data.correctionOf ?? null}::uuid WHERE id=${id}::uuid`.execute(
+        tx,
+      );
+      Object.assign(run, {
+        confirmation_fingerprint: p.confirmationFingerprint,
+        data_identity: p.dataIdentity,
+        target_channel_ids: p.targetChannelIds,
+        conditions: p.conditions,
+        correction_of: data.correctionOf ?? null,
+      });
       await sql`UPDATE analysis_grants SET reserved=reserved+1 WHERE id=${grant.id}::uuid`.execute(
         tx,
       );
@@ -332,16 +629,143 @@ export class AnalysisService {
       ).rows;
     });
   }
-  async result(s: Scope, actor: Actor, id: string) {
+  async historyPage(
+    s: Scope,
+    actor: Actor,
+    input: {
+      cursor?: string;
+      direction?: "next" | "previous";
+      type?: AnalysisRequest["type"];
+      status?: AnalysisRun["status"];
+      limit?: number;
+    } = {},
+  ) {
+    const options = z
+      .object({
+        cursor: z.uuid().optional(),
+        direction: z.enum(["next", "previous"]).default("next"),
+        type: z.enum(analysisTypes).optional(),
+        status: z
+          .enum([
+            "QUEUED",
+            "PREPARING",
+            "RUNNING",
+            "FINALIZING",
+            "COMPLETED",
+            "FAILED",
+            "CANCELED",
+          ])
+          .optional(),
+        limit: z.number().int().min(1).max(25).default(5),
+      })
+      .strict()
+      .parse(input);
+    return this.db.transaction().execute(async (tx) => {
+      const state = await operationsAccess(tx, s, actor, "READ"),
+        filters = {
+          type: options.type ?? null,
+          status: options.status ?? null,
+          limit: options.limit,
+        };
+      await sql`DELETE FROM analysis_history_cursors WHERE expires_at<=now()`.execute(
+        tx,
+      );
+      let boundary: { requested_at: string; run_id: string } | undefined;
+      if (options.cursor) {
+        const cursor = (
+          await sql<{
+            requested_at: string;
+            run_id: string;
+            filters: typeof filters;
+          }>`SELECT requested_at::text,run_id,filters FROM analysis_history_cursors WHERE ${tenant(s)} AND token=${options.cursor}::uuid AND actor_hash=${actor.key} AND expires_at>now()`.execute(
+            tx,
+          )
+        ).rows[0];
+        assert(
+          cursor &&
+            cursor.filters.type === filters.type &&
+            cursor.filters.status === filters.status &&
+            cursor.filters.limit === filters.limit,
+          "ANALYSIS_CURSOR_INVALID",
+          409,
+        );
+        boundary = cursor;
+      }
+      const base = sql`${tenant(s)} AND retention_until>now() AND requested_at>=now()-make_interval(days=>${state.limits.historyDays ?? 3650}) AND (${options.type ?? null}::text IS NULL OR analysis_type=${options.type ?? null}) AND (${options.status ?? null}::text IS NULL OR status=${options.status ?? null})`;
+      const earlier = options.direction === "next";
+      const condition = boundary
+        ? earlier
+          ? sql`(requested_at,id)<(${boundary.requested_at},${boundary.run_id}::uuid)`
+          : sql`(requested_at,id)>(${boundary.requested_at},${boundary.run_id}::uuid)`
+        : sql`true`;
+      const rows = (
+        await sql<AnalysisRun>`SELECT * FROM analysis_runs WHERE ${base} AND ${condition} ORDER BY ${earlier ? sql`requested_at DESC,id DESC` : sql`requested_at,id`} LIMIT ${options.limit}`.execute(
+          tx,
+        )
+      ).rows;
+      const runs = earlier ? rows : rows.reverse();
+      async function cursorFor(
+        run: AnalysisRun | undefined,
+        direction: "next" | "previous",
+      ) {
+        if (!run) return null;
+        const at = sql`(SELECT requested_at FROM analysis_runs WHERE id=${run.id}::uuid)`;
+        const exists = (
+          await sql`SELECT id FROM analysis_runs WHERE ${base} AND ${direction === "next" ? sql`(requested_at,id)<(${at},${run.id}::uuid)` : sql`(requested_at,id)>(${at},${run.id}::uuid)`} LIMIT 1`.execute(
+            tx,
+          )
+        ).rows.length;
+        if (!exists) return null;
+        const token = randomUUID();
+        await sql`INSERT INTO analysis_history_cursors(token,organization_id,guild_id,actor_hash,requested_at,run_id,filters) SELECT ${token}::uuid,${s.organizationId}::uuid,${s.guildId},${actor.key},requested_at,id,${json(filters)} FROM analysis_runs WHERE ${tenant(s)} AND id=${run.id}::uuid`.execute(
+          tx,
+        );
+        return token;
+      }
+      return {
+        runs,
+        nextCursor: await cursorFor(runs.at(-1), "next"),
+        previousCursor: await cursorFor(runs[0], "previous"),
+      };
+    });
+  }
+  async cancel(s: Scope, actor: Actor, id: string) {
     z.uuid().parse(id);
     return this.db.transaction().execute(async (tx) => {
-      const state = await operationsAccess(tx, s, actor, "READ");
+      await operationsAccess(tx, s, actor, "READ");
+      await analysisLock(tx, s);
       const run = (
-        await sql<AnalysisRun>`SELECT * FROM analysis_runs WHERE ${tenant(s)} AND id=${id}::uuid AND retention_until>now() AND requested_at>=now()-make_interval(days=>${state.limits.historyDays ?? 3650})`.execute(
+        await sql<AnalysisRun>`SELECT * FROM analysis_runs WHERE ${tenant(s)} AND id=${id}::uuid FOR UPDATE`.execute(
           tx,
         )
       ).rows[0];
       assert(run, "ANALYSIS_NOT_FOUND", 404);
+      const permissions = await actorPermissions(tx, s, actor);
+      assert(
+        (run.requested_by_actor_hash === actor.key &&
+          permissions.includes("ANALYZE")) ||
+          permissions.includes("OPERATE"),
+        "ANALYSIS_CANCEL_FORBIDDEN",
+        403,
+      );
+      if (run.status === "CANCELED") return { run, canceled: false };
+      assert(run.status === "QUEUED", "ANALYSIS_ALREADY_STARTED", 409);
+      const updated = (
+        await sql<AnalysisRun>`UPDATE analysis_runs SET status='CANCELED',failure_class='CANCELED',failed_at=now(),updated_at=now() WHERE id=${id}::uuid RETURNING *`.execute(
+          tx,
+        )
+      ).rows[0]!;
+      await finalizeUsage(tx, s, id, "RELEASED");
+      await operationsAudit(tx, s, actor.key, "ANALYSIS_CANCELED", id, 0);
+      return { run: updated, canceled: true };
+    });
+  }
+  async result(s: Scope, actor: Actor, id: string) {
+    z.uuid().parse(id);
+    return this.db.transaction().execute(async (tx) => {
+      await privacyReadLock(tx, s);
+      const state = await operationsAccess(tx, s, actor, "READ");
+      const run = await storedRun(tx, s, id, state.limits.historyDays ?? 3650);
       const result =
         (
           await sql<{
@@ -350,56 +774,48 @@ export class AnalysisService {
             tx,
           )
         ).rows[0]?.result ?? null;
-      return { run, result };
+      return {
+        run,
+        result: await visibleStoredResult(
+          tx,
+          s,
+          result,
+          state.limits.historyDays ?? 3650,
+        ),
+      };
     });
   }
   async compare(s: Scope, actor: Actor, id: string) {
-    const current = await this.result(s, actor, id);
-    assert(current.result, "ANALYSIS_RESULT_UNAVAILABLE", 409);
-    const rows = await this.history(s, actor, 25),
-      prior = rows.find(
-        (r) =>
-          r.status === "COMPLETED" &&
-          r.id !== id &&
-          r.period_end <= current.run.period_start &&
-          r.analysis_type === current.run.analysis_type &&
-          r.recipe_version === current.run.recipe_version &&
-          r.scope_identity === current.run.scope_identity &&
-          r.period_days === current.run.period_days,
+    z.uuid().parse(id);
+    return this.db.transaction().execute(async (tx) => {
+      await privacyReadLock(tx, s);
+      const state = await operationsAccess(tx, s, actor, "READ");
+      const run = await storedRun(tx, s, id, state.limits.historyDays ?? 3650),
+        result = (
+          await sql<{
+            result: AnalysisResult;
+          }>`SELECT result FROM analysis_results WHERE ${tenant(s)} AND run_id=${id}::uuid`.execute(
+            tx,
+          )
+        ).rows[0]?.result;
+      assert(result, "ANALYSIS_RESULT_UNAVAILABLE", 409);
+      const previous = await comparisonResult(
+        tx,
+        s,
+        run,
+        result,
+        state.limits.historyDays ?? 3650,
       );
-    if (!prior) return { comparable: false, changes: [] };
-    const previous = await this.result(s, actor, prior.id);
-    if (
-      !previous.result ||
-      current.run.recipe_version !== prior.recipe_version ||
-      current.run.scope_identity !== prior.scope_identity ||
-      current.run.period_days !== prior.period_days
-    )
-      return { comparable: false, changes: [] };
-    const changes = current.result.metrics.flatMap((metric) => {
-      const before = previous.result!.metrics.find((m) => m.key === metric.key);
-      if (
-        !before ||
-        !comparisonEligibility(metric.evidence, before.evidence).comparable ||
-        metric.evidence.value === null ||
-        before.evidence.value === null
-      )
-        return [];
-      return [
-        {
-          key: metric.key,
-          before: before.evidence.value,
-          after: metric.evidence.value,
-          unit: metric.unit,
-        },
-      ];
+      if (!previous) return { comparable: false, changes: [] };
+      const changes = observedChanges(result, previous.result);
+      return { comparable: changes.length > 0, changes };
     });
-    return { comparable: changes.length > 0, changes };
   }
   async attention(s: Scope, actor: Actor, id: string, concernKey: string) {
     z.uuid().parse(id);
     z.string().min(1).max(64).parse(concernKey);
     return this.db.transaction().execute(async (tx) => {
+      await privacyReadLock(tx, s);
       const state = await operationsAccess(
         tx,
         s,
@@ -408,10 +824,11 @@ export class AnalysisService {
         "basic_attention",
       );
       await analysisLock(tx, s);
+      await storedRun(tx, s, id, state.limits.historyDays ?? 3650);
       const row = (
         await sql<{
           result: AnalysisResult;
-        }>`SELECT r.result FROM analysis_results r JOIN analysis_runs a ON a.id=r.run_id AND a.organization_id=r.organization_id AND a.guild_id=r.guild_id WHERE r.organization_id=${s.organizationId}::uuid AND r.guild_id=${s.guildId} AND r.run_id=${id}::uuid AND a.retention_until>now() AND a.requested_at>=now()-make_interval(days=>${state.limits.historyDays ?? 3650})`.execute(
+        }>`SELECT r.result FROM analysis_results r JOIN analysis_runs a ON a.id=r.run_id AND a.organization_id=r.organization_id AND a.guild_id=r.guild_id WHERE r.organization_id=${s.organizationId}::uuid AND r.guild_id=${s.guildId} AND r.run_id=${id}::uuid AND a.retention_until>now() AND a.invalidated_at IS NULL AND a.requested_at>=now()-make_interval(days=>${state.limits.historyDays ?? 3650})`.execute(
           tx,
         )
       ).rows[0];
@@ -435,7 +852,15 @@ export class AnalysisService {
   async attentionList(s: Scope, actor: Actor, offset = 0) {
     z.number().int().min(0).max(1000).parse(offset);
     return this.db.transaction().execute(async (tx) => {
-      await operationsAccess(tx, s, actor, "READ", "basic_attention");
+      await privacyReadLock(tx, s);
+      const state = await operationsAccess(
+          tx,
+          s,
+          actor,
+          "READ",
+          "basic_attention",
+        ),
+        targets = await availableStoredTargets(tx, s);
       return (
         await sql<{
           message_id: string;
@@ -443,7 +868,7 @@ export class AnalysisService {
           status: string;
           evidence: MetricEvidence;
           detected_at: Date;
-        }>`SELECT message_id,version,status,evidence,detected_at FROM attention_items WHERE ${tenant(s)} AND item_type='ANALYSIS_CONCERN' AND status IN ('OPEN','ACKNOWLEDGED','IN_PROGRESS','SNOOZED') ORDER BY detected_at DESC,message_id LIMIT 5 OFFSET ${offset}`.execute(
+        }>`SELECT i.message_id,i.version,i.status,i.evidence,i.detected_at FROM attention_items i JOIN analysis_runs a ON a.organization_id=i.organization_id AND a.guild_id=i.guild_id AND a.id::text=split_part(i.message_id,':',2) WHERE i.organization_id=${s.organizationId}::uuid AND i.guild_id=${s.guildId} AND i.item_type='ANALYSIS_CONCERN' AND i.status IN ('OPEN','ACKNOWLEDGED','IN_PROGRESS','SNOOZED') AND a.invalidated_at IS NULL AND a.retention_until>now() AND a.requested_at>=now()-make_interval(days=>${state.limits.historyDays ?? 3650}) AND a.target_channel_ids<@${targets}::text[] ORDER BY i.detected_at DESC,i.message_id LIMIT 5 OFFSET ${offset}`.execute(
           tx,
         )
       ).rows;
@@ -454,7 +879,20 @@ export class AnalysisService {
       .regex(/^analysis:[a-f0-9-]{36}:waiting_response$/)
       .parse(key);
     return this.db.transaction().execute(async (tx) => {
-      await operationsAccess(tx, s, actor, "READ", "basic_attention");
+      await privacyReadLock(tx, s);
+      const state = await operationsAccess(
+        tx,
+        s,
+        actor,
+        "READ",
+        "basic_attention",
+      );
+      await storedRun(
+        tx,
+        s,
+        key.split(":")[1]!,
+        state.limits.historyDays ?? 3650,
+      );
       const row = (
         await sql<{
           message_id: string;
@@ -490,7 +928,20 @@ export class AnalysisService {
       null,
       "MANUAL",
       async (tx) => {
-        await operationsAccess(tx, s, actor, "OPERATE", "basic_attention");
+        await privacyReadLock(tx, s);
+        const state = await operationsAccess(
+          tx,
+          s,
+          actor,
+          "OPERATE",
+          "basic_attention",
+        );
+        await storedRun(
+          tx,
+          s,
+          key.split(":")[1]!,
+          state.limits.historyDays ?? 3650,
+        );
         assert(
           (
             await sql`SELECT message_id FROM attention_items WHERE ${tenant(s)} AND message_id=${key} AND item_type='ANALYSIS_CONCERN'`.execute(
@@ -586,7 +1037,7 @@ export class AnalysisService {
       );
       await analysisLock(tx, s);
       const run = (
-        await sql<AnalysisRun>`SELECT * FROM analysis_runs WHERE id=${id}::uuid AND status='QUEUED' AND available_at<=now() AND retention_until>now() FOR UPDATE`.execute(
+        await sql<AnalysisRun>`SELECT * FROM analysis_runs WHERE id=${id}::uuid AND status='QUEUED' AND available_at<=now() AND retention_until>now() AND requested_at>now()-make_interval(secs=>${analysisPolicy.maximumQueueWaitSeconds}) FOR UPDATE`.execute(
           tx,
         )
       ).rows[0];
@@ -662,18 +1113,7 @@ export class AnalysisService {
           assert(!state.privacyDeleted, "PRIVACY_DELETED", 403);
           await sql`SET LOCAL statement_timeout='60s'`.execute(tx);
           const cfg = await new SettingsService(tx).get(s);
-          assert(
-            cfg.enabled && cfg.revision === run.config_revision,
-            "ANALYSIS_CONFIGURATION_CHANGED",
-            409,
-          );
-          const recipe = await currentRecipe(tx, s);
-          assert(
-            analysisRecipeVersion + ":" + (recipe?.id ?? "default") ===
-              run.recipe_version,
-            "ANALYSIS_CONFIGURATION_CHANGED",
-            409,
-          );
+          const resolved = await validateRunConditions(tx, s, run, cfg);
           const dataRevision = await revision(tx, s),
             result = await compute(
               tx,
@@ -687,7 +1127,34 @@ export class AnalysisService {
             );
           assert(result.dataQuality !== "NO_DATA", "ANALYSIS_NO_DATA", 409);
           result.comparisonMetadata.recipeVersion = run.recipe_version;
-          return { dataRevision, result };
+          const baseline = await comparisonResult(
+            tx,
+            s,
+            run,
+            result,
+            state.limits.historyDays ?? 3650,
+          );
+          if (baseline)
+            result.baseline = {
+              runId: baseline.run_id,
+              changes: observedChanges(result, baseline.result).filter(
+                (c) => c.before !== c.after,
+              ),
+            };
+          const dataIdentity = await analysisDataIdentity(
+            tx,
+            s,
+            { type: run.analysis_type, days: run.period_days as 7 | 30 | 90 },
+            { start: run.period_start, end: run.period_end },
+            resolved.actualChannelIds,
+          );
+          return {
+            dataRevision,
+            dataIdentity,
+            targetChannelIds: resolved.actualChannelIds,
+            calculatedAt: new Date(),
+            result,
+          };
         });
       await this.db.transaction().execute(async (tx) => {
         await privacyReadLock(tx, s);
@@ -699,19 +1166,23 @@ export class AnalysisService {
           403,
         );
         const cfg = await new SettingsService(tx).get(s);
+        await validateRunConditions(tx, s, run, cfg);
         assert(
-          cfg.enabled && cfg.revision === run.config_revision,
-          "ANALYSIS_CONFIGURATION_CHANGED",
-          409,
+          !(
+            await sql`SELECT id FROM analysis_runs WHERE id=${run.id}::uuid AND invalidated_at IS NOT NULL`.execute(
+              tx,
+            )
+          ).rows.length,
+          "PRIVACY_DELETED",
+          403,
         );
-        const recipe = await currentRecipe(tx, s);
-        assert(
-          analysisRecipeVersion + ":" + (recipe?.id ?? "default") ===
-            run.recipe_version,
-          "ANALYSIS_CONFIGURATION_CHANGED",
-          409,
-        );
-        const { dataRevision, result } = snapshot;
+        const {
+          dataRevision,
+          dataIdentity,
+          targetChannelIds,
+          calculatedAt,
+          result,
+        } = snapshot;
         // A process that lost its lease cannot publish a result or finalize usage.
         const owned = (
           await sql`SELECT id FROM analysis_runs WHERE id=${run.id}::uuid AND lease_token=${run.lease_token}::uuid AND lease_until>clock_timestamp() AND status='RUNNING' FOR UPDATE`.execute(
@@ -737,11 +1208,13 @@ export class AnalysisService {
           run.period_end,
           run.scope_identity,
           run.recipe_version,
-          run.config_revision,
-          dataRevision,
+          dataIdentity,
           result,
         );
         await sql`UPDATE analysis_runs SET status='COMPLETED',completed_at=now(),data_revision=${dataRevision}::bigint,input_fingerprint=${fp},lease_token=NULL,lease_until=NULL,failure_class=NULL,failure_detail_safe=NULL,updated_at=now() WHERE id=${run.id}::uuid`.execute(
+          tx,
+        );
+        await sql`UPDATE analysis_runs SET data_identity=${dataIdentity},target_channel_ids=${targetChannelIds}::text[],calculated_at=${calculatedAt} WHERE id=${run.id}::uuid`.execute(
           tx,
         );
       });
@@ -778,7 +1251,7 @@ export class AnalysisService {
         run.attempts < analysisPolicy.maxAttempts;
       const released =
         !retry && (await finalizeUsage(tx, s, run.id, "RELEASED"));
-      await sql`UPDATE analysis_runs SET status=${retry ? "QUEUED" : "FAILED"},available_at=now()+make_interval(secs=>${retry ? run.attempts * 2 : 0}),failed_at=CASE WHEN ${!retry} THEN now() ELSE NULL END,failure_class=${category},failure_detail_safe='Analysis could not be completed.',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=${run.id}::uuid`.execute(
+      await sql`UPDATE analysis_runs SET status=${retry ? "QUEUED" : "FAILED"},available_at=now()+make_interval(secs=>${retry ? run.attempts * 2 + Math.random() * 2 : 0}),failed_at=CASE WHEN ${!retry} THEN now() ELSE NULL END,failure_class=${category},failure_detail_safe='Analysis could not be completed.',lease_token=NULL,lease_until=NULL,updated_at=now() WHERE id=${run.id}::uuid`.execute(
         tx,
       );
       return { retry, released };
@@ -799,7 +1272,7 @@ export class AnalysisService {
         analysisEvent("analysis_recovered");
     }
     const abandoned = (
-      await sql<AnalysisRun>`SELECT * FROM analysis_runs WHERE status='QUEUED' AND retention_until<=now() ORDER BY retention_until LIMIT ${analysisPolicy.dispatchBatch}`.execute(
+      await sql<AnalysisRun>`SELECT * FROM analysis_runs WHERE status='QUEUED' AND (retention_until<=now() OR requested_at<=now()-make_interval(secs=>${analysisPolicy.maximumQueueWaitSeconds})) ORDER BY requested_at LIMIT ${analysisPolicy.dispatchBatch}`.execute(
         this.db,
       )
     ).rows;
@@ -812,7 +1285,7 @@ export class AnalysisService {
         await privacyReadLock(tx, s);
         await analysisLock(tx, s);
         const owned = (
-          await sql`SELECT id FROM analysis_runs WHERE id=${run.id}::uuid AND status='QUEUED' AND retention_until<=now() FOR UPDATE`.execute(
+          await sql`SELECT id FROM analysis_runs WHERE id=${run.id}::uuid AND status='QUEUED' AND (retention_until<=now() OR requested_at<=now()-make_interval(secs=>${analysisPolicy.maximumQueueWaitSeconds})) FOR UPDATE`.execute(
             tx,
           )
         ).rows.length;

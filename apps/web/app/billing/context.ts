@@ -11,7 +11,7 @@ import {
 import { BillingService } from "../../../../packages/settings/src/billing";
 import { PromotionService } from "../../../../packages/settings/src/billing";
 import { assert } from "../../../../packages/shared/src/index";
-import { type Tx } from "../../../../packages/db/src/index";
+import { sql, type Tx } from "../../../../packages/db/src/index";
 export async function billingContext(
   action: BillingAction = "VIEW",
   selectedGuildId?: string,
@@ -72,6 +72,49 @@ export async function billingContext(
     session,
     principalActorHash: authority.principalHash(scope, session.userId),
     ownership: await authority.ownership(scope, snapshot.member.ownerId),
+    revalidateManagement: async (tx: Tx) => {
+      await validateOAuthSession(session);
+      const currentAuthorization = new BillingAuthorization(
+        services.authority,
+        tx,
+        services.vault,
+      );
+      await currentAuthorization.authorize(
+        scope,
+        session.userId,
+        action,
+        "WEB_DASHBOARD",
+        "billing-web-revalidate",
+      );
+      assert(
+        !requireVerification ||
+          (await services.verification.connection(scope, session.userId, tx))
+            .state === "VERIFIED",
+        "SERVER_VERIFICATION_REQUIRED",
+        403,
+      );
+      if (["PORTAL", "CANCEL", "CHANGE"].includes(action)) {
+        const account = (
+          await sql<{
+            id: string;
+          }>`SELECT id FROM billing_accounts WHERE organization_id=${scope.organizationId}::uuid AND deleted_at IS NULL`.execute(
+            tx,
+          )
+        ).rows[0];
+        assert(account, "BILLING_ACCOUNT_UNAVAILABLE", 403);
+        const financial = await currentAuthorization.authorizeFinancial(
+          account.id,
+          { userId: session.userId, checkedAt: Date.now() },
+          action as "PORTAL" | "CANCEL" | "CHANGE",
+          tx,
+        );
+        assert(
+          financial.scope.guildId === scope.guildId,
+          "BILLING_SCOPE_CONFLICT",
+          403,
+        );
+      }
+    },
     revalidateCheckout: async (tx: Tx) => {
       await validateOAuthSession(session);
       await services.authority.revalidateOwner(

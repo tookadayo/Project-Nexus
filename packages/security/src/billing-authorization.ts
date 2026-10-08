@@ -16,6 +16,7 @@ export type BillingAction =
   | "CANCEL"
   | "REDEEM"
   | "ASSIGN_GUILD";
+export type FinancialIdentity = { userId: string; checkedAt: number };
 export class BillingAuthorization {
   constructor(
     private readonly authority: ServerAuthorization,
@@ -89,6 +90,81 @@ export class BillingAuthorization {
     return this.vault.digest(
       "billing-org-actor",
       scope.organizationId + ":" + userId,
+    );
+  }
+  /** OAuth identity has been freshly checked by the Web boundary. No guild capability is returned. */
+  async financialAccounts(identity: FinancialIdentity) {
+    this.requireFinancialIdentity(identity);
+    const rows = (
+      await sql<{
+        account_id: string;
+        organization_id: string;
+        guild_id: string;
+        actor_hash: string;
+        role: string;
+        authority_state: string;
+      }>`SELECT a.account_id,a.organization_id,a.actor_hash,c.reference_guild_id AS guild_id,a.role,a.authority_state FROM billing_authorizations a JOIN billing_accounts b ON b.id=a.account_id AND b.organization_id=a.organization_id JOIN billing_provider_customers c ON c.account_id=b.id AND c.archived_at IS NULL AND c.provider='STRIPE' WHERE a.revoked_at IS NULL AND a.authority_state IN ('PROVISIONAL','ACTIVE') AND b.deleted_at IS NULL AND c.reference_guild_id IS NOT NULL`.execute(
+        this.db,
+      )
+    ).rows;
+    // Hashes are organization-bound; never introduce a global actor identifier.
+    const authorized = rows.filter(
+      (row) =>
+        row.actor_hash ===
+        this.principalHash(
+          { organizationId: row.organization_id, guildId: row.guild_id },
+          identity.userId,
+        ),
+    );
+    this.requireFinancialIdentity(identity);
+    return authorized.map((row) => ({
+      accountId: row.account_id,
+      scope: { organizationId: row.organization_id, guildId: row.guild_id },
+      provisional: row.authority_state === "PROVISIONAL",
+      canPortal: row.role === "PRIMARY_BILLING_PRINCIPAL",
+    }));
+  }
+  async authorizeFinancial(
+    accountId: string,
+    identity: FinancialIdentity,
+    action: "PORTAL" | "CANCEL" | "CHANGE",
+    transaction: Tx = this.db,
+  ) {
+    this.requireFinancialIdentity(identity);
+    const row = (
+      await sql<{
+        organization_id: string;
+        guild_id: string;
+        actor_hash: string;
+        role: string;
+      }>`SELECT b.organization_id,c.reference_guild_id AS guild_id,a.actor_hash,a.role FROM billing_accounts b JOIN billing_authorizations a ON a.account_id=b.id AND a.organization_id=b.organization_id JOIN billing_provider_customers c ON c.account_id=b.id AND c.provider='STRIPE' AND c.archived_at IS NULL WHERE b.id=${accountId}::uuid AND b.deleted_at IS NULL AND a.revoked_at IS NULL AND a.authority_state IN ('PROVISIONAL','ACTIVE') AND c.reference_guild_id IS NOT NULL`.execute(
+        transaction,
+      )
+    ).rows.find(
+      (row) =>
+        row.actor_hash ===
+          this.principalHash(
+            { organizationId: row.organization_id, guildId: row.guild_id },
+            identity.userId,
+          ) &&
+        (row.role === "PRIMARY_BILLING_PRINCIPAL" ||
+          (action !== "PORTAL" && row.role === "BILLING_MANAGER")),
+    );
+    assert(row, "BILLING_PRINCIPAL_REQUIRED", 403);
+    this.requireFinancialIdentity(identity);
+    return {
+      accountId,
+      scope: { organizationId: row.organization_id, guildId: row.guild_id },
+      principalActorHash: row.actor_hash,
+    };
+  }
+  private requireFinancialIdentity(identity: FinancialIdentity) {
+    assert(
+      /^\d{17,20}$/.test(identity.userId) &&
+        Date.now() - identity.checkedAt >= 0 &&
+        Date.now() - identity.checkedAt <= 10000,
+      "AUTHORIZATION_EXPIRED",
+      403,
     );
   }
   async ownership(scope: Scope, currentOwnerId: string | undefined) {

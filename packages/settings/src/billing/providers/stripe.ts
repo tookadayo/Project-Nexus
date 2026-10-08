@@ -25,6 +25,7 @@ import {
   type NormalizedBillingEvent,
 } from "./types";
 import type { SubscriptionState } from "../domain";
+import type { AbandonedCheckoutEvidence } from "../checkout-lifecycle";
 export { stripeConfiguration } from "../commerce";
 export type StripeClient = Stripe;
 const hash = (value: string) =>
@@ -56,6 +57,7 @@ export const stripeWebhookEvents = [
 
 /** The only runtime module that knows the Stripe SDK. Never queries NEXUS DB. */
 export class StripeBillingProvider extends UnconfiguredBillingProvider {
+  override readonly durableExternalBoundary = true;
   private sdk?: Stripe;
   private readonly env: NodeJS.ProcessEnv;
   constructor(options: { env?: NodeJS.ProcessEnv; client?: Stripe } = {}) {
@@ -89,13 +91,101 @@ export class StripeBillingProvider extends UnconfiguredBillingProvider {
       this.mode(session);
       assert(session.mode === "subscription", "STRIPE_CHECKOUT_MISMATCH", 409);
       if (session.status === "expired") return;
-      assert(session.status === "open", "BILLING_CHECKOUT_ALREADY_COMPLETED", 409);
-      const expired = await mutation(() => client.checkout.sessions.expire(checkoutRef, {}, {
-        idempotencyKey: stripeIdempotencyKey("abandon", scope, operationId),
-      }));
+      assert(
+        session.status === "open",
+        "BILLING_CHECKOUT_ALREADY_COMPLETED",
+        409,
+      );
+      const expired = await mutation(() =>
+        client.checkout.sessions.expire(
+          checkoutRef,
+          {},
+          {
+            idempotencyKey: stripeIdempotencyKey("abandon", scope, operationId),
+          },
+        ),
+      );
       this.mode(expired);
-      assert(expired.status === "expired", "STRIPE_CHECKOUT_EXPIRY_UNCONFIRMED", 502);
+      assert(
+        expired.status === "expired",
+        "STRIPE_CHECKOUT_EXPIRY_UNCONFIRMED",
+        502,
+      );
     });
+  }
+  async verifyAbandonedCheckout(
+    scope: Scope,
+    checkoutRef: string,
+    operationId: string,
+  ): Promise<AbandonedCheckoutEvidence> {
+    await this.expireCheckout(scope, checkoutRef, operationId);
+    const client = this.client();
+    const session = await client.checkout.sessions.retrieve(checkoutRef);
+    this.mode(session);
+    const customerRef = objectId(session.customer);
+    assert(
+      session.id === checkoutRef &&
+        session.status === "expired" &&
+        session.payment_status === "unpaid" &&
+        !session.subscription &&
+        !session.payment_intent &&
+        !session.setup_intent &&
+        customerRef &&
+        session.client_reference_id === operationId,
+      "BILLING_ABANDONMENT_UNCONFIRMED",
+      409,
+    );
+    const customer = await client.customers.retrieve(customerRef);
+    assert(!customer.deleted, "BILLING_ABANDONMENT_UNCONFIRMED", 409);
+    this.mode(customer);
+    assert(
+      !customer.default_source &&
+        !customer.invoice_settings.default_payment_method,
+      "BILLING_ABANDONMENT_UNCONFIRMED",
+      409,
+    );
+    // One incomplete page or any financial history means operator review, never Customer transfer.
+    const lists = await Promise.all([
+      client.subscriptions.list({
+        customer: customerRef,
+        status: "all",
+        limit: 100,
+      }),
+      client.invoices.list({ customer: customerRef, limit: 100 }),
+      client.paymentMethods.list({ customer: customerRef, limit: 100 }),
+      client.paymentIntents.list({ customer: customerRef, limit: 100 }),
+      client.setupIntents.list({ customer: customerRef, limit: 100 }),
+      client.charges.list({ customer: customerRef, limit: 100 }),
+      client.customers.listSources(customerRef, { limit: 100 }),
+    ]);
+    assert(
+      lists.every((list) => !list.has_more && list.data.length === 0),
+      "BILLING_ABANDONMENT_UNCONFIRMED",
+      409,
+    );
+    const sessions = await client.checkout.sessions.list({
+      customer: customerRef,
+      limit: 100,
+    });
+    sessions.data.forEach((row) => this.mode(row));
+    assert(
+      !sessions.has_more &&
+        sessions.data.every(
+          (row) =>
+            row.id === checkoutRef &&
+            row.status === "expired" &&
+            row.payment_status === "unpaid",
+        ),
+      "BILLING_ABANDONMENT_UNCONFIRMED",
+      409,
+    );
+    return {
+      checkoutRef,
+      customerRef,
+      complete: true,
+      unpaid: true,
+      noFinancialHistory: true,
+    };
   }
   /** Administrative Sandbox bootstrap. The caller owns all NEXUS persistence. */
   async syncSandboxCatalog(expectedAccountId: string, dryRun = true) {
@@ -264,19 +354,31 @@ export class StripeBillingProvider extends UnconfiguredBillingProvider {
   }
   private async classified<T>(
     execute: (
-      mutation: <R>(write: () => Promise<R>, partial?: boolean) => Promise<R>,
+      mutation: <R>(
+        write: () => Promise<R>,
+        partial?: boolean,
+        phase?: string,
+      ) => Promise<R>,
     ) => Promise<T>,
+    boundary?: {
+      beforeMutation?: (phase?: string) => Promise<void>;
+      afterMutation?: (phase: string) => Promise<void>;
+    },
   ): Promise<T> {
     // Invocation-local state prevents concurrent requests from sharing failure classification.
     let started = false;
     const mutation = async <R>(
       write: () => Promise<R>,
       partial = false,
+      phase = "PROVIDER",
     ): Promise<R> => {
       const priorWrite = started || partial;
+      await boundary?.beforeMutation?.(phase);
       started = true;
       try {
-        return await write();
+        const result = await write();
+        await boundary?.afterMutation?.(phase);
+        return result;
       } catch (error) {
         if (
           !priorWrite &&
@@ -425,23 +527,25 @@ export class StripeBillingProvider extends UnconfiguredBillingProvider {
           409,
         );
       } else {
-        await input.beforeMutation?.();
-        const customer = await mutation(() =>
-          client.customers.create(
-            {
-              metadata: {
-                nexus_operation: input.operationId,
-                nexus_scope_digest: hash(JSON.stringify(input.scope)),
+        const customer = await mutation(
+          () =>
+            client.customers.create(
+              {
+                metadata: {
+                  nexus_operation: input.operationId,
+                  nexus_scope_digest: hash(JSON.stringify(input.scope)),
+                },
               },
-            },
-            {
-              idempotencyKey: stripeIdempotencyKey(
-                "customer",
-                input.scope,
-                input.idempotencyKey,
-              ),
-            },
-          ),
+              {
+                idempotencyKey: stripeIdempotencyKey(
+                  "customer",
+                  input.scope,
+                  input.idempotencyKey,
+                ),
+              },
+            ),
+          false,
+          "CUSTOMER",
         );
         this.mode(customer);
         customerRef = customer.id;
@@ -460,34 +564,36 @@ export class StripeBillingProvider extends UnconfiguredBillingProvider {
           ))
             throw error;
         }
-        if (!coupon) await input.beforeMutation?.();
-        coupon ??= await mutation(() =>
-          client.coupons.create(
-            {
-              id: couponId(promotion),
-              duration: "once",
-              max_redemptions: 1,
-              applies_to: { products: [input.offering.providerProductId!] },
-              expand: ["applies_to"],
-              ...(promotion.discountType === "PERCENT"
-                ? { percent_off: promotion.discountValue }
-                : {
-                    amount_off: promotion.discountValue,
-                    currency: promotion.currency.toLowerCase(),
-                  }),
-              metadata: {
-                nexus_reservation: promotion.reservationId,
-                nexus_offering: promotion.offeringId,
+        coupon ??= await mutation(
+          () =>
+            client.coupons.create(
+              {
+                id: couponId(promotion),
+                duration: "once",
+                max_redemptions: 1,
+                applies_to: { products: [input.offering.providerProductId!] },
+                expand: ["applies_to"],
+                ...(promotion.discountType === "PERCENT"
+                  ? { percent_off: promotion.discountValue }
+                  : {
+                      amount_off: promotion.discountValue,
+                      currency: promotion.currency.toLowerCase(),
+                    }),
+                metadata: {
+                  nexus_reservation: promotion.reservationId,
+                  nexus_offering: promotion.offeringId,
+                },
               },
-            },
-            {
-              idempotencyKey: stripeIdempotencyKey(
-                "coupon",
-                input.scope,
-                promotion.reservationId,
-              ),
-            },
-          ),
+              {
+                idempotencyKey: stripeIdempotencyKey(
+                  "coupon",
+                  input.scope,
+                  promotion.reservationId,
+                ),
+              },
+            ),
+          false,
+          "COUPON",
         );
         this.mode(coupon);
         assert(
@@ -516,49 +622,56 @@ export class StripeBillingProvider extends UnconfiguredBillingProvider {
         ...(promotion ? { nexus_reservation: promotion.reservationId } : {}),
       };
       const confirmationUrl = `${origin}/checkout/confirmation${input.confirmationToken ? "?receipt=" + encodeURIComponent(input.confirmationToken) : ""}`;
-      await input.beforeMutation?.();
-      const session = await mutation(() =>
-        client.checkout.sessions.create(
-          {
-            mode: "subscription",
-            customer: customerRef,
-            line_items: [
-              { price: input.offering.providerPriceId!, quantity: 1 },
-            ],
-            client_reference_id: input.operationId,
-            metadata,
-            subscription_data: { metadata, billing_mode: { type: "flexible" } },
-            ...(input.ui === "ELEMENTS"
-              ? {
-                  ui_mode: "elements" as const,
-                  return_url: confirmationUrl,
-                }
-              : {
-                  ui_mode: "hosted_page" as const,
-                  success_url: confirmationUrl,
-                  cancel_url: `${origin}/checkout`,
-                }),
-            automatic_tax: { enabled: false },
-            managed_payments: { enabled: false },
-            adaptive_pricing: { enabled: false },
-            integration_identifier:
-              "nexus-checkout-" +
-              hash(input.operationId)
-                .slice(0, 8)
-                .replace(/[0-9]/g, (n) => String.fromCharCode(97 + Number(n))),
-            expires_at: expiresAt,
-            ...(promotion
-              ? { discounts: [{ coupon: couponId(promotion) }] }
-              : { allow_promotion_codes: false }),
-          },
-          {
-            idempotencyKey: stripeIdempotencyKey(
-              "checkout",
-              input.scope,
-              input.idempotencyKey,
-            ),
-          },
-        ),
+      const session = await mutation(
+        () =>
+          client.checkout.sessions.create(
+            {
+              mode: "subscription",
+              customer: customerRef,
+              line_items: [
+                { price: input.offering.providerPriceId!, quantity: 1 },
+              ],
+              client_reference_id: input.operationId,
+              metadata,
+              subscription_data: {
+                metadata,
+                billing_mode: { type: "flexible" },
+              },
+              ...(input.ui === "ELEMENTS"
+                ? {
+                    ui_mode: "elements" as const,
+                    return_url: confirmationUrl,
+                  }
+                : {
+                    ui_mode: "hosted_page" as const,
+                    success_url: confirmationUrl,
+                    cancel_url: `${origin}/checkout`,
+                  }),
+              automatic_tax: { enabled: false },
+              managed_payments: { enabled: false },
+              adaptive_pricing: { enabled: false },
+              integration_identifier:
+                "nexus-checkout-" +
+                hash(input.operationId)
+                  .slice(0, 8)
+                  .replace(/[0-9]/g, (n) =>
+                    String.fromCharCode(97 + Number(n)),
+                  ),
+              expires_at: expiresAt,
+              ...(promotion
+                ? { discounts: [{ coupon: couponId(promotion) }] }
+                : { allow_promotion_codes: false }),
+            },
+            {
+              idempotencyKey: stripeIdempotencyKey(
+                "checkout",
+                input.scope,
+                input.idempotencyKey,
+              ),
+            },
+          ),
+        false,
+        "CHECKOUT",
       );
       this.mode(session);
       if (input.ui === "ELEMENTS") {
@@ -588,7 +701,7 @@ export class StripeBillingProvider extends UnconfiguredBillingProvider {
         providerCheckoutRef: session.id,
         providerCustomerRef: customerRef,
       };
-    });
+    }, input);
   }
   override async createPortalSession(input: PortalRequest) {
     return this.classified(async (mutation) => {
@@ -619,21 +732,24 @@ export class StripeBillingProvider extends UnconfiguredBillingProvider {
         "STRIPE_PORTAL_POLICY_UNSAFE",
         409,
       );
-      const session = await mutation(() =>
-        client.billingPortal.sessions.create(
-          {
-            customer: customer.id,
-            configuration: config.id,
-            return_url: `${trustedWebOrigin(this.env)}/billing/manage`,
-          },
-          {
-            idempotencyKey: stripeIdempotencyKey(
-              "portal",
-              input.scope,
-              input.idempotencyKey,
-            ),
-          },
-        ),
+      const session = await mutation(
+        () =>
+          client.billingPortal.sessions.create(
+            {
+              customer: customer.id,
+              configuration: config.id,
+              return_url: `${trustedWebOrigin(this.env)}/billing/payments`,
+            },
+            {
+              idempotencyKey: stripeIdempotencyKey(
+                "portal",
+                input.scope,
+                input.idempotencyKey,
+              ),
+            },
+          ),
+        false,
+        "PORTAL",
       );
       assert(
         new URL(session.url).origin === "https://billing.stripe.com",
@@ -641,7 +757,7 @@ export class StripeBillingProvider extends UnconfiguredBillingProvider {
         502,
       );
       return { url: session.url };
-    });
+    }, input);
   }
   private async current(
     input: ChangeSubscriptionRequest | CancelSubscriptionRequest,
@@ -756,46 +872,52 @@ export class StripeBillingProvider extends UnconfiguredBillingProvider {
         409,
       );
       if (upgrade) {
-        const updated = await mutation(() =>
-          client.subscriptions.update(
-            sub.id,
-            {
-              items: [
-                {
-                  id: item.id,
-                  price: input.offering.providerPriceId!,
-                  quantity: 1,
-                },
-              ],
-              payment_behavior: "pending_if_incomplete",
-              proration_behavior: "always_invoice",
-              expand: ["latest_invoice"],
-            },
-            {
-              idempotencyKey: stripeIdempotencyKey(
-                "change",
-                input.scope,
-                input.idempotencyKey,
-              ),
-            },
-          ),
+        const updated = await mutation(
+          () =>
+            client.subscriptions.update(
+              sub.id,
+              {
+                items: [
+                  {
+                    id: item.id,
+                    price: input.offering.providerPriceId!,
+                    quantity: 1,
+                  },
+                ],
+                payment_behavior: "pending_if_incomplete",
+                proration_behavior: "always_invoice",
+                expand: ["latest_invoice"],
+              },
+              {
+                idempotencyKey: stripeIdempotencyKey(
+                  "change",
+                  input.scope,
+                  input.idempotencyKey,
+                ),
+              },
+            ),
+          false,
+          "CHANGE",
         );
         this.mode(updated);
         if (updated.pending_update) {
           return this.paymentResult(updated);
         }
       } else {
-        const schedule = await mutation(() =>
-          client.subscriptionSchedules.create(
-            { from_subscription: sub.id },
-            {
-              idempotencyKey: stripeIdempotencyKey(
-                "schedule-create",
-                input.scope,
-                input.idempotencyKey,
-              ),
-            },
-          ),
+        const schedule = await mutation(
+          () =>
+            client.subscriptionSchedules.create(
+              { from_subscription: sub.id },
+              {
+                idempotencyKey: stripeIdempotencyKey(
+                  "schedule-create",
+                  input.scope,
+                  input.idempotencyKey,
+                ),
+              },
+            ),
+          false,
+          "SCHEDULE_CREATE",
         );
         this.mode(schedule);
         const updated = await mutation(
@@ -840,11 +962,12 @@ export class StripeBillingProvider extends UnconfiguredBillingProvider {
               },
             ),
           true,
+          "SCHEDULE_UPDATE",
         );
         this.mode(updated);
       }
       return { state: "CONFIRMING" as const };
-    });
+    }, input);
   }
   override async cancel(
     input: CancelSubscriptionRequest,
@@ -874,18 +997,21 @@ export class StripeBillingProvider extends UnconfiguredBillingProvider {
           "STRIPE_SCHEDULE_REVIEW_REQUIRED",
           409,
         );
-        await mutation(() =>
-          client.subscriptionSchedules.release(
-            schedule.id,
-            {},
-            {
-              idempotencyKey: stripeIdempotencyKey(
-                "schedule-release",
-                input.scope,
-                input.idempotencyKey,
-              ),
-            },
-          ),
+        await mutation(
+          () =>
+            client.subscriptionSchedules.release(
+              schedule.id,
+              {},
+              {
+                idempotencyKey: stripeIdempotencyKey(
+                  "schedule-release",
+                  input.scope,
+                  input.idempotencyKey,
+                ),
+              },
+            ),
+          false,
+          "SCHEDULE_RELEASE",
         );
       }
       const result = await mutation(
@@ -902,10 +1028,11 @@ export class StripeBillingProvider extends UnconfiguredBillingProvider {
             },
           ),
         Boolean(sub.schedule),
+        "CANCEL",
       );
       this.mode(result);
       return { scheduledAt: iso(result.items.data[0]!.current_period_end) };
-    });
+    }, input);
   }
   override async verifyWebhook(
     body: Buffer,

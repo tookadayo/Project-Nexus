@@ -61,6 +61,7 @@ export async function startCheckout(
       promotionReservationId: input.promotionReservationId,
       checkoutUi: ui,
       principalActorHash: context.principalActorHash,
+      externalBoundary: "ADAPTER",
       revalidate: context.revalidateCheckout,
     },
     async (execution) => {
@@ -81,6 +82,7 @@ export async function startCheckout(
         promotion: execution.promotion,
         onCustomerCreated: execution.onCustomerCreated,
         beforeMutation: execution.beforeMutation,
+        afterMutation: execution.afterMutation,
         checkoutExpiresAt: execution.checkoutExpiresAt,
         ui,
         confirmationToken,

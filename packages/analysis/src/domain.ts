@@ -8,16 +8,29 @@ export const analysisTypes = [
   "SUPPORT",
   "EVENTS",
   "VOICE",
+  "ANNOUNCEMENTS",
+  "SHOWCASE",
 ] as const;
 export type AnalysisType = (typeof analysisTypes)[number];
 export const analysisRequest = z
   .object({
     type: z.enum(analysisTypes),
     days: z.union([z.literal(7), z.literal(30), z.literal(90)]),
+    periodStart: z.iso.datetime().optional(),
+    periodEnd: z.iso.datetime().optional(),
+    correctionOf: z.uuid().optional(),
   })
-  .strict();
+  .strict()
+  .refine((d) => !!d.periodStart === !!d.periodEnd, "INVALID_ANALYSIS_WINDOW")
+  .refine(
+    (d) =>
+      !d.periodStart ||
+      Date.parse(d.periodEnd!) - Date.parse(d.periodStart) ===
+        d.days * 86400000,
+    "INVALID_ANALYSIS_WINDOW",
+  );
 export type AnalysisRequest = z.infer<typeof analysisRequest>;
-export const analysisRecipeVersion = "analysis-observation-v1";
+export const analysisRecipeVersion = "analysis-observation-v3";
 export type AnalysisQuality =
   "COMPLETE" | "PARTIAL" | "NO_DATA" | "NOT_APPLICABLE" | "INSUFFICIENT_SAMPLE";
 export type AnalysisFailure =
@@ -46,6 +59,15 @@ export type AnalysisResult = {
     evidence: MetricEvidence;
   }[];
   importantChanges: string[];
+  baseline?: {
+    runId: string;
+    changes: {
+      key: string;
+      before: number;
+      after: number;
+      unit: AnalysisMetric["unit"];
+    }[];
+  };
   recommendedActions: string[];
   dataQuality: AnalysisQuality;
   comparisonMetadata: {
@@ -86,6 +108,16 @@ export type AnalysisRun = {
   config_revision: number;
   data_revision: string;
   input_fingerprint: string;
+  confirmation_fingerprint?: string | null;
+  data_identity?: string | null;
+  target_channel_ids?: string[];
+  calculated_at?: Date | null;
+  invalidated_at?: Date | null;
+  invalidation_reason?: "PRIVACY_DELETED" | "DATA_REMOVED" | null;
+  conditions?: Record<string, unknown> | null;
+  scope_bug_impact?:
+    "UNASSESSED" | "POSSIBLE_CATEGORY_PARENT" | "CORRECTED_DEFINITION";
+  correction_of?: string | null;
   plan_at_request: Plan;
   priority_class: Plan | "PACK_ONLY";
   attempts: number;

@@ -46,6 +46,7 @@ export async function adaptiveControlPanel(
           : componentCopy(locale,'measurementMethod');
   const intentsAvailable =
     !m.integration || m.integration.intents.members === "AVAILABLE";
+  if(m.caveats.some(caveat=>caveat.startsWith("Conflicting administrator-mapped status tags")))children.push(callout(analysisCopy(locale,"needs"),analysisCopy(locale,"tagConflict")));
   if (m.integration?.severe)
     children.push(
       callout(
@@ -159,7 +160,7 @@ export async function adaptiveControlPanel(
         componentCopy(locale,'whatThisServerMeasures'),
         m.recipe?.definition
           ? (recipeNames[m.recipe.definition.preset]?.[ja ? 0 : 1] ??
-              m.recipe.preset)
+              componentCopy(locale,'chooseAMeasurementRecipe'))
           : m.profile.modes
               .map((mode) => modeNames[mode][ja ? 0 : 1])
               .join(" · "),

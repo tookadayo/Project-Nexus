@@ -1,8 +1,9 @@
+import { analysisChannelScope } from "../../lifecycle/src/discovery.js";
 import type { JourneyObservation } from "../../analytics/src/journeys.js";
 import { evidenceContext } from "../../analytics/src/evidence.js";
 import { measurementEvidence } from "./evidence-compat.js";
 import { activityRollups } from "../../lifecycle/src/rollups.js";
-import { surfaceFor, purposeFor } from "../../shared/src/community-model.js";
+import { surfaceFor } from "../../shared/src/community-model.js";
 import {
   AttentionOperations,
   teamOperations,
@@ -127,28 +128,9 @@ export class CommunityService {
       list.push(f);
       byEpisode.set(f.episode_id, list);
     }
-    const parents = new Map(
-      cfg.analysisScope.mode === "all" && !cfg.communityModel.channels.length
-        ? []
-        : (
-            await sql<{
-              channel_id: string;
-              parent_id: string | null;
-            }>`SELECT channel_id,parent_id FROM discord_surface_state WHERE ${tenant(s)}`.execute(
-              this.db,
-            )
-          ).rows.map((ch) => [ch.channel_id, ch.parent_id]),
-    );
-    const allowed = (f: Fact) => {
-      const original = channel(f),
-        id = original ? (parents.get(original) ?? original) : null;
-      return (
-        !id ||
-        cfg.analysisScope.mode === "all" ||
-        (cfg.analysisScope.mode === "include") ===
-          cfg.analysisScope.channelIds.includes(id)
-      );
-    };
+    const resolvedScope = await analysisChannelScope(this.db,s,cfg),
+      resolution = new Map(resolvedScope.resolutions.map(c => [c.actualChannelId,c]));
+    const allowed = (f: Fact) => !channel(f) || resolution.get(channel(f)!)?.selected === true;
     const staffRoles = new Set([
       ...cfg.staffRoleIds,
       ...cfg.managerRoleIds,
@@ -587,7 +569,7 @@ export class CommunityService {
         threshold_seconds: number | null;
         evidence:
           import("../../shared/src/metric-evidence").MetricEvidence | null;
-      }>`SELECT channel_id,message_id,detected_at AS occurred_at,status,item_type,opened_at,acknowledged_at,threshold_seconds,evidence,count(*) OVER()::integer AS total FROM attention_items WHERE ${tenant(s)} AND status IN ('OPEN','ACKNOWLEDGED','IN_PROGRESS') AND item_type IN ('TEXT_NEWCOMER','FORUM_SUPPORT','LFG_RESPONSE') ORDER BY detected_at,message_id LIMIT ${Math.max(1, Math.min(50, attentionLimit))} OFFSET ${Math.max(0, Math.min(1000, attentionOffset))}`.execute(
+      }>`SELECT channel_id,message_id,detected_at AS occurred_at,status,item_type,opened_at,acknowledged_at,threshold_seconds,evidence,count(*) OVER()::integer AS total FROM attention_items WHERE ${tenant(s)} AND status IN ('OPEN','ACKNOWLEDGED','IN_PROGRESS') AND item_type IN ('TEXT_NEWCOMER','FORUM_SUPPORT','LFG_RESPONSE') AND channel_id=ANY(${resolvedScope.actualChannelIds}::text[]) ORDER BY detected_at,message_id LIMIT ${Math.max(1, Math.min(50, attentionLimit))} OFFSET ${Math.max(0, Math.min(1000, attentionOffset))}`.execute(
         this.db,
       )
     ).rows;
@@ -767,11 +749,7 @@ export class CommunityService {
                 purpose:
                   typeof f.data.purpose === "string"
                     ? f.data.purpose
-                    : purposeFor(
-                        cfg.communityModel,
-                        channel(f) ?? "",
-                        parents.get(channel(f) ?? "") ?? null,
-                      ),
+                    : resolution.get(channel(f) ?? "")?.effectivePurpose ?? "OTHER",
                 resolved: f.data.resolved === true,
               }));
           if (m.episode.joined_at >= journeyFrom && m.episode.joined_at < now)
@@ -912,11 +890,7 @@ export class CommunityService {
           attentionPlaces.get(row.channel_id)?.channel_type,
           attentionPlaces.get(row.channel_id)?.parent_type ?? undefined,
         ),
-        purpose: purposeFor(
-          cfg.communityModel,
-          row.channel_id,
-          attentionPlaces.get(row.channel_id)?.parent_id,
-        ),
+        purpose: resolution.get(row.channel_id)?.effectivePurpose ?? "OTHER",
         channelId: row.channel_id,
         messageId: row.message_id,
         status: row.status,

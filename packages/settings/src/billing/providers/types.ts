@@ -29,7 +29,8 @@ export type CheckoutRequest = {
   onCustomerCreated?: (customerRef: string) => Promise<void>;
   ui?: "HOSTED" | "ELEMENTS";
   confirmationToken?: string;
-  beforeMutation?: () => Promise<void>;
+  beforeMutation?: (phase?: string) => Promise<void>;
+  afterMutation?: (phase: string) => Promise<void>;
 };
 export type TrustedProviderCustomerReference = {
   provider: BillingProviderKind;
@@ -45,6 +46,8 @@ export type PortalRequest = {
   scope: Scope;
   customer: TrustedProviderCustomerReference;
   idempotencyKey: string;
+  beforeMutation?: (phase?: string) => Promise<void>;
+  afterMutation?: (phase: string) => Promise<void>;
 };
 export type CheckoutSessionResult = (
   | {
@@ -80,6 +83,8 @@ export type ChangeSubscriptionRequest = {
   /** Core-resolved current identity; optional only for legacy adapters. */
   currentOffering?: BillingOffering;
   idempotencyKey: string;
+  beforeMutation?: (phase?: string) => Promise<void>;
+  afterMutation?: (phase: string) => Promise<void>;
   policy: {
     effective: "IMMEDIATE" | "AT_PERIOD_END";
     proration: "NONE" | "PROVIDER_CALCULATED";
@@ -90,6 +95,8 @@ export type CancelSubscriptionRequest = {
   subscription: TrustedProviderSubscriptionReference;
   policy: "IMMEDIATE" | "AT_PERIOD_END";
   idempotencyKey: string;
+  beforeMutation?: (phase?: string) => Promise<void>;
+  afterMutation?: (phase: string) => Promise<void>;
 };
 export type ProviderSignal = {
   eventId: string;
@@ -208,6 +215,7 @@ export const providerReconcileResultSchema = z.discriminatedUnion("kind", [
     .strict(),
 ]);
 export interface BillingProvider {
+  readonly durableExternalBoundary?: boolean;
   readonly kind: BillingProviderKind;
   readonly ordering: ProviderEventOrdering;
   createPortalSession(input: PortalRequest): Promise<PortalSessionResult>;
@@ -241,6 +249,7 @@ export interface BillingProvider {
   ): Promise<EntitlementSubscription | null>;
 }
 export class UnconfiguredBillingProvider implements BillingProvider {
+  readonly durableExternalBoundary: boolean = false;
   readonly kind: BillingProviderKind;
   constructor(
     readonly name:

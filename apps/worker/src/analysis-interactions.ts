@@ -12,6 +12,7 @@ import {
   analysisComparisonPanel,
   analysisAttentionListPanel,
   analysisAttentionItemPanel,
+  analysisAttentionConfirmationPanel,
 } from "../../../packages/discord-panels/src/views/analysis";
 import { analysisCopy } from "../../../packages/discord-panels/src/i18n/analysis";
 import type { UiLocale } from "../../../packages/discord-panels/src/i18n";
@@ -19,6 +20,7 @@ import type { Issue } from "../../../packages/discord-panels/src/types";
 import type { Database } from "../../../packages/db/src/index";
 import type { Scope } from "../../../packages/shared/src/index";
 import type { Actor } from "../../../packages/settings/src/index";
+import { sql, tenant } from "../../../packages/db/src/index";
 const days = (value: unknown): 7 | 30 | 90 =>
   z
     .union([z.literal(7), z.literal(30), z.literal(90)])
@@ -80,6 +82,9 @@ export async function analysisInteraction(
       await service.preview(s, actor, {
         type: z.enum(analysisTypes).parse(values?.[0] ?? intent.type),
         days: days(intent.days),
+        periodStart: intent.periodStart ? z.iso.datetime().parse(intent.periodStart) : undefined,
+        periodEnd: intent.periodEnd ? z.iso.datetime().parse(intent.periodEnd) : undefined,
+        correctionOf: intent.correctionOf ? z.uuid().parse(intent.correctionOf) : undefined,
       }),
       locale,
     );
@@ -90,6 +95,9 @@ export async function analysisInteraction(
       {
         type: z.enum(analysisTypes).parse(intent.type),
         days: days(intent.days),
+        periodStart: z.iso.datetime().parse(intent.periodStart),
+        periodEnd: z.iso.datetime().parse(intent.periodEnd),
+        correctionOf: intent.correctionOf ? z.uuid().parse(intent.correctionOf) : undefined,
       },
       fingerprint([customId]),
       {
@@ -107,12 +115,23 @@ export async function analysisInteraction(
       locale,
     );
   }
-  if (action === "analysisHistory")
+  if (action === "analysisHistory") {
+    const filter = {
+      type: intent.field === "type" ? values?.[0] === "all" ? undefined : z.enum(analysisTypes).parse(values?.[0]) : intent.type ? z.enum(analysisTypes).parse(intent.type) : undefined,
+      status: intent.status ? z.enum(["QUEUED","PREPARING","RUNNING","FINALIZING","COMPLETED","FAILED","CANCELED"]).parse(intent.status) : undefined,
+    };
     return analysisHistoryPanel(
       issue,
-      await service.history(s, actor, 5),
+      await service.historyPage(s, actor, {
+        ...filter,
+        cursor: intent.cursor ? z.string().max(100).parse(intent.cursor) : undefined,
+        direction: intent.direction ? z.enum(["next", "previous"]).parse(intent.direction) : undefined,
+        limit: 5,
+      }),
       locale,
+      filter,
     );
+  }
   const id = z.uuid().parse(intent.runId);
   if (action === "analysisCompare")
     return analysisComparisonPanel(
@@ -122,7 +141,17 @@ export async function analysisInteraction(
       locale,
     );
   let notice: string | undefined;
+  if (action === "analysisCancel") {
+    const canceled = await service.cancel(s, actor, id);
+    notice = analysisCopy(locale, canceled.canceled ? "canceled" : "cancelStarted");
+  }
   if (action === "analysisAttention") {
+    const data = await service.result(s, actor, id);
+    const concernKey = z.string().max(64).parse(intent.concernKey);
+    const duplicate = (await sql<{ exists: boolean }>`SELECT EXISTS(SELECT 1 FROM attention_items WHERE ${tenant(s)} AND message_id=${"analysis:" + id + ":" + concernKey}) AS exists`.execute(db)).rows[0]!.exists;
+    return analysisAttentionConfirmationPanel(issue, data, concernKey, duplicate, locale);
+  }
+  if (action === "analysisAttentionConfirm") {
     await service.attention(
       s,
       actor,
@@ -137,5 +166,6 @@ export async function analysisInteraction(
     locale,
     notice,
     action === "analysisEvidence",
+    z.number().int().nonnegative().max(1000).parse(intent.detailPage ?? 0),
   );
 }

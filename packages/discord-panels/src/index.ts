@@ -1,5 +1,5 @@
 import {ButtonStyle,ComponentType,type APIChannelSelectComponent,type APIRoleSelectComponent,type APIStringSelectComponent} from 'discord-api-types/v10';
-import {actionRow,callout,divider,nexusPanel,type ActionRow} from './primitives.js';
+import {actionRow,callout,divider,nexusPanel,escapeUserText,type ActionRow} from './primitives.js';
 import {discordLabel,t,type UiLocale} from './i18n/index.js';
 import type {Issue} from './types.js';
 
@@ -40,5 +40,5 @@ export async function questionPanel(issue:Issue,input:{sessionId:string;revision
  if(input.type==='role_select')row={type:ComponentType.ActionRow,components:[{type:ComponentType.RoleSelect,custom_id:customId,min_values:1,max_values:Math.min(25,input.options.length)} satisfies APIRoleSelectComponent]};
  else if(input.type==='channel_select')row={type:ComponentType.ActionRow,components:[{type:ComponentType.ChannelSelect,custom_id:customId,min_values:1,max_values:Math.min(25,input.options.length)} satisfies APIChannelSelectComponent]};
  else row={type:ComponentType.ActionRow,components:[{type:ComponentType.StringSelect,custom_id:customId,min_values:1,max_values:input.type==='multi_choice'?input.options.length:1,options:input.options.map(option=>({label:option.label,value:option.id}))} satisfies APIStringSelectComponent]};
- return nexusPanel({title:t(locale,'onboarding.setupTitle'),subtitle:input.context==='PRODUCTION'?t(locale,'onboarding.personalize'):t(locale,'onboarding.excluded',{context:input.context}),children:[divider(),callout(t(locale,'onboarding.question'),input.question)],rows:[row,await actionRow(issue,[{label:discordLabel(locale,'common.privacy'),action:'privacy',style:ButtonStyle.Secondary}])]});
+ return nexusPanel({title:t(locale,'onboarding.setupTitle'),subtitle:input.context==='PRODUCTION'?t(locale,'onboarding.personalize'):t(locale,'onboarding.excluded',{context:t(locale,'common.notConfigured')}),children:[divider(),callout(t(locale,'onboarding.question'),escapeUserText(input.question))],rows:[row,await actionRow(issue,[{label:discordLabel(locale,'common.privacy'),action:'privacy',style:ButtonStyle.Secondary}])]});
 }

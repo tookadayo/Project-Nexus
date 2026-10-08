@@ -1,0 +1,79 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## 分析する内容を確認"
+        },
+        {
+          "type": 10,
+          "content": "**サーバー全体を見る**\n2026-09-08 〜 2026-10-07（UTC）"
+        },
+        {
+          "type": 10,
+          "content": "**分析する場所**\n選んだチャンネル\n指定した場所: 1件"
+        },
+        {
+          "type": 10,
+          "content": "**データ状況**\n一部のデータで分析できます"
+        },
+        {
+          "type": 10,
+          "content": "**過去の投稿データ**\n過去の投稿の記録は一部の参加者に限られます。運営メンバーやBotを含む投稿の総数と、Botの投稿が0件だったかどうかは確認できません。"
+        },
+        {
+          "type": 10,
+          "content": "**確認できた投稿**\n一部のみ確認できています"
+        },
+        {
+          "type": 10,
+          "content": "**Bot・連携サービスの投稿**\nデータがありません"
+        },
+        {
+          "type": 10,
+          "content": "**詳しい分析ができる回数: 1回**\n分析回数: 1回 → 0回\n結果を保存できたときに1回分を使います。"
+        },
+        {
+          "type": 10,
+          "content": "-# 完了時間はまだ見積もれません。"
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 1,
+              "label": "分析を始める",
+              "custom_id": "private:72760af9-5c7d-4ada-8e47-14c332221069.aaaaaaaaaaaaaaaaaaaaaa",
+              "disabled": false
+            }
+          ]
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "戻る",
+              "custom_id": "private:f3f51161-ffdc-471e-a58a-1e536e5a292d.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "設定する",
+              "custom_id": "private:23e8971a-7590-4257-8b16-d8b4df75622c.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## 場所の一覧を確認"
+        },
+        {
+          "type": 10,
+          "content": "**指定した場所: 230件**\n選んだ時点の場所だけを保存します。将来の追加は自動で含めません。"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777990>**\n未設定"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777991>**\n未設定"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777992>**\n未設定"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777993>**\n未設定"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777994>**\n未設定"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777995>**\n未設定"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777996>**\n未設定"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777997>**\n未設定"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777998>**\n未設定"
+        },
+        {
+          "type": 10,
+          "content": "**<#777777777777777999>**\n未設定"
+        },
+        {
+          "type": 10,
+          "content": "**分析する場所**\n221〜230 / 230件"
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "戻る",
+              "custom_id": "private:7361d26d-8017-4554-83a6-86868a5a05a5.aaaaaaaaaaaaaaaaaaaaaa",
+              "disabled": false
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "次へ",
+              "custom_id": "private:e12efdc1-59d7-4301-ae40-cf1f4112fd29.aaaaaaaaaaaaaaaaaaaaaa",
+              "disabled": true
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "この設定で始めます",
+              "custom_id": "private:908c3573-b22d-4220-a6bb-d2650b00f561.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -62,6 +62,8 @@ for (const size of [10000, 50000])
   it(`serves overview, comparison and channels for ${size.toLocaleString()} members`, async () => {
     const s = scopeForGuild(String(901000000000000000n + BigInt(size)));
     await ensureGuild(db, s);
+    // Synthetic events carry observed location IDs; seed the matching Discord types.
+    await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,visibility_state,observed_at) SELECT ${s.organizationId}::uuid,${s.guildId},id,type,'VISIBLE',now() FROM (VALUES ('933333333333333333',0),('933333333333333334',15),('933333333333333335',0),('933333333333333339',2)) channels(id,type)`.execute(db);
     // Measure the complete analysis path; Free intentionally omits paid breakdowns.
     await sql`INSERT INTO guild_subscriptions(organization_id,guild_id,plan_key) VALUES(${s.organizationId}::uuid,${s.guildId},'STARTER')`.execute(
       db,
@@ -90,7 +92,7 @@ for (const size of [10000, 50000])
       await sql`INSERT INTO guild_capability_snapshots VALUES(${s.organizationId}::uuid,${s.guildId},gen_random_uuid(),${json(buildCapabilitySnapshot(representativeSource(4), new Date(), null, { reaction: 100000, poll: 10000 }))},now())`.execute(
         db,
       );
-      await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,parent_id,channel_type,owner_hash,archived,locked,created_at,tag_ids,observed_at,creation_observed) SELECT ${s.organizationId}::uuid,${s.guildId},(960000000000000000::bigint+n)::text,'933333333333333334',11,NULL,false,false,now()-interval '1 hour','{}',now(),true FROM generate_series(1,10000) n`.execute(
+      await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,parent_id,channel_type,owner_hash,archived,locked,created_at,tag_ids,observed_at,creation_observed,visibility_state) SELECT ${s.organizationId}::uuid,${s.guildId},(960000000000000000::bigint+n)::text,'933333333333333334',11,NULL,false,false,now()-interval '1 hour','{}',now(),true,'VISIBLE' FROM generate_series(1,10000) n`.execute(
         db,
       );
       await sql`INSERT INTO adaptive_states SELECT ${s.organizationId}::uuid,${s.guildId},domain,(970000000000000000::bigint+n)::text,lpad(to_hex(n%10000),64,'0'),CASE WHEN domain='reaction' THEN lpad(to_hex(1000000+n),64,'0') ELSE NULL END,jsonb_build_object('messageId',(970000000000000000::bigint+n)::text,'channelId','933333333333333330','active',true),now() FROM generate_series(1,100000) n CROSS JOIN (VALUES('reaction'),('poll')) d(domain)`.execute(

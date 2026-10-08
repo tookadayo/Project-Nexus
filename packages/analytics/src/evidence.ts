@@ -1,6 +1,7 @@
 import { sql, tenant, type Tx } from "../../db/src/index";
 import type { Scope } from "../../shared/src/index";
 import type { CapabilitySnapshot } from "../../shared/src/community-model";
+import { resolveAnalysisScope } from "../../shared/src/channel-scope";
 import type { Settings } from "../../settings/src/index";
 import {
   metricEvidence,
@@ -20,6 +21,13 @@ import {
   integrationHealth,
   collectionEpochs,
 } from "../../lifecycle/src/observation";
+export type LocationPopulationSource = "LEGACY_PARTICIPANT_ONLY" | "LOCATION_STREAM_V1";
+export async function locationPopulationIntroduction(tx: Tx, s: Scope) {
+  return (await sql<{introduced_at:Date}>`SELECT introduced_at FROM location_population_collection WHERE ${tenant(s)} AND collector_version='LOCATION_STREAM_V1'`.execute(tx)).rows[0]?.introduced_at ?? null;
+}
+export async function locationPopulationCoversWindowStart(tx: Tx, s: Scope, from: Date) {
+  return (await sql<{complete:boolean}>`SELECT EXISTS(SELECT 1 FROM location_population_collection WHERE ${tenant(s)} AND collector_version='LOCATION_STREAM_V1' AND introduced_at<=${from}) AS complete`.execute(tx)).rows[0]!.complete;
+}
 export async function evidenceContext(tx: Tx, s: Scope, from: Date, to: Date) {
   const [health, epochs, gaps, safety, recipe, recipeVersions, unknownEntries] =
     await Promise.all([
@@ -106,12 +114,14 @@ export function metricCoverage(
   }
   let observedThrough = context.from.getTime();
   for (const epoch of context.epochs) {
+    // PostgreSQL timestamps can retain microseconds that JS Date rounds away.
+    // An epoch ending at the window boundary proves no in-window collection.
+    if (epoch.endedAt && Date.parse(epoch.endedAt) <= context.from.getTime()) continue;
     if (
-      Date.parse(epoch.startedAt) > observedThrough &&
-      observedThrough > context.from.getTime()
+      Date.parse(epoch.startedAt) > observedThrough
     ) {
       reasons.push("COLLECTION_GAP");
-      states.push("PARTIAL");
+      states.push(observedThrough === context.from.getTime() ? "LOWER_BOUND" : "PARTIAL");
     }
     observedThrough = Math.max(
       observedThrough,
@@ -154,13 +164,8 @@ export function metricCoverage(
       continue;
     }
     const types = visibilityChannelTypes(key);
-    const channels = snapshot.channels.filter(
-      (c) =>
-        types.includes(c.type) &&
-        (cfg.analysisScope.mode === "all" ||
-          (cfg.analysisScope.mode === "include") ===
-            cfg.analysisScope.channelIds.includes(c.id)),
-    );
+    const scope = resolveAnalysisScope(cfg.communityModel,cfg.analysisScope,snapshot.channels);
+    const channels = snapshot.channels.filter(c => types.includes(c.type) && scope.resolutions.some(r => r.actualChannelId === c.id && (r.selected || r.collectionEligibility === "PERMISSION_MISSING")));
     if (channels.some((c) => !c.observable)) {
       reasons.push("VIEW_CHANNEL_MISSING");
       states.push("PARTIAL");

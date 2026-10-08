@@ -8,6 +8,31 @@ export type ActionRow=APIActionRowComponent<APIComponentInMessageActionRow>;
 export type InteractiveButtonStyle=ButtonStyle.Primary|ButtonStyle.Secondary|ButtonStyle.Success|ButtonStyle.Danger;
 export type ButtonSpec={label:string;action:string;emoji?:string;style?:InteractiveButtonStyle;data?:Record<string,unknown>;publicEntry?:boolean;disabled?:boolean};
 
+// Escape only user supplied names; product copy intentionally uses Discord markdown.
+export const escapeUserText=(value:string)=>value.replaceAll(/([\\`*_~|>[\]()])/g,'\\$1').replaceAll('@','@\u200b').replaceAll('<','\\<');
+export function validatePanel(panel:Panel):void{
+ const components=panel.components??[];
+ if(componentCount({components})>40)throw new Error('DISCORD_COMPONENT_LIMIT');
+ const bounded=(value:unknown,min:number,max:number,code:string)=>{if(typeof value!=='string'||value.length<min||value.length>max)throw new Error(code);};
+ let textLength=0;
+ const inspect=(value:unknown):void=>{
+  if(!value||typeof value!=='object')return;
+  const c=value as Record<string,unknown>,children=c.components as unknown[]|undefined;
+  if(c.custom_id!==undefined)bounded(c.custom_id,1,100,'DISCORD_CUSTOM_ID_LIMIT');
+  if(c.type===ComponentType.TextDisplay){bounded(c.content,1,4000,'DISCORD_TEXT_LIMIT');textLength+=String(c.content).length;}
+  if(c.type===ComponentType.Button){if(c.label!==undefined)bounded(c.label,1,80,'DISCORD_BUTTON_LIMIT');if(c.url!==undefined)bounded(c.url,1,512,'DISCORD_LINK_LIMIT');}
+  if(c.type===ComponentType.Section){if(!children||children.length<1||children.length>3||children.some(v=>(v as {type:number}).type!==ComponentType.TextDisplay)||![ComponentType.Button,ComponentType.Thumbnail].includes((c.accessory as {type:number}|undefined)?.type as ComponentType.Button))throw new Error('DISCORD_SECTION_LIMIT');}
+  if(c.type===ComponentType.ActionRow){if(!children||!children.length||children.length>5||children.filter(v=>(v as {style?:number}).style===ButtonStyle.Primary).length>1||children.length>1&&children.some(v=>(v as {type:number}).type!==ComponentType.Button))throw new Error('DISCORD_ACTION_GROUP_LIMIT');}
+  if(c.placeholder!==undefined)bounded(c.placeholder,0,150,'DISCORD_SELECT_LIMIT');
+  if(c.type===ComponentType.StringSelect){const options=c.options as Record<string,unknown>[];if(!options?.length||options.length>25)throw new Error('DISCORD_SELECT_LIMIT');for(const o of options){bounded(o.label,1,100,'DISCORD_SELECT_LIMIT');bounded(o.value,1,100,'DISCORD_SELECT_LIMIT');if(o.description!==undefined)bounded(o.description,0,100,'DISCORD_SELECT_LIMIT');}}
+  if([ComponentType.StringSelect,ComponentType.ChannelSelect,ComponentType.RoleSelect,ComponentType.UserSelect,ComponentType.MentionableSelect].includes(c.type as ComponentType.StringSelect)){for(const key of ['min_values','max_values'])if(c[key]!==undefined&&(!Number.isInteger(c[key])||Number(c[key])<0||Number(c[key])>25))throw new Error('DISCORD_SELECT_LIMIT');}
+  for(const child of children??[])inspect(child);
+  if(c.accessory)inspect(c.accessory);
+ };
+ for(const c of components)inspect(c);
+ if(textLength>4000)throw new Error('DISCORD_MESSAGE_TEXT_LIMIT');
+}
+
 export const text=(content:string):PanelChild=>({type:ComponentType.TextDisplay,content});
 export const componentCount=(value:unknown):number=>{
  if(!value||typeof value!=='object')return 0;
@@ -42,5 +67,7 @@ export function nexusPanel(options:{title:string;subtitle?:string;accent?:Accent
  const children=[...panelHeader(options.title,options.subtitle),...(options.children??[]),...(options.rows??[])];
  const count=1+children.reduce((n,c)=>n+componentCount(c),0)+(options.topLevel??[]).reduce((n,c)=>n+componentCount(c),0);
  if(count>40)throw new Error('DISCORD_COMPONENT_LIMIT');
- return {flags:MessageFlags.IsComponentsV2,allowed_mentions:{parse:[]},components:[{type:ComponentType.Container,accent_color:colors[options.accent??'nexus'],components:children},...(options.topLevel??[])]};
+ const result:Panel={flags:MessageFlags.IsComponentsV2,allowed_mentions:{parse:[]},components:[{type:ComponentType.Container,accent_color:colors[options.accent??'nexus'],components:children},...(options.topLevel??[])]};
+ validatePanel(result);
+ return result;
 }

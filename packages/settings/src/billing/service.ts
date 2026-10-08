@@ -85,7 +85,7 @@ export class BillingService {
       await sql<{
         id: string;
         reference_ciphertext: string;
-      }>`SELECT c.id,c.reference_ciphertext FROM billing_provider_customers c JOIN billing_accounts a ON a.id=c.account_id WHERE a.organization_id=${s.organizationId}::uuid AND a.deleted_at IS NULL AND c.provider=${provider} AND c.reference_guild_id=${s.guildId}`.execute(
+      }>`SELECT c.id,c.reference_ciphertext FROM billing_provider_customers c JOIN billing_accounts a ON a.id=c.account_id WHERE a.organization_id=${s.organizationId}::uuid AND a.deleted_at IS NULL AND c.archived_at IS NULL AND c.provider=${provider} AND c.reference_guild_id=${s.guildId}`.execute(
         this.db,
       )
     ).rows[0];
@@ -139,11 +139,12 @@ export class BillingService {
     s: Scope,
     operationId: string,
     customerRef: string,
+    leaseToken: string,
   ) {
     return this.db.transaction().execute(async (tx) => {
       await billingScopeLock(tx, s);
       const operation =
-        await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND id=${operationId}::uuid AND provider='STRIPE' AND operation='CHECKOUT' AND state='PENDING' AND external_started_at IS NOT NULL AND lease_until>now()`.execute(
+        await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND id=${operationId}::uuid AND provider='STRIPE' AND operation='CHECKOUT' AND state='PENDING' AND external_started_at IS NOT NULL AND lease_token=${leaseToken}::uuid AND lease_until>clock_timestamp()`.execute(
           tx,
         );
       assert(operation.rows.length, "BILLING_CUSTOMER_BINDING_UNVERIFIED", 409);
@@ -188,7 +189,8 @@ export class BillingService {
         account_id: string;
         reference_digest: string;
         reference_guild_id: string | null;
-      }>`SELECT id,account_id,reference_digest,reference_guild_id FROM billing_provider_customers WHERE provider=${provider} AND (reference_digest=${digest} OR account_id=${account.id}::uuid) FOR UPDATE`.execute(
+        archived_at: Date | null;
+      }>`SELECT id,account_id,reference_digest,reference_guild_id,archived_at FROM billing_provider_customers WHERE provider=${provider} AND (reference_digest=${digest} OR (account_id=${account.id}::uuid AND archived_at IS NULL)) FOR UPDATE`.execute(
         tx,
       )
     ).rows;
@@ -196,6 +198,7 @@ export class BillingService {
       existing.every(
         (row) =>
           row.account_id === account.id &&
+          !row.archived_at &&
           row.reference_digest === digest &&
           row.reference_guild_id === s.guildId,
       ),
@@ -277,7 +280,7 @@ export class BillingService {
     );
     assert(!paid.length, "BILLING_PROVIDER_MIGRATION_REQUIRED", 409);
     const unknown =
-      await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND id IS DISTINCT FROM ${currentOperationId ?? null}::uuid AND operation IN ('CHECKOUT','CHANGE','CANCEL') AND (state='RECONCILE_REQUIRED' OR (state='PENDING' AND external_started_at IS NOT NULL))`.execute(
+      await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND id IS DISTINCT FROM ${currentOperationId ?? null}::uuid AND operation IN ('CHECKOUT','CHANGE','CANCEL') AND (state='RECONCILE_REQUIRED' OR (state='PENDING' AND (external_started_at IS NOT NULL OR lease_until>now())))`.execute(
         this.db,
       );
     assert(!unknown.rows.length, "BILLING_RECONCILE_REQUIRED", 409);
@@ -293,6 +296,7 @@ export class BillingService {
     offeringId: string,
     idempotencyKey: string,
     policy: ChangeSubscriptionRequest["policy"],
+    revalidate?: (tx: Tx) => Promise<void>,
   ) {
     assert(
       provider.kind === "STRIPE" || provider.kind === "DISCORD",
@@ -305,10 +309,12 @@ export class BillingService {
         scope: s,
         provider: provider.kind,
         operation: "CHANGE",
+        revalidate,
         offeringId,
         idempotencyKey,
         subscription,
         policy,
+        externalBoundary: provider.durableExternalBoundary ? "ADAPTER" : undefined,
       },
       async (context) => {
         assert(context.offering, "BILLING_OFFERING_REQUIRED", 409);
@@ -319,6 +325,8 @@ export class BillingService {
           currentOffering: context.currentOffering,
           idempotencyKey: context.idempotencyKey,
           policy,
+          beforeMutation: context.beforeMutation,
+          afterMutation: context.afterMutation,
         });
       },
     );
@@ -328,6 +336,7 @@ export class BillingService {
     provider: BillingProvider,
     idempotencyKey: string,
     policy: CancelSubscriptionRequest["policy"],
+    revalidate?: (tx: Tx) => Promise<void>,
   ) {
     assert(
       provider.kind === "STRIPE" || provider.kind === "DISCORD",
@@ -343,6 +352,8 @@ export class BillingService {
         idempotencyKey,
         subscription,
         policy,
+        revalidate,
+        externalBoundary: provider.durableExternalBoundary ? "ADAPTER" : undefined,
       },
       (context) =>
         provider.cancel({
@@ -350,6 +361,8 @@ export class BillingService {
           subscription,
           idempotencyKey: context.idempotencyKey,
           policy,
+          beforeMutation: context.beforeMutation,
+          afterMutation: context.afterMutation,
         }),
     );
   }
@@ -506,7 +519,7 @@ export class BillingService {
           signal.customerRef,
         );
         resolved = (
-          await sql<Scope>`SELECT a.organization_id AS "organizationId",c.reference_guild_id AS "guildId" FROM billing_provider_customers c JOIN billing_accounts a ON a.id=c.account_id WHERE c.provider='STRIPE' AND c.reference_digest=${digest} AND c.reference_guild_id IS NOT NULL AND a.deleted_at IS NULL`.execute(
+          await sql<Scope>`SELECT a.organization_id AS "organizationId",c.reference_guild_id AS "guildId" FROM billing_provider_customers c JOIN billing_accounts a ON a.id=c.account_id WHERE c.provider='STRIPE' AND c.reference_digest=${digest} AND c.reference_guild_id IS NOT NULL AND c.archived_at IS NULL AND a.deleted_at IS NULL`.execute(
             tx,
           )
         ).rows[0];
@@ -878,6 +891,8 @@ export class BillingService {
         ).rows[0];
         assert(account, "BILLING_ACCOUNT_UNAVAILABLE");
         const before = await new EntitlementService(tx).effective(s);
+        if (event.provider === "STRIPE" && ["ACTIVE", "TRIALING", "CANCEL_AT_PERIOD_END"].includes(event.status))
+          await sql`UPDATE billing_authorizations SET authority_state='ACTIVE',account_id=${account.id}::uuid WHERE organization_id=${s.organizationId}::uuid AND authority_state='PROVISIONAL' AND revoked_at IS NULL AND checkout_operation_id IN(SELECT id FROM billing_operations WHERE ${tenant(s)} AND operation='CHECKOUT' AND checkout_abandoned_at IS NULL)`.execute(tx);
         const existing = (
           await sql<{
             id: string;
@@ -1215,7 +1230,7 @@ export class BillingService {
       ).rows.length > 0;
     const pending =
       (
-        await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND provider='STRIPE' AND (state='RECONCILE_REQUIRED' OR (state='PENDING' AND external_started_at IS NOT NULL) OR (operation='CHECKOUT' AND state='FINALIZED' AND checkout_completed_at IS NULL AND checkout_abandoned_at IS NULL AND checkout_expires_at>now() AND NOT EXISTS(SELECT 1 FROM billing_subscriptions b WHERE b.organization_id=${s.organizationId}::uuid AND b.provider='STRIPE' AND b.status NOT IN ('CANCELED','EXPIRED'))))`.execute(
+        await sql`SELECT id FROM billing_operations WHERE ${tenant(s)} AND provider='STRIPE' AND (state='RECONCILE_REQUIRED' OR (state='PENDING' AND (external_started_at IS NOT NULL OR lease_until>now())) OR (operation='CHECKOUT' AND state='FINALIZED' AND checkout_completed_at IS NULL AND checkout_abandoned_at IS NULL AND checkout_expires_at>now() AND NOT EXISTS(SELECT 1 FROM billing_subscriptions b WHERE b.organization_id=${s.organizationId}::uuid AND b.provider='STRIPE' AND b.status NOT IN ('CANCELED','EXPIRED'))))`.execute(
           this.db,
         )
       ).rows.length > 0;

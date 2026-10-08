@@ -8,6 +8,10 @@ export const analysisPolicy = {
   minimumPriority: 100,
   guildConcurrency: 1,
   dispatchBatch: 100,
+  guildPending: 5,
+  organizationPending: 25,
+  maximumQueueWaitSeconds: 86400,
+  previewRequestsPerMinute: 12,
 } as const;
 const priorities: Record<Plan | "PACK_ONLY", number> = {
   SCALE: 100,

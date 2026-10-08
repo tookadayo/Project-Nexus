@@ -36,13 +36,13 @@ const commands = [
   ],
   [
     "link",
-    "Verify this server for the Web Dashboard",
+    "Verify this server for the Web screen",
     "接続",
     "このサーバーのWeb接続を検証します",
   ],
   [
     "unlink",
-    "Disconnect the Web Dashboard after confirmation",
+    "Disconnect the Web screen after confirmation",
     "接続解除",
     "確認後にWeb画面の接続を解除します",
   ],
@@ -76,6 +76,7 @@ export function buildNexusCommand() {
     command.addSubcommand((sub) =>
       sub
         .setName(name)
+        .setDescriptionLocalizations({ja:name==="chart"?"確認できた活動のグラフを表示します":"確認できた活動を期間ごとに比べます"})
         .setDescription(
           name === "chart"
             ? "Show an aggregate community chart"
@@ -84,10 +85,11 @@ export function buildNexusCommand() {
         .addStringOption((option) =>
           option
             .setName("metric")
-            .setDescription("Observed community surface")
+            .setDescription("Activity to show")
+            .setDescriptionLocalizations({ja:"表示する活動"})
             .addChoices(
               ...["reply", "forum", "voice", "event", "reaction", "poll"].map(
-                (value) => ({ name: value, value }),
+                (value) => ({ name: ({reply:"Posts and replies",forum:"Forum posts",voice:"Voice co-presence",event:"Events",reaction:"Reactions",poll:"Poll participants"} as Record<string,string>)[value]!,name_localizations:{ja:({reply:"投稿と返信",forum:"フォーラム投稿",voice:"ボイス同席",event:"イベント",reaction:"リアクション",poll:"投票人数"} as Record<string,string>)[value]!}, value }),
               ),
             ),
         )
@@ -95,19 +97,21 @@ export function buildNexusCommand() {
           option
             .setName("days")
             .setDescription("Completed UTC days")
+            .setDescriptionLocalizations({ja:"UTCで完了済みの日数"})
             .addChoices(
-              { name: "7 days", value: 7 },
-              { name: "30 days", value: 30 },
-              { name: "90 days", value: 90 },
+              { name: "7 days", name_localizations:{ja:"7日間"}, value: 7 },
+              { name: "30 days", name_localizations:{ja:"30日間"}, value: 30 },
+              { name: "90 days", name_localizations:{ja:"90日間"}, value: 90 },
             ),
         )
         .addStringOption((option) =>
           option
             .setName("visibility")
             .setDescription("Private reply or authorized channel publication")
+            .setDescriptionLocalizations({ja:"自分だけに表示、または権限を確認してチャンネルへ送信"})
             .addChoices(
-              { name: "private", value: "private" },
-              { name: "channel", value: "channel" },
+              { name: "Only me", name_localizations:{ja:"自分だけ"}, value: "private" },
+              { name: "Send to this channel", name_localizations:{ja:"このチャンネルへ送る"}, value: "channel" },
             ),
         ),
     );
@@ -115,7 +119,8 @@ export function buildNexusCommand() {
     command.addSubcommand((sub) =>
       sub
         .setName(name)
-        .setDescription("Open a configured saved operational report"),
+        .setDescription("Open a configured saved team report")
+        .setDescriptionLocalizations({ja:name==="support-health"?"設定した質問受付の状況を確認します":"新しい参加者の活動を確認します"}),
     );
   return command;
 }

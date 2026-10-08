@@ -308,9 +308,9 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
     );
     expect(receiptB.status()).toBe(403);
     const management = await nextOwner.newPage();
-    await management.goto(base + "/billing/manage");
+    await management.goto(base + "/billing/payments");
     await expect(
-      management.getByText(/current Discord Owner differs/),
+      management.getByText(/This Discord account has no managed payments/),
     ).toBeVisible();
     expect(
       (
@@ -323,5 +323,179 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
     ).toBe("ACTIVE");
   } finally {
     await nextOwner.close();
+  }
+  await request.post(`${fixture}/fixture/departed`, {
+    data: { guildId: guild, userId: user },
+  });
+  await page.goto("/billing/payments");
+  await expect(
+    page.getByRole("heading", { name: "My payments", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "View invoices and payment methods" }),
+  ).toBeVisible();
+  const accountId = (
+    await (
+      await request.get(`${fixture}/fixture/billing-account?guildId=${guild}`)
+    ).json()
+  ).accountId;
+  const portal = await context.request.post("/billing/payments/actions", {
+    headers: { Origin: base, "Sec-Fetch-Site": "same-origin" },
+    data: { action: "portal", accountId, idempotencyKey: randomUUID() },
+  });
+  expect(portal.status()).toBe(200);
+  expect((await portal.json()).url).toMatch(/^https:\/\/billing.stripe.com\//);
+  expect(
+    (
+      await context.request.post("/billing/payments/actions", {
+        headers: { Origin: "https://evil.example" },
+        data: {
+          action: "cancel",
+          accountId,
+          idempotencyKey: randomUUID(),
+          confirmed: true,
+        },
+      })
+    ).status(),
+  ).toBe(403);
+  expect(
+    (
+      await context.request.post("/billing/payments/actions", {
+        headers: { Origin: base, "Sec-Fetch-Site": "same-origin" },
+        data: {
+          action: "cancel",
+          accountId: randomUUID(),
+          idempotencyKey: randomUUID(),
+          confirmed: true,
+        },
+      })
+    ).status(),
+  ).toBe(403);
+  expect((await context.request.get("/data/results")).status()).toBe(403);
+  await page
+    .getByRole("checkbox", {
+      name: "Cancel this subscription when the current billing period ends.",
+    })
+    .check();
+  await page.getByRole("button", { name: "Cancel at period end" }).click();
+  await expect(page.getByRole("status")).toContainText(
+    "Cancellation at the end",
+  );
+  const counts = await (await request.get(`${fixture}/fixture/count`)).json();
+  expect(counts.cancelCalls).toBe(1);
+  expect(counts.portalCalls).toBeGreaterThanOrEqual(2);
+});
+test("confirmed unpaid abandonment frees the provisional payer without transferring Customer history to the next Owner", async ({
+  page,
+  context,
+  request,
+  browser,
+}) => {
+  const abandonedGuild = "931111111111112112",
+    headers = { Origin: base, "Sec-Fetch-Site": "same-origin" };
+  await context.addCookies([{ name: "nexus_locale", value: "en", url: base }]);
+  const login = await context.request.get(
+      "/auth/login?next=%2Fbilling%2Fpayments",
+      { maxRedirects: 0 },
+    ),
+    state = new URL(login.headers().location!).searchParams.get("state");
+  await page.goto(`/auth/callback?code=fixture-code&state=${state}`);
+  await expect(page).toHaveURL(/\/billing\/payments/);
+  await request.post(`${fixture}/fixture/install`);
+  expect(
+    (
+      await context.request.post("/checkout/connect", {
+        headers,
+        data: { guildId: abandonedGuild, confirm: true },
+      })
+    ).status(),
+  ).toBe(200);
+  const start = await context.request.post("/checkout/actions", {
+    headers,
+    data: {
+      action: "start",
+      guildId: abandonedGuild,
+      offeringId: offering,
+      idempotencyKey: randomUUID(),
+    },
+  });
+  expect(start.status()).toBe(200);
+  const checkout = await start.json(),
+    receipt = new URL(checkout.confirmationUrl, base).searchParams.get(
+      "receipt",
+    );
+  const abandoned = await context.request.post("/checkout/abandon", {
+    headers,
+    data: { receipt },
+  });
+  expect(abandoned.status()).toBe(200);
+  expect((await abandoned.json()).state).toBe("EXPIRED");
+  expect(
+    await (
+      await request.get(
+        `${fixture}/fixture/billing-customer-history?guildId=${abandonedGuild}`,
+      )
+    ).json(),
+  ).toEqual({ archived: 1, current: 0 });
+  const accountId = (
+    await (
+      await request.get(
+        `${fixture}/fixture/billing-account?guildId=${abandonedGuild}`,
+      )
+    ).json()
+  ).accountId;
+  expect(
+    (
+      await context.request.post("/billing/payments/actions", {
+        headers,
+        data: { action: "portal", accountId, idempotencyKey: randomUUID() },
+      })
+    ).status(),
+  ).toBe(403);
+  await request.post(`${fixture}/fixture/owner`, {
+    data: { guildId: abandonedGuild, ownerId: other },
+  });
+  const owner = await browser.newContext();
+  try {
+    const signIn = await owner.request.get(base + "/auth/login", {
+        maxRedirects: 0,
+      }),
+      ownerState = new URL(signIn.headers().location!).searchParams.get(
+        "state",
+      );
+    await owner.request.get(
+      `${base}/auth/callback?code=other-user&state=${ownerState}`,
+      { maxRedirects: 0 },
+    );
+    expect(
+      (
+        await owner.request.post(base + "/checkout/connect", {
+          headers,
+          data: { guildId: abandonedGuild, confirm: true },
+        })
+      ).status(),
+    ).toBe(200);
+    expect(
+      (
+        await owner.request.post(base + "/checkout/actions", {
+          headers,
+          data: {
+            action: "start",
+            guildId: abandonedGuild,
+            offeringId: offering,
+            idempotencyKey: randomUUID(),
+          },
+        })
+      ).status(),
+    ).toBe(200);
+    expect(
+      await (
+        await request.get(
+          `${fixture}/fixture/billing-customer-history?guildId=${abandonedGuild}`,
+        )
+      ).json(),
+    ).toEqual({ archived: 1, current: 1 });
+  } finally {
+    await owner.close();
   }
 });

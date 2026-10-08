@@ -1,0 +1,84 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## NEXUS\n-# NEXUSの今の状況"
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### ⚠ 要確認\n2件"
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 1,
+            "label": "見る",
+            "custom_id": "preview"
+          }
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### 📊 基本の分析\n基本の分析は、回数を使わずいつでも確認できます。\n詳しい分析ができる回数: 0回\n最近の詳しい分析: まだ実行していません"
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 2,
+            "label": "見る",
+            "custom_id": "preview"
+          }
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### 👋 新しい参加者\n過去30日の参加者: 29人"
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 2,
+            "label": "見る",
+            "custom_id": "preview"
+          }
+        },
+        {
+          "type": 10,
+          "content": "-# 返信は本文の意味を判断しません。ボイス同席は会話、イベント申込は参加を意味しません。"
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "設定する",
+              "custom_id": "preview"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "その他",
+              "custom_id": "preview"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -49,14 +49,14 @@ it('starts the guild worker only after the interaction job is durable',async()=>
  expect(order).toEqual(['save']);finish('committed');expect(await result).toBe('committed');expect(order).toEqual(['save','wake']);
  await expect(saveThenWake(async()=>{throw new Error('rollback');},async()=>{order.push('bad wake');})).rejects.toThrow('rollback');expect(order).not.toContain('bad wake');
 });
-it('uses a message update ACK for components and keeps save errors private',async()=>{
- const order:string[]=[],followUp=vi.fn(async()=>{});
+it('opens ordinary shared panel buttons privately before database work and keeps errors in the private response',async()=>{
+ const order:string[]=[],followUp=vi.fn(async()=>{}),editReply=vi.fn(async()=>{}),deferUpdate=vi.fn();
  const db={transaction:()=>({execute:async()=>{order.push('database');throw new Error('offline');}})} as unknown as Database;
  const input={inGuild:()=>true,guildId:'111111111111111111',user:{id:'222222222222222222'},isChatInputCommand:()=>false,isMessageComponent:()=>true,isModalSubmit:()=>false,isAnySelectMenu:()=>false,
   id:'333333333333333333',applicationId:'444444444444444444',token:'secret',channelId:'555555555555555555',customId:'ordinary',message:{id:'666666666666666666'},locale:'en-US',guildLocale:'en-US',
-  deferUpdate:vi.fn(async()=>{order.push('update');}),followUp,editReply:vi.fn()} as unknown as Interaction;
+  deferReply:vi.fn(async body=>{expect(body).toEqual({flags:64});order.push('private');}),deferUpdate,followUp,editReply} as unknown as Interaction;
  await handleGatewayInteraction(input,{db,vault:{} as IdentityVault,components:new Components('test')});
- expect(order).toEqual(['update','database']);expect(followUp).toHaveBeenCalledWith(expect.objectContaining({flags:64}));
+ expect(order).toEqual(['private','database']);expect(deferUpdate).not.toHaveBeenCalled();expect(followUp).not.toHaveBeenCalled();expect(editReply).toHaveBeenCalledWith(expect.objectContaining({content:expect.stringContaining('Try again')}));
 });
 
 it('acknowledges private settings before database work and never updates the public message',async()=>{

@@ -1038,6 +1038,7 @@ it("distinguishes setup approval from safe skip during a legacy guild review", a
   const userId = "656666666666666667",
     channelId = "656666666666666668",
     roleId = "656666666666666669";
+  await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,observed_at,visibility_state) VALUES(${s.organizationId}::uuid,${s.guildId},${channelId},0,now(),'VISIBLE')`.execute(db);
   discord.members.set(userId, {
     roles: [],
     permissions: "8",
@@ -1317,6 +1318,10 @@ it("snoozes an attention item, shows it after expiry, and suppresses it when res
   await settings.update(s, actor, 0, {
     helperChannelId: channelId,
     helperEnabled: true,
+    communityModel: {
+      modes: ["SUPPORT_QA"], confirmed: true, forumTags: [], voiceThresholdSeconds: 300,
+      channels: [{channelId, purpose: "SUPPORT"}],
+    },
   });
   const helpers = new HelperWorker(db, discord, settings);
   expect(

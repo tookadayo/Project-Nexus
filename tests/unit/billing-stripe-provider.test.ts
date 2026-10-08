@@ -843,13 +843,11 @@ it("expiry retries are provider-idempotent and require an authoritative expired 
         livemode: false,
         status: "open",
       } as never),
-    expire = vi
-      .spyOn(f.client.checkout.sessions, "expire")
-      .mockResolvedValue({
-        id: "cs_fixture",
-        livemode: false,
-        status: "expired",
-      } as never);
+    expire = vi.spyOn(f.client.checkout.sessions, "expire").mockResolvedValue({
+      id: "cs_fixture",
+      livemode: false,
+      status: "expired",
+    } as never);
   await f.provider.expireCheckout(scope, "cs_fixture", f.input.operationId);
   expect(expire.mock.calls[0]![2]?.idempotencyKey).toBe(
     stripeIdempotencyKey("abandon", scope, f.input.operationId),
@@ -872,4 +870,142 @@ it("expiry retries are provider-idempotent and require an authoritative expired 
   await expect(
     f.provider.expireCheckout(scope, "cs_fixture", f.input.operationId),
   ).rejects.not.toBeInstanceOf(DefinitiveBillingFailure);
+});
+function abandonmentFixture() {
+  const f = fixture(),
+    session = {
+      id: "cs_fixture",
+      mode: "subscription",
+      livemode: false,
+      status: "expired",
+      payment_status: "unpaid",
+      customer: "cus_fixture",
+      subscription: null,
+      payment_intent: null,
+      setup_intent: null,
+      client_reference_id: f.input.operationId,
+    };
+  vi.spyOn(f.client.checkout.sessions, "retrieve").mockResolvedValue(
+    session as never,
+  );
+  f.mocks.customer.mockResolvedValue({
+    id: "cus_fixture",
+    livemode: false,
+    default_source: null,
+    invoice_settings: { default_payment_method: null },
+  } as never);
+  const census = { data: [], has_more: false };
+  const invoice = vi
+    .spyOn(f.client.invoices, "list")
+    .mockResolvedValue(census as never);
+  const paymentMethods = vi
+    .spyOn(f.client.paymentMethods, "list")
+    .mockResolvedValue(census as never);
+  const paymentIntents = vi
+    .spyOn(f.client.paymentIntents, "list")
+    .mockResolvedValue(census as never);
+  const setupIntents = vi
+    .spyOn(f.client.setupIntents, "list")
+    .mockResolvedValue(census as never);
+  const charges = vi
+    .spyOn(f.client.charges, "list")
+    .mockResolvedValue(census as never);
+  const sources = vi
+    .spyOn(f.client.customers, "listSources")
+    .mockResolvedValue(census as never);
+  const sessions = vi
+    .spyOn(f.client.checkout.sessions, "list")
+    .mockResolvedValue({ data: [session], has_more: false } as never);
+  return {
+    ...f,
+    invoice,
+    paymentMethods,
+    paymentIntents,
+    setupIntents,
+    charges,
+    sources,
+    sessions,
+  };
+}
+it("only exact expired unpaid checkout and complete empty financial census authorize provisional release", async () => {
+  const f = abandonmentFixture();
+  expect(
+    await f.provider.verifyAbandonedCheckout(
+      scope,
+      "cs_fixture",
+      f.input.operationId,
+    ),
+  ).toEqual({
+    checkoutRef: "cs_fixture",
+    customerRef: "cus_fixture",
+    complete: true,
+    unpaid: true,
+    noFinancialHistory: true,
+  });
+});
+it.each([
+  "subscription",
+  "invoice",
+  "paymentMethods",
+  "paymentIntents",
+  "setupIntents",
+  "charges",
+  "sources",
+  "sessions",
+  "partial",
+  "provider",
+])("abandonment retains authority for %s evidence", async (kind) => {
+  const f = abandonmentFixture();
+  if (kind === "subscription")
+    f.mocks.list.mockResolvedValue({
+      data: [f.subscription],
+      has_more: false,
+    } as never);
+  else if (kind === "partial")
+    f.invoice.mockResolvedValue({ data: [], has_more: true } as never);
+  else if (kind === "provider")
+    f.invoice.mockRejectedValue(new Error("provider unavailable"));
+  else
+    f[
+      kind as
+        | "invoice"
+        | "paymentMethods"
+        | "paymentIntents"
+        | "setupIntents"
+        | "charges"
+        | "sources"
+        | "sessions"
+    ].mockResolvedValue({
+      data: [{ id: "historical" }],
+      has_more: false,
+    } as never);
+  await expect(
+    f.provider.verifyAbandonedCheckout(
+      scope,
+      "cs_fixture",
+      f.input.operationId,
+    ),
+  ).rejects.toThrow();
+});
+it("per-write hooks record Customer then Checkout and completed stages after the SDK response", async () => {
+  const f = fixture(),
+    phases: string[] = [];
+  const before = vi.fn(async (phase?: string) => {
+      phases.push("start:" + phase);
+    }),
+    after = vi.fn(async (phase: string) => {
+      phases.push("done:" + phase);
+    });
+  await f.provider.createCheckout({
+    ...f.input,
+    customer: undefined,
+    beforeMutation: before,
+    afterMutation: after,
+  });
+  expect(phases).toEqual([
+    "start:CUSTOMER",
+    "done:CUSTOMER",
+    "start:CHECKOUT",
+    "done:CHECKOUT",
+  ]);
 });

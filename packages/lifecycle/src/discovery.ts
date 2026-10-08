@@ -11,6 +11,8 @@ import {
 import type { Scope } from "../../shared/src/index";
 import type { CapabilitySnapshot } from "../../shared/src/community-model";
 import { observedSurfaceUsage } from "../../shared/src/community-model";
+import { resolveAnalysisScope, type ScopeChannel } from "../../shared/src/channel-scope";
+import type { Settings } from "../../settings/src/index";
 import type { IdentityVault } from "../../identity/src/index";
 import type { DiscordPort } from "../../discord/src/rest";
 import { buildCapabilitySnapshot } from "../../discord/src/discovery";
@@ -43,6 +45,12 @@ export async function latestCapability(tx: Tx, s: Scope) {
       )
     ).rows[0]?.snapshot ?? null
   );
+}
+export async function analysisChannelScope(tx: Tx, s: Scope, cfg: Pick<Settings,"communityModel"|"analysisScope">) {
+  const [snapshot, current] = await Promise.all([latestCapability(tx,s),sql<{channel_id:string;channel_type:number;parent_id:string|null;visibility_state:string;deleted_at:Date|null;collection_forbidden:boolean}>`SELECT channel_id,channel_type,parent_id,visibility_state,deleted_at,collection_forbidden FROM discord_surface_state WHERE ${tenant(s)}`.execute(tx)]);
+  const channels = new Map<string,ScopeChannel>((snapshot?.channels ?? []).map(c => [c.id,c]));
+  for (const c of current.rows) channels.set(c.channel_id,{id:c.channel_id,type:c.channel_type,parentId:c.parent_id,observable:c.visibility_state === "VISIBLE",deleted:Boolean(c.deleted_at),collectionForbidden:c.collection_forbidden});
+  return {...resolveAnalysisScope(cfg.communityModel,cfg.analysisScope,[...channels.values()]),channels:[...channels.values()]};
 }
 export function refreshPriority(reason: string) {
   return reason === "manual"
@@ -164,6 +172,7 @@ export class DiscoveryWorker {
             )
           ).rows.map((row) => row.lookup_hash),
         );
+        source.threads = source.threads.filter(thread => thread.type !== 12);
         for (const thread of source.threads)
           if (thread.ownerHash && suppressed.has(thread.ownerHash))
             thread.ownerHash = null;
@@ -253,7 +262,7 @@ export class DiscoveryWorker {
           })),
           ...source.threads,
         ])
-          await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,parent_id,channel_type,owner_hash,archived,locked,created_at,tag_ids,observed_at,visibility_state,visibility_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${c.id},${c.parentId},${c.type},${c.ownerHash},${c.archived},${c.locked},${c.createdAt ? new Date(c.createdAt) : null},${c.tagIds}::text[],${now},${source.channels.find((ch) => ch.id === c.id)?.observable === false ? "UNOBSERVABLE" : "VISIBLE"},${now}) ON CONFLICT(organization_id,guild_id,channel_id) DO UPDATE SET parent_id=EXCLUDED.parent_id,channel_type=EXCLUDED.channel_type,owner_hash=EXCLUDED.owner_hash,archived=EXCLUDED.archived,locked=EXCLUDED.locked,tag_ids=EXCLUDED.tag_ids,visibility_state=EXCLUDED.visibility_state,visibility_observed_at=EXCLUDED.visibility_observed_at,observed_at=EXCLUDED.observed_at WHERE discord_surface_state.observed_at<=EXCLUDED.observed_at`.execute(
+          await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,parent_id,channel_type,owner_hash,archived,locked,created_at,tag_ids,observed_at,visibility_state,visibility_observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${c.id},${c.parentId},${c.type},${c.ownerHash},${c.archived},${c.locked},${c.createdAt ? new Date(c.createdAt) : null},${c.tagIds}::text[],${now},${source.channels.find((ch) => ch.id === c.id)?.observable === false ? "UNOBSERVABLE" : "VISIBLE"},${now}) ON CONFLICT(organization_id,guild_id,channel_id) DO UPDATE SET parent_id=EXCLUDED.parent_id,channel_type=EXCLUDED.channel_type,owner_hash=EXCLUDED.owner_hash,archived=EXCLUDED.archived,locked=EXCLUDED.locked,tag_ids=EXCLUDED.tag_ids,visibility_state=EXCLUDED.visibility_state,visibility_observed_at=EXCLUDED.visibility_observed_at,observed_at=EXCLUDED.observed_at WHERE discord_surface_state.observed_at<=EXCLUDED.observed_at AND discord_surface_state.deleted_at IS NULL`.execute(
             tx,
           );
         // REST-discovered ACTIVE events have no observed start: attendance remains unknown until a Gateway ACTIVE observation.

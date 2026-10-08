@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
       context.operation.id,
       context.operation.principal_actor_hash!,
       (ref) =>
-        new StripeBillingProvider().expireCheckout(
+        new StripeBillingProvider().verifyAbandonedCheckout(
           context.scope,
           ref,
           context.operation.id,

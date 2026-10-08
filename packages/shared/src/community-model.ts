@@ -25,6 +25,7 @@ export const channelPurposes = [
 export const tagMeanings = [
   "SUPPORT_REQUEST",
   "RESOLVED",
+  "UNRESOLVED",
   "BUG_REPORT",
   "FEEDBACK",
   "LFG",
@@ -89,7 +90,7 @@ export const communityModelSchema = z
       .array(
         z.object({ channelId: id, purpose: z.enum(channelPurposes) }).strict(),
       )
-      .max(100)
+      .max(1000)
       .refine((v) => new Set(v.map((x) => x.channelId)).size === v.length)
       .default([]),
     forumTags: z
@@ -98,7 +99,7 @@ export const communityModelSchema = z
           .object({ channelId: id, tagId: id, meaning: z.enum(tagMeanings) })
           .strict(),
       )
-      .max(100)
+      .max(1000)
       .refine(
         (v) =>
           new Set(v.map((x) => x.channelId + ":" + x.tagId)).size === v.length,
@@ -126,6 +127,8 @@ export type ChannelMetadata = {
   parentId: string | null;
   observable: boolean;
   tagIds: string[];
+  deleted?: boolean;
+  collectionForbidden?: boolean;
 };
 export type ThreadMetadata = {
   id: string;
@@ -188,9 +191,10 @@ export function surfaceFor(
   channelType: number | undefined,
   parentType?: number,
 ): Surface {
-  if (channelType === 15 || parentType === 15) return "FORUM_POST";
-  if (channelType === 16 || parentType === 16) return "MEDIA_POST";
-  if ([10, 11, 12].includes(channelType ?? -1)) return "THREAD";
+  if (channelType === 12) return "UNKNOWN";
+  if (channelType === 15 || (channelType === 11 && parentType === 15)) return "FORUM_POST";
+  if (channelType === 16 || (channelType === 11 && parentType === 16)) return "MEDIA_POST";
+  if ([10, 11].includes(channelType ?? -1)) return "THREAD";
   return channelType === 0
     ? "TEXT"
     : channelType === 5
@@ -205,10 +209,11 @@ export function purposeFor(
   model: CommunityModel,
   channelId: string,
   parentId?: string | null,
+  channelType?: number,
 ) {
   return (
-    model.channels.find((c) => c.channelId === (parentId ?? channelId))
-      ?.purpose ?? "OTHER"
+    model.channels.find((c) => c.channelId === channelId)?.purpose ??
+    ((channelType === undefined || channelType === 10 || channelType === 11) && parentId ? model.channels.find((c) => c.channelId === parentId)?.purpose : undefined) ?? "OTHER"
   );
 }
 export function strongResponseAllowed(
@@ -218,10 +223,15 @@ export function strongResponseAllowed(
   return (
     purpose === "GENERAL_CONVERSATION" ||
     (purpose === "LFG" && model.modes.includes("LFG_PLAY")) ||
-    (purpose === "SUPPORT" && model.modes.includes("SUPPORT_QA")) ||
+    purpose === "SUPPORT" ||
     (["BUG_REPORT", "FEEDBACK"].includes(purpose) &&
       model.modes.includes("DEVELOPMENT_FEEDBACK"))
   );
+}
+export function forumTagResolution(model:CommunityModel,parentChannelId:string,tagIds:readonly string[]) {
+  const meanings = new Set(model.forumTags.filter(t=>t.channelId===parentChannelId && tagIds.includes(t.tagId)).map(t=>t.meaning));
+  const conflict = meanings.has("RESOLVED") && meanings.has("UNRESOLVED");
+  return {resolved:meanings.has("RESOLVED") && !conflict,conflict};
 }
 export function volumeMode(input: {
   members: number;
@@ -256,7 +266,7 @@ export function quantiles(values: number[]) {
 }
 export function meaningfulActivityKinds(model: CommunityModel): Set<string> {
   const kinds = new Set(["interaction.used", "activation.completed"]);
-  if (!model.confirmed)
+  if (!model.confirmed || model.modes.length === 0)
     return new Set([
       ...kinds,
       "message.sent",

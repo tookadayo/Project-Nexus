@@ -40,6 +40,8 @@ afterAll(async () => {
 async function scope() {
   const s = { organizationId: randomUUID(), guildId: "111111111111111111" };
   await ensureGuild(db, s);
+  // Synthetic historical observations have a declared collector activation.
+  await sql`UPDATE location_population_collection SET introduced_at=${time} WHERE ${tenant(s)}`.execute(db);
   return s;
 }
 function event(

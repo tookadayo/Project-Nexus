@@ -1,0 +1,75 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## 分析する内容を確認"
+        },
+        {
+          "type": 10,
+          "content": "**計算方法の訂正を確認**\n以前の計算方法を訂正します。回数は使いません。"
+        },
+        {
+          "type": 10,
+          "content": "**サーバー全体を見る**\n2026-09-08 〜 2026-10-07（UTC）"
+        },
+        {
+          "type": 10,
+          "content": "**分析する場所**\n選んだチャンネル\n指定した場所: 1件"
+        },
+        {
+          "type": 10,
+          "content": "**データ状況**\n分析できます"
+        },
+        {
+          "type": 10,
+          "content": "**確認できた投稿**\nそろっています"
+        },
+        {
+          "type": 10,
+          "content": "**詳しい分析ができる回数: 0回**\n分析回数: 0回 → 0回\n結果を保存できたときに1回分を使います。"
+        },
+        {
+          "type": 10,
+          "content": "-# 完了時間はまだ見積もれません。"
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 1,
+              "label": "分析を始める",
+              "custom_id": "private:c2133438-3d0b-4eeb-a53a-3e7d7367256e.aaaaaaaaaaaaaaaaaaaaaa",
+              "disabled": false
+            }
+          ]
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "戻る",
+              "custom_id": "private:9eea9591-dfad-4964-b852-183037a39b39.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "設定する",
+              "custom_id": "private:004a103b-4958-4b6d-a81d-c3dcc0fe14fe.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

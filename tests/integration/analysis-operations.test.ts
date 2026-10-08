@@ -251,8 +251,12 @@ it("restores a queued use when retention expires before dispatch", async () => {
   expect(await usage(f)).toEqual({ remaining: 1, reserved: 0, consumed: 0 });
 });
 it("fails closed on no data, unsupported periods, option payloads and changed preview", async () => {
-  const f = await analysisFixture(db, "FREE", false),
-    p = await service.preview(f.s, f.actor, { type: "OVERALL", days: 30 });
+  const f = await analysisFixture(db, "FREE", false);
+  // Missing observation coverage is unknown, distinct from a fully observed zero.
+  await sql`UPDATE discord_integration_health SET gateway_state='UNKNOWN' WHERE ${tenant(f.s)}`.execute(
+    db,
+  );
+  const p = await service.preview(f.s, f.actor, { type: "OVERALL", days: 30 });
   expect(p.quality).toBe("NO_DATA");
   expect(p.metrics.every((m) => m.evidence.value === null)).toBe(true);
   await expect(reserve(f)).rejects.toThrow("ANALYSIS_NO_DATA");
@@ -271,7 +275,9 @@ it("fails closed on no data, unsupported periods, option payloads and changed pr
       type: "OVERALL",
       days: 30,
     });
-  await filled.settings.update(filled.s, filled.actor, 1, { uiLanguage: "ja" });
+  await filled.settings.update(filled.s, filled.actor, 1, {
+    analysisScope: { mode: "exclude", channelIds: [filled.channel] },
+  });
   await expect(
     service.request(
       filled.s,
@@ -469,6 +475,7 @@ it("supports preview-first setup, actor binding, stale revisions and idempotent 
   expect(saved.analysisScope).toEqual({
     mode: "include",
     channelIds: [f.channel],
+    excludedChannelIds: [],
   });
   expect(
     (await wizard.confirm(f.s, f.actor, draft.id, draft.version)).revision,
@@ -706,6 +713,13 @@ it("compares only compatible prior windows, definitions, scopes and recipes", as
     db,
   );
   await sql`INSERT INTO analysis_results(run_id,organization_id,guild_id,result) VALUES(${badId}::uuid,${f.s.organizationId}::uuid,${f.s.guildId},${json(prior)})`.execute(
+    db,
+  );
+  // A valid comparison must survive more than 25 newer incompatible results.
+  await sql`INSERT INTO analysis_runs(id,organization_id,guild_id,scheduler_organization_id,analysis_type,status,request_key,period_start,period_end,period_days,recipe_version,scope_identity,config_revision,data_revision,input_fingerprint,plan_at_request,priority_class,retention_until,completed_at,requested_at) SELECT gen_random_uuid(),organization_id,guild_id,scheduler_organization_id,analysis_type,status,${"newer-incompatible:" + badId + ":"}||n::text,period_start,period_end,period_days,recipe_version,scope_identity,config_revision,data_revision,input_fingerprint,plan_at_request,priority_class,retention_until,completed_at,requested_at+n*interval '1 second' FROM analysis_runs CROSS JOIN generate_series(1,30) n WHERE id=${badId}::uuid`.execute(
+    db,
+  );
+  await sql`INSERT INTO analysis_results(run_id,organization_id,guild_id,result) SELECT id,organization_id,guild_id,${json(prior)} FROM analysis_runs WHERE ${tenant(f.s)} AND request_key LIKE ${"newer-incompatible:" + badId + ":%"}`.execute(
     db,
   );
   const comparison = await service.compare(f.s, f.actor, current.id);

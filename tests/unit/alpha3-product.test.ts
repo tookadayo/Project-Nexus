@@ -27,8 +27,8 @@ it('keeps visible goal names aligned to observed activity',()=>{
 it('distinguishes zero live attention from unavailable observations',async()=>{
  const live=await controlPanel(issue,'overview',{community:{daily:{ready:true,todayJoined:0,todayConnected:0,attentionCount:0},attention:[],suggestion:null} as never},'en');
  const waiting=await controlPanel(issue,'overview',{community:{daily:{ready:false},attention:[],suggestion:null} as never},'en');
- expect(JSON.stringify(live)).toContain('0 posts');
+ expect(JSON.stringify(live)).toContain('No items currently require action.');
  expect(JSON.stringify(live)).toContain('Basic analysis');
- expect(JSON.stringify(waiting)).toContain('Data is unavailable');
- expect(JSON.stringify(waiting)).not.toContain('**Joined**\\n0');
+ expect(JSON.stringify(waiting)).toContain('The current situation is unavailable');
+ expect(JSON.stringify(waiting)).not.toContain('No items currently require action.');
 });

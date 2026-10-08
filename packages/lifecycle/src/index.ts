@@ -32,7 +32,9 @@ import {
   projectMemberFlags,
   projectAdaptiveMember,
   resolveSurface,
+  projectLocationPost,
 } from "./adaptive-projector.js";
+import { resolveChannel } from "../../shared/src/channel-scope.js";
 import { projectObservation } from "./observation.js";
 export class AwaitingReference extends Error {}
 export class LifecycleService {
@@ -148,11 +150,13 @@ export class LifecycleService {
         await this.health(tx, s, event);
         return;
       }
-      if (
-        (await projectStructure(tx, s, event, settings)) ||
-        !event.encryptedUserId
-      )
+      if (await projectStructure(tx, s, event, settings))
         return;
+      if (event.kind === "channel.post_observed") {
+        await projectLocationPost(tx,s,event,settings,null);
+        return;
+      }
+      if (!event.encryptedUserId) return;
       const userId = this.vault.open(s, event.encryptedUserId);
       const hash = this.vault.hash(s, userId);
       if (observedMember?.bot) return;
@@ -164,6 +168,7 @@ export class LifecycleService {
         ).rows.length
       )
         return;
+      if (event.kind === "message.sent") await projectLocationPost(tx,s,event,settings,hash);
       const guestObservation = (
         await sql<{
           observed_at: Date;
@@ -423,11 +428,7 @@ export class LifecycleService {
         : null;
       const channelAllowed = (channelId: string | null | undefined) =>
         !channelId ||
-        settings.analysisScope.mode === "all" ||
-        (settings.analysisScope.mode === "include") ===
-          settings.analysisScope.channelIds.includes(
-            observedSurface?.parentId ?? channelId,
-          );
+        resolveChannel(settings.communityModel,settings.analysisScope,observedSurface?.metadata ?? [],channelId).selected;
       if (event.kind === "reaction.added" && channelAllowed(event.channelId)) {
         const target = (
           await sql<{

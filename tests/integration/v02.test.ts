@@ -77,6 +77,7 @@ async function setup() {
     discord = new FakeDiscord();
   await settings.update(s, actor, 0, {
     enabled: true,
+    communityModel: { modes: [], confirmed: true, channels: [{ channelId: channel, purpose: "SUPPORT" }], forumTags: [], voiceThresholdSeconds: 300 },
     flags: {
       native_capability_v2: true,
       native_snapshot_v2: true,
@@ -93,7 +94,10 @@ async function setup() {
   await sql`INSERT INTO discord_integration_health(organization_id,guild_id,gateway_state,last_gateway_at,intents,rest_state,last_refresh_at,updated_at) VALUES(${s.organizationId}::uuid,${s.guildId},'CONNECTED',${now},'{"members":"AVAILABLE","messages":"AVAILABLE","voice":"AVAILABLE"}', 'AVAILABLE',${now},${now})`.execute(
     db,
   );
-  await sql`INSERT INTO guild_capability_snapshots VALUES(${s.organizationId}::uuid,${s.guildId},gen_random_uuid(),${json(buildCapabilitySnapshot(representativeSource(0), now))},${now})`.execute(
+  const source = representativeSource(0);
+  source.channels = [{ id: channel, parentId: null, type: 0, observable: true, tagIds: [] }];
+  await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,visibility_state,observed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${channel},0,'VISIBLE',${now})`.execute(db);
+  await sql`INSERT INTO guild_capability_snapshots VALUES(${s.organizationId}::uuid,${s.guildId},gen_random_uuid(),${json(buildCapabilitySnapshot(source, now))},${now})`.execute(
     db,
   );
   discord.members.set(user, {
@@ -1875,6 +1879,7 @@ it("attributes replies and later channel activity to the correct channel and tim
     now = new Date("2026-09-24T12:00:00.000Z"),
     joined = new Date(now.getTime() - 5 * 86400000),
     other = "777111111111111111";
+  await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,visibility_state,observed_at) VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${other},0,'VISIBLE',${now})`.execute(db);
   await sql`INSERT INTO telemetry_cursor VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},${new Date(joined.getTime() - 1000)},${now})`.execute(
     db,
   );

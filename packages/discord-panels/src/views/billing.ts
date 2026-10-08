@@ -90,14 +90,7 @@ export async function billingPanel(
           label: l("プランを比較", "Compare plans"),
           url: new URL("/billing/plans", url).toString(),
         },
-        ...(view.canManage === false
-          ? []
-          : [
-              {
-                label: l("支払いを管理", "Manage billing"),
-                url: new URL("/billing/manage", url).toString(),
-              },
-            ]),
+        {label:l("自分が管理している支払い", "My payments"),url:new URL("/billing/payments",url).toString()},
       ]),
     );
   }

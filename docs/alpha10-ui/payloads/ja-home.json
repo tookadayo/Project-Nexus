@@ -1,0 +1,84 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## NEXUS\n-# このサーバーの状況 · 過去30日（UTCの完了済み日） · <t:1790758800:R>"
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### 基本の分析\n投稿・返信・新しい参加者の状況を確認できます。\n基本の分析は、回数を使わずいつでも確認できます。"
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 2,
+            "label": "状況を見る",
+            "custom_id": "private:3a7eaf2d-e2d9-4fa9-a6e5-fdc5ff9d2f96.aaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### 要確認\n対応が必要な項目があります。"
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 2,
+            "label": "要確認を見る",
+            "custom_id": "private:65cb3b63-d8cf-41e9-93aa-34ec8976f6ff.aaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### 詳しい分析\n設定した用途に合わせて、変化と確認したい点をまとめます。\n残りの分析回数は確認できません。\n最近の詳しい分析: まだ実行していません"
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 1,
+            "label": "詳しく分析する",
+            "custom_id": "private:4caaf1ad-ed0a-46f0-8a32-88603397685b.aaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "type": 10,
+          "content": "-# 返信は本文の意味を判断しません。ボイス同席は会話、イベント申込は参加を意味しません。"
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "設定する",
+              "custom_id": "private:57fd42a6-3c40-41d5-b033-0732933abd65.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "その他",
+              "custom_id": "private:4d3dc2cb-1b2d-43a4-ac87-242ea7238e19.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

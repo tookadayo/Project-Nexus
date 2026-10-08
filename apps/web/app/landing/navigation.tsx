@@ -14,6 +14,7 @@ export function Navigation({ locale }: { locale: Locale }) {
     ["/#privacy", text(locale, "Privacy", "プライバシー")],
     ["/pricing", text(locale, "Pricing", "プラン")],
     ["/support", text(locale, "Support", "サポート")],
+    ["/billing/payments", text(locale, "My payments", "自分の支払い")],
   ];
   useEffect(() => {
     const media = window.matchMedia("(min-width: 1025px)");

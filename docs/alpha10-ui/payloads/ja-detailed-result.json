@@ -1,0 +1,76 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## 分析が終わりました"
+        },
+        {
+          "type": 10,
+          "content": "**サーバー全体を見る**\n完了\n2026-09-08 〜 2026-10-07（UTC）"
+        },
+        {
+          "type": 10,
+          "content": "**分析する場所**\n以前の計算方法による結果です。場所の記録は確認できません。"
+        },
+        {
+          "type": 10,
+          "content": "**データ状況**\nデータがありません"
+        },
+        {
+          "type": 10,
+          "content": "**確認できた投稿**\nデータがありません\n対象件数を確認できません。"
+        },
+        {
+          "type": 10,
+          "content": "**気になる点**\n今回の分析から追加する要確認はありません。"
+        },
+        {
+          "type": 10,
+          "content": "-# 返信は本文の意味を判断しません。ボイス同席は会話、イベント申込は参加を意味しません。"
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "前回と比べる",
+              "custom_id": "private:4e08225f-1bf8-4212-85a4-52b4fdeeba61.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "詳しく見る",
+              "custom_id": "private:abd00bef-d24f-4330-bc19-ea5728bd72cb.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "これまでの詳しい分析",
+              "custom_id": "private:15c483cd-496b-4a92-b3a8-107901581986.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "戻る",
+              "custom_id": "private:7a222bfc-40f0-4c98-9eef-513fd6970e12.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

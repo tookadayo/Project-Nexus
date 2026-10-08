@@ -264,7 +264,7 @@ it("hydrates all supplied guild channel/thread metadata without storing raw obje
   ]);
   expect(JSON.stringify(events)).not.toContain("secret");
 });
-it.each(["MESSAGE_CREATE", "VOICE_STATE_UPDATE", "GUILD_MEMBER_ADD"])(
+it.each(["VOICE_STATE_UPDATE", "GUILD_MEMBER_ADD"])(
   "rejects bots for %s",
   (t) => {
     expect(
@@ -370,7 +370,7 @@ it.each([
   [13, undefined, "STAGE_TEXT"],
   [11, 15, "FORUM_POST"],
   [11, 16, "MEDIA_POST"],
-  [12, 0, "THREAD"],
+  [12, 0, "UNKNOWN"],
   [undefined, undefined, "UNKNOWN"],
 ] as const)("resolves surface %s/%s", (type, parent, expected) =>
   expect(surfaceFor(type, parent)).toBe(expected),

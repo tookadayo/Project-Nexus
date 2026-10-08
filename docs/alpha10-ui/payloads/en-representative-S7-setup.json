@@ -1,0 +1,78 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## Set up NEXUS"
+        },
+        {
+          "type": 10,
+          "content": "**Review your settings**\n"
+        },
+        {
+          "type": 10,
+          "content": "**Places to analyse**\nSelected channels\nSelected places: 319\n<#800000000000070001>\n<#800000000000070002>\n<#800000000000070003>\n<#800000000000070004>\n<#800000000000070005>\n314 more"
+        },
+        {
+          "type": 10,
+          "content": "**Notifications**\nOff\nNot configured"
+        },
+        {
+          "type": 10,
+          "content": "**Team members**\nNot configured"
+        },
+        {
+          "type": 10,
+          "content": "**What to view**\nNot configured"
+        },
+        {
+          "type": 10,
+          "content": "**Notifications**\nUnchanged (skipped)"
+        },
+        {
+          "type": 10,
+          "content": "**Team members**\nUnchanged (skipped)"
+        },
+        {
+          "type": 10,
+          "content": "**What to view**\nUnchanged (skipped)"
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Review selected places",
+              "custom_id": "private:f08e00c1-6f36-40d5-a713-3d4bb0d1e91f.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 1,
+              "label": "Apply these settings",
+              "custom_id": "private:1b0959df-7261-48f2-b663-eb0ad6c76bff.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Back",
+              "custom_id": "private:7b3536af-b072-4bb8-b2c2-2b63dc247cf0.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

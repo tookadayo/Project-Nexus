@@ -101,6 +101,8 @@ import {
 import type { InteractionJob } from "../../interaction/src/server.js";
 import { CapabilityService } from "../../../packages/lifecycle/src/capabilities.js";
 import { AnalyticsService } from "../../../packages/analytics/src/index.js";
+import {analysisMetrics} from "../../../packages/analytics/src/analysis";
+import {completedWindow,fingerprint} from "../../../packages/analysis/src/domain";
 import { EntitlementService } from "../../../packages/settings/src/billing/index.js";
 import { visibleMetrics } from "../../../packages/settings/src/metric-visibility";
 import { BillingService } from "../../../packages/settings/src/billing";
@@ -130,6 +132,7 @@ import { communityModelSchema } from "../../../packages/shared/src/community-mod
 import {
   latestCapability,
   requestCapabilityRefresh,
+  analysisChannelScope,
 } from "../../../packages/lifecycle/src/discovery.js";
 import type { InteractionHealthSnapshot } from "../../interaction/src/health.js";
 import { releaseInfo } from "../../../packages/shared/src/runtime-info.js";
@@ -592,8 +595,8 @@ export class InteractionWorker {
     }
     const setupFlow = action === "setup" || intent.setupFlow === true;
     const privateSettings = intent.privateSettings === true;
-    const panelMessageId = privateSettings
-      ? String(intent.panelMessageId ?? input.messageId ?? "")
+    let panelMessageId = privateSettings
+      ? String(intent.panelMessageId ?? "")
       : undefined;
     if (privateSettings) {
       const saved = (
@@ -603,7 +606,8 @@ export class InteractionWorker {
           this.db,
         )
       ).rows[0];
-      assert(saved && saved.message_id === panelMessageId, "COMPONENT_EXPIRED");
+      assert(saved && (!panelMessageId || saved.message_id === panelMessageId), "COMPONENT_EXPIRED");
+      panelMessageId = saved.message_id;
     }
 
     const issue: Issue = (data, publicEntry = false) =>
@@ -622,7 +626,7 @@ export class InteractionWorker {
       assert(!member.bot && Date.now()-authorization.checkedAt<=10000,"GUILD_MEMBER_REQUIRED",403);
     }
     if(action==='setup'||action==='controlReviewSetup')return setupInteraction(this.db,this.discord,s,actor,issue,locale,{action:'setupWizard'});
-    if (['analysisMenu','analysisPreview','analysisStart','analysisRerun','analysisHistory','analysisResult','analysisEvidence','analysisCompare','analysisAttention','analysisAttentionList','analysisAttentionItem','analysisAttentionUpdate'].includes(action)) {
+    if (['analysisMenu','analysisPreview','analysisStart','analysisRerun','analysisHistory','analysisResult','analysisEvidence','analysisCompare','analysisAttention','analysisAttentionConfirm','analysisCancel','analysisAttentionList','analysisAttentionItem','analysisAttentionUpdate'].includes(action)) {
       return analysisInteraction(this.db,s,actor,issue,locale,intent,input.values,input.customId??input.id);
     }
     if (action.startsWith('setupWizard'))return setupInteraction(this.db,this.discord,s,actor,issue,locale,intent,input.values);
@@ -682,6 +686,7 @@ export class InteractionWorker {
       "controlWeeklyToggle",
       "controlTryImprove",
       "controlTestAlert",
+      "controlTestAlertPreview",
       "controlTestSummary",
       "setup",
       "setupNext",
@@ -738,6 +743,10 @@ export class InteractionWorker {
     )
       await this.db.transaction().execute(tx=>operationsAccess(tx,s,actor,['controlNavigate','controlRefresh','controlAnalysis','controlChannelPage','controlAttentionPage','controlSettings','controlRules','overview','lifecycle','cohorts','diagnose','experiments','reports','status','settings','billing','panel'].includes(action)?'READ':['contextAdd','contextResolve','controlResolve','controlAcknowledge','controlSnoozeMenu','controlSnooze'].includes(action)?'OPERATE':'CONFIGURE'));
     onStage("operation");
+    if(action==="controlTestAlertPreview"){
+      assert(current.helperChannelId,"CHANNEL_REQUIRED");
+      return nexusPanel({title:t(locale,"control.testAlert"),children:[callout(t(locale,"control.destination"),`<#${current.helperChannelId}>`),callout(locale==="ja"?"送信する内容":"What will be sent",locale==="ja"?"このチャンネルへテスト通知を1件送信します。全員へのメンションは行いません。":"Send one test notification to this channel without mentioning everyone.")],rows:[await actionRow(issue,[{label:locale==="ja"?"テスト通知を送る":"Send test notification",action:"controlTestAlert",data:{revision:current.revision,channelId:current.helperChannelId},style:1},{label:t(locale,"common.back"),action:"controlSettings",data:{section:"notifications"}}])]});
+    }
     if (["controlModelSave", "controlModelRefresh"].includes(action)) {
       await this.db.transaction().execute(tx=>operationsAccess(tx,s,actor,'CONFIGURE'));
       if (action === "controlModelRefresh")
@@ -871,7 +880,8 @@ export class InteractionWorker {
             ),
           ],
         });
-      const scopeFilter = sql`(data->>'channelId' IS NULL OR ${current.analysisScope.mode}='all' OR (${current.analysisScope.mode}='include')=(data->>'channelId'=ANY(${current.analysisScope.channelIds}::text[])))`;
+      const allowed=await analysisChannelScope(this.db,s,current);
+      const scopeFilter = sql`(data->>'channelId' IS NULL OR data->>'channelId'=ANY(${allowed.actualChannelIds}::text[]))`;
       const facts = (
         await sql<{
           kind: string;
@@ -1650,7 +1660,7 @@ export class InteractionWorker {
           enabled: true,
         });
       onStage("panel_render");
-      const root = await this.communityPanel(issue, s, publicLocale);
+      const root = await controlPanel(issue,"overview",{sharedEntry:true},publicLocale);
       onStage("panel_upsert_enqueue");
       await enqueue(this.db, s, `panel:${input.id}`, "PANEL_UPSERT", {
         channelId: targetChannel,
@@ -1675,7 +1685,7 @@ export class InteractionWorker {
         )
       ).rows[0];
       assert(saved, "PANEL_NOT_CONFIGURED");
-      const root = await this.communityPanel(issue, s, publicLocale);
+      const root = await controlPanel(issue,"overview",{sharedEntry:true},publicLocale);
       await enqueue(this.db, s, `panel-refresh:${input.id}`, "PANEL_UPSERT", {
         channelId: saved.channel_id,
         body: root,
@@ -1705,11 +1715,11 @@ export class InteractionWorker {
           this.db,
         )
       ).rows[0];
-      assert(saved, "PANEL_NOT_CONFIGURED");
+      assert(input.privateResponse || saved, "PANEL_NOT_CONFIGURED");
       assert(
         privateSettings ||
-          !input.messageId ||
-          input.messageId === saved.message_id,
+          input.privateResponse || !input.messageId ||
+          input.messageId === saved?.message_id,
         "COMPONENT_EXPIRED",
       );
       const page = z
@@ -1755,7 +1765,7 @@ export class InteractionWorker {
           : "none";
       const analysisView: AnalysisView =
         action === "controlAnalysis"
-          ? z.enum(analysisViews).parse(input.values?.[0])
+          ? z.enum(analysisViews).parse(intent.analysisView ?? input.values?.[0])
           : action === "controlChannelPage"
             ? "channels"
             : intent.analysisView
@@ -1764,13 +1774,15 @@ export class InteractionWorker {
       return this.communityPanel(
         issue,
         s,
-        publicLocale,
-        page,
+        locale,
+        analysisView==="newMembers"?"newMembers":page,
         section,
         channelPage,
         summaryField,
         goalPurpose,
         analysisView,
+        0,
+        z.number().int().nonnegative().max(1000).parse(intent.detailPage??0),
       );
     }
     if (action === "controlRules")
@@ -2127,7 +2139,7 @@ export class InteractionWorker {
         z.number().int().min(0).max(1000).parse(intent.index),
       );
     if (action.startsWith("control")) {
-      if (!setupFlow && !privateSettings) {
+      if (!setupFlow && !privateSettings && !input.privateResponse) {
         const saved = (
           await sql<{
             message_id: string;
@@ -2394,6 +2406,7 @@ export class InteractionWorker {
             ? current.helperChannelId
             : current.weeklySummaryChannelId;
         assert(channel, "CHANNEL_REQUIRED");
+        if(action==="controlTestAlert"&&intent.channelId)assert(intent.channelId===channel&&intent.revision===current.revision,"REVISION_CONFLICT",409);
         await this.discord.checkChannel(s.guildId, channel);
         await enqueue(this.db, s, `test:${input.id}`, "TEST_MESSAGE", {
           channelId: channel,
@@ -2526,6 +2539,7 @@ export class InteractionWorker {
         issue,
         { revision: current.revision, nodes: flow.nodes, versions },
         locale,
+        z.number().int().nonnegative().max(1000).parse(intent.optionPage??0),
       );
     } else if (action === "editNode") {
       assert(current.flowVersionId, "FLOW_NOT_CONFIGURED");
@@ -2805,6 +2819,7 @@ export class InteractionWorker {
     goalPurpose: "none" | "lfg" | "feedback" | "bug" | "playtest" = "none",
     analysisView: AnalysisView = "overall",
     attentionIndex = 0,
+    detailPage = 0,
   ) {
     const web = await this.webLink(s);
     const data: Parameters<typeof controlPanel>[2] = {
@@ -2812,6 +2827,13 @@ export class InteractionWorker {
       webVerified: web.verified,
       updatedAt: new Date(),
     };
+    if(page==="analysis"){
+      const cfg=await this.settings.get(s),window=completedWindow(30),selected=await analysisChannelScope(this.db,s,cfg);
+      data.basicAnalysis={result:await this.db.transaction().execute(async tx=>{
+        await privacyReadLock(tx,s);
+        return analysisMetrics(tx,s,cfg,"OVERALL",window.start,window.end,fingerprint([selected.actualChannelIds]),30);
+      }),from:window.start,to:window.end,channelCount:selected.actualChannelIds.length};
+    }
     if (
       [
         "overview",
@@ -2966,6 +2988,7 @@ export class InteractionWorker {
       goalPurpose,
       analysisView,
       attentionIndex,
+      detailPage,
     );
   }
   private async sessionPanel(

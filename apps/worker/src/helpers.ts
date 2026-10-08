@@ -1,5 +1,6 @@
 import { resolveSurface } from "../../../packages/lifecycle/src/adaptive-projector.js";
-import { purposeFor } from "../../../packages/shared/src/community-model.js";
+import { resolveChannel } from "../../../packages/shared/src/channel-scope.js";
+import { analysisChannelScope } from "../../../packages/lifecycle/src/discovery.js";
 import { attentionReason } from "../../../packages/shared/src/attention-copy.js";
 import { attentionEligibility } from "../../../packages/presentation/src/attention.js";
 import { sql, tenant, type Database } from "../../../packages/db/src/index.js";
@@ -66,8 +67,9 @@ export class HelperWorker {
             now.getTime() - cfg.helperAlertCooldownMinutes * 60000)
       )
         return null;
+      const scope = await analysisChannelScope(tx,s,cfg), pendingChannels = scope.resolutions.filter(c => c.selected && ["SUPPORT","BUG_REPORT","LFG"].includes(c.effectivePurpose) && ["TEXT","THREAD","FORUM_POST"].includes(c.surface)).map(c=>c.actualChannelId);
       const row = (
-        await sql<Candidate>`SELECT f.data->>'messageId' AS message_id,f.data->>'channelId' AS channel_id,f.occurred_at FROM lifecycle_events f JOIN membership_episodes e ON e.organization_id=f.organization_id AND e.guild_id=f.guild_id AND e.id=f.episode_id LEFT JOIN member_observable_state state ON state.organization_id=e.organization_id AND state.guild_id=e.guild_id AND state.episode_id=e.id WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.context='PRODUCTION' AND f.kind='message.sent' AND e.context='PRODUCTION' AND e.left_at IS NULL AND ${attentionEligibility(s, cfg, now)} AND f.occurred_at>=${new Date(now.getTime() - DAY)} AND f.occurred_at<=${new Date(now.getTime() - cfg.firstResponseMinutes * 60000)} AND e.screening_observed_at IS NOT NULL AND e.guest_observed_at IS NOT NULL AND NOT e.screening_pending AND NOT e.is_guest AND NOT EXISTS(SELECT 1 FROM discord_surface_state ch WHERE ch.organization_id=f.organization_id AND ch.guild_id=f.guild_id AND ch.channel_id=f.data->>'channelId' AND ch.channel_type IN (2,5,13)) AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(${JSON.stringify(cfg.communityModel.channels)}::jsonb) mapping WHERE mapping->>'purpose' IN ('STAFF','ANNOUNCEMENT','ONBOARDING') AND (mapping->>'channelId'=f.data->>'channelId' OR mapping->>'channelId'=(SELECT parent_id FROM discord_surface_state WHERE organization_id=f.organization_id AND guild_id=f.guild_id AND channel_id=f.data->>'channelId'))) AND f.data->>'messageId' ~ '^[0-9]{17,20}$' AND f.data->>'channelId' ~ '^[0-9]{17,20}$' AND f.data->>'receivedExplicitReply' IS DISTINCT FROM 'true' AND NOT(COALESCE(state.roles,'{}'::text[]) && ${[...cfg.staffRoleIds, ...cfg.managerRoleIds, ...cfg.helperRoleIds]}::text[]) AND (${cfg.analysisScope.mode}='all' OR (${cfg.analysisScope.mode}='include')=(COALESCE((SELECT parent_id FROM discord_surface_state WHERE organization_id=f.organization_id AND guild_id=f.guild_id AND channel_id=f.data->>'channelId'),f.data->>'channelId')=ANY(${cfg.analysisScope.channelIds}::text[]))) AND NOT EXISTS(SELECT 1 FROM helper_alerts a WHERE a.organization_id=f.organization_id AND a.guild_id=f.guild_id AND a.message_id=f.data->>'messageId') AND NOT EXISTS(SELECT 1 FROM attention_items a WHERE a.organization_id=f.organization_id AND a.guild_id=f.guild_id AND a.message_id=f.data->>'messageId' AND a.status IN ('RESOLVED','ACKNOWLEDGED','SNOOZED')) ORDER BY f.occurred_at LIMIT 1`.execute(
+        await sql<Candidate>`SELECT f.data->>'messageId' AS message_id,f.data->>'channelId' AS channel_id,f.occurred_at FROM lifecycle_events f JOIN membership_episodes e ON e.organization_id=f.organization_id AND e.guild_id=f.guild_id AND e.id=f.episode_id LEFT JOIN member_observable_state state ON state.organization_id=e.organization_id AND state.guild_id=e.guild_id AND state.episode_id=e.id WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.context='PRODUCTION' AND f.kind='message.sent' AND e.context='PRODUCTION' AND e.left_at IS NULL AND ${attentionEligibility(s, cfg, now)} AND f.occurred_at>=${new Date(now.getTime() - DAY)} AND f.occurred_at<=${new Date(now.getTime() - cfg.firstResponseMinutes * 60000)} AND e.screening_observed_at IS NOT NULL AND e.guest_observed_at IS NOT NULL AND NOT e.screening_pending AND NOT e.is_guest AND NOT EXISTS(SELECT 1 FROM discord_surface_state ch WHERE ch.organization_id=f.organization_id AND ch.guild_id=f.guild_id AND ch.channel_id=f.data->>'channelId' AND ch.channel_type IN (2,5,13)) AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(${JSON.stringify(cfg.communityModel.channels)}::jsonb) mapping WHERE mapping->>'purpose' IN ('STAFF','ANNOUNCEMENT','ONBOARDING') AND (mapping->>'channelId'=f.data->>'channelId' OR mapping->>'channelId'=(SELECT parent_id FROM discord_surface_state WHERE organization_id=f.organization_id AND guild_id=f.guild_id AND channel_id=f.data->>'channelId'))) AND f.data->>'messageId' ~ '^[0-9]{17,20}$' AND f.data->>'channelId' ~ '^[0-9]{17,20}$' AND f.data->>'receivedExplicitReply' IS DISTINCT FROM 'true' AND NOT(COALESCE(state.roles,'{}'::text[]) && ${[...cfg.staffRoleIds, ...cfg.managerRoleIds, ...cfg.helperRoleIds]}::text[]) AND f.data->>'channelId'=ANY(${pendingChannels}::text[]) AND f.data->>'receivedHumanParticipant' IS DISTINCT FROM 'true' AND NOT EXISTS(SELECT 1 FROM helper_alerts a WHERE a.organization_id=f.organization_id AND a.guild_id=f.guild_id AND a.message_id=f.data->>'messageId') AND NOT EXISTS(SELECT 1 FROM attention_items a WHERE a.organization_id=f.organization_id AND a.guild_id=f.guild_id AND a.message_id=f.data->>'messageId' AND a.status IN ('RESOLVED','ACKNOWLEDGED','SNOOZED')) ORDER BY f.occurred_at LIMIT 1`.execute(
           tx,
         )
       ).rows[0];
@@ -103,11 +105,9 @@ export class HelperWorker {
         ),
       ];
     const surface = await resolveSurface(this.db, s, target.channel_id),
-      purpose = purposeFor(
-        cfg.communityModel,
-        target.channel_id,
-        surface.parentId,
-      );
+      resolved = resolveChannel(cfg.communityModel,cfg.analysisScope,surface.metadata,target.channel_id),
+      purpose = resolved.effectivePurpose;
+    if (!resolved.selected || !["SUPPORT","BUG_REPORT","LFG"].includes(purpose)) return false;
     const content =
       `${roles.map((id) => `<@&${id}>`).join(" ")} ${t(locale, "helper.alertBody", { channel: target.channel_id, minutes: Math.max(0, Math.floor((now.getTime() - target.occurred_at.getTime()) / 60000)), url })}`.trim() +
       (purpose === "LFG" || purpose === "SUPPORT"

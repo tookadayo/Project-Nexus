@@ -7,6 +7,7 @@ import { assert, type Scope } from "../../shared/src/index";
 import { saveRecipe, currentRecipe } from "./recipes";
 import { recipeDefinition } from "../../shared/src/measurement-recipes";
 import { communityModelSchema } from "../../shared/src/community-model";
+import { analysisScopeSchema } from "../../shared/src/channel-scope";
 import type { CapabilitySnapshot } from "../../shared/src/community-model";
 import { EntitlementService } from "./billing/entitlements";
 export const templates = [
@@ -97,13 +98,7 @@ export const settingsSchema = z
       )
       .max(20)
       .default([]),
-    analysisScope: z
-      .object({
-        mode: z.enum(["all", "include", "exclude"]).default("all"),
-        channelIds: z.array(id).max(100).default([]),
-      })
-      .strict()
-      .default({ mode: "all", channelIds: [] }),
+    analysisScope: analysisScopeSchema.default({ mode: "all", channelIds: [] }),
     staffRoleIds: z.array(id).max(30).default([]),
     memberStages: z
       .object({
@@ -269,11 +264,6 @@ export class SettingsService {
         JSON.stringify(next.communityModel) !==
         JSON.stringify(before.communityModel)
       ) {
-        assert(
-          !next.communityModel.confirmed ||
-            next.communityModel.modes.length > 0,
-          "COMMUNITY_MODE_REQUIRED",
-        );
         const snapshot = (
           await sql<{
             snapshot: CapabilitySnapshot;

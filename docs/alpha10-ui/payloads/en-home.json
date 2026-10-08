@@ -1,0 +1,84 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## NEXUS\n-# This server’s activity · Last 30 complete UTC days · <t:1790758800:R>"
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### Basic analysis\nView posts, replies and new participants.\nBasic analysis is always available without using an analysis run."
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 2,
+            "label": "View activity",
+            "custom_id": "private:caf431a4-d4ed-4558-be4f-51b66b2122c9.aaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### Needs review\nThere are items for your team to review."
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 2,
+            "label": "View reviews",
+            "custom_id": "private:6a3bee3f-d998-4492-849e-ce2a56772a23.aaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### Detailed analysis\nSummarise changes and points to review for your configured purposes.\nRemaining detailed analyses are unavailable.\nLatest detailed analysis: Not run yet"
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 1,
+            "label": "Start detailed analysis",
+            "custom_id": "private:1cf5d61f-8391-4247-b981-ceb3b59b7581.aaaaaaaaaaaaaaaaaaaaaa"
+          }
+        },
+        {
+          "type": 10,
+          "content": "-# Replies do not describe message meaning. Voice co-presence does not prove conversation; event signup does not prove attendance."
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Open settings",
+              "custom_id": "private:b2b2437c-bf23-4f92-90ec-1cf0a091b649.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "More",
+              "custom_id": "private:403f3e0d-11d7-49e3-a754-b1bbc5f66495.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

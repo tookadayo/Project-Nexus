@@ -1,0 +1,76 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## Analysis completed"
+        },
+        {
+          "type": 10,
+          "content": "**Review the whole server**\nCompleted\n2026-09-08–2026-10-07 (UTC)"
+        },
+        {
+          "type": 10,
+          "content": "**Places to analyse**\nThis result uses an older calculation method. Its saved places are unavailable."
+        },
+        {
+          "type": 10,
+          "content": "**Data available**\nData is unavailable"
+        },
+        {
+          "type": 10,
+          "content": "**Observed posts**\nData is unavailable\nThe observed sample is unavailable."
+        },
+        {
+          "type": 10,
+          "content": "**Concerns to review**\nThis analysis has no additional items for review."
+        },
+        {
+          "type": 10,
+          "content": "-# Replies do not describe message meaning. Voice co-presence does not prove conversation; event signup does not prove attendance."
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Compare with previous",
+              "custom_id": "private:c294d459-057b-43c1-9a0c-1e257f1a0968.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "View details",
+              "custom_id": "private:9f1bab08-5ccf-467c-b468-fe80be751c5d.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Detailed analysis history",
+              "custom_id": "private:92f84f5d-5a89-49dc-9dc4-071dfa61a3b5.aaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "Back",
+              "custom_id": "private:91474ed1-d85e-4e40-8b13-0f0ba9dde4dd.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

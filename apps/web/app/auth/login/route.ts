@@ -17,7 +17,7 @@ export async function GET(req:NextRequest){
  if(offeringId){
   try{const catalog=await publicBillingCatalog();if(!catalog.offerings.some(row=>row.id===offeringId))return authProblem(new DomainError('BILLING_OFFERING_UNAVAILABLE',409));response.cookies.set('nexus_checkout_login',checkoutLoginIntent(offeringId,state),{httpOnly:true,secure:secureCookies(),sameSite:'lax',path:'/',maxAge:600});}catch{return authProblem(new DomainError('BILLING_OFFERING_UNAVAILABLE',409));}
  }else response.cookies.delete('nexus_checkout_login');
- if(next&&(next==='/link'||/^\/dashboard\/\d{17,20}$/.test(next)))response.cookies.set('nexus_oauth_next',next,{httpOnly:true,secure:secureCookies(),sameSite:'lax',path:'/',maxAge:600});
+ if(next&&(next==='/link'||next==='/billing/manage'||next==='/billing/payments'||/^\/dashboard\/\d{17,20}$/.test(next)))response.cookies.set('nexus_oauth_next',next,{httpOnly:true,secure:secureCookies(),sameSite:'lax',path:'/',maxAge:600});
  else response.cookies.delete('nexus_oauth_next');
  return response;
 }

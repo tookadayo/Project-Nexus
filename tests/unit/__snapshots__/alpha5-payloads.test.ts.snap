@@ -11,7 +11,7 @@ exports[`Discord Components V2 alpha.5 discord-unavailable 1`] = `
       "components": [
         {
           "content": "## NEXUS
--# NEXUSの今の状況",
+-# このサーバーの状況 · <t:1790899200:R>",
           "type": 10,
         },
         {
@@ -19,14 +19,15 @@ exports[`Discord Components V2 alpha.5 discord-unavailable 1`] = `
             "custom_id": "nxs:fixture:1",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
+            "label": "状況を見る",
             "style": 2,
             "type": 2,
           },
           "components": [
             {
-              "content": "### ⚠ 要確認
-データを確認できません",
+              "content": "### 基本の分析
+投稿・返信・新しい参加者の状況を確認できます。
+基本の分析は、回数を使わずいつでも確認できます。",
               "type": 10,
             },
           ],
@@ -37,16 +38,14 @@ exports[`Discord Components V2 alpha.5 discord-unavailable 1`] = `
             "custom_id": "nxs:fixture:2",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
+            "label": "要確認を見る",
             "style": 2,
             "type": 2,
           },
           "components": [
             {
-              "content": "### 📊 基本の分析
-基本の分析は、回数を使わずいつでも確認できます。
-詳しい分析ができる回数: 0回
-最近の詳しい分析: まだ実行していません",
+              "content": "### 要確認
+現在の状況を確認できません。接続状況を確認してください。",
               "type": 10,
             },
           ],
@@ -57,14 +56,16 @@ exports[`Discord Components V2 alpha.5 discord-unavailable 1`] = `
             "custom_id": "nxs:fixture:3",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
-            "style": 2,
+            "label": "詳しく分析する",
+            "style": 1,
             "type": 2,
           },
           "components": [
             {
-              "content": "### 👋 新しい参加者
-データを確認できません",
+              "content": "### 詳しい分析
+設定した用途に合わせて、変化と確認したい点をまとめます。
+残りの分析回数は確認できません。
+最近の詳しい分析: まだ実行していません",
               "type": 10,
             },
           ],
@@ -114,7 +115,7 @@ exports[`Discord Components V2 alpha.5 integration 1`] = `
       "components": [
         {
           "content": "## NEXUS
--# NEXUSの今の状況",
+-# このサーバーの状況 · <t:1790899200:R>",
           "type": 10,
         },
         {
@@ -122,14 +123,15 @@ exports[`Discord Components V2 alpha.5 integration 1`] = `
             "custom_id": "nxs:fixture:1",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
+            "label": "状況を見る",
             "style": 2,
             "type": 2,
           },
           "components": [
             {
-              "content": "### ⚠ 要確認
-データを確認できません",
+              "content": "### 基本の分析
+投稿・返信・新しい参加者の状況を確認できます。
+基本の分析は、回数を使わずいつでも確認できます。",
               "type": 10,
             },
           ],
@@ -140,16 +142,14 @@ exports[`Discord Components V2 alpha.5 integration 1`] = `
             "custom_id": "nxs:fixture:2",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
+            "label": "要確認を見る",
             "style": 2,
             "type": 2,
           },
           "components": [
             {
-              "content": "### 📊 基本の分析
-基本の分析は、回数を使わずいつでも確認できます。
-詳しい分析ができる回数: 0回
-最近の詳しい分析: まだ実行していません",
+              "content": "### 要確認
+現在の状況を確認できません。接続状況を確認してください。",
               "type": 10,
             },
           ],
@@ -160,14 +160,16 @@ exports[`Discord Components V2 alpha.5 integration 1`] = `
             "custom_id": "nxs:fixture:3",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
-            "style": 2,
+            "label": "詳しく分析する",
+            "style": 1,
             "type": 2,
           },
           "components": [
             {
-              "content": "### 👋 新しい参加者
-データを確認できません",
+              "content": "### 詳しい分析
+設定した用途に合わせて、変化と確認したい点をまとめます。
+残りの分析回数は確認できません。
+最近の詳しい分析: まだ実行していません",
               "type": 10,
             },
           ],
@@ -217,7 +219,7 @@ exports[`Discord Components V2 alpha.5 large 1`] = `
       "components": [
         {
           "content": "## NEXUS
--# NEXUSの今の状況",
+-# このサーバーの状況 · <t:1790899200:R>",
           "type": 10,
         },
         {
@@ -225,14 +227,15 @@ exports[`Discord Components V2 alpha.5 large 1`] = `
             "custom_id": "nxs:fixture:1",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
-            "style": 1,
+            "label": "状況を見る",
+            "style": 2,
             "type": 2,
           },
           "components": [
             {
-              "content": "### ⚠ 要確認
-47件",
+              "content": "### 基本の分析
+投稿・返信・新しい参加者の状況を確認できます。
+基本の分析は、回数を使わずいつでも確認できます。",
               "type": 10,
             },
           ],
@@ -243,16 +246,14 @@ exports[`Discord Components V2 alpha.5 large 1`] = `
             "custom_id": "nxs:fixture:2",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
+            "label": "要確認を見る",
             "style": 2,
             "type": 2,
           },
           "components": [
             {
-              "content": "### 📊 基本の分析
-基本の分析は、回数を使わずいつでも確認できます。
-詳しい分析ができる回数: 0回
-最近の詳しい分析: まだ実行していません",
+              "content": "### 要確認
+対応が必要な項目があります。",
               "type": 10,
             },
           ],
@@ -263,14 +264,16 @@ exports[`Discord Components V2 alpha.5 large 1`] = `
             "custom_id": "nxs:fixture:3",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
-            "style": 2,
+            "label": "詳しく分析する",
+            "style": 1,
             "type": 2,
           },
           "components": [
             {
-              "content": "### 👋 新しい参加者
-データを確認できません",
+              "content": "### 詳しい分析
+設定した用途に合わせて、変化と確認したい点をまとめます。
+残りの分析回数は確認できません。
+最近の詳しい分析: まだ実行していません",
               "type": 10,
             },
           ],
@@ -504,7 +507,7 @@ exports[`Discord Components V2 alpha.5 no-data 1`] = `
       "components": [
         {
           "content": "## NEXUS
--# NEXUSの今の状況",
+-# このサーバーの状況 · <t:1790899200:R>",
           "type": 10,
         },
         {
@@ -512,14 +515,15 @@ exports[`Discord Components V2 alpha.5 no-data 1`] = `
             "custom_id": "nxs:fixture:1",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
+            "label": "状況を見る",
             "style": 2,
             "type": 2,
           },
           "components": [
             {
-              "content": "### ⚠ 要確認
-0件",
+              "content": "### 基本の分析
+投稿・返信・新しい参加者の状況を確認できます。
+基本の分析は、回数を使わずいつでも確認できます。",
               "type": 10,
             },
           ],
@@ -530,16 +534,14 @@ exports[`Discord Components V2 alpha.5 no-data 1`] = `
             "custom_id": "nxs:fixture:2",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
+            "label": "要確認を見る",
             "style": 2,
             "type": 2,
           },
           "components": [
             {
-              "content": "### 📊 基本の分析
-基本の分析は、回数を使わずいつでも確認できます。
-詳しい分析ができる回数: 0回
-最近の詳しい分析: まだ実行していません",
+              "content": "### 要確認
+現在、対応が必要な項目はありません。",
               "type": 10,
             },
           ],
@@ -550,14 +552,16 @@ exports[`Discord Components V2 alpha.5 no-data 1`] = `
             "custom_id": "nxs:fixture:3",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
-            "style": 2,
+            "label": "詳しく分析する",
+            "style": 1,
             "type": 2,
           },
           "components": [
             {
-              "content": "### 👋 新しい参加者
-データを確認できません",
+              "content": "### 詳しい分析
+設定した用途に合わせて、変化と確認したい点をまとめます。
+残りの分析回数は確認できません。
+最近の詳しい分析: まだ実行していません",
               "type": 10,
             },
           ],
@@ -607,7 +611,7 @@ exports[`Discord Components V2 alpha.5 partial 1`] = `
       "components": [
         {
           "content": "## NEXUS
--# NEXUSの今の状況",
+-# このサーバーの状況 · <t:1790899200:R>",
           "type": 10,
         },
         {
@@ -615,14 +619,15 @@ exports[`Discord Components V2 alpha.5 partial 1`] = `
             "custom_id": "nxs:fixture:1",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
+            "label": "状況を見る",
             "style": 2,
             "type": 2,
           },
           "components": [
             {
-              "content": "### ⚠ 要確認
-0件",
+              "content": "### 基本の分析
+投稿・返信・新しい参加者の状況を確認できます。
+基本の分析は、回数を使わずいつでも確認できます。",
               "type": 10,
             },
           ],
@@ -633,16 +638,14 @@ exports[`Discord Components V2 alpha.5 partial 1`] = `
             "custom_id": "nxs:fixture:2",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
+            "label": "要確認を見る",
             "style": 2,
             "type": 2,
           },
           "components": [
             {
-              "content": "### 📊 基本の分析
-基本の分析は、回数を使わずいつでも確認できます。
-詳しい分析ができる回数: 0回
-最近の詳しい分析: まだ実行していません",
+              "content": "### 要確認
+現在、対応が必要な項目はありません。",
               "type": 10,
             },
           ],
@@ -653,14 +656,16 @@ exports[`Discord Components V2 alpha.5 partial 1`] = `
             "custom_id": "nxs:fixture:3",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
-            "style": 2,
+            "label": "詳しく分析する",
+            "style": 1,
             "type": 2,
           },
           "components": [
             {
-              "content": "### 👋 新しい参加者
-データを確認できません",
+              "content": "### 詳しい分析
+設定した用途に合わせて、変化と確認したい点をまとめます。
+残りの分析回数は確認できません。
+最近の詳しい分析: まだ実行していません",
               "type": 10,
             },
           ],
@@ -710,7 +715,7 @@ exports[`Discord Components V2 alpha.5 small 1`] = `
       "components": [
         {
           "content": "## NEXUS
--# NEXUSの今の状況",
+-# このサーバーの状況 · <t:1790899200:R>",
           "type": 10,
         },
         {
@@ -718,14 +723,15 @@ exports[`Discord Components V2 alpha.5 small 1`] = `
             "custom_id": "nxs:fixture:1",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
+            "label": "状況を見る",
             "style": 2,
             "type": 2,
           },
           "components": [
             {
-              "content": "### ⚠ 要確認
-0件",
+              "content": "### 基本の分析
+投稿・返信・新しい参加者の状況を確認できます。
+基本の分析は、回数を使わずいつでも確認できます。",
               "type": 10,
             },
           ],
@@ -736,16 +742,14 @@ exports[`Discord Components V2 alpha.5 small 1`] = `
             "custom_id": "nxs:fixture:2",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
+            "label": "要確認を見る",
             "style": 2,
             "type": 2,
           },
           "components": [
             {
-              "content": "### 📊 基本の分析
-基本の分析は、回数を使わずいつでも確認できます。
-詳しい分析ができる回数: 0回
-最近の詳しい分析: まだ実行していません",
+              "content": "### 要確認
+現在、対応が必要な項目はありません。",
               "type": 10,
             },
           ],
@@ -756,14 +760,16 @@ exports[`Discord Components V2 alpha.5 small 1`] = `
             "custom_id": "nxs:fixture:3",
             "disabled": undefined,
             "emoji": undefined,
-            "label": "見る",
-            "style": 2,
+            "label": "詳しく分析する",
+            "style": 1,
             "type": 2,
           },
           "components": [
             {
-              "content": "### 👋 新しい参加者
-データを確認できません",
+              "content": "### 詳しい分析
+設定した用途に合わせて、変化と確認したい点をまとめます。
+残りの分析回数は確認できません。
+最近の詳しい分析: まだ実行していません",
               "type": 10,
             },
           ],

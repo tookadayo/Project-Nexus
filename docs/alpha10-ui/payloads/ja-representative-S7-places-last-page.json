@@ -1,0 +1,87 @@
+{
+  "flags": 32768,
+  "allowed_mentions": {
+    "parse": []
+  },
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 5793266,
+      "components": [
+        {
+          "type": 10,
+          "content": "## 場所の一覧を確認"
+        },
+        {
+          "type": 10,
+          "content": "**指定した場所: 319件**\n選んだ時点の場所だけを保存します。将来の追加は自動で含めません。"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070321>**\n会話・交流"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070322>**\n作品共有"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070323>**\n会話・交流"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070324>**\n会話・交流"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070325>**\n会話・交流"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070326>**\n会話・交流"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070327>**\n会話・交流"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070328>**\n会話・交流"
+        },
+        {
+          "type": 10,
+          "content": "**<#800000000000070329>**\n作品共有"
+        },
+        {
+          "type": 10,
+          "content": "**分析する場所**\n311〜319 / 319件"
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 2,
+              "label": "戻る",
+              "custom_id": "private:0b197788-aa9d-4155-beb0-fa9faed51323.aaaaaaaaaaaaaaaaaaaaaa",
+              "disabled": false
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "次へ",
+              "custom_id": "private:37d86acd-4a30-4a14-bc51-0b911ede10f8.aaaaaaaaaaaaaaaaaaaaaa",
+              "disabled": true
+            },
+            {
+              "type": 2,
+              "style": 2,
+              "label": "この設定で始めます",
+              "custom_id": "private:9ad158f5-82fd-4ae3-8c85-275bd9edadd4.aaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { SetupWizard } from "../../../packages/operations/src/setup-wizard";
-import { setupWizardPanel } from "../../../packages/discord-panels/src/views/setup-wizard";
+import { setupWizardPanel, setupPlacesPanel } from "../../../packages/discord-panels/src/views/setup-wizard";
 import { successPanel } from "../../../packages/discord-panels/src/views/success";
 import { analysisCopy } from "../../../packages/discord-panels/src/i18n/analysis";
 import type { Database } from "../../../packages/db/src/index";
@@ -25,6 +25,8 @@ export async function setupInteraction(
     return setupWizardPanel(issue, await wizard.open(s, actor), locale);
   const id = z.uuid().parse(intent.draftId),
     version = z.number().int().nonnegative().parse(intent.version);
+  if(action==="setupWizardPlaces")return setupPlacesPanel(issue,await wizard.get(s,actor,id),locale,z.number().int().nonnegative().max(1000).parse(intent.placePage??0));
+  if(action==="setupWizardResume")return setupWizardPanel(issue,await wizard.get(s,actor,id),locale);
   if (action === "setupWizardConfirm") {
     const state = await wizard.get(s, actor, id);
     if (state.draft.helperEnabled && state.draft.helperChannelId)

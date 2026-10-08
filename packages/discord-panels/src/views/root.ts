@@ -213,7 +213,7 @@ export async function rootPanel(
     rows: [
       {
         type: ComponentType.ActionRow,
-        components: navigation.slice(0, 5),
+        components: navigation,
       } as ActionRow,
       { type: ComponentType.ActionRow, components: management } as ActionRow,
     ],

@@ -118,17 +118,51 @@ it("enforces an atomic rate limit and disables paid tokens on downgrade without 
       scopes: ["guild:read"],
     }),
     now = new Date("2026-10-06T13:01:00Z");
-  const results = await Promise.allSettled(
-    Array.from({ length: 62 }, () =>
+  // Keep setup bursts within the database pool; race the last two permits.
+  const results: PromiseSettledResult<unknown>[] = [];
+  for (let offset = 0; offset < 58; offset += 10) {
+    results.push(
+      ...(await Promise.allSettled(
+        Array.from({ length: Math.min(10, 58 - offset) }, () =>
+          credentials.authenticate(created.token, "guild:read", now),
+        ),
+      )),
+    );
+  }
+  expect(results.filter((result) => result.status === "rejected")).toEqual([]);
+  const boundary = await Promise.allSettled(
+    Array.from({ length: 4 }, () =>
       credentials.authenticate(created.token, "guild:read", now),
     ),
   );
+  expect(boundary.filter((result) => result.status === "fulfilled")).toHaveLength(
+    2,
+  );
+  const denied = boundary.filter((result) => result.status === "rejected");
+  expect(denied).toHaveLength(2);
+  for (const result of denied)
+    expect(result.reason).toMatchObject({ code: "API_RATE_LIMIT", status: 429 });
+  results.push(...boundary);
   expect(
     results.filter((result) => result.status === "fulfilled"),
   ).toHaveLength(60);
   expect(results.filter((result) => result.status === "rejected")).toHaveLength(
     2,
   );
+  expect(
+    (
+      await sql`SELECT requests FROM api_usage_windows WHERE ${tenant(s)} AND credential_id=${created.id}::uuid AND window_kind='MINUTE' AND window_start=${now}`.execute(
+        db,
+      )
+    ).rows,
+  ).toEqual([{ requests: 60 }]);
+  expect(
+    (
+      await sql`SELECT requests FROM api_guild_usage_months WHERE ${tenant(s)} AND month_start='2026-10-01'::date`.execute(
+        db,
+      )
+    ).rows,
+  ).toEqual([{ requests: 60 }]);
   await sql`UPDATE guild_subscriptions SET plan_key='STARTER' WHERE ${tenant(s)}`.execute(
     db,
   );

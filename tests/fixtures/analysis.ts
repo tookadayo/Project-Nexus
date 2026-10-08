@@ -19,8 +19,10 @@ export async function analysisFixture(
   db: Database,
   plan = "FREE",
   withData = true,
+  scope?: {organizationId:string;guildId:string},
+  populationProof = true,
 ) {
-  const s = { organizationId: randomUUID(), guildId: "111111111111111111" },
+  const s = scope ?? { organizationId: randomUUID(), guildId: "111111111111111111" },
     user = "222222222222222222",
     channel = "933333333333333330",
     settings = new SettingsService(db);
@@ -47,6 +49,10 @@ export async function analysisFixture(
     at = new Date(end.getTime() - 2 * 86400000),
     joined = new Date(start.getTime() + 86400000),
     epoch = randomUUID();
+  // This synthetic fixture declares continuous operation of the full location
+  // collector over its test windows; historical/upgrade tests opt out.
+  if (populationProof)
+    await sql`UPDATE location_population_collection SET introduced_at=${new Date(start.getTime()-365*86400000)} WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId}`.execute(db);
   await settings.update(s, actor, 0, {
     communityModel: {
       modes: ["SOCIAL", "SUPPORT_QA"],
@@ -79,6 +85,10 @@ export async function analysisFixture(
       await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episode}::uuid,'message.sent',${at},'PRODUCTION',${json({ channelId: channel, messageId: String(444444444444444440n + BigInt(index)), ...(index < 5 ? { firstReplyLatencySeconds: 120 + index } : {}) })})`.execute(
         db,
       );
+    if (populationProof)
+      await sql`INSERT INTO location_post_observations(organization_id,guild_id,message_id,channel_id,sent_at,author_kind,subject_hash,message_type,first_reply_seconds,definition_version,reply_source,population_source)
+       SELECT o.organization_id,o.guild_id,o.message_id,o.channel_id,o.sent_at,'HUMAN',${actor.key},0,o.first_reply_seconds,o.definition_version,CASE WHEN o.first_reply_seconds IS NOT NULL THEN 'DIRECT' END,'LOCATION_STREAM_V1'
+       FROM message_observations o WHERE o.organization_id=${s.organizationId}::uuid AND o.guild_id=${s.guildId}`.execute(db);
   }
   return { s, actor, settings, discord, user, channel, start, end };
 }
