@@ -1,4 +1,5 @@
 "use client";
+import { metricLabels, surfaceLabels } from "../analysis-labels";
 import { useDraft, useUnsavedChanges } from "../navigation-safety";
 import { exploreLocation, exploreQuery } from "./navigation";
 import { safeError } from "../safe-error";
@@ -215,11 +216,13 @@ export function ExploreControls({
               })
             }
           >
-            {["reply", "forum", "voice", "event", "reaction", "poll"].map(
-              (metric) => (
-                <option key={metric}>{metric}</option>
-              ),
-            )}
+            {(
+              ["reply", "forum", "voice", "event", "reaction", "poll"] as const
+            ).map((metric) => (
+              <option key={metric} value={metric}>
+                {metricLabels[metric][locale]}
+              </option>
+            ))}
           </select>
         </label>
         <label>
@@ -268,9 +271,13 @@ export function ExploreControls({
                   })
                 }
               >
-                {["ALL", "TEXT", "FORUM", "VOICE", "EVENT"].map((value) => (
-                  <option key={value}>{value}</option>
-                ))}
+                {(["ALL", "TEXT", "FORUM", "VOICE", "EVENT"] as const).map(
+                  (value) => (
+                    <option key={value} value={value}>
+                      {surfaceLabels[value][locale]}
+                    </option>
+                  ),
+                )}
               </select>
             </label>
             <label>
@@ -329,14 +336,22 @@ export function ExploreControls({
               />
             </label>
             <label>
-              {ja ? "Recipe revision ID" : "Recipe revision ID"}
+              {ja
+                ? "測定方法の版ID（任意）"
+                : "Measurement recipe version ID (optional)"}
               <input
+                aria-describedby="recipe-version-help"
                 value={query.filter.recipeVersionId ?? ""}
                 onChange={(e) =>
                   patchFilter({ recipeVersionId: e.target.value || null })
                 }
               />
             </label>
+            <p id="recipe-version-help">
+              {ja
+                ? "特定の測定方法の版で得た記録に絞る場合だけ、その版のID（UUID）を入力します。改訂番号ではありません。空欄では版による絞り込みを行いません。"
+                : "Enter the version ID (UUID), not its revision number, only to filter records collected with that measurement recipe version. Leave blank to include all versions."}
+            </p>
             <label>
               {ja ? "タイムゾーン" : "Timezone"}
               <input

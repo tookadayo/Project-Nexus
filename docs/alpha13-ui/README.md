@@ -15,3 +15,7 @@ These are lightweight visual evidence, not real-server acceptance, populated-dat
 ## Follow-up verification
 
 The current captures include the draft/filter/server-scope follow-up. [Explore](explore-followup-1440.png) and [Operations](operations-followup-1440.png) show the corrected white surfaces and shared typography/buttons with synthetic authorized responses. Their read/write services are mocked; these are not live-server screenshots. The follow-up script also checks draft cancellation, native beforeunload, save success/failure, edits during a pending save and filter history restoration. See [current acceptance matrix](../alpha13-acceptance.md).
+
+## 文言追加修正の画像
+
+[Explore](explore-labels-1440.png) / [Operations](operations-labels-1440.png): fa7202b7後のJA/ENラベル修正を含む最終ソースで撮影。合成データのみ。指標・活動種類・NEXUS権限の表示名、任意の測定方法の版IDと補足を確認。元のfollowup画像は前版の証跡として保持。ホーム画像は変更対象外。[検証記録](../alpha13-labels.md)。

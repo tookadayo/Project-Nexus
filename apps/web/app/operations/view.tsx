@@ -1,4 +1,5 @@
 "use client";
+import { metricLabels, nexusRoleLabel } from "../analysis-labels";
 import { useUnsavedChanges } from "../navigation-safety";
 import { safeError } from "../safe-error";
 import {
@@ -202,7 +203,14 @@ const labels: Record<Tab, [string, string]> = {
   organization: ["Organization", "組織"],
   integrations: ["Integrations", "連携"],
 };
-const metrics = ["reply", "forum", "voice", "event", "reaction", "poll"];
+const metrics = [
+  "reply",
+  "forum",
+  "voice",
+  "event",
+  "reaction",
+  "poll",
+] as const;
 const text = (f: FormData, key: string) => String(f.get(key) ?? "").trim();
 const number = (f: FormData, key: string) => Number(text(f, key));
 function query(f: FormData, prefix = "") {
@@ -251,7 +259,9 @@ function MetricFields({
       >
         <select name={prefix + "metric"} defaultValue={defaults?.metric}>
           {metrics.map((value) => (
-            <option key={value}>{value}</option>
+            <option key={value} value={value}>
+              {metricLabels[value][ja ? "ja" : "en"]}
+            </option>
           ))}
         </select>
       </Field>
@@ -568,8 +578,9 @@ export function OperationsControls({
         {data && (
           <p>
             {data.access.plan} ·{" "}
-            {data.access.role ??
-              t("Discord operations staff", "Discord運営担当")}
+            {data.access.role
+              ? nexusRoleLabel(data.access.role, locale)
+              : t("Discord operations staff", "Discord運営担当")}
           </p>
         )}
       </header>
@@ -1805,7 +1816,9 @@ export function OperationsControls({
                     <select name="role">
                       {["OWNER", "ADMIN", "OPERATOR", "ANALYST", "VIEWER"].map(
                         (value) => (
-                          <option key={value}>{value}</option>
+                          <option key={value} value={value}>
+                            {nexusRoleLabel(value, locale)}
+                          </option>
                         ),
                       )}
                     </select>
@@ -1827,8 +1840,8 @@ export function OperationsControls({
             </Gate>
             {data?.members?.map((member) => (
               <p key={member.id}>
-                {member.name} · {member.role} · {state(member.state ?? "")} · r
-                {member.revision}{" "}
+                {member.name} · {nexusRoleLabel(member.role, locale)} ·{" "}
+                {state(member.state ?? "")} · r{member.revision}{" "}
                 {govern && (
                   <button
                     disabled={busy}
