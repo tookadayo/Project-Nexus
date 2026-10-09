@@ -46,5 +46,6 @@ Record the actual result and platform for each selected check. Focused success
 does not establish that the full suite, real Discord/OAuth/payment flows,
 physical devices, accessibility audit, backup restoration or load tests passed.
 The [historical failures and current verification](alpha14-existing-test-failures.md)
-separate corrected presentation assertions from the unresolved Windows ACL
-fixture failure. The full suite must not be reported as green.
+separate corrected presentation assertions, hosted CI results and the unresolved
+local Windows ACL fixture failure. Report each platform and suite separately;
+a passing hosted check does not close local operator acceptance gaps.

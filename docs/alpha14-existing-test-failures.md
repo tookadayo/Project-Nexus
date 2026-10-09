@@ -45,6 +45,30 @@ file-based operator credential path. Synthetic in-memory authentication tests
 do not close it, and this diagnostic does not establish successful Windows operator operation.
 Do not relax ACLs or execution security settings as a test workaround.
 
+## Initial hosted CI and browser-test corrections
+
+The initial public commit's push and pull-request CI runs passed the secret scan,
+lint, TypeScript checks, all **792 Linux unit tests**, production builds and the
+Windows runtime job. Both runs then failed the main browser suite with
+**19 failed and 21 passed**; later verification, checkout, integration and
+performance steps did not run. These browser failures are separate from the
+historical unit failures above.
+
+The browser fixtures now bundle imported production CSS, including its token
+imports, instead of asking Node to import CSS directly. Navigation and pricing
+assertions follow the implemented menus, mobile dialog, five plans and comparison
+tables. The Attention UI scenario uses stateful synthetic data while separately
+checking that Basic development authentication is rejected by the real operations
+route. It does not establish successful OAuth authorization or database writes.
+No production authentication checks or test assertions were skipped to obtain a
+passing result. Record the follow-up CI result against its actual commit.
+
+A local Windows browser run after these corrections passed all **40 tests**, with
+no failures, skips or retries. It used isolated synthetic services and a separate
+same-drive checkout for the Web server to avoid the cross-drive dependency path
+limitation. This run does not replace the later hosted OAuth, Checkout, database
+integration or performance checks.
+
 Record the current command, platform, selected tests and PASS/FAIL/NOT RUN
 separately. Focused checks and historical comparisons cannot substitute for a
 current full-suite result or deployment acceptance. Publication conditions are
