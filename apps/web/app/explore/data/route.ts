@@ -1,3 +1,6 @@
+import { failureResponse } from "../../auth/failure-response";
+import { isDomainError } from "../../../../../packages/shared/src/index";
+import { assertDisplayedGuild } from "../../auth/displayed-guild";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { operationsContext } from "../../operations/context";
@@ -17,6 +20,8 @@ import { latestCapability } from "../../../../../packages/lifecycle/src/discover
 import { assert } from "../../../../../packages/shared/src/index";
 export const runtime = "nodejs";
 function failure(error: unknown) {
+  if (isDomainError(error) && error.code === "SERVER_SELECTION_CHANGED")
+    return failureResponse(error, "NOT_STARTED");
   if (error instanceof z.ZodError || error instanceof SyntaxError)
     return NextResponse.json(
       { error: "INVALID_EXPLORE_REQUEST" },
@@ -31,6 +36,10 @@ export async function GET(request: NextRequest) {
       params = request.nextUrl.searchParams,
       q = params.get("q") ?? "{}";
     assert(q.length <= 4096, "REQUEST_TOO_LARGE", 413);
+    assertDisplayedGuild(
+      request.headers.get("X-Nexus-Guild") ?? params.get("guild"),
+      context.scope.guildId,
+    );
     const query = chartQuerySchema.parse(JSON.parse(q)),
       saved = params.get("saved"),
       spec = saved
@@ -95,6 +104,10 @@ export async function POST(request: NextRequest) {
         ])
         .parse(JSON.parse(await billingBody(request, 8192))),
       explore = new ExploreService(context.services.db);
+    assertDisplayedGuild(
+      request.headers.get("X-Nexus-Guild"),
+      context.scope.guildId,
+    );
     const result =
       input.action === "saveView"
         ? await explore.save(context.scope, context.actor, input.view)

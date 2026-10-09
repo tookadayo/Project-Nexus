@@ -1,3 +1,4 @@
+import { followupChecks } from "./alpha13-followup-checks";
 import { chromium, expect } from "@playwright/test";
 import { createServer } from "node:http";
 import { readFile, mkdir } from "node:fs/promises";
@@ -253,6 +254,7 @@ try {
     );
     await expect(page.getByText("RAW_SECRET_STACK_TRACE")).toHaveCount(0);
   }
+  await followupChecks(page, origin);
   expect(errors).toEqual([]);
   console.log(
     "PASS alpha13 UI: eight widths, 13+4 destinations, help/locale/logout, modal focus/Escape, Back/refresh, JA/EN, long names, text enlargement, server selection boundary. External requests blocked.",

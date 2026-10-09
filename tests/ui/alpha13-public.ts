@@ -64,6 +64,10 @@ try {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(origin);
     await page.evaluate(() => document.fonts.ready);
+    await expect(page.locator('link[rel="icon"]').last()).toHaveAttribute(
+      "href",
+      "/nexus/brand/navy-tile.png",
+    );
     await expect(page.locator(".nx-brand img").first()).toBeVisible();
     expect(
       await page

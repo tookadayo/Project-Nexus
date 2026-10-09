@@ -1,3 +1,6 @@
+import { failureResponse } from "../../auth/failure-response";
+import { isDomainError } from "../../../../../packages/shared/src/index";
+import { assertDisplayedGuild } from "../../auth/displayed-guild";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { operationsContext } from "../context";
@@ -46,6 +49,8 @@ const viewSchema = z.enum([
   "integrations",
 ]);
 function failure(error: unknown) {
+  if (isDomainError(error) && error.code === "SERVER_SELECTION_CHANGED")
+    return failureResponse(error, "NOT_STARTED");
   if (error instanceof z.ZodError || error instanceof SyntaxError)
     return NextResponse.json(
       { error: "INVALID_OPERATIONS_REQUEST" },
@@ -72,8 +77,13 @@ function domains(c: Awaited<ReturnType<typeof operationsContext>>) {
 }
 export async function GET(request: NextRequest) {
   try {
-    const c = await operationsContext(),
-      { scope: s, actor: a } = c,
+    const c = await operationsContext();
+    assertDisplayedGuild(
+      request.headers.get("X-Nexus-Guild") ??
+        request.nextUrl.searchParams.get("guild"),
+      c.scope.guildId,
+    );
+    const { scope: s, actor: a } = c,
       d = domains(c),
       params = request.nextUrl.searchParams,
       view = viewSchema.parse(params.get("view") ?? "attention");
@@ -230,8 +240,9 @@ export async function POST(request: NextRequest) {
         .object({ action: z.enum(actions), input: z.unknown() })
         .strict()
         .parse(JSON.parse(await billingBody(request, 180000))),
-      c = await operationsContext(),
-      { scope: s, actor: a } = c,
+      c = await operationsContext();
+    assertDisplayedGuild(request.headers.get("X-Nexus-Guild"), c.scope.guildId);
+    const { scope: s, actor: a } = c,
       d = domains(c);
     const id = () => z.object({ id: z.uuid() }).strict().parse(input).id;
     let result: unknown;

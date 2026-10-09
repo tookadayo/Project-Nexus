@@ -1,6 +1,10 @@
 import { createRoot } from "../../apps/web/node_modules/react-dom/client";
 import Console, { type ProductData } from "../../apps/web/app/console";
-import { dashboardView } from "../../apps/web/app/navigation-model";
+import {
+  dashboardView,
+  dashboardFilters,
+} from "../../apps/web/app/navigation-model";
+import { exploreQuery } from "../../apps/web/app/explore/navigation";
 import { HomeSummary } from "../../apps/web/app/home-summary";
 import { ServerConnection } from "../../apps/web/app/link/connection";
 import { OperationsNavigation } from "../../apps/web/app/operations/navigation";
@@ -77,16 +81,25 @@ else if (preview === "operations")
       <OperationsNavigation locale={locale} active="reports" />
     </main>,
   );
-else if (preview === "explore-error")
+else if (preview === "explore-error" || location.pathname === "/explore")
   root.render(
     <main className="operations-page">
-      <ExploreControls locale={locale} />
+      <ExploreControls
+        locale={locale}
+        scope={data.selectedGuildId}
+        initialQuery={exploreQuery(query, data.selectedGuildId!)}
+      />
     </main>,
   );
-else if (preview === "operations-error")
+else if (preview === "operations-error" || location.pathname === "/operations")
   root.render(
     <main className="operations-page">
-      <OperationsControls locale={locale} initialView="attention" />
+      <OperationsNavigation locale={locale} />
+      <OperationsControls
+        locale={locale}
+        scope={data.selectedGuildId}
+        initialView={query.get("view") ?? "attention"}
+      />
     </main>,
   );
 else
@@ -95,5 +108,6 @@ else
       data={data}
       initialLocale={locale}
       initialView={dashboardView(query.get("view"))}
+      initialFilters={dashboardFilters(query)}
     />,
   );

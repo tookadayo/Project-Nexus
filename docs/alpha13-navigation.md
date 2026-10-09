@@ -31,3 +31,9 @@ Supplementary routes retained: /servers → /auth/select (fresh authorization/fu
 Web view 3 is existing response/experiment results, not the detailed-analysis run ledger. Detailed analysis menu, fixed preview, run state, saved run history, comparison and attention recording are already implemented in Discord (`views/analysis.ts`, action handlers). Reuse those operations and disclose this distinction in Web; do not rename experiment results into analysis history or create an unapproved Web run API. Existing Operations tabs (reports/playbooks/improvements/intake/events/organization/integrations), saved views, settings and billing destinations remain reachable. Hosted purchase gates stay unchanged.
 
 Server switching is full-document navigation through /auth/select. Hide the old console immediately on selection; the destination rechecks authorization before rendering and does not inherit filters/comparison state. No new client cache or shared-tenant state.
+
+## alpha.13 follow-up navigation contract
+
+Dashboard additionally restores the existing range (7/30/90) and analysis tab (overall/channels/behavior) identifiers. Explore persists the existing validated ChartQuery as `q`, bound to the selected `guild`; stale cross-guild filters are reset. No draft names, freeform submitted content, credentials or result data are stored in URLs/history/storage. See [current acceptance mapping](alpha13-acceptance.md) for draft guards, Back cancellation and scope consistency checks.
+
+The internal Web read/write endpoints require the displayed guild to match the currently authorized guild. `X-Nexus-Guild` (or the equivalent guild query on read/export links) is a consistency assertion, never authorization. Old open clients without the assertion fail closed and need a refresh. Existing live identity/permission/admission and downstream mutation checks remain authoritative.

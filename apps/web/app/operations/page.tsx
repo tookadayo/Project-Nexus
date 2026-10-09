@@ -7,6 +7,7 @@ export default async function OperationsPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  const scope = (await cookies()).get("nexus_guild")?.value ?? "";
   const locale =
       (await cookies()).get("nexus_locale")?.value === "ja" ? "ja" : "en",
     params = await searchParams;
@@ -17,6 +18,8 @@ export default async function OperationsPage({
         active={typeof params.view === "string" ? params.view : "attention"}
       />
       <OperationsControls
+        key={scope}
+        scope={scope}
         locale={locale}
         initialView={
           typeof params.view === "string" ? params.view : "attention"

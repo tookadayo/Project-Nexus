@@ -1,5 +1,7 @@
 # alpha.13 UX 実装・検証記録
 
+**現在の追加修正・受入結果は[alpha.13受入対応表](alpha13-acceptance.md)を参照。以下は初回commit db67cb8時点の記録。**
+
 2026-10-09 / Normal Development / MacBook。承認された「要点中心ホーム」「4主要入口と既存機能維持」「利用者Web/Discord優先」を適用した。公開可能判定ではない。
 
 ## 対象と変更

@@ -76,7 +76,10 @@ export async function generateMetadata(): Promise<Metadata> {
       description,
       images: ["/nexus/social-preview.png"],
     },
-    icons: { icon: "/nexus/mark.svg" },
+    icons: {
+      icon: "/nexus/brand/navy-tile.png",
+      apple: "/nexus/brand/navy-tile.png",
+    },
   };
 }
 

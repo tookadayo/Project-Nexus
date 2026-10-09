@@ -110,3 +110,33 @@ it("does not copy unrelated URL data into navigation entries", () => {
     ),
   ).toBe("/dashboard?view=5");
 });
+
+it("restores only allowed dashboard filters and rejects cross-server Explore filters", async () => {
+  const { dashboardFilters } =
+    await import("../../apps/web/app/navigation-model");
+  const { exploreQuery, exploreLocation } =
+    await import("../../apps/web/app/explore/navigation");
+  const filters = dashboardFilters(
+    new URLSearchParams("range=7&tab=channels&token=private"),
+  );
+  expect(filters).toEqual({ range: 7, tab: "channels" });
+  expect(
+    dashboardLocation("https://example.invalid/dashboard", 5, filters),
+  ).toBe("/dashboard?view=5&range=7&tab=channels");
+  expect(
+    dashboardFilters(new URLSearchParams("range=999&tab=private")),
+  ).toEqual({ range: 30, tab: "overall" });
+  const a = "111111111111111111",
+    b = "222222222222222222";
+  const defaults = exploreQuery(new URLSearchParams(), a);
+  const query = {
+    ...defaults,
+    days: 30 as const,
+    filter: { ...defaults.filter, channelIds: [a] },
+  };
+  const url = new URL(exploreLocation(query, a), "https://example.invalid");
+  expect(exploreQuery(url.searchParams, a)).toEqual(query);
+  expect(exploreQuery(url.searchParams, b)).toEqual(defaults);
+  url.searchParams.set("q", JSON.stringify({ ...query, token: "private" }));
+  expect(exploreQuery(url.searchParams, a)).toEqual(defaults);
+});

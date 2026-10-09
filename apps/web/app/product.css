@@ -330,9 +330,6 @@
 .operations-nav details {
   width: 100%;
 }
-.operations-page {
-  font-family: system-ui, sans-serif;
-}
 .operations-nav a {
   color: var(--nx-accent);
 }
@@ -350,4 +347,50 @@
 }
 .product .primary {
   border-color: var(--nx-accent);
+}
+
+.operations-page .surface {
+  background: var(--nx-background);
+  color: var(--nx-text);
+  border-color: var(--nx-border);
+  border-radius: 10px;
+}
+
+.product .sidebar > * {
+  flex-shrink: 0;
+}
+.product .sidebar nav {
+  overflow: visible;
+}
+
+.operations-page :is(h1, h2, h3) {
+  font-family: inherit;
+  font-weight: 600;
+  letter-spacing: normal;
+  line-height: 1.35;
+}
+.operations-page h1 {
+  font-size: 26px;
+}
+.operations-page h2 {
+  font-size: 20px;
+}
+.operations-page button {
+  background: var(--nx-background);
+  color: var(--nx-text);
+}
+.operations-page button:hover {
+  background: var(--nx-surface);
+}
+.operations-page :is(button[type="submit"], .primary) {
+  background: var(--nx-accent);
+  color: white;
+  border-color: var(--nx-accent);
+  min-height: 50px;
+}
+.operations-page input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
 }

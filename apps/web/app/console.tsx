@@ -9,7 +9,13 @@ import { Attention } from "./attention";
 import { useState, useEffect, useRef } from "react";
 import { BrandAsset } from "./brand-asset";
 import { ProductMenu, NavIcon } from "./product-navigation";
-import { dashboardLocation, dashboardView } from "./navigation-model";
+import { useDraft, useUnsavedChanges } from "./navigation-safety";
+import {
+  dashboardLocation,
+  dashboardView,
+  dashboardFilters,
+  type DashboardFilters,
+} from "./navigation-model";
 import { AccessNotice, type AccessState } from "./access-notice";
 import { HomeSummary } from "./home-summary";
 import { Measurements, AnalysisSummary } from "./measurements";
@@ -176,27 +182,33 @@ const signed = (n: number | null, rate = true) =>
     : `${n > 0 ? "+" : n < 0 ? "−" : ""}${rate ? `${(Math.abs(n) * 100).toFixed(1)} pt` : Math.abs(n).toLocaleString()}`;
 
 export default function Console({
-  data,
+  data: initialData,
   initialLocale = "en",
   initialView = 0,
+  initialFilters = { range: 30, tab: "overall" },
 }: {
   data: ProductData;
   initialLocale?: Locale;
   initialView?: number;
+  initialFilters?: DashboardFilters;
 }) {
+  const [communityData, setCommunityData] = useState(initialData.community);
+  const data = initialData;
+  const [savedModel, setSavedModel] = useState(() =>
+    communityModelSchema.parse(data.admin?.settings.communityModel ?? {}),
+  );
   const [locale, setLocale] = useState<Locale>(initialLocale),
     [page, setPageState] = useState(initialView),
     [showHomeDetail, setShowHomeDetail] = useState(false),
     [switchingGuild, setSwitchingGuild] = useState(false),
     [analysisTab, setAnalysisTab] = useState<
       "overall" | "channels" | "behavior"
-    >("overall"),
+    >(initialFilters.tab),
     [journey, setJourney] = useState(data.journey),
-    [range, setRange] = useState<7 | 30 | 90>(data.journey?.range ?? 30),
+    [range, setRange] = useState<7 | 30 | 90>(initialFilters.range),
     [journeyLoading, setJourneyLoading] = useState(false),
     [template, setTemplate] = useState<ActionTemplateKey>("reply_rescue"),
     [showImprovementSetup, setShowImprovementSetup] = useState(false),
-    [adaptiveData, setAdaptiveData] = useState(data.community?.adaptive),
     [preflightState, setPreflightState] = useState<
       "ready" | "permission_needed" | "unavailable" | null
     >(null),
@@ -331,29 +343,128 @@ export default function Console({
     [attentionSnooze, setAttentionSnooze] = useState<
       Record<string, "30" | "60" | "today">
     >({});
+  const displayCommunity = [1, 5].includes(page)
+    ? communityData
+    : data.community;
   const c = messages[locale];
   const requestInFlight = useRef(false);
+  const [modelDirty, setModelDirty] = useState(false);
+  const [scopeChanged, setScopeChanged] = useState(false);
+  const scopeHeaders = { "X-Nexus-Guild": data.selectedGuildId ?? "" };
+  const scopeDraft = useDraft({ scopeMode, scopeChannels, staffRoles });
+  const weeklyDraft = useDraft({
+    weeklyEnabled,
+    weeklyChannelId,
+    weeklyDay,
+    weeklyHour,
+    timezone,
+  });
+  const helperDraft = useDraft({
+    helperEnabled,
+    helperChannelId,
+    helperRoleId,
+    responseMinutes,
+  });
+  const goalsDraft = useDraft({
+    goalPreset,
+    newMemberGoals,
+    importantChannels,
+  });
+  const improvementDraft = useDraft({
+    template,
+    runMode,
+    channelId,
+    eventId,
+    channels,
+  });
+  const canLeave = useUnsavedChanges(
+    scopeDraft.dirty ||
+      weeklyDraft.dirty ||
+      helperDraft.dirty ||
+      goalsDraft.dirty ||
+      improvementDraft.dirty ||
+      modelDirty ||
+      preview !== null ||
+      busy,
+    locale,
+  );
+  const historyIndex = useRef(0);
+  const navigationRef = useRef({ page, range, tab: analysisTab, canLeave });
+  navigationRef.current = { page, range, tab: analysisTab, canLeave };
+  const historyScope = data.selectedGuildId ?? "development";
+  const pushNavigation = (view: number, filters: DashboardFilters) => {
+    const href = dashboardLocation(window.location.href, view, filters);
+    if (href !== window.location.pathname + window.location.search) {
+      historyIndex.current += 1;
+      window.history.pushState(
+        {
+          ...window.history.state,
+          nexus: { scope: historyScope, index: historyIndex.current },
+        },
+        "",
+        href,
+      );
+    }
+  };
   const setPage = (view: number) => {
     const next = dashboardView(String(view));
-    if (next !== page)
-      window.history.pushState(
-        null,
-        "",
-        dashboardLocation(window.location.href, next),
-      );
+    if (next !== page && !canLeave()) return;
+    pushNavigation(next, { range, tab: analysisTab });
     setPageState(next);
     setShowHomeDetail(false);
   };
+  const changeAnalysisTab = (tab: DashboardFilters["tab"]) => {
+    pushNavigation(page, { range, tab });
+    setAnalysisTab(tab);
+  };
   useEffect(() => {
-    const restore = () => {
-      setPageState(
-        dashboardView(new URL(window.location.href).searchParams.get("view")),
-      );
+    historyIndex.current =
+      window.history.state?.nexus?.scope === historyScope
+        ? window.history.state.nexus.index
+        : 0;
+    window.history.replaceState(
+      {
+        ...window.history.state,
+        nexus: { scope: historyScope, index: historyIndex.current },
+      },
+      "",
+      dashboardLocation(
+        window.location.href,
+        navigationRef.current.page,
+        navigationRef.current,
+      ),
+    );
+    let restoring = false;
+    const restore = (event: PopStateEvent) => {
+      if (restoring) {
+        restoring = false;
+        return;
+      }
+      const params = new URL(window.location.href).searchParams;
+      const next = dashboardView(params.get("view"));
+      const target = event.state?.nexus;
+      if (
+        next !== navigationRef.current.page &&
+        !navigationRef.current.canLeave()
+      ) {
+        restoring = true;
+        window.history.go(
+          target?.scope === historyScope
+            ? historyIndex.current - target.index
+            : 1,
+        );
+        return;
+      }
+      historyIndex.current = target?.scope === historyScope ? target.index : 0;
+      const filters = dashboardFilters(params);
+      setPageState(next);
+      setRange(filters.range);
+      setAnalysisTab(filters.tab);
       setShowHomeDetail(false);
     };
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
-  }, []);
+  }, [historyScope]);
   const suggestedExcludedChannels = data.options.channels
     .filter((option) =>
       /^#?(?:bot|logs?|staff|mod(?:erator)?)(?:[-_]|$)/i.test(option.label),
@@ -374,7 +485,7 @@ export default function Console({
   const selected = actions?.templates.find((t) => t.key === template),
     selectedAction = actions?.items.find((a) => a.id === testActionId);
   async function request(body: unknown) {
-    if (requestInFlight.current) return null;
+    if (requestInFlight.current || scopeChanged) return null;
     if (data.betaState && data.betaState !== "ACTIVE") {
       setOperationFailure({ category: "BETA_ACCESS", effect: "NOT_STARTED" });
       return null;
@@ -386,11 +497,15 @@ export default function Console({
     try {
       const response = await fetch("/control", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...scopeHeaders },
           body: JSON.stringify(body),
         }),
         result = await response.json();
       if (!response.ok) {
+        if (result.error === "SERVER_SELECTION_CHANGED") {
+          setScopeChanged(true);
+          return null;
+        }
         if (response.status === 401 && result.error === "SESSION_EXPIRED") {
           window.location.href = "/auth/expired";
           throw new Error(
@@ -430,9 +545,16 @@ export default function Console({
   }
   async function readData<T>(url: string): Promise<T | null> {
     try {
-      const response = await fetch(url, { cache: "no-store" }),
+      const response = await fetch(url, {
+          cache: "no-store",
+          headers: scopeHeaders,
+        }),
         body = await response.json();
       if (!response.ok) {
+        if (body.error === "SERVER_SELECTION_CHANGED") {
+          setScopeChanged(true);
+          return null;
+        }
         setOperationFailure(
           body.failure ?? {
             category: "INTERNAL",
@@ -540,9 +662,13 @@ export default function Console({
     if (!saved) return;
     const current = await readData<ActionsPresentation>("/data/actions");
     if (current) setActions(current);
-    const resultResponse = await fetch("/data/results", { cache: "no-store" });
+    const resultResponse = await fetch("/data/results", {
+      cache: "no-store",
+      headers: scopeHeaders,
+    });
     if (resultResponse.ok)
       setResults((await resultResponse.json()) as ResultsPresentation);
+    improvementDraft.saved();
     setStatus(t(locale, "web.improvement_enabled"));
   }
   async function checkImprovement() {
@@ -593,6 +719,7 @@ export default function Console({
     if (!updated) return;
     setNotificationRevision(Number(updated.revision));
     setChannelId(id);
+    improvementDraft.savedPatch({ channelId: id });
     setStatus(t(locale, "web.notification_destination_saved"));
   }
   async function saveRetentionDays(days: 7 | 14 | 30) {
@@ -626,6 +753,13 @@ export default function Console({
     setNotificationRevision(Number(updated.revision));
     setWeeklyEnabled(enabled);
     setWeeklyChannelId(destination);
+    weeklyDraft.saved({
+      weeklyEnabled: enabled,
+      weeklyChannelId: destination,
+      weeklyDay: day,
+      weeklyHour: hour,
+      timezone: zone,
+    });
     setStatus(t(locale, "web.weekly_summary_saved"));
   }
   async function saveHelper(enabled = helperEnabled) {
@@ -642,6 +776,12 @@ export default function Console({
     setNotificationRevision(Number(updated.revision));
     setHelperEnabled(enabled);
     setSavedResponseMinutes(responseMinutes);
+    helperDraft.saved({
+      helperEnabled: enabled,
+      helperChannelId,
+      helperRoleId,
+      responseMinutes,
+    });
     setStatus(t(locale, "web.helper_alert_settings_saved"));
   }
   async function saveGoals() {
@@ -654,6 +794,7 @@ export default function Console({
     });
     if (!updated) return;
     setNotificationRevision(Number(updated.revision));
+    goalsDraft.saved();
     setStatus(t(locale, "web.community_focus_saved"));
   }
   async function startCheck() {
@@ -717,22 +858,53 @@ export default function Console({
       t(locale, state === "paused" ? "web.testPaused" : "web.testStopped"),
     );
   }
-  async function changeRange(value: 7 | 30 | 90) {
+  function changeRange(value: 7 | 30 | 90) {
+    pushNavigation(page, { range: value, tab: analysisTab });
     setRange(value);
-    setJourneyLoading(true);
-    try {
-      const current = await readData<JourneyPresentation>(
-        `/data/journey?range=${value}`,
-      );
-      if (current) setJourney(current);
-      const measured = await readData<NonNullable<ProductData["community"]>>(
-        `/data/community?range=${value}`,
-      );
-      if (measured?.adaptive) setAdaptiveData(measured.adaptive);
-    } finally {
-      setJourneyLoading(false);
-    }
   }
+  const initialRange = useRef(true);
+  useEffect(() => {
+    if (initialRange.current) {
+      initialRange.current = false;
+      return;
+    }
+    const abort = new AbortController();
+    setJourney(null);
+    setCommunityData(null);
+    setJourneyLoading(true);
+    void (async () => {
+      try {
+        const responses = await Promise.all(
+          ["journey", "community"].map(async (kind) => {
+            const response = await fetch(`/data/${kind}?range=${range}`, {
+              cache: "no-store",
+              signal: abort.signal,
+              headers: scopeHeaders,
+            });
+            if (!response.ok) {
+              const body = await response.json();
+              if (
+                !abort.signal.aborted &&
+                body.error === "SERVER_SELECTION_CHANGED"
+              )
+                setScopeChanged(true);
+              throw new Error("READ_FAILED");
+            }
+            return response.json();
+          }),
+        );
+        if (abort.signal.aborted) return;
+        setJourney(responses[0]);
+        setCommunityData(responses[1]);
+      } catch {
+        if (!abort.signal.aborted)
+          setOperationFailure({ category: "INTERNAL", effect: "NOT_STARTED" });
+      } finally {
+        if (!abort.signal.aborted) setJourneyLoading(false);
+      }
+    })();
+    return () => abort.abort();
+  }, [range]);
   const healthText = (label: string) =>
     label === "healthy"
       ? t(locale, "web.collecting_normally")
@@ -751,18 +923,18 @@ export default function Console({
         <div>
           <p className="eyebrow">{t(locale, "control.attention")}</p>
           <h2>
-            {!data.community?.daily.ready ||
-            data.community.daily.attentionCount === null
+            {!displayCommunity?.daily.ready ||
+            displayCommunity.daily.attentionCount === null
               ? t(locale, "control.queueUnavailable")
               : Math.max(
                     0,
-                    (data.community.daily.attentionCount ?? 0) -
+                    (displayCommunity.daily.attentionCount ?? 0) -
                       attentionRemoved,
                   ) > 0
                 ? t(locale, "experience.needsReply", {
                     count: Math.max(
                       0,
-                      (data.community.daily.attentionCount ?? 0) -
+                      (displayCommunity.daily.attentionCount ?? 0) -
                         attentionRemoved,
                     ),
                   })
@@ -807,39 +979,39 @@ export default function Console({
               publish={publish}
             />
           )}
-          {data.community && (
+          {displayCommunity && (
             <p className="inline-note">
               <button onClick={() => setPage(9)}>
                 {t(locale, "experience.howMeasured")} →
               </button>
             </p>
           )}
-          {data.community && (
+          {displayCommunity && (
             <section className="surface">
               <h2>{t(locale, "web.how_new_members_are_participating")}</h2>
-              {data.community.dataReady ? (
+              {displayCommunity.dataReady ? (
                 <>
                   <div className="journey-steps">
-                    {data.community.stages.map((step) => (
+                    {displayCommunity.stages.map((step) => (
                       <p key={step.key}>
                         <strong>{step.count.toLocaleString()}</strong>{" "}
                         {t(locale, `control.${step.key as "joined"}`)}
                       </p>
                     ))}
                   </div>
-                  {data.community.largestDrop && (
+                  {displayCommunity.largestDrop && (
                     <p>
                       {t(locale, "web.the_largest_observed_drop_is_between", {
                         a: String(
                           t(
                             locale,
-                            `control.${data.community.largestDrop.fromKey as "joined"}`,
+                            `control.${displayCommunity.largestDrop.fromKey as "joined"}`,
                           ),
                         ),
                         b: String(
                           t(
                             locale,
-                            `control.${data.community.largestDrop.toKey as "joined"}`,
+                            `control.${displayCommunity.largestDrop.toKey as "joined"}`,
                           ),
                         ),
                       })}
@@ -852,7 +1024,7 @@ export default function Console({
               <button onClick={go(1)}>{t(locale, "web.see_details")} →</button>
             </section>
           )}
-          {data.community && (
+          {displayCommunity && (
             <>
               <section className="surface">
                 <h2>{t(locale, "polish.today")}</h2>
@@ -861,18 +1033,18 @@ export default function Console({
                     <h3>{t(locale, "control.joined")}</h3>
                     <strong
                       className={
-                        data.community.daily.todayJoined === null ||
-                        data.community.daily.todayJoined === 0
+                        displayCommunity.daily.todayJoined === null ||
+                        displayCommunity.daily.todayJoined === 0
                           ? "measurement-state"
                           : ""
                       }
                     >
-                      {data.community.daily.todayJoined === null
+                      {displayCommunity.daily.todayJoined === null
                         ? t(locale, "polish.unavailable")
-                        : data.community.daily.todayJoined === 0
+                        : displayCommunity.daily.todayJoined === 0
                           ? t(locale, "polish.noneJoined")
                           : t(locale, "polish.people", {
-                              count: data.community.daily.todayJoined,
+                              count: displayCommunity.daily.todayJoined,
                             })}
                     </strong>
                   </article>
@@ -880,30 +1052,30 @@ export default function Console({
                     <h3>{t(locale, "control.connected")}</h3>
                     <strong
                       className={
-                        data.community.daily.todayConnected === null ||
-                        data.community.daily.todayJoined === 0
+                        displayCommunity.daily.todayConnected === null ||
+                        displayCommunity.daily.todayJoined === 0
                           ? "measurement-state"
                           : ""
                       }
                     >
-                      {data.community.daily.todayConnected === null
+                      {displayCommunity.daily.todayConnected === null
                         ? t(locale, "polish.unavailable")
-                        : data.community.daily.todayJoined === 0
+                        : displayCommunity.daily.todayJoined === 0
                           ? t(locale, "polish.noneEligible")
                           : t(locale, "polish.people", {
-                              count: data.community.daily.todayConnected,
+                              count: displayCommunity.daily.todayConnected,
                             })}
                     </strong>
                   </article>
                   <article className="metric-card">
                     <h3>{t(locale, "polish.waiting")}</h3>
                     <strong>
-                      {data.community.daily.attentionCount === null
+                      {displayCommunity.daily.attentionCount === null
                         ? t(locale, "polish.unavailable")
                         : t(locale, "polish.count", {
                             count: Math.max(
                               0,
-                              data.community.daily.attentionCount -
+                              displayCommunity.daily.attentionCount -
                                 attentionRemoved,
                             ),
                           })}
@@ -911,7 +1083,7 @@ export default function Console({
                   </article>
                 </div>
               </section>
-              <Measurements community={data.community} locale={locale} />
+              <Measurements community={displayCommunity} locale={locale} />
             </>
           )}
           <section className="surface opportunity-spotlight">
@@ -968,12 +1140,12 @@ export default function Console({
           ))}
         </div>
       </div>
-      {data.community && (
+      {displayCommunity && (
         <section className="surface">
           <h2>{t(locale, "polish.receivedTotal")}</h2>
           <p>
-            {data.community.reactionsReceived} ·{" "}
-            {t(locale, "control.days", { count: data.community.range })}
+            {displayCommunity.reactionsReceived} ·{" "}
+            {t(locale, "control.days", { count: displayCommunity.range })}
           </p>
           <p>{t(locale, "polish.receivedRule")}</p>
         </section>
@@ -1852,6 +2024,7 @@ export default function Console({
               if (result) {
                 setNotificationRevision(result.revision);
                 setSavedScopeMode(scopeMode);
+                scopeDraft.saved();
                 setStatus(t(locale, "web.analysis_scope_saved"));
               }
             }}
@@ -2278,7 +2451,7 @@ export default function Console({
 
   const attentionView = (
     <Attention
-      ready={Boolean(data.community?.daily.ready)}
+      ready={Boolean(displayCommunity?.daily.ready)}
       items={attentionItems}
       locale={locale}
       channels={data.options.surfaces ?? data.options.channels}
@@ -2299,7 +2472,7 @@ export default function Console({
     pending: number,
     unavailable = false,
   ) =>
-    !data.community || unavailable
+    !displayCommunity || unavailable
       ? t(locale, "polish.unavailable")
       : total >= 5
         ? `${value} / ${total}`
@@ -2325,16 +2498,17 @@ export default function Console({
             <div>
               <dt>
                 {t(locale, "experience.observed", {
-                  count: data.community?.eligibleMembers ?? 0,
+                  count: displayCommunity?.eligibleMembers ?? 0,
                 })}
               </dt>
               <dd>
                 {ruleValue(
-                  data.community?.stages[2]?.count ?? 0,
-                  data.community?.eligibleMembers ?? 0,
-                  data.community?.arrivalCount ?? 0,
-                  !data.community ||
-                    data.community?.weekly?.connection.state === "UNAVAILABLE",
+                  displayCommunity?.stages[2]?.count ?? 0,
+                  displayCommunity?.eligibleMembers ?? 0,
+                  displayCommunity?.arrivalCount ?? 0,
+                  !displayCommunity ||
+                    displayCommunity?.weekly?.connection.state ===
+                      "UNAVAILABLE",
                 )}
               </dd>
             </div>
@@ -2360,23 +2534,23 @@ export default function Console({
           <h2>
             {activityWindow(
               locale,
-              data.community?.analysis?.rules.retainedFromDay,
-              data.community?.analysis?.rules.retainedThroughDay,
+              displayCommunity?.analysis?.rules.retainedFromDay,
+              displayCommunity?.analysis?.rules.retainedThroughDay,
             )}
           </h2>
           <p>{t(locale, "experience.retentionRule")}</p>
           <p>
             {ruleValue(
-              data.community?.outcomes.retained ?? 0,
-              (data.community?.outcomes.retained ?? 0) +
-                (data.community?.outcomes.notRetained ?? 0),
-              data.community?.outcomes.pending ?? 0,
-              !data.community ||
-                (Boolean(data.community?.outcomes.insufficient) &&
-                  !data.community?.outcomes.pending &&
+              displayCommunity?.outcomes.retained ?? 0,
+              (displayCommunity?.outcomes.retained ?? 0) +
+                (displayCommunity?.outcomes.notRetained ?? 0),
+              displayCommunity?.outcomes.pending ?? 0,
+              !displayCommunity ||
+                (Boolean(displayCommunity?.outcomes.insufficient) &&
+                  !displayCommunity?.outcomes.pending &&
                   !(
-                    (data.community?.outcomes.retained ?? 0) +
-                    (data.community?.outcomes.notRetained ?? 0)
+                    (displayCommunity?.outcomes.retained ?? 0) +
+                    (displayCommunity?.outcomes.notRetained ?? 0)
                   )),
             )}
           </p>
@@ -2433,10 +2607,10 @@ export default function Console({
     </section>,
     resultView,
     settingsView,
-    data.community ? (
+    displayCommunity ? (
       <AnalysisSummary
         key="community"
-        community={data.community}
+        community={displayCommunity}
         locale={locale}
       />
     ) : (
@@ -2447,26 +2621,32 @@ export default function Console({
     ),
     <section key="compare" className="surface">
       <h1>{t(locale, "web.compare_participation")}</h1>
-      {data.community?.compare.available ? (
+      {displayCommunity?.compare.available ? (
         <>
           <p>
             {t(locale, "web.new_members_waited_value_minutes_on", {
-              a: String(data.community.compare.newcomers?.replyMinutes ?? "—"),
-              b: String(data.community.compare.continuing?.replyMinutes ?? "—"),
+              a: String(
+                displayCommunity.compare.newcomers?.replyMinutes ?? "—",
+              ),
+              b: String(
+                displayCommunity.compare.continuing?.replyMinutes ?? "—",
+              ),
             })}
           </p>
           <p>
             {t(locale, "web.received_a_reply_new_value_continuing", {
-              a: String(data.community.compare.newcomers?.receivedReplyPercent),
+              a: String(
+                displayCommunity.compare.newcomers?.receivedReplyPercent,
+              ),
               b: String(
-                data.community.compare.continuing?.receivedReplyPercent,
+                displayCommunity.compare.continuing?.receivedReplyPercent,
               ),
             })}
           </p>
           <p>
             {t(locale, "web.active_days_new_value_continuing_value", {
-              a: String(data.community.compare.newcomers?.activeDays),
-              b: String(data.community.compare.continuing?.activeDays),
+              a: String(displayCommunity.compare.newcomers?.activeDays),
+              b: String(displayCommunity.compare.continuing?.activeDays),
             })}
           </p>
         </>
@@ -2474,100 +2654,102 @@ export default function Console({
         <p>{t(locale, "web.there_is_not_enough_data_to")}</p>
       )}
       <h2>
-        {data.community
+        {displayCommunity
           ? activityWindow(
               locale,
-              data.community.analysis.rules.retainedFromDay,
-              data.community.analysis.rules.retainedThroughDay,
+              displayCommunity.analysis.rules.retainedFromDay,
+              displayCommunity.analysis.rules.retainedThroughDay,
             )
           : t(locale, "web.what_happened_after_joining")}
       </h2>
-      {data.community?.outcomes.patterns && (
+      {displayCommunity?.outcomes.patterns && (
         <p>
           {t(locale, "web.distinct_people_interacted_with_in_the", {
             a: String(
-              data.community.outcomes.patterns.retained.interactionPartners,
+              displayCommunity.outcomes.patterns.retained.interactionPartners,
             ),
             b: String(
-              data.community.outcomes.patterns.notRetained.interactionPartners,
+              displayCommunity.outcomes.patterns.notRetained
+                .interactionPartners,
             ),
           })}
         </p>
       )}
-      {data.community ? (
+      {displayCommunity ? (
         <p>
           {t(locale, "web.observed_a_week_later_value_not", {
-            a: String(data.community.outcomes.retained),
-            b: String(data.community.outcomes.notRetained),
-            c: String(data.community.outcomes.pending),
-            d: String(data.community.outcomes.insufficient),
+            a: String(displayCommunity.outcomes.retained),
+            b: String(displayCommunity.outcomes.notRetained),
+            c: String(displayCommunity.outcomes.pending),
+            d: String(displayCommunity.outcomes.insufficient),
           })}
         </p>
       ) : null}
-      {data.community?.outcomes.patterns && (
+      {displayCommunity?.outcomes.patterns && (
         <p>
           {t(locale, "web.value_of_continuing_newcomers_received_a", {
             a: String(
-              data.community.outcomes.patterns.retained.receivedReplyPercent,
+              displayCommunity.outcomes.patterns.retained.receivedReplyPercent,
             ),
             b: String(
-              data.community.outcomes.patterns.notRetained.receivedReplyPercent,
+              displayCommunity.outcomes.patterns.notRetained
+                .receivedReplyPercent,
             ),
           })}
         </p>
       )}
-      {data.community?.suggestion && (
+      {displayCommunity?.suggestion && (
         <p>{t(locale, "control.replySuggestion")}</p>
       )}
-      {data.community?.compare.available && (
+      {displayCommunity?.compare.available && (
         <p>
           {t(locale, "web.channels_used_new_value_continuing_value", {
-            a: String(data.community.compare.newcomers?.channelCount),
-            b: String(data.community.compare.continuing?.channelCount),
+            a: String(displayCommunity.compare.newcomers?.channelCount),
+            b: String(displayCommunity.compare.continuing?.channelCount),
             c: String(
               wholePercent(
-                data.community.compare.newcomers?.voicePercent ?? null,
+                displayCommunity.compare.newcomers?.voicePercent ?? null,
               ),
             ),
             d: String(
               wholePercent(
-                data.community.compare.continuing?.voicePercent ?? null,
+                displayCommunity.compare.continuing?.voicePercent ?? null,
               ),
             ),
             e: String(
               wholePercent(
-                data.community.compare.newcomers?.eventPercent ?? null,
+                displayCommunity.compare.newcomers?.eventPercent ?? null,
               ),
             ),
             f: String(
               wholePercent(
-                data.community.compare.continuing?.eventPercent ?? null,
+                displayCommunity.compare.continuing?.eventPercent ?? null,
               ),
             ),
           })}
         </p>
       )}
-      {data.community?.outcomes.patterns && (
+      {displayCommunity?.outcomes.patterns && (
         <p>
           {t(locale, "web.first_three_days_those_observed_later", {
             a: String(
               wholePercent(
-                data.community.outcomes.patterns.retained.voicePercent,
+                displayCommunity.outcomes.patterns.retained.voicePercent,
               ),
             ),
             b: String(
               wholePercent(
-                data.community.outcomes.patterns.retained.eventPercent,
+                displayCommunity.outcomes.patterns.retained.eventPercent,
               ),
             ),
             c: String(
               wholePercent(
-                data.community.outcomes.patterns.notRetained.voicePercent,
+                displayCommunity.outcomes.patterns.notRetained.voicePercent,
               ),
             ),
             d: String(
               wholePercent(
-                data.community.outcomes.patterns.notRetained.eventPercent,
+                displayCommunity.outcomes.patterns.notRetained.eventPercent,
               ),
             ),
           })}
@@ -2576,17 +2758,17 @@ export default function Console({
     </section>,
     <section key="channels" className="surface">
       <h1>{t(locale, "web.channels_used_by_new_members")}</h1>
-      {data.community && (
+      {displayCommunity && (
         <p>
           {activityWindow(
             locale,
-            data.community.analysis.rules.retainedFromDay,
-            data.community.analysis.rules.retainedThroughDay,
+            displayCommunity.analysis.rules.retainedFromDay,
+            displayCommunity.analysis.rules.retainedThroughDay,
           )}
         </p>
       )}
-      {data.community?.channels.length ? (
-        data.community.channels.map((row) => (
+      {displayCommunity?.channels.length ? (
+        displayCommunity.channels.map((row) => (
           <article key={row.channelId}>
             <h2>
               {data.options.channels.find(
@@ -2767,6 +2949,7 @@ export default function Console({
               <select
                 value={data.selectedGuildId ?? ""}
                 onChange={(e) => {
+                  if (!canLeave(true)) return;
                   setSwitchingGuild(true);
                   window.location.assign(
                     `/auth/select?guild=${encodeURIComponent(e.target.value)}`,
@@ -2786,7 +2969,24 @@ export default function Console({
               {locale === "ja" ? "サーバー一覧" : "Server list"}
             </a>
           </div>
+          <small>
+            {locale === "ja"
+              ? "サーバーを変更すると、絞り込みと比較条件は初期状態に戻ります。"
+              : "Changing servers resets filters and comparison selections."}
+          </small>
         </div>
+        {scopeChanged && (
+          <section className="surface" role="alert">
+            <p>
+              {locale === "ja"
+                ? "選択中のサーバーが別のタブで変更されています。操作は実行していません。未保存の入力を確認してから再読み込みし、対象サーバーを確認してください。"
+                : "The selected server changed in another tab. The operation was not started. Review any unsaved input, then reload and check the target server."}
+            </p>
+            <button onClick={() => window.location.reload()}>
+              {locale === "ja" ? "対象を再確認" : "Recheck server"}
+            </button>
+          </section>
+        )}
         {data.betaState && (
           <AccessNotice
             state={data.betaState}
@@ -2796,7 +2996,7 @@ export default function Console({
         )}
         {page === 0 && (
           <HomeSummary
-            data={data}
+            data={{ ...data, results }}
             locale={locale}
             removed={attentionRemoved}
             onNavigate={setPage}
@@ -2824,22 +3024,25 @@ export default function Console({
           tabIndex={-1}
           hidden={page === 0 && !showHomeDetail}
         >
-          {page >= 12 && page <= 14 ? (
+          {journeyLoading && [1, 5].includes(page) ? (
+            <p role="status">
+              {locale === "ja" ? "読み込み中です。" : "Loading…"}
+            </p>
+          ) : page >= 12 && page <= 14 ? (
             <OperationsView
               data={data.integration}
-              model={data.community?.adaptive}
+              model={displayCommunity?.adaptive}
               locale={locale}
               view={page}
               channels={data.options.surfaces ?? data.options.channels}
             />
-          ) : page === 10 && data.community?.adaptive ? (
-            <JourneysView model={data.community.adaptive} locale={locale} />
+          ) : page === 10 && displayCommunity?.adaptive ? (
+            <JourneysView model={displayCommunity.adaptive} locale={locale} />
           ) : page === 11 ? (
             <CommunityModelEditor
-              initial={communityModelSchema.parse(
-                data.admin?.settings.communityModel ?? {},
-              )}
-              snapshot={data.community?.adaptive?.capabilities ?? null}
+              onDirtyChange={setModelDirty}
+              initial={savedModel}
+              snapshot={displayCommunity?.adaptive?.capabilities ?? null}
               locale={locale}
               channels={data.options.surfaces ?? data.options.channels}
               tags={data.options.forumTags}
@@ -2851,6 +3054,7 @@ export default function Console({
                 });
                 if (!updated) return false;
                 setNotificationRevision(Number(updated.revision));
+                setSavedModel(profile);
                 return true;
               }}
               onRefresh={async () =>
@@ -2889,7 +3093,7 @@ export default function Console({
               }
               onCheck={() => window.location.reload()}
             />
-          ) : data.community?.adaptive && [0, 1, 5, 9].includes(page) ? (
+          ) : displayCommunity?.adaptive && [0, 1, 5, 9].includes(page) ? (
             <>
               {page === 1 && (
                 <div className="segmented">
@@ -2911,7 +3115,7 @@ export default function Console({
                       key={tab}
                       role="tab"
                       aria-selected={analysisTab === tab}
-                      onClick={() => setAnalysisTab(tab)}
+                      onClick={() => changeAnalysisTab(tab)}
                     >
                       {t(locale, `control.${tab}`)}
                     </button>
@@ -2919,17 +3123,17 @@ export default function Console({
                 </div>
               )}
               <AdaptiveCommunity
-                model={adaptiveData ?? data.community.adaptive}
+                model={displayCommunity.adaptive}
                 locale={locale}
                 view={page}
                 analysisView={analysisTab}
-                operations={data.community.operations}
+                operations={displayCommunity.operations}
                 onSettings={() => setPage(4)}
                 channels={data.options.surfaces ?? data.options.channels}
                 attention={{
-                  ready: data.community.daily.ready,
-                  total: data.community.daily.attentionCount,
-                  items: data.community.attention,
+                  ready: displayCommunity.daily.ready,
+                  total: displayCommunity.daily.attentionCount,
+                  items: displayCommunity.attention,
                 }}
               />
               {page === 0 && data.home?.setup.required && (
@@ -2951,10 +3155,9 @@ export default function Console({
           ) : page === 4 ? (
             <>
               <CommunityModelEditor
-                initial={communityModelSchema.parse(
-                  data.admin?.settings.communityModel ?? {},
-                )}
-                snapshot={data.community?.adaptive?.capabilities ?? null}
+                onDirtyChange={setModelDirty}
+                initial={savedModel}
+                snapshot={displayCommunity?.adaptive?.capabilities ?? null}
                 locale={locale}
                 channels={data.options.surfaces ?? data.options.channels}
                 tags={data.options.forumTags}
@@ -2966,6 +3169,7 @@ export default function Console({
                   });
                   if (!updated) return false;
                   setNotificationRevision(Number(updated.revision));
+                  setSavedModel(profile);
                   return true;
                 }}
                 onRefresh={async () =>
@@ -2979,7 +3183,7 @@ export default function Console({
           ) : page === 8 ? (
             <>
               <TeamQueue
-                operations={data.community?.operations}
+                operations={displayCommunity?.operations}
                 locale={locale}
               />
               {attentionView}
@@ -2996,7 +3200,7 @@ export default function Console({
                     key={tab}
                     role="tab"
                     aria-selected={analysisTab === tab}
-                    onClick={() => setAnalysisTab(tab)}
+                    onClick={() => changeAnalysisTab(tab)}
                   >
                     {t(locale, `control.${tab}`)}
                   </button>
@@ -3013,26 +3217,26 @@ export default function Console({
               ) : (
                 <section className="surface">
                   <h1>{t(locale, "control.behavior")}</h1>
-                  {data.community?.compare.available ? (
+                  {displayCommunity?.compare.available ? (
                     <>
                       <p>
                         {t(locale, "control.replyAlert")}:{" "}
                         {wholePercent(
-                          data.community.compare.newcomers
+                          displayCommunity.compare.newcomers
                             ?.receivedReplyPercent ?? null,
                         )}
                       </p>
                       <p>
                         {t(locale, "control.voice")}:{" "}
                         {wholePercent(
-                          data.community.compare.newcomers?.voicePercent ??
+                          displayCommunity.compare.newcomers?.voicePercent ??
                             null,
                         )}
                       </p>
                       <p>
                         {t(locale, "control.goalEvent")}:{" "}
                         {wholePercent(
-                          data.community.compare.newcomers?.eventPercent ??
+                          displayCommunity.compare.newcomers?.eventPercent ??
                             null,
                         )}
                       </p>
@@ -3040,10 +3244,10 @@ export default function Console({
                   ) : (
                     <p>{t(locale, "control.noComparison")}</p>
                   )}
-                  {data.community?.transitions.length ? (
+                  {displayCommunity?.transitions.length ? (
                     <>
                       <h2>{t(locale, "control.moves")}</h2>
-                      {data.community.transitions
+                      {displayCommunity.transitions
                         .slice(0, 5)
                         .map((move, index) => (
                           <p key={index}>

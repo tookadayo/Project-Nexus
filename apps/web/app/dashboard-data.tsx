@@ -1,4 +1,4 @@
-import { dashboardView } from "./navigation-model";
+import { dashboardView, dashboardFilters } from "./navigation-model";
 import { hostedBetaEnabled } from "../../../packages/config/src/hosted-beta";
 import Console, { type ProductData } from "./console";
 import type {
@@ -22,7 +22,12 @@ export const dynamic = "force-dynamic";
 export default async function Page({
   guildId,
   view,
-}: { guildId?: string; view?: string } = {}) {
+  range,
+  tab,
+}: { guildId?: string; view?: string; range?: string; tab?: string } = {}) {
+  const filters = dashboardFilters(
+    new URLSearchParams({ range: range ?? "", tab: tab ?? "" }),
+  );
   const started = Date.now();
   const cookieStore = await cookies();
   const selectedCookie = cookieStore.get("nexus_guild")?.value;
@@ -116,9 +121,9 @@ export default async function Page({
       integration,
     ] = await Promise.all([
       read<HomePresentation>(base + "/home"),
-      read<JourneyPresentation>(base + "/journey?range=30"),
+      read<JourneyPresentation>(base + `/journey?range=${filters.range}`),
       read<Awaited<ReturnType<CommunityService["overview"]>>>(
-        base + "/community?range=30&limit=50",
+        base + `/community?range=${filters.range}&limit=50`,
       ),
       read<OpportunitiesPresentation>(base + "/opportunities"),
       read<ActionsPresentation>(base + "/actions"),
@@ -208,6 +213,7 @@ export default async function Page({
       data={data}
       initialLocale={initialLocale}
       initialView={dashboardView(view)}
+      initialFilters={filters}
     />
   );
 }

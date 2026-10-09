@@ -1,6 +1,8 @@
 "use client";
-import {safeError} from "../safe-error";
-import { useEffect, useState } from "react";
+import { useDraft, useUnsavedChanges } from "../navigation-safety";
+import { exploreLocation, exploreQuery } from "./navigation";
+import { safeError } from "../safe-error";
+import { useEffect, useState, useRef, type SetStateAction } from "react";
 import {
   chartQuerySchema,
   type ChartSpec,
@@ -19,31 +21,93 @@ type Data = {
   capabilities: { advanced: boolean; csv: boolean; historyDays: number | null };
   channels: { id: string; type: number; observable: boolean }[];
 };
-export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
+const defaultQuery = chartQuerySchema.parse({});
+export function ExploreControls({
+  locale,
+  scope = "",
+  initialQuery = defaultQuery,
+  filtersReset = false,
+}: {
+  locale: "ja" | "en";
+  scope?: string;
+  initialQuery?: ChartQuery;
+  filtersReset?: boolean;
+}) {
   const ja = locale === "ja",
-    [query, setQuery] = useState<ChartQuery>(chartQuerySchema.parse({})),
+    [query, setQueryState] = useState<ChartQuery>(initialQuery),
     [data, setData] = useState<Data | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
+    [reload, setReload] = useState(0),
+    [saving, setSaving] = useState(false),
     [name, setName] = useState(""),
     [shortcut, setShortcut] = useState<string>(""),
     [selected, setSelected] = useState<View | null>(null);
-  const url = "/explore/data?q=" + encodeURIComponent(JSON.stringify(query));
-  async function load() {
-    setData(null);
-    setBusy(true);
-    setError("");
-    try {
-      const response = await fetch(url, { cache: "no-store" }),
-        result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? "UNAVAILABLE");
-      setData(result);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "UNAVAILABLE");
-    } finally {
-      setBusy(false);
+  const savingRef = useRef(false);
+  const draft = useDraft({ name, shortcut, query });
+  const canLeave = useUnsavedChanges(
+    (Boolean(name || selected) && draft.dirty) || saving,
+    locale,
+  );
+  const navigation = useRef({ canLeave });
+  navigation.current = { canLeave };
+  const index = useRef(0);
+  function setQuery(update: SetStateAction<ChartQuery>) {
+    const next = typeof update === "function" ? update(query) : update;
+    if (scope && chartQuerySchema.safeParse(next).success) {
+      index.current += 1;
+      window.history.pushState(
+        {
+          ...window.history.state,
+          nexusExplore: { scope, index: index.current },
+        },
+        "",
+        exploreLocation(next, scope),
+      );
     }
+    setQueryState(next);
   }
+  useEffect(() => {
+    if (!scope) return;
+    index.current =
+      window.history.state?.nexusExplore?.scope === scope
+        ? window.history.state.nexusExplore.index
+        : 0;
+    window.history.replaceState(
+      {
+        ...window.history.state,
+        nexusExplore: { scope, index: index.current },
+      },
+      "",
+      exploreLocation(initialQuery, scope),
+    );
+    let restoring = false;
+    const restore = (event: PopStateEvent) => {
+      if (restoring) {
+        restoring = false;
+        return;
+      }
+      const target = event.state?.nexusExplore;
+      if (!navigation.current.canLeave()) {
+        restoring = true;
+        window.history.go(
+          target?.scope === scope ? index.current - target.index : 1,
+        );
+        return;
+      }
+      index.current = target?.scope === scope ? target.index : 0;
+      setQueryState(
+        exploreQuery(new URL(window.location.href).searchParams, scope),
+      );
+    };
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, [scope, initialQuery]);
+  const url =
+    "/explore/data?guild=" +
+    encodeURIComponent(scope) +
+    "&q=" +
+    encodeURIComponent(JSON.stringify(query));
   useEffect(() => {
     let active = true;
     setData(null);
@@ -66,8 +130,11 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
     return () => {
       active = false;
     };
-  }, [url]);
+  }, [url, reload]);
   async function save(action: "saveView" | "saveSegment") {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
     setBusy(true);
     setError("");
     try {
@@ -87,16 +154,22 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
           : { action, segment: { name, filters: query.filter } };
       const response = await fetch("/explore/data", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "X-Nexus-Guild": scope,
+          },
           body: JSON.stringify(payload),
         }),
         result = await response.json();
       if (!response.ok) throw new Error(result.error);
+      draft.saved();
       setSelected(null);
-      await load();
+      setReload((current) => current + 1);
     } catch (error) {
       setError(error instanceof Error ? error.message : "UNAVAILABLE");
     } finally {
+      savingRef.current = false;
+      setSaving(false);
       setBusy(false);
     }
   }
@@ -115,6 +188,13 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
     );
   return (
     <>
+      {filtersReset && (
+        <p role="status">
+          {ja
+            ? "サーバーが変わったか、条件を確認できないため、絞り込み条件を初期状態に戻しました。"
+            : "Filters were reset because the server changed or the conditions could not be verified."}
+        </p>
+      )}
       <header className="page-head">
         <h1>{ja ? "コミュニティを分析" : "Explore your community"}</h1>
         <p>
@@ -162,7 +242,7 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
                   days > (data?.capabilities.historyDays ?? 30)
                 }
               >
-                {days} days
+                {days} {ja ? "日" : "days"}
               </option>
             ))}
           </select>
@@ -179,7 +259,7 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
         {data?.capabilities.advanced && (
           <>
             <label>
-              {ja ? "観測面" : "Surface"}
+              {ja ? "活動の種類" : "Activity type"}
               <select
                 value={query.filter.surface}
                 onChange={(e) =>
@@ -220,7 +300,7 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
             </label>
             <label>
               {ja
-                ? "Role ID（カンマ区切り）"
+                ? "ロールID（カンマ区切り）"
                 : "Role cohort IDs (comma separated)"}
               <input
                 value={query.filter.roleIds.join(",")}
@@ -267,7 +347,7 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
               />
             </label>
             <label>
-              {ja ? "保存したセグメント" : "Saved segment"}
+              {ja ? "保存した絞り込み条件" : "Saved filters"}
               <select
                 defaultValue=""
                 onChange={(e) => {
@@ -455,6 +535,7 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
             </select>
           </label>
           <button
+            className="primary"
             disabled={busy || !name}
             onClick={() => void save("saveView")}
           >
@@ -470,12 +551,24 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
             disabled={busy || !name}
             onClick={() => void save("saveSegment")}
           >
-            {ja ? "セグメントを保存" : "Save segment"}
+            {ja ? "絞り込み条件を保存" : "Save filters"}
           </button>
           {data.views.map((view) => (
             <button
               key={view.id}
               onClick={() => {
+                if (!canLeave()) return;
+                draft.saved({
+                  name: view.name,
+                  shortcut: view.shortcut ?? "",
+                  query: {
+                    metric: view.metric,
+                    days: view.days,
+                    compare: view.compare,
+                    timezone: view.timezone,
+                    filter: view.filter,
+                  },
+                });
                 setSelected(view);
                 setName(view.name);
                 setShortcut(view.shortcut ?? "");
