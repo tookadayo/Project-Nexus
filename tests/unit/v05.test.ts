@@ -1,6 +1,9 @@
+vi.mock('../../apps/web/app/auth/public-session-store',async()=>{const {memoryPublicSessions}=await import('../fixtures/public-sessions');return {publicSessions:()=>memoryPublicSessions};});
 vi.mock("server-only",()=>({}));
 import {afterEach,expect,it,vi} from 'vitest';
 vi.mock('../../apps/web/app/auth/server-access',()=>({manageableConnection:vi.fn(async(id:string)=>['111111111111111111','222222222222222222'].includes(id)?{state:'VERIFIED',version:'2026-09-30T00:00:00.000Z',name:'Server'}:null)}));
+import {PublicTokenCipher} from '../../packages/security/src/public-sessions';
+import {memoryPublicSessions} from '../fixtures/public-sessions';
 import {readFileSync} from 'node:fs';
 import {NextRequest} from '../../apps/web/node_modules/next/server.js';
 import {authorizedGuilds,dashboardContext,openSession,sealSession,validOAuthState} from '../../apps/web/app/auth/session';
@@ -36,14 +39,14 @@ it('keeps DM follow-up out of the normal improvement menu',()=>{
  expect(normal).toEqual(['reply_rescue','welcome_helper','channel_recommendation','event_recommendation']);
  expect(toOpportunity({type:'RETENTION_DROP',severity:'warning',cohort:'New members',facts:{metric:'d7_active_retention'},comparison:{current:.2,baseline:.4},sampleSize:40,confidenceLabel:'observational',causality:'not_established'},0,{}).suggestedAction).toBe('channel_recommendation');
 });
-it('checks OAuth state, authenticates encrypted sessions, and rejects tampering',()=>{
+it('checks OAuth state and rejects token ciphertext tampering or another session binding',async()=>{
  vi.stubEnv('NEXUS_SESSION_SECRET','a'.repeat(64));
- expect(validOAuthState('state123','state123')).toBe(true);
- expect(validOAuthState('state123','state124')).toBe(false);
- const value=sealSession({accessToken:'access',userId:'12345678901234567',expiresAt:Date.now()+10000});
- expect(openSession(value)?.userId).toBe('12345678901234567');
- const tampered=Buffer.from(value,'base64url');tampered[12]=tampered[12]!^1;
- expect(openSession(tampered.toString('base64url'))).toBeNull();
+ expect(validOAuthState('state123','state123')).toBe(true);expect(validOAuthState('state123','state124')).toBe(false);
+ const cipher=new PublicTokenCipher('synthetic-encryption-key-for-unit-tests');
+ const encrypted=cipher.seal('session-binding','synthetic-token');expect(cipher.open('session-binding',encrypted)).toBe('synthetic-token');
+ const tampered=Buffer.from(encrypted,'base64url');tampered[12]=tampered[12]!^1;
+ expect(()=>cipher.open('session-binding',tampered.toString('base64url'))).toThrow();expect(()=>cipher.open('other-session',encrypted)).toThrow();
+ const value=await sealSession({accessToken:'access',userId:'12345678901234567',expiresAt:Date.now()+10000});expect((await openSession(value))?.userId).toBe('12345678901234567');expect(await openSession('tampered')).toBeNull();
 });
 it('authorizes only guilds with administrative permissions on each request',async()=>{
  vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_SESSION_SECRET','a'.repeat(64));vi.stubEnv('API_KEY','b'.repeat(64));vi.stubEnv('DISCORD_TOKEN','bot-test');vi.stubEnv('DISCORD_APPLICATION_ID','123456789012345678');
@@ -55,7 +58,7 @@ it('authorizes only guilds with administrative permissions on each request',asyn
   {id:'333333333333333333',name:'Member',permissions:'0'}
  ]})));
  const guilds=await authorizedGuilds('access','444444444444444444');expect(guilds.map(guild=>guild.id)).toEqual(['111111111111111111','222222222222222222','555555555555555555']);expect(guilds[2]?.installed).toBe(false);expect(guilds[2]?.installUrl).toContain('guild_id=555555555555555555');
- const session=sealSession({accessToken:'access',userId:'444444444444444444',expiresAt:Date.now()+10000});
+ const session=await sealSession({accessToken:'access',userId:'444444444444444444',expiresAt:Date.now()+10000});
  const selected=await dashboardContext(session,'222222222222222222');expect(selected?.guildId).toBe('222222222222222222');
  const allowed=await selectGuild(new NextRequest('http://localhost:3100/auth/select?guild=222222222222222222',{headers:{cookie:`nexus_session=${session}`}}));expect(allowed.headers.get('location')).toContain('/dashboard/222222222222222222');
  const unauthorized=await dashboardContext(session,'333333333333333333');expect(unauthorized).toBeNull();
@@ -71,15 +74,15 @@ it('keeps OAuth return paths inside a validated guild dashboard route',async()=>
 });
 it('returns a clear re-login response for an expired OAuth session',async()=>{
  vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_SESSION_SECRET','a'.repeat(64));vi.stubEnv('NEXUS_WEB_URL','http://localhost:3100');
- const expired=sealSession({accessToken:'access',userId:'111111111111111111',expiresAt:Date.now()-1000});
+ const expired=await sealSession({accessToken:'access',userId:'111111111111111111',expiresAt:Date.now()+60000});memoryPublicSessions.expire(expired);
  const response=await webControl(new NextRequest('http://localhost:3100/control',{method:'POST',headers:{origin:'http://localhost:3100',host:'localhost:3100','sec-fetch-site':'same-origin',cookie:`nexus_session=${expired}`},body:'{}'}));
  expect(response.status).toBe(401);expect((await response.json()).error).toBe('SESSION_EXPIRED');
 });
 it('accepts a matching OAuth code exchange with identify and guilds scopes',async()=>{
  vi.stubEnv('NEXUS_WEB_URL','http://localhost:3100');vi.stubEnv('DISCORD_APPLICATION_ID','123456789012345678');vi.stubEnv('DISCORD_CLIENT_SECRET','secret');vi.stubEnv('NEXUS_SESSION_SECRET','a'.repeat(64));
- const fetcher=vi.fn().mockResolvedValueOnce({ok:true,json:async()=>({access_token:'access',expires_in:3600,scope:'identify guilds'})}).mockResolvedValueOnce({ok:true,json:async()=>({id:'444444444444444444'})});vi.stubGlobal('fetch',fetcher);
+ const fetcher=vi.fn().mockResolvedValueOnce({ok:true,json:async()=>({access_token:'access',refresh_token:'synthetic-refresh',token_type:'Bearer',expires_in:3600,scope:'identify guilds'})}).mockResolvedValueOnce({ok:true,json:async()=>({id:'444444444444444444'})});vi.stubGlobal('fetch',fetcher);
  const response=await oauthCallback(new NextRequest('http://localhost:3100/auth/callback?state=matching&code=grant',{headers:{cookie:'nexus_oauth_state=matching'}}));
- expect(response.status).toBe(307);expect(openSession(response.cookies.get('nexus_session')?.value)?.userId).toBe('444444444444444444');expect(response.cookies.get('nexus_session')?.httpOnly).toBe(true);expect(fetcher).toHaveBeenCalledTimes(2);
+ expect(response.status).toBe(307);expect((await openSession(response.cookies.get('nexus_session')?.value))?.userId).toBe('444444444444444444');expect(response.cookies.get('nexus_session')?.httpOnly).toBe(true);expect(fetcher).toHaveBeenCalledTimes(2);
  const rejected=await oauthCallback(new NextRequest('http://localhost:3100/auth/callback?state=other&code=grant',{headers:{cookie:'nexus_oauth_state=matching'}}));expect(rejected.status).toBe(307);expect(rejected.headers.get('location')).toContain('/auth/problem');expect(fetcher).toHaveBeenCalledTimes(2);
 });
 it('uses the last complete UTC week for the optional summary',()=>{

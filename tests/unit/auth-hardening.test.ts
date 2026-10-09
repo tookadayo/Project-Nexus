@@ -1,3 +1,4 @@
+vi.mock('../../apps/web/app/auth/public-session-store',async()=>{const {memoryPublicSessions}=await import('../fixtures/public-sessions');return {publicSessions:()=>memoryPublicSessions};});
 import {afterEach,expect,it,vi} from 'vitest';
 import {webAuthMode} from '../../packages/config/src/web-auth';
 const manageable=vi.hoisted(()=>vi.fn());
@@ -13,7 +14,7 @@ it('rejects development auth in production and accepts only explicit nonproducti
 it('checks only the selected guild, without an OAuth or Bot guild-list fetch',async()=>{
  vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_SESSION_SECRET','s'.repeat(64));vi.stubEnv('API_KEY','a'.repeat(64));
  const fetcher=vi.fn(async(url:string)=>{expect(url).toBe('https://discord.com/api/v10/users/@me');return {ok:true,json:async()=>({id:'811111111111111111'})};});vi.stubGlobal('fetch',fetcher);
- const cookie=sealSession({accessToken:'test',userId:'811111111111111111',expiresAt:Date.now()+60000});
+ const cookie=await sealSession({accessToken:'test',userId:'811111111111111111',expiresAt:Date.now()+60000});
  manageable.mockResolvedValue({state:'VERIFIED',name:'A'});
  expect((await dashboardContext(cookie,'821111111111111111'))?.guildId).toBe('821111111111111111');expect(fetcher).toHaveBeenCalledTimes(1);expect(manageable).toHaveBeenCalledTimes(1);
  manageable.mockResolvedValue(null);expect(await dashboardContext(cookie,'821111111111111111')).toBeNull();
@@ -28,6 +29,6 @@ it('isolates an installed guild failure from other server cards',async()=>{
 it('rejects a revoked OAuth grant before accessing the selected guild',async()=>{
  vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_SESSION_SECRET','s'.repeat(64));
  vi.stubGlobal('fetch',vi.fn(async()=>({ok:false,status:401})));
- const cookie=sealSession({accessToken:'revoked',userId:'811111111111111111',expiresAt:Date.now()+60000});
+ const cookie=await sealSession({accessToken:'revoked',userId:'811111111111111111',expiresAt:Date.now()+60000});
  await expect(dashboardContext(cookie,'821111111111111111')).rejects.toThrow('SESSION_EXPIRED');expect(manageable).not.toHaveBeenCalled();
 });

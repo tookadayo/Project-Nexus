@@ -1,5 +1,5 @@
 export const colors={
- nexus:0x5865f2,
+ nexus:0x2758ca,
  healthy:0x3ba55d,
  collecting:0xfee75c,
  warning:0xf0b232,

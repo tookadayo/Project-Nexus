@@ -7,7 +7,7 @@ import { assert } from "../../../../packages/shared/src/index";
 import { operationsAccess } from "../../../../packages/operations/src/policy";
 export async function operationsContext() {
   const cookie = await cookies(),
-    session = openSession(cookie.get("nexus_session")?.value),
+    session = await openSession(cookie.get("nexus_session")?.value),
     guildId = cookie.get("nexus_guild")?.value;
   assert(session, "SESSION_EXPIRED", 401);
   assert(guildId && /^\d{17,20}$/.test(guildId), "GUILD_REQUIRED", 403);

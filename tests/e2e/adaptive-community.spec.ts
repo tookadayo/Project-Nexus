@@ -1,22 +1,32 @@
 import { test, expect } from "@playwright/test";
-import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { renderWithCss } from "../fixtures/render-with-css";
+import { navigateDashboard } from "./dashboard-navigation";
 test("seven community profiles adapt six Web and Discord views without irrelevant KPIs", async ({
   page,
 }) => {
   test.setTimeout(180000);
-  const previews = JSON.parse(
-    execFileSync(
-      process.execPath,
-      ["--import", "tsx", "tests/e2e/render-adaptive-community.tsx"],
-      { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 },
-    ),
-  ) as Record<string, { html: string; discord: unknown; expected: string[] }>;
-  const css = readFileSync("apps/web/app/style.css", "utf8");
+  const rendered = await renderWithCss<{
+    html: string;
+    discord: unknown;
+    expected: string[];
+  }>(new URL("./render-adaptive-community.tsx", import.meta.url));
+  const { previews } = rendered;
+  for (const fileName of [
+    "style.css",
+    "tokens.css",
+    "product.css",
+    "brand.css",
+    "attention.css",
+  ])
+    expect(
+      rendered.cssFiles.some((file) => file.endsWith("/" + fileName)),
+    ).toBe(true);
+  expect(rendered.css).toContain(".attention-view");
+  const css = rendered.css;
   for (const [name, preview] of Object.entries(previews)) {
     await page.setViewportSize({ width: 1200, height: 950 });
     await page.setContent(
-      `<html><head><meta charset="utf-8"><style>${css}</style></head><body><main style="max-width:1050px;margin:24px auto;padding:16px"><p>Fixture sample · ${name}</p>${preview.html}</main></body></html>`,
+      `<html><head><meta charset="utf-8"><style>${css}</style></head><body><div class="product" style="display:block"><main class="content" style="max-width:1050px;margin:24px auto;padding:16px"><p>Fixture sample · ${name}</p>${preview.html}</main></div></body></html>`,
     );
     if (!name.endsWith("-4") && !name.endsWith("-8")) {
       await expect(page.locator("[data-metric]")).toHaveCount(
@@ -69,11 +79,23 @@ test("seven community profiles adapt six Web and Discord views without irrelevan
     }
     walk(preview.discord);
     expect(displays.join("\n").length).toBeLessThanOrEqual(4000);
-    if(name.includes('-ja-')){
-      const escaped=displays.map(text=>text.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')).join('<hr/>');
-      await page.setViewportSize({width:700,height:1000});
-      await page.setContent(`<html><head><meta charset="utf-8"><style>body{background:#313338;color:#dbdee1;font:14px/1.5 system-ui;padding:24px}article{background:#2b2d31;border-left:4px solid #5865f2;border-radius:8px;padding:18px;white-space:pre-wrap;overflow-wrap:anywhere}hr{border:0;border-top:1px solid #424449}</style></head><body><p>Discord Components V2 approximation · ${name}</p><article>${escaped}</article></body></html>`);
-      await page.screenshot({path:`test-results/alpha4-discord-${name}.png`,fullPage:true});
+    if (name.includes("-ja-")) {
+      const escaped = displays
+        .map((text) =>
+          text
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;"),
+        )
+        .join("<hr/>");
+      await page.setViewportSize({ width: 700, height: 1000 });
+      await page.setContent(
+        `<html><head><meta charset="utf-8"><style>body{background:#313338;color:#dbdee1;font:14px/1.5 system-ui;padding:24px}article{background:#2b2d31;border-left:4px solid #5865f2;border-radius:8px;padding:18px;white-space:pre-wrap;overflow-wrap:anywhere}hr{border:0;border-top:1px solid #424449}</style></head><body><p>Discord Components V2 approximation · ${name}</p><article>${escaped}</article></body></html>`,
+      );
+      await page.screenshot({
+        path: `test-results/alpha4-discord-${name}.png`,
+        fullPage: true,
+      });
     }
   }
 });
@@ -81,9 +103,12 @@ test("community settings save multiple purposes with the current revision and qu
   page,
 }) => {
   await page.goto("/dashboard");
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await navigateDashboard(page, "en", 4);
   const form = page.getByTestId("community-model-settings");
-  await form.locator("summary").filter({hasText:"Advanced purposes"}).click();
+  await form
+    .locator("summary")
+    .filter({ hasText: "Advanced purposes" })
+    .click();
   await form.getByRole("checkbox", { name: /Social conversation/ }).check();
   await form.getByRole("checkbox", { name: /Support \/ Q&A/ }).check();
   const saved = page.waitForResponse(

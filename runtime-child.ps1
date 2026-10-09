@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('infra','nexus','web','ngrok')][string]$Role,
+    [Parameter(Mandatory=$true)][ValidateSet('infra','nexus','web','ngrok','operator')][string]$Role,
     [Parameter(Mandatory=$true)][string]$Root
 )
 $ErrorActionPreference = 'Stop'
@@ -8,6 +8,7 @@ switch ($Role) {
     'infra' { & corepack pnpm infra; break }
     'nexus' { & corepack pnpm dev; break }
     'web' { & corepack pnpm web --dev; break }
+    'operator' { & corepack pnpm operator; break }
     'ngrok' { & ngrok http 3002; break }
 }
 exit $LASTEXITCODE

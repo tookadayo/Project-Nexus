@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>NEXUS Local Operations</title>
+    <link rel="stylesheet" href="/operator-ui.css" />
+    <link rel="stylesheet" href="/publication-document.css" />
+    <script defer src="/operator-ui.js"></script>
+  </head>
+  <body>
+    <header>
+      <a href="/" class="brand">NEXUS <span>LOCAL</span></a>
+      <div>
+        <select id="locale" aria-label="Language">
+          <option value="ja">日本語</option>
+          <option value="en">English</option></select
+        ><button id="logout" hidden></button>
+      </div>
+    </header>
+    <main>
+      <p id="notice" role="status" aria-live="polite"></p>
+      <section id="login">
+        <h1 data-copy="loginTitle"></h1>
+        <p data-copy="localOnly"></p>
+        <form id="login-form">
+          <label
+            ><span data-copy="password"></span
+            ><input
+              name="password"
+              type="password"
+              required
+              autocomplete="current-password"
+              maxlength="1024" /></label
+          ><button type="submit" data-copy="login"></button>
+        </form>
+        <p class="muted" data-copy="setup"></p>
+      </section>
+      <div id="workspace" hidden>
+        <nav>
+          <button data-tab="guilds" data-copy="guilds"></button
+          ><button data-tab="register" data-copy="register"></button
+          ><button data-tab="audit" data-copy="audit"></button
+          ><button data-tab="sessions" data-copy="sessions"></button
+          ><button data-tab="publications" data-copy="publications"></button
+          ><button data-tab="legal" data-copy="legal"></button
+          ><button id="reload" data-copy="reload"></button>
+        </nav>
+        <section id="overview"></section>
+        <section id="guilds">
+          <h1 data-copy="guilds"></h1>
+          <div class="columns">
+            <div id="guild-list"></div>
+            <article id="guild-detail"></article>
+          </div>
+        </section>
+        <section id="register" hidden>
+          <h1 data-copy="register"></h1>
+          <form id="register-form">
+            <label
+              ><span data-copy="guildId"></span
+              ><input
+                name="guildId"
+                inputmode="numeric"
+                pattern="[0-9]{17,20}"
+                required
+                maxlength="20" /></label
+            ><label
+              ><span data-copy="reason"></span
+              ><textarea name="reason" required maxlength="400"></textarea>
+            </label>
+            <p data-copy="registerHelp"></p>
+            <button type="submit" data-copy="register"></button>
+          </form>
+        </section>
+        <section id="audit" hidden></section>
+        <section id="sessions" hidden></section>
+        <section id="publications" hidden></section>
+        <section id="legal" hidden></section>
+      </div>
+      <dialog id="confirmation">
+        <h2 id="confirm-title"></h2>
+        <p id="confirm-target"></p>
+        <p id="confirm-impact"></p>
+        <p id="confirm-next"></p>
+        <form id="confirm-form">
+          <label
+            ><span data-copy="reason"></span
+            ><textarea name="reason" required maxlength="400"></textarea>
+          </label>
+          <div class="actions">
+            <button type="button" id="cancel" data-copy="cancel"></button
+            ><button type="submit" data-copy="confirm"></button>
+          </div>
+        </form>
+      </dialog>
+      <dialog
+        id="publication-confirmation"
+        aria-labelledby="publication-confirm-title"
+      >
+        <h2 id="publication-confirm-title"></h2>
+        <div id="publication-confirm-details"></div>
+        <form id="publication-confirm-form">
+          <div id="publication-confirm-checks"></div>
+          <p id="publication-confirm-status" role="status"></p>
+          <div class="actions">
+            <button
+              type="button"
+              id="publication-cancel"
+              data-copy="cancel"
+            ></button>
+            <button type="submit" data-copy="confirm"></button>
+          </div>
+        </form>
+      </dialog>
+    </main>
+    <footer data-copy="footer"></footer>
+  </body>
+</html>

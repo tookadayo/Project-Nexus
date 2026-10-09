@@ -1,3 +1,7 @@
+import { historySnapshot, filteredHistory } from "./history-projection";
+import { featureDecision } from "../../settings/src/billing/domain";
+import { EntitlementService } from "../../settings/src/billing/entitlements";
+import { SettingsService } from "../../settings/src/index";
 import { z } from "zod";
 import { sql, tenant, json, type Database } from "../../db/src/index";
 import type { Scope } from "../../shared/src/index";
@@ -77,10 +81,10 @@ export class InterventionReview {
       };
     });
   }
-  async list(s: Scope, actor: Actor) {
+  async list(s: Scope, actor: Actor, now = new Date()) {
     return this.db.transaction().execute(async (tx) => {
       await operationsAccess(tx, s, actor, "READ");
-      return interventionRows(tx, s);
+      return interventionRows(tx, s, now);
     });
   }
   async tick(s: Scope, now = new Date()) {
@@ -147,10 +151,74 @@ export class InterventionReview {
 export async function interventionRows(
   tx: import("../../db/src/index").Tx,
   s: Scope,
+  now = new Date(),
 ) {
-  return (
-    await sql`SELECT i.id,i.title,i.started_at,i.review_at,i.state,i.assigned_team_id,i.baseline,r.after_snapshot,r.comparison FROM operations_interventions i LEFT JOIN operations_intervention_reviews r ON r.organization_id=i.organization_id AND r.guild_id=i.guild_id AND r.intervention_id=i.id WHERE i.organization_id=${s.organizationId}::uuid AND i.guild_id=${s.guildId} ORDER BY i.started_at DESC LIMIT 100`.execute(
+  const state = await new EntitlementService(tx).effective(s, now);
+  const settings = await new SettingsService(tx).get(s);
+  // Chart windows and retained daily aggregates use closed UTC days. A valid
+  // 30-day snapshot must not expire partway through its last authorized day.
+  const day = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const bounds = (
+    await sql<{
+      cutoff: Date;
+      deleted: Date | null;
+    }>`SELECT greatest(${day}::timestamptz-make_interval(months=>${settings.aggregateRetentionMonths}),${day}::timestamptz-make_interval(days=>${state.limits.historyDays ?? 3650})) AS cutoff,(SELECT max(completed_at) FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash IS NOT NULL) AS deleted`.execute(
+      tx,
+    )
+  ).rows[0]!;
+  const cutoff = bounds.cutoff;
+  const rows = (
+    await sql<{
+      id: string;
+      title: string;
+      started_at: Date;
+      review_at: Date;
+      state: string;
+      assigned_team_id: string | null;
+      metric_query: unknown;
+      baseline: unknown;
+      after_snapshot: unknown;
+      comparison: unknown;
+    }>`SELECT i.metric_query,i.id,i.title,i.started_at,i.review_at,i.state,i.assigned_team_id,i.baseline,r.after_snapshot,r.comparison FROM operations_interventions i LEFT JOIN operations_intervention_reviews r ON r.organization_id=i.organization_id AND r.guild_id=i.guild_id AND r.intervention_id=i.id WHERE i.organization_id=${s.organizationId}::uuid AND i.guild_id=${s.guildId} ORDER BY i.started_at DESC LIMIT 100`.execute(
       tx,
     )
   ).rows;
+  return rows.flatMap((row) => {
+    const query = chartQuerySchema.safeParse(row.metric_query);
+    if (
+      state.privacyDeleted ||
+      row.started_at < cutoff ||
+      (bounds.deleted !== null && row.started_at <= bounds.deleted) ||
+      !query.success ||
+      (filteredHistory(query.data.filter) &&
+        !featureDecision(state, "surface_breakdowns").allowed)
+    )
+      return [];
+    const baseline = historySnapshot(row.baseline, state, cutoff);
+    const after =
+      row.after_snapshot === null
+        ? null
+        : historySnapshot(row.after_snapshot, state, cutoff);
+    if (!baseline || (row.after_snapshot !== null && !after)) return [];
+    // Recompute only the comparison of two fully permitted evidence summaries.
+    const comparison =
+      after && featureDecision(state, "comparable_periods").allowed
+        ? chartComparison(after.evidence, baseline.evidence)
+        : null;
+    return [
+      {
+        id: row.id,
+        title: row.title,
+        started_at: row.started_at,
+        review_at: row.review_at,
+        state: row.state,
+        assigned_team_id: row.assigned_team_id,
+        baseline,
+        after_snapshot: after,
+        comparison,
+      },
+    ];
+  });
 }

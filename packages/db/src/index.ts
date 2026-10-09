@@ -1,6 +1,7 @@
 import { Kysely, PostgresDialect, sql, type Transaction } from "kysely";
 import pg from "pg";
 import { readFile } from "node:fs/promises";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { scopeSchema, type Scope } from "../../shared/src/index";
 export type Database = Kysely<Record<string, never>>;
 export type Tx = Database | Transaction<Record<string, never>>;
@@ -81,6 +82,8 @@ export async function migrate(
       "048_billing_external_phases_and_financial_authority",
       "049_analysis_stabilization",
       "050_location_population_coverage",
+      "051_hosted_beta",
+      "052_official_publications",
     ].entries()) {
       const version = index + 1;
       if (
@@ -110,8 +113,39 @@ export function tenant(s: Scope) {
 export function json(value: unknown) {
   return sql`${JSON.stringify(value)}::jsonb`;
 }
+const heldReadFences = new AsyncLocalStorage<
+  { keys: ReadonlySet<string>; active: boolean }[]
+>();
+export function hasHeldReadFence(key: string) {
+  return (
+    heldReadFences
+      .getStore()
+      ?.some((fence) => fence.active && fence.keys.has(key)) ?? false
+  );
+}
+/** Only call after acquiring the listed session locks, and await all work before
+ * releasing them. This carries an existing fence through nested service calls;
+ * reacquiring it on another pooled connection can wait behind an exclusive
+ * stop/delete request that is itself waiting for this worker. */
+export async function withHeldReadFences<T>(
+  keys: string[],
+  work: () => Promise<T>,
+) {
+  const fence = { keys: new Set(keys), active: true };
+  try {
+    return await heldReadFences.run(
+      [...(heldReadFences.getStore() ?? []), fence],
+      work,
+    );
+  } finally {
+    // Async descendants cannot keep claiming the fence after its owner exits.
+    fence.active = false;
+  }
+}
 export async function privacyReadLock(tx: Tx, s: Scope) {
-  await sql`SELECT pg_advisory_xact_lock_shared(hashtextextended(${"privacy:" + s.organizationId + ":" + s.guildId},0))`.execute(
+  const key = "privacy:" + s.organizationId + ":" + s.guildId;
+  if (hasHeldReadFence(key)) return;
+  await sql`SELECT pg_advisory_xact_lock_shared(hashtextextended(${key},0))`.execute(
     tx,
   );
 }

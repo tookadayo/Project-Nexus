@@ -348,6 +348,7 @@ export class AttentionOperations {
     resolutionReason = "MANUAL",
     authorize?: (tx:Tx)=>Promise<void>,
     expectedVersion?:number,
+    actorHash?:string,
   ) {
     return this.db.transaction().execute(async (tx) => {
       await privacyReadLock(tx, s);
@@ -372,7 +373,7 @@ export class AttentionOperations {
         status !== "SNOOZED" || (snoozeUntil && snoozeUntil > at),
         "INVALID_SNOOZE",
       );
-      await sql`UPDATE attention_items SET status=${status},acknowledged_at=CASE WHEN ${status === "ACKNOWLEDGED"} THEN COALESCE(acknowledged_at,${at}) ELSE acknowledged_at END,snooze_until=${status === "SNOOZED" ? snoozeUntil : null},resolved_at=${status === "RESOLVED" ? at : null},resolution_reason=${status === "RESOLVED" ? resolutionReason : null},version=version+1,updated_at=${at} WHERE ${tenant(s)} AND message_id=${key}`.execute(
+      await sql`UPDATE attention_items SET status=${status},acknowledged_at=CASE WHEN ${status === "ACKNOWLEDGED"} THEN COALESCE(acknowledged_at,${at}) ELSE acknowledged_at END,snooze_until=${status === "SNOOZED" ? snoozeUntil : null},resolved_at=${status === "RESOLVED" ? at : null},resolution_reason=${["RESOLVED", "DISMISSED"].includes(status) ? resolutionReason : null},last_actor_hash=CASE WHEN ${actorHash !== undefined} THEN ${actorHash ?? null} ELSE last_actor_hash END,version=version+1,updated_at=${at} WHERE ${tenant(s)} AND message_id=${key}`.execute(
         tx,
       );
       await enqueue(

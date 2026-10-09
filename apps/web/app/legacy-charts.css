@@ -1,0 +1,63 @@
+.legacy-chart {
+  min-width: 0;
+  color: #172b4d;
+}
+.legacy-chart-note {
+  font-size: 14px;
+  line-height: 1.65;
+  color: #53627a;
+  margin: 8px 0 16px;
+}
+.legacy-chart-values {
+  border-top: 1px solid #dbe3ef;
+  margin-top: 14px;
+}
+.legacy-chart-values summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 12px 0;
+  font-size: 14px;
+}
+.legacy-chart-scroll {
+  max-width: 100%;
+  overflow: auto;
+}
+.legacy-chart-scroll:focus-visible,
+.legacy-chart-values summary:focus-visible {
+  outline: 3px solid #2758ca;
+  outline-offset: 2px;
+}
+.legacy-chart table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+  color: #172b4d;
+}
+.legacy-chart caption {
+  text-align: left;
+  color: #53627a;
+  padding: 8px 0;
+}
+.legacy-chart th,
+.legacy-chart td {
+  padding: 10px 12px;
+  border-bottom: 1px solid #dbe3ef;
+  text-align: left;
+  white-space: nowrap;
+}
+.legacy-chart th {
+  font-weight: 600;
+}
+.legacy-chart small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 400;
+}
+.legacy-chart .cohort-value-table td {
+  min-width: 100px;
+  border: 3px solid white;
+}
+.legacy-chart .cohort-value-table th {
+  background: #f3f6fb;
+}

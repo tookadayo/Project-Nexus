@@ -1,5 +1,13 @@
 "use client";
-import { useEffect, useState } from "react";
+import "./explore.css";
+import { ObservationChart } from "../observation-chart";
+import { CurrentAccessPanel } from "../current-access";
+import type { CurrentAccess } from "../../../../packages/operations/src/access-presentation";
+import { metricLabels, surfaceLabels } from "../analysis-labels";
+import { useDraft, useUnsavedChanges } from "../navigation-safety";
+import { exploreLocation, exploreQuery } from "./navigation";
+import { safeError } from "../safe-error";
+import { useEffect, useState, useRef, type SetStateAction } from "react";
 import {
   chartQuerySchema,
   type ChartSpec,
@@ -15,35 +23,114 @@ type Data = {
   spec: ChartSpec;
   views: View[];
   segments: { id: string; name: string; filters: ChartQuery["filter"] }[];
-  capabilities: { advanced: boolean; csv: boolean; historyDays: number | null };
+  capabilities: {
+    advanced: boolean;
+    compare: boolean;
+    canSave: boolean;
+    saveReason: string | null;
+    csv: boolean;
+    historyDays: number | null;
+    access?: CurrentAccess;
+  };
   channels: { id: string; type: number; observable: boolean }[];
 };
-export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
+const defaultQuery = chartQuerySchema.parse({});
+export function ExploreControls({
+  locale,
+  scope = "",
+  initialQuery = defaultQuery,
+  filtersReset = false,
+}: {
+  locale: "ja" | "en";
+  scope?: string;
+  initialQuery?: ChartQuery;
+  filtersReset?: boolean;
+}) {
   const ja = locale === "ja",
-    [query, setQuery] = useState<ChartQuery>(chartQuerySchema.parse({})),
+    [query, setQueryState] = useState<ChartQuery>(initialQuery),
     [data, setData] = useState<Data | null>(null),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
+    [reload, setReload] = useState(0),
+    [saving, setSaving] = useState(false),
     [name, setName] = useState(""),
     [shortcut, setShortcut] = useState<string>(""),
-    [selected, setSelected] = useState<View | null>(null);
-  const url = "/explore/data?q=" + encodeURIComponent(JSON.stringify(query));
-  async function load() {
-    setBusy(true);
-    setError("");
-    try {
-      const response = await fetch(url, { cache: "no-store" }),
-        result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? "UNAVAILABLE");
-      setData(result);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "UNAVAILABLE");
-    } finally {
-      setBusy(false);
+    [selected, setSelected] = useState<View | null>(null),
+    [filtersOpen, setFiltersOpen] = useState(
+      initialQuery.filter.surface !== "ALL" ||
+        initialQuery.filter.channelIds.length > 0 ||
+        initialQuery.filter.roleIds.length > 0 ||
+        initialQuery.filter.categoryIds.length > 0 ||
+        Boolean(initialQuery.filter.recipeVersionId),
+    );
+  const savingRef = useRef(false);
+  const draft = useDraft({ name, shortcut, query });
+  const canLeave = useUnsavedChanges(
+    (Boolean(name || selected) && draft.dirty) || saving,
+    locale,
+  );
+  const navigation = useRef({ canLeave });
+  navigation.current = { canLeave };
+  const index = useRef(0);
+  function setQuery(update: SetStateAction<ChartQuery>) {
+    const next = typeof update === "function" ? update(query) : update;
+    if (scope && chartQuerySchema.safeParse(next).success) {
+      index.current += 1;
+      window.history.pushState(
+        {
+          ...window.history.state,
+          nexusExplore: { scope, index: index.current },
+        },
+        "",
+        exploreLocation(next, scope),
+      );
     }
+    setQueryState(next);
   }
   useEffect(() => {
+    if (!scope) return;
+    index.current =
+      window.history.state?.nexusExplore?.scope === scope
+        ? window.history.state.nexusExplore.index
+        : 0;
+    window.history.replaceState(
+      {
+        ...window.history.state,
+        nexusExplore: { scope, index: index.current },
+      },
+      "",
+      exploreLocation(initialQuery, scope),
+    );
+    let restoring = false;
+    const restore = (event: PopStateEvent) => {
+      if (restoring) {
+        restoring = false;
+        return;
+      }
+      const target = event.state?.nexusExplore;
+      if (!navigation.current.canLeave()) {
+        restoring = true;
+        window.history.go(
+          target?.scope === scope ? index.current - target.index : 1,
+        );
+        return;
+      }
+      index.current = target?.scope === scope ? target.index : 0;
+      setQueryState(
+        exploreQuery(new URL(window.location.href).searchParams, scope),
+      );
+    };
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, [scope, initialQuery]);
+  const url =
+    "/explore/data?guild=" +
+    encodeURIComponent(scope) +
+    "&q=" +
+    encodeURIComponent(JSON.stringify(query));
+  useEffect(() => {
     let active = true;
+    setData(null);
     setBusy(true);
     fetch(url, { cache: "no-store" })
       .then(async (response) => {
@@ -63,8 +150,11 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
     return () => {
       active = false;
     };
-  }, [url]);
+  }, [url, reload]);
   async function save(action: "saveView" | "saveSegment") {
+    if (savingRef.current || !data?.capabilities.canSave) return;
+    savingRef.current = true;
+    setSaving(true);
     setBusy(true);
     setError("");
     try {
@@ -84,16 +174,22 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
           : { action, segment: { name, filters: query.filter } };
       const response = await fetch("/explore/data", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "X-Nexus-Guild": scope,
+          },
           body: JSON.stringify(payload),
         }),
         result = await response.json();
       if (!response.ok) throw new Error(result.error);
+      draft.saved();
       setSelected(null);
-      await load();
+      setReload((current) => current + 1);
     } catch (error) {
       setError(error instanceof Error ? error.message : "UNAVAILABLE");
     } finally {
+      savingRef.current = false;
+      setSaving(false);
       setBusy(false);
     }
   }
@@ -103,250 +199,276 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
       filter: { ...current.filter, ...patch },
     }));
   }
-  const spec = data?.spec,
-    maximum = Math.max(
-      1,
-      ...(spec?.series.flatMap((series) =>
-        series.points.map((p) => p.value ?? 0),
-      ) ?? []),
-    );
+  const spec = data?.spec;
+  const filtered =
+    query.filter.surface !== "ALL" ||
+    query.filter.channelIds.length > 0 ||
+    query.filter.roleIds.length > 0 ||
+    query.filter.categoryIds.length > 0 ||
+    Boolean(query.filter.recipeVersionId);
   return (
-    <>
+    <div className="explore-workspace">
+      {filtersReset && (
+        <p role="status">
+          {ja
+            ? "サーバーが変わったか、条件を確認できないため、絞り込み条件を初期状態に戻しました。"
+            : "Filters were reset because the server changed or the conditions could not be verified."}
+        </p>
+      )}
       <header className="page-head">
         <h1>{ja ? "コミュニティを分析" : "Explore your community"}</h1>
         <p>
           {ja
-            ? "観測された集計を比較し、運営の変化を確認します。変化の原因は断定しません。"
-            : "Compare aggregate observations and inspect operational changes. A change does not establish its cause."}
+            ? "活動の推移と対象ごとの差を確認します。集計の変化だけで原因は断定しません。"
+            : "See activity over time and differences across channels. A change in the data does not establish its cause."}
         </p>
       </header>
-      <section className="surface explore-controls">
-        <label>
-          {ja ? "指標" : "Metric"}
-          <select
-            value={query.metric}
-            onChange={(e) =>
-              setQuery({
-                ...query,
-                metric: e.target.value as ChartQuery["metric"],
-              })
-            }
-          >
-            {["reply", "forum", "voice", "event", "reaction", "poll"].map(
-              (metric) => (
-                <option key={metric}>{metric}</option>
-              ),
-            )}
-          </select>
-        </label>
-        <label>
-          {ja ? "期間" : "Period"}
-          <select
-            value={query.days}
-            onChange={(e) =>
-              setQuery({
-                ...query,
-                days: Number(e.target.value) as ChartQuery["days"],
-              })
-            }
-          >
-            {[7, 30, 90].map((days) => (
-              <option
-                key={days}
-                value={days}
-                disabled={
-                  data?.capabilities.historyDays !== null &&
-                  days > (data?.capabilities.historyDays ?? 30)
-                }
-              >
-                {days} days
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={query.compare}
-            disabled={!data?.capabilities.advanced}
-            onChange={(e) => setQuery({ ...query, compare: e.target.checked })}
-          />
-          {ja ? "前の同期間と比較" : "Compare previous period"}
-        </label>
+      {data?.capabilities.access && (
+        <CurrentAccessPanel access={data.capabilities.access} locale={locale} />
+      )}
+      <section
+        className="surface explore-controls"
+        aria-label={ja ? "分析する条件" : "Analysis conditions"}
+      >
+        <div className="explore-primary-controls">
+          <label>
+            {ja ? "指標" : "Metric"}
+            <select
+              value={query.metric}
+              onChange={(e) =>
+                setQuery({
+                  ...query,
+                  metric: e.target.value as ChartQuery["metric"],
+                })
+              }
+            >
+              {(
+                [
+                  "reply",
+                  "forum",
+                  "voice",
+                  "event",
+                  "reaction",
+                  "poll",
+                ] as const
+              ).map((metric) => (
+                <option key={metric} value={metric}>
+                  {metricLabels[metric][locale]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            {ja ? "期間" : "Period"}
+            <select
+              value={query.days}
+              onChange={(e) =>
+                setQuery({
+                  ...query,
+                  days: Number(e.target.value) as ChartQuery["days"],
+                })
+              }
+            >
+              {[7, 30, 90].map((days) => (
+                <option
+                  key={days}
+                  value={days}
+                  disabled={
+                    data?.capabilities.historyDays != null &&
+                    days > data.capabilities.historyDays
+                  }
+                >
+                  {days} {ja ? "日" : "days"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={query.compare}
+              disabled={!query.compare && !data?.capabilities.compare}
+              onChange={(e) =>
+                setQuery({ ...query, compare: e.target.checked })
+              }
+            />
+            {ja ? "前の同期間と比較" : "Compare previous period"}
+          </label>
+          {query.compare && (
+            <button
+              type="button"
+              onClick={() => setQuery({ ...query, compare: false })}
+            >
+              {ja ? "比較を解除" : "Turn off comparison"}
+            </button>
+          )}
+        </div>
+        <p className="explore-read-note">
+          {ja
+            ? "条件を変えると集計を表示します。この画面の確認で詳細分析の利用枠は消費しません。"
+            : "Results update as you change the conditions. Viewing this page does not consume detailed analysis credits."}
+        </p>
         {data?.capabilities.advanced && (
-          <>
-            <label>
-              {ja ? "観測面" : "Surface"}
-              <select
-                value={query.filter.surface}
-                onChange={(e) =>
-                  patchFilter({
-                    surface: e.target.value as ChartQuery["filter"]["surface"],
-                  })
-                }
-              >
-                {["ALL", "TEXT", "FORUM", "VOICE", "EVENT"].map((value) => (
-                  <option key={value}>{value}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              {ja ? "チャンネル（複数選択）" : "Channels (select several)"}
-              <select
-                multiple
-                value={query.filter.channelIds}
-                onChange={(e) =>
-                  patchFilter({
-                    channelIds: Array.from(
-                      e.target.selectedOptions,
-                      (option) => option.value,
+          <details
+            className="explore-filter-details"
+            open={filtersOpen}
+            onToggle={(event) => setFiltersOpen(event.currentTarget.open)}
+          >
+            <summary>
+              {ja ? "対象を絞り込む" : "Refine the scope"}
+              {filtered && (
+                <span>{ja ? " · 絞り込み中" : " · Filters applied"}</span>
+              )}
+            </summary>
+            <div className="explore-filter-grid">
+              <label>
+                {ja ? "活動の種類" : "Activity type"}
+                <select
+                  value={query.filter.surface}
+                  onChange={(e) =>
+                    patchFilter({
+                      surface: e.target
+                        .value as ChartQuery["filter"]["surface"],
+                    })
+                  }
+                >
+                  {(["ALL", "TEXT", "FORUM", "VOICE", "EVENT"] as const).map(
+                    (value) => (
+                      <option key={value} value={value}>
+                        {surfaceLabels[value][locale]}
+                      </option>
                     ),
-                  })
-                }
-              >
-                {data.channels.map((channel) => (
-                  <option
-                    key={channel.id}
-                    value={channel.id}
-                    disabled={!channel.observable}
-                  >
-                    #{channel.id} · {channel.type}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              {ja
-                ? "Role ID（カンマ区切り）"
-                : "Role cohort IDs (comma separated)"}
-              <input
-                value={query.filter.roleIds.join(",")}
-                onChange={(e) =>
-                  patchFilter({
-                    roleIds: e.target.value
-                      .split(",")
-                      .map((v) => v.trim())
-                      .filter(Boolean),
-                  })
-                }
-              />
-            </label>
-            <label>
-              {ja ? "カテゴリーID" : "Category IDs"}
-              <input
-                value={query.filter.categoryIds.join(",")}
-                onChange={(e) =>
-                  patchFilter({
-                    categoryIds: e.target.value
-                      .split(",")
-                      .map((v) => v.trim())
-                      .filter(Boolean),
-                  })
-                }
-              />
-            </label>
-            <label>
-              {ja ? "Recipe revision ID" : "Recipe revision ID"}
-              <input
-                value={query.filter.recipeVersionId ?? ""}
-                onChange={(e) =>
-                  patchFilter({ recipeVersionId: e.target.value || null })
-                }
-              />
-            </label>
-            <label>
-              {ja ? "タイムゾーン" : "Timezone"}
-              <input
-                value={query.timezone}
-                onChange={(e) =>
-                  setQuery({ ...query, timezone: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              {ja ? "保存したセグメント" : "Saved segment"}
-              <select
-                defaultValue=""
-                onChange={(e) => {
-                  const segment = data.segments.find(
-                    (s) => s.id === e.target.value,
-                  );
-                  if (segment) patchFilter(segment.filters);
-                }}
-              >
-                <option value="">—</option>
-                {data.segments.map((segment) => (
-                  <option key={segment.id} value={segment.id}>
-                    {segment.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </>
+                  )}
+                </select>
+              </label>
+              <label>
+                {ja ? "チャンネル（複数選択）" : "Channels (select several)"}
+                <select
+                  multiple
+                  value={query.filter.channelIds}
+                  onChange={(e) =>
+                    patchFilter({
+                      channelIds: Array.from(
+                        e.target.selectedOptions,
+                        (option) => option.value,
+                      ),
+                    })
+                  }
+                >
+                  {data.channels.map((channel) => (
+                    <option
+                      key={channel.id}
+                      value={channel.id}
+                      disabled={!channel.observable}
+                    >
+                      #{channel.id} ·{" "}
+                      {channel.type === 15
+                        ? ja
+                          ? "フォーラム"
+                          : "Forum"
+                        : [2, 13].includes(channel.type)
+                          ? ja
+                            ? "ボイス"
+                            : "Voice"
+                          : ja
+                            ? "テキスト"
+                            : "Text"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {ja
+                  ? "ロールID（カンマ区切り）"
+                  : "Role cohort IDs (comma separated)"}
+                <input
+                  value={query.filter.roleIds.join(",")}
+                  onChange={(e) =>
+                    patchFilter({
+                      roleIds: e.target.value
+                        .split(",")
+                        .map((v) => v.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                />
+              </label>
+              <label>
+                {ja ? "カテゴリーID" : "Category IDs"}
+                <input
+                  value={query.filter.categoryIds.join(",")}
+                  onChange={(e) =>
+                    patchFilter({
+                      categoryIds: e.target.value
+                        .split(",")
+                        .map((v) => v.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                />
+              </label>
+              <label>
+                {ja
+                  ? "測定方法の版ID（任意）"
+                  : "Measurement recipe version ID (optional)"}
+                <input
+                  aria-describedby="recipe-version-help"
+                  value={query.filter.recipeVersionId ?? ""}
+                  onChange={(e) =>
+                    patchFilter({ recipeVersionId: e.target.value || null })
+                  }
+                />
+              </label>
+              <p id="recipe-version-help">
+                {ja
+                  ? "特定の測定方法の版で得た記録に絞る場合だけ、その版のID（UUID）を入力します。改訂番号ではありません。空欄では版による絞り込みを行いません。"
+                  : "Enter the version ID (UUID), not its revision number, only to filter records collected with that measurement recipe version. Leave blank to include all versions."}
+              </p>
+              <label>
+                {ja ? "タイムゾーン" : "Timezone"}
+                <input
+                  value={query.timezone}
+                  onChange={(e) =>
+                    setQuery({ ...query, timezone: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                {ja ? "保存した絞り込み条件" : "Saved filters"}
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    const segment = data.segments.find(
+                      (s) => s.id === e.target.value,
+                    );
+                    if (segment) patchFilter(segment.filters);
+                  }}
+                >
+                  <option value="">—</option>
+                  {data.segments.map((segment) => (
+                    <option key={segment.id} value={segment.id}>
+                      {segment.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </details>
         )}
       </section>
-      {error && <p role="alert">{error}</p>}
+      {error && <p role="alert">{safeError(error, locale)}</p>}
       {busy && <p role="status">{ja ? "確認中…" : "Loading…"}</p>}
       {spec && (
         <>
-          <section className="surface">
-            <h2>{spec.title}</h2>
-            <p>
-              {spec.range.from.slice(0, 10)} — {spec.range.to.slice(0, 10)} ·{" "}
-              {spec.evidence.coverageState}
-            </p>
-            <strong>{spec.evidence.value ?? "NO DATA"}</strong>
-            <svg
-              role="img"
-              aria-label={spec.title}
-              viewBox="0 0 960 310"
-              style={{ width: "100%", maxHeight: 350 }}
-            >
-              {spec.series[0]?.points.map((point, index) => {
-                const width = 900 / spec.series[0]!.points.length,
-                  height = ((point.value ?? 0) / maximum) * 240;
-                return (
-                  <g key={point.bucket}>
-                    <title>
-                      {point.bucket}: {point.value ?? "NO DATA"} ·{" "}
-                      {point.evidence.coverageState}
-                    </title>
-                    <rect
-                      x={30 + index * width}
-                      y={270 - height}
-                      width={Math.max(1, width - 2)}
-                      height={point.value === null ? 5 : Math.max(1, height)}
-                      fill={point.value === null ? "#707e74" : "#a5cd51"}
-                    />
-                    {spec.series[1]?.points[index]?.value != null && (
-                      <circle
-                        cx={30 + (index + 0.5) * width}
-                        cy={
-                          270 -
-                          (spec.series[1]!.points[index]!.value! / maximum) *
-                            240
-                        }
-                        r={3}
-                        fill="#71b8ee"
-                      />
-                    )}
-                  </g>
-                );
-              })}
-            </svg>
-            {spec.comparison && (
-              <p>
-                {ja ? "前の期間" : "Previous"}:{" "}
-                {spec.comparison.value ?? "UNKNOWN"} ·{" "}
-                {spec.comparison.comparable
-                  ? (spec.comparison.absoluteChange ?? "UNKNOWN")
-                  : spec.comparison.blockers.join(", ")}{" "}
-                {spec.comparison.comparable &&
-                spec.comparison.relativeChange !== null
-                  ? `(${Math.round(spec.comparison.relativeChange * 100)}%)`
-                  : ""}
-              </p>
-            )}
+          <ObservationChart
+            spec={spec}
+            locale={locale}
+            onChannelSelect={(id) => {
+              setFiltersOpen(true);
+              patchFilter({ channelIds: [id] });
+            }}
+          />
+          <p>
             <a href={url + "&format=png"}>
               {ja ? "Discordと同じPNGを保存" : "Download the Discord PNG"}
             </a>
@@ -359,79 +481,21 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
                 </a>
               </>
             )}
-            <details>
-              <summary>Evidence</summary>
-              <p>{spec.evidence.definition}</p>
-              <p>{spec.evidence.coverageReasons.join(", ") || "COMPLETE"}</p>
-              <p>{spec.evidence.observationState}</p>
-              {spec.caveats.map((caveat) => (
-                <p key={caveat}>{caveat}</p>
-              ))}
-            </details>
-          </section>
-          {!!spec.breakdowns?.length && (
-            <section className="surface">
-              <h2>
-                {ja
-                  ? "チャンネル比較とDrilldown"
-                  : "Channel comparison and drilldown"}
-              </h2>
-              {spec.breakdowns.map((target) => (
-                <details key={target.channelId}>
-                  <summary>
-                    #{target.channelId} · {target.evidence.value ?? "NO DATA"}
-                  </summary>
-                  {target.points.map((point) => (
-                    <p key={point.bucket}>
-                      {point.bucket.slice(0, 10)} · {point.value ?? "NO DATA"} ·{" "}
-                      {point.evidence.coverageState}
-                    </p>
-                  ))}
-                  <button
-                    onClick={() =>
-                      patchFilter({ channelIds: [target.channelId] })
-                    }
-                  >
-                    {ja ? "このチャンネルを分析" : "Explore this channel"}
-                  </button>
-                </details>
-              ))}
-            </section>
-          )}
-          {!!spec.heatmap.length && (
-            <section className="surface">
-              <h2>{ja ? "曜日 × 時間" : "Weekday × hour"}</h2>
-              <p>
-                {query.timezone} · ? = NO DATA · 0 ={" "}
-                {ja ? "観測済み、該当なし" : "observed, none recorded"}
-              </p>
-              <div className="heatmap-grid">
-                {spec.heatmap.map((cell) => (
-                  <span
-                    key={cell.weekday + ":" + cell.hour}
-                    title={`${cell.weekday} · ${cell.hour}:00 · ${cell.value ?? "NO DATA"}`}
-                    style={{
-                      background:
-                        cell.value === null
-                          ? "#26342b"
-                          : `rgba(165,205,81,${Math.min(1, 0.08 + (cell.value ?? 0) / Math.max(1, ...spec.heatmap.map((c) => c.value ?? 0)))})`,
-                    }}
-                  >
-                    {cell.value === null ? "?" : cell.value}
-                  </span>
-                ))}
-              </div>
-            </section>
-          )}
+          </p>
         </>
       )}
       {data?.capabilities.advanced && (
-        <section className="surface">
+        <section className="surface explore-save">
           <h2>
             {ja
               ? "保存ビューとレポートショートカット"
               : "Saved views and report shortcuts"}
           </h2>
+          {!data.capabilities.canSave && (
+            <p role="status">
+              {safeError(data.capabilities.saveReason ?? "UNAVAILABLE", locale)}
+            </p>
+          )}
           <label>
             {ja ? "名前" : "Name"}
             <input
@@ -452,7 +516,8 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
             </select>
           </label>
           <button
-            disabled={busy || !name}
+            className="primary"
+            disabled={busy || !name || !data.capabilities.canSave}
             onClick={() => void save("saveView")}
           >
             {selected
@@ -464,15 +529,27 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
                 : "Save view"}
           </button>
           <button
-            disabled={busy || !name}
+            disabled={busy || !name || !data.capabilities.canSave}
             onClick={() => void save("saveSegment")}
           >
-            {ja ? "セグメントを保存" : "Save segment"}
+            {ja ? "絞り込み条件を保存" : "Save filters"}
           </button>
           {data.views.map((view) => (
             <button
               key={view.id}
               onClick={() => {
+                if (!canLeave()) return;
+                draft.saved({
+                  name: view.name,
+                  shortcut: view.shortcut ?? "",
+                  query: {
+                    metric: view.metric,
+                    days: view.days,
+                    compare: view.compare,
+                    timezone: view.timezone,
+                    filter: view.filter,
+                  },
+                });
                 setSelected(view);
                 setName(view.name);
                 setShortcut(view.shortcut ?? "");
@@ -490,6 +567,6 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
           ))}
         </section>
       )}
-    </>
+    </div>
   );
 }

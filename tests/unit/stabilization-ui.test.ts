@@ -11,7 +11,7 @@ const capture=()=>{const intents:Record<string,unknown>[]=[];return{intents,issu
 it.each(["ja","en"] as const)("separates basic activity from counted detailed analysis with stable entries (%s)",async locale=>{
  const {issue,intents}=capture(),home=await workflowHome(issue,{analysis:{remaining:0,latest:null,attentionCount:0}},locale);
  validatePanel(home);
- expect(intents.map(i=>[i.action,i.page])).toEqual([["controlNavigate","analysis"],["controlNavigate","attention"],["analysisMenu",undefined],["controlNavigate","settings"],["controlNavigate","settings"]]);
+ expect(intents.map(i=>[i.action,i.page])).toEqual([["controlNavigate","analysis"],["controlNavigate","attention"],["analysisMenu",undefined],["analysisHistory",undefined],["controlNavigate","settings"],["controlNavigate","settings"]]);
  const sections=(home.components![0] as unknown as {components:Record<string,unknown>[]}).components.filter(c=>c.type===ComponentType.Section);
  expect(JSON.stringify(sections[0])).not.toContain(locale==="ja"?"0回":"remaining");
  expect(JSON.stringify(sections[2])).toContain(locale==="ja"?"0回":"remaining: 0");

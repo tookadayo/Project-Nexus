@@ -1,0 +1,215 @@
+/* Public reading surfaces only. No dashboard or operator selectors. */
+.nexus-site .site-footer.nx-site-footer {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 48px 40px 56px;
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 2fr);
+  align-items: start;
+  gap: 48px;
+  border-top: 1px solid #dbe1e8;
+  color: #17212b;
+  background: #fff;
+}
+.nexus-site .nx-site-footer .nx-footer-brand p {
+  max-width: 27ch;
+  margin: 18px 0 0;
+  color: #526171;
+  font-size: 14px;
+  line-height: 1.8;
+}
+.nexus-site .nx-site-footer > nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+  gap: 32px;
+  margin: 0;
+}
+.nexus-site .nx-footer-group {
+  min-width: 0;
+}
+.nexus-site .nx-footer-group h2 {
+  margin: 0 0 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+.nexus-site .nx-footer-group ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.nexus-site .nx-footer-group a {
+  display: inline-block;
+  padding-block: 9px;
+  color: #526171;
+  font-size: 14px;
+  line-height: 1.6;
+  font-weight: 450;
+  text-decoration: none;
+  text-underline-offset: 4px;
+  overflow-wrap: break-word;
+}
+.nexus-site .nx-footer-group a:hover {
+  color: #2758ca;
+  text-decoration: underline;
+}
+.nexus-site .nx-site-footer a:focus-visible {
+  outline: 3px solid #2758ca;
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+.site.nexus-site .nx-product-demo-link {
+  display: inline-block;
+  margin-top: 16px;
+  padding-block: 8px;
+}
+.site.nexus-site
+  :is(.news-page, .legal-page.support-page, .publication-status-page) {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1000px;
+  margin-inline: auto;
+  padding: 72px 40px 88px;
+}
+.site.nexus-site :is(.news-page, .support-page, .publication-status-page) h1 {
+  margin: 0 0 24px;
+  font-size: clamp(36px, 4vw, 52px);
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+  overflow-wrap: break-word;
+}
+.site.nexus-site :is(.news-page, .support-page, .publication-status-page) h2 {
+  font-size: clamp(22px, 2.5vw, 28px);
+  line-height: 1.5;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+.site.nexus-site :is(.news-intro, .support-page, .publication-status-page) p {
+  max-width: 76ch;
+}
+.site.nexus-site .support-page > :is(section, .nx-beta-notice) {
+  margin-top: 48px;
+}
+.site.nexus-site .support-page .nx-beta-notice {
+  width: 100%;
+  margin-bottom: 48px;
+}
+.site.nexus-site .support-page > ul {
+  margin: 24px 0 40px;
+  padding-left: 24px;
+  color: #526171;
+  line-height: 1.85;
+}
+.site.nexus-site .support-page > ul > li + li {
+  margin-top: 20px;
+}
+.site.nexus-site .nx-support-form-details {
+  margin-top: 24px;
+  border-block: 1px solid #dbe1e8;
+}
+.site.nexus-site .nx-support-form-details > summary {
+  padding: 18px 0;
+  min-height: 44px;
+  color: #17212b;
+  font-size: 16px;
+  font-weight: 550;
+  line-height: 1.7;
+  cursor: pointer;
+}
+.site.nexus-site .support-page .nx-support-form-details .support-contact-form {
+  margin: 0 0 24px;
+}
+.site.nexus-site .news-page .news-filters {
+  padding: 24px 0;
+  border-width: 1px 0;
+  border-radius: 0;
+  background: transparent;
+}
+.site.nexus-site .news-page .news-contents h2 {
+  font-size: 16px;
+}
+.site.nexus-site .publication-status-page .publication-status {
+  border-left-width: 1px;
+  border-radius: 8px;
+}
+@media (max-width: 960px) {
+  .nexus-site .site-footer.nx-site-footer {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+    padding-inline: 32px;
+  }
+  .nexus-site .nx-site-footer .nx-footer-brand p {
+    max-width: 48ch;
+  }
+}
+@media (max-width: 600px) {
+  .nexus-site .site-footer.nx-site-footer {
+    padding: 40px 24px;
+  }
+  .nexus-site .nx-site-footer > nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 32px 24px;
+  }
+  .nexus-site .nx-footer-group:last-child {
+    grid-column: 1 / -1;
+  }
+  .site.nexus-site
+    :is(.news-page, .legal-page.support-page, .publication-status-page) {
+    padding: 48px 24px 64px;
+  }
+  .site.nexus-site :is(.news-page, .support-page, .publication-status-page) h1 {
+    font-size: clamp(32px, 8vw, 40px);
+  }
+  .site.nexus-site .support-page > :is(section, .nx-beta-notice) {
+    margin-top: 36px;
+  }
+}
+@media print {
+  .nexus-site .site-footer.nx-site-footer {
+    display: none;
+  }
+  .site.nexus-site
+    :is(.news-page, .legal-page.support-page, .publication-status-page) {
+    max-width: none;
+    padding: 0;
+  }
+}
+
+/* The real product screenshot needs a full row, not a narrow hero column. */
+.site.nexus-site .nx-product-hero {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: 48px;
+}
+.site.nexus-site .nx-product-hero .nx-hero-copy {
+  width: 100%;
+  max-width: 880px;
+  text-align: center;
+}
+.site.nexus-site .nx-product-hero h1 {
+  max-width: 880px;
+  margin-inline: auto;
+}
+.site.nexus-site .nx-product-hero :is(.nx-lead, .nx-availability) {
+  margin-inline: auto;
+  max-width: 680px;
+}
+.site.nexus-site .nx-product-hero .cta-row {
+  justify-content: center;
+}
+.site.nexus-site .nx-product-hero .nx-hero-example {
+  width: 100%;
+  max-width: 1024px;
+  text-align: left;
+}
+@media (max-width: 600px) {
+  .site.nexus-site .nx-product-hero {
+    gap: 32px;
+  }
+}

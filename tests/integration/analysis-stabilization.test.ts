@@ -13,7 +13,7 @@ import {
   analysisUsage,
 } from "../../packages/analysis/src/index";
 import { analysisFixture } from "../fixtures/analysis";
-import { infrastructure } from "../fixtures/infrastructure";
+import { isolatedPostgres as infrastructure } from "../fixtures/postgres";
 import { PrivacyService } from "../../packages/security/src/privacy";
 import { analysisVault } from "../fixtures/analysis";
 import { analysisMetrics } from "../../packages/analytics/src/analysis";

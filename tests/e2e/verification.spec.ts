@@ -1,5 +1,6 @@
 import { test, expect, type BrowserContext } from "@playwright/test";
 import { createHash, createCipheriv, randomBytes } from "node:crypto";
+import { navigateDashboard } from "./dashboard-navigation";
 const base = `http://127.0.0.1:${process.env.NEXUS_VERIFICATION_WEB_PORT ?? 3150}`,
   fixture = `http://127.0.0.1:${process.env.NEXUS_VERIFICATION_API_PORT ?? 3151}`;
 const ids = [
@@ -159,7 +160,7 @@ test("issuer-only redemption, confirmed disconnect and relinking preserve settin
   const before = await (
     await request.get(`${fixture}/fixture/data/${ids[1]}`)
   ).json();
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await navigateDashboard(page, "en", 4);
   await page.getByRole("button", { name: "Disconnect", exact: true }).click();
   await expect(
     page.getByRole("dialog", { name: "Confirm disconnect" }),

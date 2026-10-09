@@ -1,3 +1,4 @@
+import { assertDisplayedGuild } from "../auth/displayed-guild";
 import { NextRequest, NextResponse } from "next/server";
 import { dashboardContext, openSession, authMode } from "../auth/session";
 import { failureResponse } from "../auth/failure-response";
@@ -10,7 +11,7 @@ export async function POST(req: NextRequest) {
       "NOT_STARTED",
     );
   if (
-    !openSession(req.cookies.get("nexus_session")?.value) &&
+    !(await openSession(req.cookies.get("nexus_session")?.value)) &&
     authMode() !== "development"
   )
     return failureResponse(
@@ -36,6 +37,11 @@ export async function POST(req: NextRequest) {
       new DomainError("NEXUS_ROLE_REQUIRED", 403),
       "NOT_STARTED",
     );
+  try {
+    assertDisplayedGuild(req.headers.get("X-Nexus-Guild"), context.guildId);
+  } catch (error) {
+    return failureResponse(error, "NOT_STARTED");
+  }
   const body = await req.text();
   if (body.length > 32768)
     return failureResponse(
@@ -125,14 +131,12 @@ export async function POST(req: NextRequest) {
       });
     }
     if (action === "attention_action") {
-      url = base + "/attention/action";
-      payload = JSON.stringify({
-        channelId: parsed.channelId,
-        messageId: parsed.messageId,
-        status: parsed.status,
-        minutes: parsed.minutes,
-        untilToday: parsed.untilToday,
-      });
+      // Old tabs have no row version or current per-channel authorization.
+      // Reload into the scoped Attention route before recording a response.
+      return failureResponse(
+        new DomainError("REVISION_CONFLICT", 409),
+        "NOT_STARTED",
+      );
     }
     if (action === "action_template") {
       url = base + "/actions/draft";

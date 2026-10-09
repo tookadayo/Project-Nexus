@@ -5,10 +5,10 @@ export const text = <T>(locale: Locale, en: T, ja: T): T =>
 // Public copy describes shipped behavior only. Availability belongs to plan-registry.
 export const faqs = [
   {
-    question: ["What does NEXUS observe?", "何を観測できますか？"],
+    question: ["What activity can I review?", "どんな活動を確認できますか？"],
     answer: [
-      "NEXUS observes newcomer activity, direct replies, Thread and Forum responses, Reaction and Poll participation, qualified Voice co-presence, and Event signup and observable attendance. Event signup is separate from attendance; Voice co-presence does not prove conversation.",
-      "新規メンバーの活動、直接返信、Thread・Forumの応答、Reaction・Pollの参加、条件を満たすVoice同席、Eventの参加登録と観測できる出席を確認できます。参加登録と出席は別で、Voice同席は会話の証明ではありません。",
+      "NEXUS helps you review community activity, including newcomer activity, direct replies, Thread and Forum responses, Reaction and Poll participation, qualified Voice co-presence, and Event signup and observable attendance. Event signup is separate from attendance; Voice co-presence does not prove conversation.",
+      "コミュニティの活動を確認でき、新規メンバーの活動、直接返信、Thread・Forumの応答、Reaction・Pollの参加、条件を満たすVoice同席、Eventの参加登録と観測できる出席を確認できます。参加登録と出席は別で、Voice同席は会話の証明ではありません。",
     ],
   },
   {
@@ -34,8 +34,8 @@ export const faqs = [
   {
     question: ["How can I use NEXUS?", "利用するにはどうすればよいですか？"],
     answer: [
-      "NEXUS is currently an alpha release. Development self-host setup is documented in the repository. Ask support about availability for your server. Paid checkout is not configured and paid prices are not published.",
-      "現在はアルファ版です。開発用セルフホストの手順をリポジトリで公開しています。サーバーでの利用についてはサポートにお問い合わせください。有料決済は未設定で、有料価格は公開していません。",
+      "NEXUS is preparing Closed Beta 1: free, invitation-only access for a limited period and within usage limits. General registration, paid checkout, Live and extra analysis packs are not open. Check the participation information on Support; developer self-host setup remains documented in the repository.",
+      "無料・招待制のClosed Beta 1を準備中です。招待されたサーバーへ、期限・利用上限つきで提供する予定です。一般登録・有料決済・Live・追加回数パックは開始していません。参加案内はサポートで確認できます。開発用セルフホストの手順はリポジトリにあります。",
     ],
   },
 ] as const;

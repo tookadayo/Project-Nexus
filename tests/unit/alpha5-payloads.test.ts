@@ -58,7 +58,7 @@ for (const [name, index, state] of scenarios)
     expect(texts.join("").length).toBeLessThanOrEqual(4000);
     expect(panel).toMatchSnapshot();
     if (state === "INTENT_UNAVAILABLE")
-      expect(texts.join("\n")).toContain("現在の状況を確認できません");
+      expect(texts.join("\n")).toContain("現在の状態を確認できません。時間をおいて更新してください。");
     if (state === "NO_DATA") expect(texts.join("\n")).not.toContain("0%");
   });
 it("error payload describes only the known failure and returns to its context", async () => {

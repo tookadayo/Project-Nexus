@@ -27,6 +27,13 @@ import {
   type ChartSpec,
 } from "../../../packages/analytics/src/chart-spec";
 import { renderChartPng } from "../../../packages/analytics/src/chart-renderer";
+import {
+  chartLocale,
+  chartSummary,
+  chartCaveat,
+} from "../../../packages/analytics/src/chart-language";
+import { SettingsService } from "../../../packages/settings/src/index";
+import { resolveLocale } from "../../../packages/discord-panels/src/i18n";
 import { enqueue } from "../../../packages/discord/src/outbox";
 export class ReportWorker {
   constructor(private readonly db: Database) {}
@@ -147,6 +154,9 @@ export class ReportWorker {
           )
         ).rows[0]!;
       });
+      const locale = chartLocale(
+        resolveLocale((await new SettingsService(this.db).get(s)).uiLanguage),
+      );
       const files: { filename: string; dataBase64: string }[] = [];
       if (template.format !== "WEBHOOK")
         for (let i = 0; i < charts.length; i++) {
@@ -162,7 +172,9 @@ export class ReportWorker {
               .digest("hex");
             files.push({
               filename: `nexus-report-${i}.png`,
-              dataBase64: (await renderChartPng(chart)).toString("base64"),
+              dataBase64: (await renderChartPng(chart, locale)).toString(
+                "base64",
+              ),
             });
           } else
             files.push({
@@ -232,7 +244,7 @@ export class ReportWorker {
           assert(template.kind === "DISCORD", "DESTINATION_KIND_MISMATCH", 409);
           const body = {
               content:
-                `${template.role_id ? "<@&" + template.role_id + "> " : ""}**${template.title}**\n${run.scheduled_at.toISOString()}\n${charts.map((chart) => `${chart.title}: ${chart.evidence.value ?? "NO DATA"} · ${chart.evidence.coverageState}`).join("\n")}\n${template.include_attention ? "Open Attention: " + summary.open_attention + "\n" : ""}${template.include_interventions ? "Intervention reviews ready: " + summary.reviews_ready + "\n" : ""}${template.footer}`.slice(
+                `${template.role_id ? "<@&" + template.role_id + "> " : ""}**${template.title}**\n${run.scheduled_at.toISOString()}\n${charts.map((chart) => chartSummary(chart, locale)).join("\n\n")}\n${chartCaveat(locale)}\n${template.include_attention ? (locale === "ja" ? "要確認の記録: " : "Open review records: ") + summary.open_attention + "\n" : ""}${template.include_interventions ? (locale === "ja" ? "振り返り可能な対応記録: " : "Follow-up records ready for review: ") + summary.reviews_ready + "\n" : ""}${template.footer}`.slice(
                   0,
                   2000,
                 ),
@@ -243,6 +255,7 @@ export class ReportWorker {
               ...(template.format === "DISCORD"
                 ? {
                     embeds: files.map((file) => ({
+                      color: 0x2758ca,
                       image: { url: "attachment://" + file.filename },
                     })),
                   }

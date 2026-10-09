@@ -1,8 +1,16 @@
 # NEXUS documentation
 
-Current release: **0.6.0-alpha.10** — Discord Analysis Operations. PostgreSQL is the normalized billing and
+Current release: **0.6.0-alpha.14** — Community operations UX, official announcements and private legal review. PostgreSQL is the normalized billing and
 entitlement source of truth. Current documents retain their established paths
 where moving them would create unnecessary link churn.
+
+## alpha14
+
+- [Scope and local verification](alpha14-acceptance.md)
+- [Official site](official-site-r3.md)
+- [Announcements and private legal review](alpha14-official-publications-acceptance.md)
+- [Publication conditions](alpha14-publication-gates.md)
+- [Existing test failures](alpha14-existing-test-failures.md)
 
 ## Website design
 
@@ -31,6 +39,7 @@ where moving them would create unnecessary link churn.
 
 ## Architecture, product and evidence
 
+- [alpha.11 analysis clarity, follow-up and focused verification](alpha11-analysis-clarity.md)
 - [alpha.10 Discord UX, analysis lifecycle, usage and recovery](alpha10-analysis-operations.md)
 
 - [Measurement evidence contract](measurement-evidence-contract.md)
@@ -45,6 +54,10 @@ where moving them would create unnecessary link churn.
 
 ## Operations and security
 
+- [alpha.12 implementation and focused verification](alpha12-hosted-beta.md)
+- [alpha.12 outbox review fixes and delivery regression](alpha12-outbox-review-fixes.md)
+- [alpha.12 local operator procedures (Mac / Windows 11)](alpha12-operator-operations.md)
+- [alpha.12 authentication and data lifecycle inventory](alpha12-data-inventory.md)
 - [Server verification](server-verification.md)
 - [Backup and restore](backup-restore-operations.md)
 - [Privacy inventory](privacy-data-inventory.md)

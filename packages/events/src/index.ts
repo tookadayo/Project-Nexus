@@ -17,6 +17,7 @@ export const eventSchema = z
     gatewaySessionId: z.string().min(1),
     sequence: z.number().int(),
     ordinal: z.number().int().nonnegative().optional(),
+    betaGeneration:z.number().int().nonnegative().optional(),
     schemaVersion: z.literal(2).optional(),
     kind: z.enum([
       "member.joined",

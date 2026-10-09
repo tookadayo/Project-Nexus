@@ -1,3 +1,6 @@
+import {betaAccess,betaWork} from '../packages/security/src/hosted-beta';
+import {BetaLifecycle} from '../packages/security/src/beta-lifecycle';
+import {hostedBetaEnabled} from '../packages/config/src/hosted-beta';
 import { analysisRuntime } from "../apps/worker/src/analysis";
 import { AttentionOperations } from "../packages/operations/src/attention.js";
 import { CommunityOperationsWorker } from "../apps/worker/src/community-operations";
@@ -78,6 +81,7 @@ const onboarding = new OnboardingService(db, settings, vault);
 const privacy = new PrivacyService(db, vault, settings, (s, hash) =>
   scrubStream(redis, vault, s, hash),
 );
+const betaLifecycle=new BetaLifecycle(db,privacy);
 const analytics = new AnalyticsService(db, settings);
 const lifecycle = new LifecycleService(db, vault, settings, discord);
 const nativeSnapshots = new NativeMemberSnapshotWorker(db, vault, discord);
@@ -177,7 +181,7 @@ const consumer = new StreamConsumer(
   `${hostname()}-${process.pid}`,
   60000,
   async () => {
-    for (const s of await scopes()) await lifecycle.streamReset(s);
+    for (const s of await scopes())try{await lifecycle.streamReset(s);}catch(error){if(!(error instanceof Error)||error.message!=='BETA_UNAVAILABLE')throw error;}
   },
 );
 await consumer.init();
@@ -209,18 +213,16 @@ const worker = new Worker<Scope>(
         for (let i = 0; i < 30 && (await actions.tick(s)); i++) {
           /* bounded drain */
         }
-        for (let i = 0; i < 5 && (await nativeSnapshots.tick(s)); i++) {
+        for (let i = 0; i < 5 && (await betaWork(db,s,()=>nativeSnapshots.tick(s))); i++) {
           /* bounded REST snapshots */
         }
-        await optimization.tick(s);
-        await new AttentionOperations(db).observe(s, await settings.get(s));
-        await communityOperations.tick(s);
+        await betaWork(db,s,async()=>{await optimization.tick(s);await new AttentionOperations(db).observe(s,await settings.get(s));await communityOperations.tick(s);});
       } finally {
         span.end();
       }
     });
   },
-  { connection, concurrency: 4 },
+  { connection, concurrency: hostedBetaEnabled()?1:4 },
 );
 worker.on("error", () =>
   process.stderr.write("Background worker unavailable\n"),
@@ -253,24 +255,29 @@ const loop = async () => {
       await gateway.publisher.recover();
       if (Date.now() - lastMaintenance > 10000) {
         await billingWorker.project();
-        await discovery.batch();
+        await betaLifecycle.tick();
+        for(const s of await scopes())await privacy.purge(s);
+        await discovery.batch(new Date(),hostedBetaEnabled()?1:4);
         if (Date.now() - lastCapabilities > 1800000) {
           for (const s of await scopes()) {
-            const configuration = await settings.get(s);
+            try{await db.transaction().execute(tx=>betaAccess(tx,s));}catch(error){if(error instanceof Error&&error.message==='BETA_UNAVAILABLE')continue;throw error;}
+          const configuration = await settings.get(s);
             if (configuration.enabled)
-              await requestCapabilityRefresh(db, s, "periodic");
+              await betaWork(db,s,()=>requestCapabilityRefresh(db, s, "periodic"));
           }
           lastCapabilities = Date.now();
         }
         if (Date.now() - lastAggregate > 3600000) {
-          for (const s of await scopes()) await analytics.materialize(s);
+          for (const s of await scopes())try{await betaWork(db,s,()=>analytics.materialize(s));}catch(error){if(!(error instanceof Error)||error.message!=='BETA_UNAVAILABLE')throw error;}
           lastAggregate = Date.now();
         }
         if (Date.now() - lastWeekly > 3600000) {
-          for (const s of await scopes()) await weekly.tick(s);
+          for (const s of await scopes())try{await betaWork(db,s,()=>weekly.tick(s));}catch(error){if(!(error instanceof Error)||error.message!=='BETA_UNAVAILABLE')throw error;}
           lastWeekly = Date.now();
         }
         for (const s of await scopes()) {
+          try{await db.transaction().execute(tx=>betaAccess(tx,s));}catch(error){if(error instanceof Error&&error.message==="BETA_UNAVAILABLE")continue;throw error;}
+          try{await betaWork(db,s,async()=>{
           await retryCommands(s);
           const voiceConfiguration = await settings.get(s);
           if (voiceConfiguration.enabled) await billingWorker.tick(s);
@@ -285,7 +292,8 @@ const loop = async () => {
             backoff: { type: "exponential", delay: 1000 },
           });
           await helpers.tick(s);
-          await privacy.purge(s);
+
+          });}catch(error){if(!(error instanceof Error)||error.message!=='BETA_UNAVAILABLE')throw error;}
         }
         await redis.xtrim(STREAM, "MINID", `${Date.now() - 86400000}-0`);
         lastMaintenance = Date.now();
@@ -330,7 +338,8 @@ async function syncCommands(s: Scope) {
 }
 for (const guild of gateway.client.guilds.cache.values()) {
   const s = scopeForGuild(guild.id);
-  await db.transaction().execute((tx) => ensureGuild(tx, s));
+  if(hostedBetaEnabled())try{await db.transaction().execute(tx=>betaAccess(tx,s));}catch(error){if(error instanceof Error&&error.message==="BETA_UNAVAILABLE")continue;throw error;}
+  await db.transaction().execute(async tx=>{await betaAccess(tx,s);await ensureGuild(tx,s);});
   await requestCapabilityRefresh(db, s, "startup");
   await retryCommands(s);
 }
@@ -338,10 +347,9 @@ gateway.client.on("guildCreate", (guild) => {
   const s = scopeForGuild(guild.id);
   void db
     .transaction()
-    .execute((tx) => ensureGuild(tx, s))
+    .execute(async tx=>{await betaAccess(tx,s);await ensureGuild(tx,s);})
     .then(async () => {
-      await recordProductEvent(db, s, "guild_installed");
-      await retryCommands(s);
+      await betaWork(db,s,async()=>{await recordProductEvent(db, s, "guild_installed");await retryCommands(s);});
     })
     .catch((error) =>
       logFailure({

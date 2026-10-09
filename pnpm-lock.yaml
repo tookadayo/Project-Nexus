@@ -97,6 +97,8 @@ importers:
 
   apps/interaction: {}
 
+  apps/operator: {}
+
   apps/web:
     dependencies:
       '@stripe/react-stripe-js':
