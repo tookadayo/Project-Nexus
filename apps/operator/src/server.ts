@@ -1,4 +1,9 @@
 import Fastify from "fastify";
+import { readLegalCandidate } from "./legal-candidates";
+import {
+  readConfirmedLegalContacts,
+  type LegalContactsLoader,
+} from "./legal-contacts";
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import {
@@ -10,6 +15,10 @@ import { BetaOperator } from "../../../packages/security/src/beta-operator";
 import { sql, type Database } from "../../../packages/db/src/index";
 import { isDomainError } from "../../../packages/shared/src/index";
 import { BETA_ACTIVE_MAX } from "../../../packages/config/src/hosted-beta";
+import {
+  OfficialPublications,
+  type LegalCandidateLoader,
+} from "../../../packages/operations/src/publication";
 
 export function operatorBoundary(
   headers: Record<string, string | string[] | undefined>,
@@ -47,6 +56,10 @@ export function createOperatorServer(
   auth: OperatorAuth,
   beta: BetaOperator,
   origin = "http://127.0.0.1:3210",
+  options: {
+    readLegalCandidate?: LegalCandidateLoader;
+    readConfirmedLegalContacts?: LegalContactsLoader;
+  } = {},
 ) {
   const url = new URL(origin);
   if (
@@ -64,6 +77,7 @@ export function createOperatorServer(
     reply
       .header("Cache-Control", "no-store")
       .header("X-Content-Type-Options", "nosniff")
+      .header("X-Robots-Tag", "noindex, nofollow, noarchive")
       .header(
         "Content-Security-Policy",
         "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
@@ -241,6 +255,82 @@ export function createOperatorServer(
         )
       ).rows,
     };
+  });
+  const publications = new OfficialPublications(
+    db,
+    options.readLegalCandidate ?? readLegalCandidate,
+  );
+
+  app.get("/publication-document.css", async (_req, reply) =>
+    reply
+      .type("text/css")
+      .send(
+        await readFile(
+          new URL(
+            "../../../packages/presentation/src/publication-document.css",
+            import.meta.url,
+          ),
+          "utf8",
+        ),
+      ),
+  );
+  app.get("/operator/publications", async (req) => {
+    await authorize(req);
+    return { items: await publications.list() };
+  });
+  app.get<{ Params: { id: string } }>(
+    "/operator/publications/:id",
+    async (req) => {
+      await authorize(req);
+      return publications.detail(req.params.id);
+    },
+  );
+  app.get<{
+    Params: { id: string };
+    Querystring: { revision?: string; locale?: string };
+  }>("/operator/publications/:id/preview", async (req) => {
+    await authorize(req);
+    const query = z
+      .object({
+        revision: z.coerce.number().int().nonnegative(),
+        locale: z.enum(["ja", "en"]).default("ja"),
+      })
+      .strict()
+      .parse(req.query);
+    return publications.preview(req.params.id, query.revision, query.locale);
+  });
+  app.post("/operator/publications", { bodyLimit: 262144 }, async (req) => {
+    await authorize(req, true);
+    return publications.change(req.body);
+  });
+  app.get("/operator/legal", async (req) => {
+    await authorize(req);
+    return {
+      ...(await publications.legal()),
+      confirmedContacts: await (
+        options.readConfirmedLegalContacts ?? readConfirmedLegalContacts
+      )(),
+    };
+  });
+  app.post("/operator/legal", { bodyLimit: 262144 }, async (req) => {
+    await authorize(req, true);
+    return publications.saveLegal(req.body);
+  });
+  app.get<{
+    Params: { document: string; locale: string };
+    Querystring: { revision?: string };
+  }>("/operator/legal/:document/:locale", async (req) => {
+    await authorize(req);
+    const revision = z.coerce
+      .number()
+      .int()
+      .nonnegative()
+      .parse(req.query.revision);
+    return publications.legalPreview(
+      req.params.document,
+      req.params.locale,
+      revision,
+    );
   });
   return app;
 }

@@ -2,6 +2,7 @@
 import { useId, useRef, useState, useEffect } from "react";
 import { ConfirmationDialog } from "./confirmation-dialog";
 import type { ChartSpec } from "../../../packages/analytics/src/chart-spec";
+import { chartLinePath } from "../../../packages/analytics/src/chart-language";
 import {
   chartTitle,
   chartUnit,
@@ -55,7 +56,10 @@ export function ObservationChart({
     ),
     unit = chartUnit(locale),
     value = (n: number | null) => chartValue(n, locale),
-    date = (s: string) => chartDate(s, locale);
+    date = (s: string) => chartDate(s, locale),
+    pointX = (index: number) =>
+      60 + ((index + 0.5) * (plotWidth - 72)) / Math.max(1, current.length),
+    pointY = (n: number) => 256 - (n / max) * 210;
   const open = (selected: Selection, target: HTMLElement | SVGElement) => {
     origin.current = target;
     setSelection(selected);
@@ -73,25 +77,28 @@ export function ObservationChart({
       className={`observation-chart${compact ? " compact" : ""}`}
       aria-labelledby={id + "-title"}
     >
+      <p className="chart-purpose">
+        {ja ? "日ごとの活動の変化" : "How activity changes over time"}
+      </p>
       <h2 id={id + "-title"}>{chartTitle(spec, locale)}</h2>
       <p>{metricDescription[spec.metric][ja ? 0 : 1]}</p>
       <p>
         {date(spec.range.from)} — {date(spec.range.to)}{" "}
         {ja ? "（終了時点を含まない）" : "(end exclusive)"} · UTC
       </p>
-      <p>
+      <p className="chart-total">
         {ja ? "合計" : "Total"}: <strong>{value(spec.evidence.value)}</strong>{" "}
         {unit} · {evidenceLabel(spec.evidence.observationState, locale)} ·{" "}
         {evidenceLabel(spec.evidence.coverageState, locale)}
       </p>
       <div className="chart-legend">
         <span className="chart-current">
-          ■ {ja ? "本期間" : "Current period"}
+          ● ━ {ja ? "本期間" : "Current period"}
         </span>
         {previous.length > 0 && (
           <span className="chart-previous">
-            ● {ja ? "比較期間" : "Previous period"}: {date(previous[0]!.bucket)}{" "}
-            — {date(previous.at(-1)!.bucket)}
+            ◆ ┄ {ja ? "比較期間" : "Previous period"}:{" "}
+            {date(previous[0]!.bucket)} — {date(previous.at(-1)!.bucket)}
           </span>
         )}
         <span>
@@ -136,6 +143,16 @@ export function ObservationChart({
               </text>
             </g>
           ))}
+          <path
+            className="chart-line"
+            d={chartLinePath(current, pointX, pointY)}
+          />
+          {previous.length > 0 && (
+            <path
+              className="chart-line chart-line-previous"
+              d={chartLinePath(previous, pointX, pointY)}
+            />
+          )}
           {current.map((p, i) => {
             const step = (plotWidth - 72) / Math.max(1, current.length),
               x = 60 + i * step,
@@ -183,20 +200,20 @@ export function ObservationChart({
                     ?
                   </text>
                 ) : (
-                  <rect
-                    className="chart-bar"
-                    x={x + 2}
-                    y={256 - height}
-                    width={Math.max(1, step - 4)}
-                    height={Math.max(2, height)}
+                  <circle
+                    className="chart-point"
+                    cx={x + step / 2}
+                    cy={256 - height}
+                    r="4"
                   />
                 )}
                 {previous[i]?.value != null && (
-                  <circle
+                  <rect
                     className="chart-dot"
-                    cx={x + step / 2}
-                    cy={256 - (previous[i]!.value! / max) * 210}
-                    r="4"
+                    x={x + step / 2 - 3.5}
+                    y={256 - (previous[i]!.value! / max) * 210 - 3.5}
+                    width="7"
+                    height="7"
                   />
                 )}
                 {((i % stride === 0 && current.length - 1 - i >= stride / 2) ||
@@ -348,13 +365,13 @@ export function ObservationChart({
       {!compact && !!spec.heatmap.length && (
         <section>
           <h3>
-            {ja ? "曜日・時間ごとの件数" : "Observations by weekday and hour"}
+            {ja ? "曜日・時間ごとの件数" : "Activity by weekday and hour"}
           </h3>
           <p>
             {spec.range.timezone} · {unit} ·{" "}
             {ja
               ? "色が濃いほど件数が多い"
-              : "Darker blue means more observations"}
+              : "Darker blue means more recorded activities"}
             : 0–{heatMax}.{" "}
             {ja
               ? "?は欠測・不明、0は取得できた範囲でのゼロです。"
@@ -442,7 +459,7 @@ export function ObservationChart({
           {evidenceLabel(spec.evidence.coverageState, locale)}
         </p>
         <p>
-          {ja ? "集計対象の観測数" : "Sample observations"}:{" "}
+          {ja ? "集計に使えた記録数" : "Records used"}:{" "}
           {spec.evidence.sampleSize}
         </p>
         {spec.evidence.coverageReasons.length > 0 && (
@@ -458,7 +475,7 @@ export function ObservationChart({
         )}
         <p>
           {ja
-            ? "日別グラフは完了したUTC日を使用します。ロール条件は現在観測できた所属に基づきます。活動の件数を個人の評価や継続参加率として扱いません。変化の原因や対応の効果は断定できません。時間別の取得範囲は保持された元の記録に限られ、欠測を0件には置き換えません。"
+            ? "日別グラフは完了したUTC日を使用します。ロール条件は現在確認できた所属に基づきます。活動の件数を個人の評価や継続参加率として扱いません。変化の原因や対応の効果は断定できません。時間別の取得範囲は保持された元の記録に限られ、欠測を0件には置き換えません。"
             : "Daily charts use completed UTC days. Role filters use the current observed cohort. Observation counts are not individual scores or retention rates. Changes do not establish causes or intervention effects. Hourly coverage is limited to retained raw observations; missing values are not zero."}
         </p>
       </details>

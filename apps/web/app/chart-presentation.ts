@@ -1,16 +1,11 @@
 import type { ChartSpec } from "../../../packages/analytics/src/chart-spec";
-import { metricLabels } from "./analysis-labels";
-export type ChartLocale = "ja" | "en";
-export const chartTitle = (spec: ChartSpec, locale: ChartLocale) =>
-  metricLabels[spec.metric][locale];
-export const chartUnit = (locale: ChartLocale) =>
-  locale === "ja" ? "件（確認できた活動）" : "observations";
-export const chartValue = (value: number | null, locale: ChartLocale) =>
-  value === null
-    ? locale === "ja"
-      ? "確認できません"
-      : "Unavailable"
-    : new Intl.NumberFormat(locale).format(value);
+import type { ChartLocale } from "../../../packages/analytics/src/chart-language";
+export {
+  chartTitle,
+  chartUnit,
+  chartValue,
+  type ChartLocale,
+} from "../../../packages/analytics/src/chart-language";
 export const chartDate = (date: string, locale: ChartLocale) =>
   new Intl.DateTimeFormat(locale, {
     year: "numeric",
@@ -22,9 +17,9 @@ export function evidenceLabel(code: string, locale: ChartLocale) {
   const labels: Record<string, [string, string]> = {
     COMPLETE: ["取得できた範囲", "Available data"],
     PARTIAL: ["一部のデータのみ", "Partial data"],
-    LOWER_BOUND: ["確認できた下限", "Observed lower bound"],
+    LOWER_BOUND: ["確認できた下限", "Confirmed lower bound"],
     UNKNOWN: ["確認できません", "Unavailable"],
-    OBSERVED: ["確認済み", "Observed"],
+    OBSERVED: ["確認済み", "Confirmed"],
     NO_ELIGIBLE: ["集計対象のデータがありません", "No eligible data"],
     COLLECTING: ["データを収集中です", "Collecting data"],
     INSUFFICIENT_SAMPLE: [

@@ -1,149 +1,199 @@
 import { BetaNotice } from "../landing/beta-notice";
+import { HeroExample } from "../landing/hero-example";
+import { CommunityWorkflow } from "../landing/workflow";
 import { Preview, SiteCta, SiteShell, copy, siteLocale } from "../public-ui";
+
 export default async function Product() {
   const locale = await siteLocale();
-  const steps = [
-    {
-      tag: "ACTIVITY",
-      title: copy(
-        locale,
-        "新規メンバーの活動を確認する",
-        "See how far newcomers get.",
-      ),
-      body: copy(
-        locale,
-        "参加、最初の活動、他の人との交流、参加後の活動を、取得できた範囲で分けて表示します。",
-        "Separate joining, first activity, human connection, and activity after joining using observed data.",
-      ),
-      detail: copy(
-        locale,
-        "対象者なし、測定中、人数不足、取得失敗を区別。",
-        "Distinguish no eligible members, incomplete observations, small samples and unavailable data.",
-      ),
-    },
-    {
-      tag: "ATTENTION",
-      title: copy(
-        locale,
-        "返信待ちの投稿を見つける",
-        "Bring unanswered posts into view.",
-      ),
-      body: copy(
-        locale,
-        "設定された時間を過ぎても直接返信が確認できない新規メンバーの投稿を、Discordの対応画面にまとめます。",
-        "Bring newcomer posts without a confirmed direct reply after your configured delay into a Discord attention queue.",
-      ),
-      detail: copy(
-        locale,
-        "スタッフ確認・後で確認・解決を明確に区別。",
-        "Acknowledge, snooze, and resolve remain distinct actions.",
-      ),
-    },
-    {
-      tag: "EVIDENCE",
-      title: copy(
-        locale,
-        "比較人数と対象期間を見る",
-        "Show the reason and the rule.",
-      ),
-      body: copy(
-        locale,
-        "提案には観測した人数、期間、比較の可否を添えます。測定に使う活動と除外条件も確認できます。",
-        "Recommendations include their sample, observation period, and whether comparison is supported. Inspect measured activity and exclusions.",
-      ),
-      detail: copy(
-        locale,
-        "イベント登録を参加実績とは扱いません。",
-        "Event signup is labeled signup, never attendance.",
-      ),
-    },
-    {
-      tag: "SETTINGS",
-      title: copy(
-        locale,
-        "変更内容を確認して適用する",
-        "Preview the change before applying it.",
-      ),
-      body: copy(
-        locale,
-        "返信通知などの改善案は、対象、待ち時間、通知先、上限を確認してから適用します。",
-        "Check audience, delay, destination, and limits before enabling an improvement such as a reply alert.",
-      ),
-      detail: copy(
-        locale,
-        "権限と安全上限は既存の運用ルールを使用。",
-        "Existing permissions and safety limits apply.",
-      ),
-    },
-    {
-      tag: "RESULTS",
-      title: copy(
-        locale,
-        "改善前後の結果を見る",
-        "Read outcomes with their limits.",
-      ),
-      body: copy(
-        locale,
-        "通常の場合と改善した場合を見比べ、観測途中や人数不足なら結論を急ぎません。",
-        "Compare usual and improved experiences. When observations are incomplete, results stay inconclusive.",
-      ),
-      detail: copy(
-        locale,
-        "サンプルや観測状況を結果と一緒に表示。",
-        "Sample sizes and observation state appear with results.",
-      ),
-    },
-  ];
   return (
     <SiteShell locale={locale}>
-      <BetaNotice locale={locale} />
-      <section className="site-hero product-hero">
-        <div className="hero-copy">
-          <p className="site-eyebrow">PRODUCT / NEXUS</p>
-          <h1>
+      <section
+        className="nx-container nx-hero nx-product-hero"
+        aria-labelledby="product-heading"
+      >
+        <div className="nx-hero-copy">
+          <h1 id="product-heading">
             {copy(
               locale,
-              <>
-                <span className="nx-heading-phrase">新規メンバーの</span>
-                <span className="nx-heading-phrase">返信を確認。</span>
-              </>,
-              <>Track newcomer replies in Discord and Web.</>,
+              "Discordの活動と、投稿への返信状況を確認する。",
+              "Review Discord activity and replies to posts.",
             )}
           </h1>
-          <p className="site-lead">
+          <p className="nx-lead">
             {copy(
               locale,
-              "NEXUSはDiscordコミュニティの運営を支援する製品です。サーバーの目的、観測できる事実、対応が必要な場所、変更後の結果をつなぎます。",
-              "NEXUS supports Discord community operations: choose a community purpose, inspect observed evidence, handle attention items, and review what changed.",
+              "コミュニティの活動を知り、投稿を確認し、対応後を振り返る。DiscordとWebで、それぞれの仕事に必要な情報を確認できます。",
+              "Understand activity, review a post, and look back on your response. Discord and Web bring the right context to each part of your work.",
             )}
           </p>
           <SiteCta locale={locale} secondary={false} />
+          <a className="nx-text-link nx-product-demo-link" href="#demo">
+            {copy(locale, "操作デモを見る", "Try the interactive demo")}
+          </a>
+          <p className="nx-availability">
+            {copy(
+              locale,
+              "Closed Beta 1は準備中 · 無料・招待制 · 期限・利用上限あり",
+              "Closed Beta 1 is in preparation · Free and invitation-only · Limited duration and usage",
+            )}
+            {" · "}
+            <a href="#invitation-beta">
+              {copy(locale, "提供条件を見る", "Participation conditions")}
+            </a>
+          </p>
         </div>
-        <Preview locale={locale} />
+        <HeroExample locale={locale} />
       </section>
-      <section className="site-section product-steps">
-        {steps.map((step) => (
-          <article className="product-step" key={step.tag}>
-            <div>
-              <p className="site-eyebrow">{step.tag}</p>
-              <h2>{step.title}</h2>
-              <p>{step.body}</p>
+      <section
+        id="demo"
+        className="nx-demo-section"
+        aria-labelledby="product-demo-heading"
+      >
+        <div className="nx-container">
+          <div className="nx-demo-intro">
+            <div className="nx-section-heading">
+              <h2 id="product-demo-heading">
+                {copy(
+                  locale,
+                  "操作デモで、使い方を確かめる。",
+                  "Try the demo and explore how NEXUS works.",
+                )}
+              </h2>
             </div>
-            <div className="step-detail">
-              <p>{step.detail}</p>
-            </div>
-          </article>
-        ))}
+            <p>
+              {copy(
+                locale,
+                "合成データで7日・30日を切り替え、投稿の表示例や測定の根拠を確認できます。実際の分析や保存は行いません。",
+                "Explore 7 or 30 days of synthetic data, a sample post and the measurement context. No real analysis runs or saves.",
+              )}
+            </p>
+          </div>
+          <Preview locale={locale} />
+        </div>
       </section>
-      <section className="site-section final-cta">
-        <h2>
+      <section
+        className="nx-section nx-container"
+        aria-labelledby="product-workflow-heading"
+      >
+        <div className="nx-section-heading">
+          <h2 id="product-workflow-heading">
+            {copy(
+              locale,
+              "活動を確認し、対応を記録する",
+              "Review activity and record your response",
+            )}
+          </h2>
+          <p>
+            {copy(
+              locale,
+              "新規参加者の支援も、既存メンバーとの日々の交流も。個人の評価や満足度を推定せず、確認できる事実から進めます。",
+              "From welcoming new members to everyday activity with established members. Work from available facts without inferring individual performance or satisfaction.",
+            )}
+          </p>
+        </div>
+        <CommunityWorkflow locale={locale} />
+      </section>
+      <section
+        className="nx-tinted-section nx-section"
+        aria-labelledby="surfaces-heading"
+      >
+        <div className="nx-container">
+          <div className="nx-section-heading">
+            <h2 id="surfaces-heading">
+              {copy(
+                locale,
+                "WebとDiscordで確認できること",
+                "What you can review in Web and Discord",
+              )}
+            </h2>
+          </div>
+          <div className="nx-product-surfaces">
+            <article>
+              <h3>Web</h3>
+              <p>
+                {copy(
+                  locale,
+                  "ホームから要確認・分析・履歴へ。対象期間や条件を確かめて結果を読み、収集状況と設定を管理します。",
+                  "Start from Home, then open Attention, Analysis or History. Read results alongside periods and conditions, and manage collection status and settings.",
+                )}
+              </p>
+            </article>
+            <article>
+              <h3>Discord</h3>
+              <p>
+                {copy(
+                  locale,
+                  "/nexus panel から日々の確認と対応へ。本文は元の投稿で読み、権限を持つ運営者が確認・保留・対応済みを記録します。",
+                  "Open /nexus panel for daily checks and follow-up. Read the original post, then record a staff check, snooze or handled state with the required permissions.",
+                )}
+              </p>
+            </article>
+          </div>
+          <p className="nx-product-access-note">
+            {copy(
+              locale,
+              "画面や操作ごとに現在の権限を確認します。収集中・データ不足・取得不能をゼロと区別し、条件が合わない結果は比較できない理由を示します。",
+              "Current permissions apply to each view and action. Collection in progress, insufficient data and unavailable results stay distinct from zero. Incompatible results explain why they cannot be compared.",
+            )}
+          </p>
+        </div>
+      </section>
+      <div className="nx-container nx-beta-section">
+        <BetaNotice locale={locale} />
+      </div>
+      <section
+        className="nx-section nx-container nx-product-boundaries"
+        aria-labelledby="boundaries-heading"
+      >
+        <h2 id="boundaries-heading">
           {copy(
             locale,
-            "対応が必要な投稿を確認する。",
-            "Review posts needing attention.",
+            "使うデータと、分かること",
+            "The data NEXUS uses and what it can tell you",
           )}
         </h2>
-        <SiteCta locale={locale} />
+        <ul>
+          <li>
+            {copy(
+              locale,
+              "本文・添付・DM内容・Voice音声は保存しません。活動の種類、時刻、測定と対応に必要なメタデータを扱います。",
+              "Message text, attachments, DM contents and Voice audio are not stored. NEXUS uses activity types, timestamps and metadata needed for measurement and follow-up.",
+            )}
+          </li>
+          <li>
+            {copy(
+              locale,
+              "返信や他者の参加の確認は、問題の解決を示しません。「対応済み」は運営者による記録です。ボイスチャンネルへの同席は、会話したことの証明ではありません。",
+              "A detected reply or another person's participation does not prove resolution. Handled is a record made by an operator. Voice co-presence does not prove that a conversation took place.",
+            )}
+          </li>
+          <li>
+            {copy(
+              locale,
+              "無料・招待制のClosed Beta 1を準備しています。有料決済と追加分析回数の購入は開始していません。",
+              "We are preparing free, invitation-only Closed Beta 1. Paid checkout and extra analysis packs are not open.",
+            )}
+          </li>
+        </ul>
+        <div className="nx-product-links">
+          <a className="nx-text-link" href="/privacy">
+            {copy(
+              locale,
+              "プライバシーポリシーの公開状況",
+              "Privacy Policy availability",
+            )}
+          </a>
+          <a className="nx-text-link" href="/pricing">
+            {copy(locale, "通常プランの構成", "Standard plan structure")}
+          </a>
+          <a className="nx-text-link" href="/support">
+            {copy(
+              locale,
+              "提供条件と既知の制約",
+              "Availability and known limitations",
+            )}
+          </a>
+        </div>
       </section>
     </SiteShell>
   );

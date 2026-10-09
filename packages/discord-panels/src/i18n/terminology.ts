@@ -52,5 +52,5 @@ export const activityWindow = (locale: "ja" | "en", from = 7, through = 14) =>
     : `Activity ${from}–${through} days after joining`;
 export const replyDenominator = (locale: "ja" | "en", metric: Measurement) =>
   locale === "ja"
-    ? `返信あり ${metric.responded} / ${metric.eligible}人 · 参加後${metric.observationDays}日間の観測を完了`
-    : `Replied ${metric.responded} / ${metric.eligible} members · ${metric.observationDays}-day observation complete`;
+    ? `返信あり ${metric.responded} / ${metric.eligible}人 · 参加後${metric.observationDays}日間の記録がそろっています`
+    : `Replied ${metric.responded} / ${metric.eligible} members · ${metric.observationDays}-day collection complete`;

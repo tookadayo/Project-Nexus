@@ -58,9 +58,17 @@ export async function GET(request: NextRequest) {
       });
     }
     if (params.get("format") === "png")
-      return new Response(new Uint8Array(await renderChartPng(spec)), {
-        headers: { "Content-Type": "image/png", "Cache-Control": "no-store" },
-      });
+      return new Response(
+        new Uint8Array(
+          await renderChartPng(
+            spec,
+            request.cookies.get("nexus_locale")?.value === "ja" ? "ja" : "en",
+          ),
+        ),
+        {
+          headers: { "Content-Type": "image/png", "Cache-Control": "no-store" },
+        },
+      );
     const capabilities = await context.services.db
       .transaction()
       .execute((tx) =>

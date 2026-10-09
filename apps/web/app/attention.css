@@ -1,0 +1,268 @@
+.attention-view .page-head {
+  align-items: flex-start;
+  gap: 1.2rem;
+}
+.attention-view .page-head h1 {
+  margin-bottom: 0.45rem;
+}
+.attention-view .page-head p:last-child {
+  max-width: 46rem;
+  margin: 0;
+  color: #475569;
+}
+.attention-scope {
+  border-left: 3px solid #c6daf7;
+  padding: 0.1rem 0 0.1rem 1rem;
+  margin: 1.5rem 0;
+  display: block;
+}
+.attention-scope summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.7;
+  color: #38516c;
+}
+.attention-scope[open] summary {
+  margin-bottom: 0.75rem;
+}
+.attention-scope p {
+  margin: 0;
+  line-height: 1.7;
+  font-size: 0.9rem;
+  max-width: 55rem;
+}
+.attention-text-button {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  color: #1558aa;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  padding: 0.5rem;
+}
+.attention-filters {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: 1.5rem 0;
+}
+.attention-filters label {
+  display: grid;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  flex: 1;
+  min-width: 15rem;
+}
+.attention-filters select {
+  width: 100%;
+  min-height: 44px;
+}
+.attention-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 1rem;
+  margin: 1rem 0;
+}
+.attention-summary p {
+  margin: 0;
+  color: #475569;
+  font-size: 0.85rem;
+}
+.attention-summary p:first-child {
+  flex-shrink: 0;
+  font-size: 0.95rem;
+}
+.attention-summary strong {
+  font-size: 1.1rem;
+  color: #183450;
+}
+.attention-summary p:last-child {
+  max-width: 30rem;
+  text-align: right;
+}
+.attention-summary span {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+.attention-view .attention-list {
+  display: grid;
+  gap: 0;
+}
+.attention-view .attention-card {
+  border: 0;
+  border-bottom: 1px solid #e2e8f0;
+  border-radius: 0;
+  padding: 1.4rem 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 13rem;
+  gap: 1.25rem;
+  box-shadow: none;
+  background: transparent;
+}
+.attention-item-heading {
+  display: flex;
+  gap: 0.7rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.attention-item-heading h2 {
+  font-size: 1.03rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.attention-view .badge {
+  font-size: 0.73rem;
+  background: #edf4ff;
+  color: #1e4f8f;
+  white-space: normal;
+}
+.attention-post > p {
+  color: #475569;
+  font-size: 0.88rem;
+  line-height: 1.65;
+  margin: 0.6rem 0;
+}
+.attention-post-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.9rem;
+  color: #64748b;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.attention-post-meta > span:first-child {
+  font-weight: 600;
+}
+.attention-view .attention-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+.attention-actions > a {
+  text-align: center;
+  justify-content: center;
+  min-height: 44px;
+}
+.attention-record summary {
+  padding: 0.65rem 0.25rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: #1558aa;
+  text-align: center;
+}
+.attention-record > div {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.7rem;
+  background: #f3f7fc;
+  border-radius: 0.65rem;
+}
+.attention-record p {
+  font-size: 0.75rem;
+  line-height: 1.55;
+  margin: 0;
+}
+.attention-record label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+}
+.attention-record button,
+.attention-record select {
+  font-size: 0.78rem;
+  min-height: 40px;
+  width: 100%;
+}
+.attention-pagination {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  margin-top: 1.5rem;
+}
+.attention-loading {
+  padding: 2rem 0;
+  color: #475569;
+}
+.attention-readonly {
+  color: #475569;
+  font-size: 0.85rem;
+  margin: 1rem 0;
+}
+.attention-history-detail {
+  margin-top: 1.25rem;
+}
+.attention-history-detail > summary {
+  cursor: pointer;
+  padding: 0.7rem 0;
+  font-weight: 600;
+  color: #38516c;
+}
+.attention-history-detail .surface {
+  margin-top: 1rem;
+}
+.attention-view button:focus-visible,
+.attention-view summary:focus-visible,
+.attention-view a:focus-visible,
+.attention-view select:focus-visible {
+  outline: 3px solid #5a97e8;
+  outline-offset: 3px;
+}
+@media (max-width: 720px) {
+  .attention-scope {
+    display: block;
+  }
+  .attention-scope button {
+    padding-left: 0;
+    margin-top: 0.4rem;
+    white-space: normal;
+    text-align: left;
+  }
+  .attention-view .page-head {
+    flex-wrap: wrap;
+  }
+  .attention-view .page-head > button {
+    align-self: flex-start;
+  }
+  .attention-summary {
+    display: block;
+  }
+  .attention-summary p:last-child {
+    text-align: left;
+    margin-top: 0.7rem;
+  }
+  .attention-filters {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .attention-filters label {
+    min-width: 0;
+  }
+  .attention-view .attention-card {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+  .attention-view .attention-actions {
+    align-items: stretch;
+  }
+  .attention-record summary {
+    text-align: left;
+  }
+  .attention-pagination {
+    justify-content: stretch;
+  }
+  .attention-pagination button {
+    flex: 1;
+    padding: 0.7rem 0.5rem;
+  }
+  .attention-view .attention-post-meta {
+    font-size: 0.8rem;
+  }
+}

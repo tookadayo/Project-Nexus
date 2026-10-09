@@ -140,3 +140,19 @@ it("restores only allowed dashboard filters and rejects cross-server Explore fil
   url.searchParams.set("q", JSON.stringify({ ...query, token: "private" }));
   expect(exploreQuery(url.searchParams, a)).toEqual(defaults);
 });
+
+it("preserves Attention filters and its scoped page cursor during hydration without carrying it to another view", () => {
+  const href =
+    "https://example.invalid/dashboard?view=8&attentionState=OPEN&attentionChannel=333333333333333333&attentionCursor=synthetic-page-2&secret=drop";
+  expect(dashboardLocation(href, 8)).toBe(
+    "/dashboard?view=8&attentionState=OPEN&attentionChannel=333333333333333333&attentionCursor=synthetic-page-2",
+  );
+  expect(dashboardLocation(href, 0)).toBe("/dashboard");
+  expect(dashboardLocation(href, 5)).toBe("/dashboard?view=5");
+  expect(
+    dashboardLocation(
+      "https://example.invalid/dashboard?view=8&attentionState=UNKNOWN&attentionChannel=wrong",
+      8,
+    ),
+  ).toBe("/dashboard?view=8");
+});

@@ -22,14 +22,14 @@ async function render(page:'overview'|'settings'|'analysis'|'community',data:Con
 }
 it.each(['ja','en'] as const)('keeps confirmed zero and unavailable observations distinct across Home and activity (%s)',async locale=>{
  const noMembers=await render('overview',{community:community()},locale);
- expect(noMembers.json).toContain(locale==='ja'?'現在、対応が必要な項目はありません。':'No items currently require action.');
+ expect(noMembers.json).toContain(locale==='ja'?'現在の条件で、追加された要確認の記録はありません。':'No review records are listed under the current conditions.');
  expect(noMembers.json).toContain(locale==='ja'?'基本の分析':'Basic analysis');
  const metric={...result.metrics[0]!,quality:'COMPLETE' as const,evidence:{...result.metrics[0]!.evidence,value:0,observationState:'OBSERVED' as const,coverageState:'COMPLETE' as const}};
  const zero=await render('analysis',{basicAnalysis:{result:{...result,metrics:[metric]},from:run.period_start,to:run.period_end,channelCount:1}},locale);
  expect(zero.json).toContain(locale==='ja'?'0件':'0 items');
  const unavailable=await render('overview',{community:community({daily:{ready:false,todayJoined:null,todayConnected:null,attentionCount:null}})},locale);
- expect(unavailable.json).toContain(locale==='ja'?'現在の状況を確認できません':'The current situation is unavailable');
- expect(unavailable.json).not.toContain(locale==='ja'?'対応が必要な項目はありません':'No items currently require action');
+ expect(unavailable.json).toContain(locale==='ja'?'現在の状態を確認できません。時間をおいて更新してください。':'We cannot determine the current status. Refresh again later.');
+ expect(unavailable.json).not.toContain(locale==='ja'?'現在の条件で、追加された要確認の記録はありません。':'No review records are listed under the current conditions.');
 });
 it.each(['ja','en'] as const)('keeps activity, review and detailed analysis in stable positions (%s)',async locale=>{
  const home=await render('overview',{community:community({daily:{ready:true,todayJoined:4,todayConnected:3,attentionCount:2},attention:[{channelId:'111111111111111111',waitingMinutes:42}]})},locale);
@@ -40,11 +40,12 @@ it.each(['ja','en'] as const)('keeps activity, review and detailed analysis in s
  expect(sections[2]!.accessory).toMatchObject({style:ButtonStyle.Primary,custom_id:expect.any(String)});
  expect(home.intents.find(item=>item.page==='attention')).toMatchObject({action:'controlNavigate'});
 });
-it('offers exactly five Home actions and three Section destinations',async()=>{
+it('offers exactly six Home actions and three Section destinations',async()=>{
  const home=await render('overview',{community:community(),dashboardUrl:'https://nexus.example/dashboard/111111111111111111'},'en');
  expect(home.intents).toContainEqual({action:'analysisMenu'});
  for(const page of ['attention','analysis'])expect(home.intents).toContainEqual({action:'controlNavigate',page});
- expect(home.buttons).toHaveLength(2);
+ expect(home.intents).toContainEqual({action:'analysisHistory'});
+ expect(home.buttons).toHaveLength(3);
  expect(home.children.filter(item=>item.type===ComponentType.Section)).toHaveLength(3);
  expect(home.rows.flatMap(row=>row.components).filter(item=>item.type===ComponentType.StringSelect)).toHaveLength(0);
  expect(home.json).toContain('More');

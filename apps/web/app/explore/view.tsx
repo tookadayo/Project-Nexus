@@ -1,4 +1,5 @@
 "use client";
+import "./explore.css";
 import { ObservationChart } from "../observation-chart";
 import { CurrentAccessPanel } from "../current-access";
 import type { CurrentAccess } from "../../../../packages/operations/src/access-presentation";
@@ -54,7 +55,14 @@ export function ExploreControls({
     [saving, setSaving] = useState(false),
     [name, setName] = useState(""),
     [shortcut, setShortcut] = useState<string>(""),
-    [selected, setSelected] = useState<View | null>(null);
+    [selected, setSelected] = useState<View | null>(null),
+    [filtersOpen, setFiltersOpen] = useState(
+      initialQuery.filter.surface !== "ALL" ||
+        initialQuery.filter.channelIds.length > 0 ||
+        initialQuery.filter.roleIds.length > 0 ||
+        initialQuery.filter.categoryIds.length > 0 ||
+        Boolean(initialQuery.filter.recipeVersionId),
+    );
   const savingRef = useRef(false);
   const draft = useDraft({ name, shortcut, query });
   const canLeave = useUnsavedChanges(
@@ -192,8 +200,14 @@ export function ExploreControls({
     }));
   }
   const spec = data?.spec;
+  const filtered =
+    query.filter.surface !== "ALL" ||
+    query.filter.channelIds.length > 0 ||
+    query.filter.roleIds.length > 0 ||
+    query.filter.categoryIds.length > 0 ||
+    Boolean(query.filter.recipeVersionId);
   return (
-    <>
+    <div className="explore-workspace">
       {filtersReset && (
         <p role="status">
           {ja
@@ -205,209 +219,241 @@ export function ExploreControls({
         <h1>{ja ? "コミュニティを分析" : "Explore your community"}</h1>
         <p>
           {ja
-            ? "観測された集計を比較し、運営の変化を確認します。変化の原因は断定しません。"
-            : "Compare aggregate observations and inspect operational changes. A change does not establish its cause."}
+            ? "活動の推移と対象ごとの差を確認します。集計の変化だけで原因は断定しません。"
+            : "See activity over time and differences across channels. A change in the data does not establish its cause."}
         </p>
       </header>
       {data?.capabilities.access && (
         <CurrentAccessPanel access={data.capabilities.access} locale={locale} />
       )}
-      <section className="surface explore-controls">
-        <label>
-          {ja ? "指標" : "Metric"}
-          <select
-            value={query.metric}
-            onChange={(e) =>
-              setQuery({
-                ...query,
-                metric: e.target.value as ChartQuery["metric"],
-              })
-            }
-          >
-            {(
-              ["reply", "forum", "voice", "event", "reaction", "poll"] as const
-            ).map((metric) => (
-              <option key={metric} value={metric}>
-                {metricLabels[metric][locale]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          {ja ? "期間" : "Period"}
-          <select
-            value={query.days}
-            onChange={(e) =>
-              setQuery({
-                ...query,
-                days: Number(e.target.value) as ChartQuery["days"],
-              })
-            }
-          >
-            {[7, 30, 90].map((days) => (
-              <option
-                key={days}
-                value={days}
-                disabled={
-                  data?.capabilities.historyDays != null &&
-                  days > data.capabilities.historyDays
-                }
-              >
-                {days} {ja ? "日" : "days"}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={query.compare}
-            disabled={!query.compare && !data?.capabilities.compare}
-            onChange={(e) => setQuery({ ...query, compare: e.target.checked })}
-          />
-          {ja ? "前の同期間と比較" : "Compare previous period"}
-        </label>
-        {query.compare && (
-          <button
-            type="button"
-            onClick={() => setQuery({ ...query, compare: false })}
-          >
-            {ja ? "比較を解除" : "Turn off comparison"}
-          </button>
-        )}
+      <section
+        className="surface explore-controls"
+        aria-label={ja ? "分析する条件" : "Analysis conditions"}
+      >
+        <div className="explore-primary-controls">
+          <label>
+            {ja ? "指標" : "Metric"}
+            <select
+              value={query.metric}
+              onChange={(e) =>
+                setQuery({
+                  ...query,
+                  metric: e.target.value as ChartQuery["metric"],
+                })
+              }
+            >
+              {(
+                [
+                  "reply",
+                  "forum",
+                  "voice",
+                  "event",
+                  "reaction",
+                  "poll",
+                ] as const
+              ).map((metric) => (
+                <option key={metric} value={metric}>
+                  {metricLabels[metric][locale]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            {ja ? "期間" : "Period"}
+            <select
+              value={query.days}
+              onChange={(e) =>
+                setQuery({
+                  ...query,
+                  days: Number(e.target.value) as ChartQuery["days"],
+                })
+              }
+            >
+              {[7, 30, 90].map((days) => (
+                <option
+                  key={days}
+                  value={days}
+                  disabled={
+                    data?.capabilities.historyDays != null &&
+                    days > data.capabilities.historyDays
+                  }
+                >
+                  {days} {ja ? "日" : "days"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={query.compare}
+              disabled={!query.compare && !data?.capabilities.compare}
+              onChange={(e) =>
+                setQuery({ ...query, compare: e.target.checked })
+              }
+            />
+            {ja ? "前の同期間と比較" : "Compare previous period"}
+          </label>
+          {query.compare && (
+            <button
+              type="button"
+              onClick={() => setQuery({ ...query, compare: false })}
+            >
+              {ja ? "比較を解除" : "Turn off comparison"}
+            </button>
+          )}
+        </div>
+        <p className="explore-read-note">
+          {ja
+            ? "条件を変えると集計を表示します。この画面の確認で詳細分析の利用枠は消費しません。"
+            : "Results update as you change the conditions. Viewing this page does not consume detailed analysis credits."}
+        </p>
         {data?.capabilities.advanced && (
-          <>
-            <label>
-              {ja ? "活動の種類" : "Activity type"}
-              <select
-                value={query.filter.surface}
-                onChange={(e) =>
-                  patchFilter({
-                    surface: e.target.value as ChartQuery["filter"]["surface"],
-                  })
-                }
-              >
-                {(["ALL", "TEXT", "FORUM", "VOICE", "EVENT"] as const).map(
-                  (value) => (
-                    <option key={value} value={value}>
-                      {surfaceLabels[value][locale]}
-                    </option>
-                  ),
-                )}
-              </select>
-            </label>
-            <label>
-              {ja ? "チャンネル（複数選択）" : "Channels (select several)"}
-              <select
-                multiple
-                value={query.filter.channelIds}
-                onChange={(e) =>
-                  patchFilter({
-                    channelIds: Array.from(
-                      e.target.selectedOptions,
-                      (option) => option.value,
+          <details
+            className="explore-filter-details"
+            open={filtersOpen}
+            onToggle={(event) => setFiltersOpen(event.currentTarget.open)}
+          >
+            <summary>
+              {ja ? "対象を絞り込む" : "Refine the scope"}
+              {filtered && (
+                <span>{ja ? " · 絞り込み中" : " · Filters applied"}</span>
+              )}
+            </summary>
+            <div className="explore-filter-grid">
+              <label>
+                {ja ? "活動の種類" : "Activity type"}
+                <select
+                  value={query.filter.surface}
+                  onChange={(e) =>
+                    patchFilter({
+                      surface: e.target
+                        .value as ChartQuery["filter"]["surface"],
+                    })
+                  }
+                >
+                  {(["ALL", "TEXT", "FORUM", "VOICE", "EVENT"] as const).map(
+                    (value) => (
+                      <option key={value} value={value}>
+                        {surfaceLabels[value][locale]}
+                      </option>
                     ),
-                  })
-                }
-              >
-                {data.channels.map((channel) => (
-                  <option
-                    key={channel.id}
-                    value={channel.id}
-                    disabled={!channel.observable}
-                  >
-                    #{channel.id} ·{" "}
-                    {channel.type === 15
-                      ? ja
-                        ? "フォーラム"
-                        : "Forum"
-                      : [2, 13].includes(channel.type)
+                  )}
+                </select>
+              </label>
+              <label>
+                {ja ? "チャンネル（複数選択）" : "Channels (select several)"}
+                <select
+                  multiple
+                  value={query.filter.channelIds}
+                  onChange={(e) =>
+                    patchFilter({
+                      channelIds: Array.from(
+                        e.target.selectedOptions,
+                        (option) => option.value,
+                      ),
+                    })
+                  }
+                >
+                  {data.channels.map((channel) => (
+                    <option
+                      key={channel.id}
+                      value={channel.id}
+                      disabled={!channel.observable}
+                    >
+                      #{channel.id} ·{" "}
+                      {channel.type === 15
                         ? ja
-                          ? "ボイス"
-                          : "Voice"
-                        : ja
-                          ? "テキスト"
-                          : "Text"}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              {ja
-                ? "ロールID（カンマ区切り）"
-                : "Role cohort IDs (comma separated)"}
-              <input
-                value={query.filter.roleIds.join(",")}
-                onChange={(e) =>
-                  patchFilter({
-                    roleIds: e.target.value
-                      .split(",")
-                      .map((v) => v.trim())
-                      .filter(Boolean),
-                  })
-                }
-              />
-            </label>
-            <label>
-              {ja ? "カテゴリーID" : "Category IDs"}
-              <input
-                value={query.filter.categoryIds.join(",")}
-                onChange={(e) =>
-                  patchFilter({
-                    categoryIds: e.target.value
-                      .split(",")
-                      .map((v) => v.trim())
-                      .filter(Boolean),
-                  })
-                }
-              />
-            </label>
-            <label>
-              {ja
-                ? "測定方法の版ID（任意）"
-                : "Measurement recipe version ID (optional)"}
-              <input
-                aria-describedby="recipe-version-help"
-                value={query.filter.recipeVersionId ?? ""}
-                onChange={(e) =>
-                  patchFilter({ recipeVersionId: e.target.value || null })
-                }
-              />
-            </label>
-            <p id="recipe-version-help">
-              {ja
-                ? "特定の測定方法の版で得た記録に絞る場合だけ、その版のID（UUID）を入力します。改訂番号ではありません。空欄では版による絞り込みを行いません。"
-                : "Enter the version ID (UUID), not its revision number, only to filter records collected with that measurement recipe version. Leave blank to include all versions."}
-            </p>
-            <label>
-              {ja ? "タイムゾーン" : "Timezone"}
-              <input
-                value={query.timezone}
-                onChange={(e) =>
-                  setQuery({ ...query, timezone: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              {ja ? "保存した絞り込み条件" : "Saved filters"}
-              <select
-                defaultValue=""
-                onChange={(e) => {
-                  const segment = data.segments.find(
-                    (s) => s.id === e.target.value,
-                  );
-                  if (segment) patchFilter(segment.filters);
-                }}
-              >
-                <option value="">—</option>
-                {data.segments.map((segment) => (
-                  <option key={segment.id} value={segment.id}>
-                    {segment.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </>
+                          ? "フォーラム"
+                          : "Forum"
+                        : [2, 13].includes(channel.type)
+                          ? ja
+                            ? "ボイス"
+                            : "Voice"
+                          : ja
+                            ? "テキスト"
+                            : "Text"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {ja
+                  ? "ロールID（カンマ区切り）"
+                  : "Role cohort IDs (comma separated)"}
+                <input
+                  value={query.filter.roleIds.join(",")}
+                  onChange={(e) =>
+                    patchFilter({
+                      roleIds: e.target.value
+                        .split(",")
+                        .map((v) => v.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                />
+              </label>
+              <label>
+                {ja ? "カテゴリーID" : "Category IDs"}
+                <input
+                  value={query.filter.categoryIds.join(",")}
+                  onChange={(e) =>
+                    patchFilter({
+                      categoryIds: e.target.value
+                        .split(",")
+                        .map((v) => v.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                />
+              </label>
+              <label>
+                {ja
+                  ? "測定方法の版ID（任意）"
+                  : "Measurement recipe version ID (optional)"}
+                <input
+                  aria-describedby="recipe-version-help"
+                  value={query.filter.recipeVersionId ?? ""}
+                  onChange={(e) =>
+                    patchFilter({ recipeVersionId: e.target.value || null })
+                  }
+                />
+              </label>
+              <p id="recipe-version-help">
+                {ja
+                  ? "特定の測定方法の版で得た記録に絞る場合だけ、その版のID（UUID）を入力します。改訂番号ではありません。空欄では版による絞り込みを行いません。"
+                  : "Enter the version ID (UUID), not its revision number, only to filter records collected with that measurement recipe version. Leave blank to include all versions."}
+              </p>
+              <label>
+                {ja ? "タイムゾーン" : "Timezone"}
+                <input
+                  value={query.timezone}
+                  onChange={(e) =>
+                    setQuery({ ...query, timezone: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                {ja ? "保存した絞り込み条件" : "Saved filters"}
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    const segment = data.segments.find(
+                      (s) => s.id === e.target.value,
+                    );
+                    if (segment) patchFilter(segment.filters);
+                  }}
+                >
+                  <option value="">—</option>
+                  {data.segments.map((segment) => (
+                    <option key={segment.id} value={segment.id}>
+                      {segment.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </details>
         )}
       </section>
       {error && <p role="alert">{safeError(error, locale)}</p>}
@@ -417,7 +463,10 @@ export function ExploreControls({
           <ObservationChart
             spec={spec}
             locale={locale}
-            onChannelSelect={(id) => patchFilter({ channelIds: [id] })}
+            onChannelSelect={(id) => {
+              setFiltersOpen(true);
+              patchFilter({ channelIds: [id] });
+            }}
           />
           <p>
             <a href={url + "&format=png"}>
@@ -436,7 +485,7 @@ export function ExploreControls({
         </>
       )}
       {data?.capabilities.advanced && (
-        <section className="surface">
+        <section className="surface explore-save">
           <h2>
             {ja
               ? "保存ビューとレポートショートカット"
@@ -518,6 +567,6 @@ export function ExploreControls({
           ))}
         </section>
       )}
-    </>
+    </div>
   );
 }

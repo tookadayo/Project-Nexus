@@ -1,5 +1,7 @@
+import { componentEmoji } from "../../../shared/src/application-emoji";
 import { ButtonStyle, ComponentType } from "discord-api-types/v10";
 import {
+  panelIconText,
   nexusPanel,
   callout,
   actionRow,
@@ -79,7 +81,7 @@ export async function analysisMenuPanel(
   locale: UiLocale,
 ) {
   return nexusPanel({
-    title: c(locale, "title"),
+    title: panelIconText("analysis", c(locale, "title")),
     children: [
       callout(
         c(locale, "menu"),
@@ -101,6 +103,7 @@ export async function analysisMenuPanel(
             placeholder: c(locale, "menu"),
             options: data.items.map((item) => ({
               label: localized(locale, analysisNames[item.type]),
+              emoji: componentEmoji("analysis"),
               value: item.type,
               description: localized(locale, analysisDescriptions[item.type]),
             })),
@@ -123,7 +126,11 @@ export async function analysisMenuPanel(
         ],
       },
       await actionRow(issue, [
-        { label: c(locale, "history"), action: "analysisHistory" },
+        {
+          label: c(locale, "history"),
+          action: "analysisHistory",
+          emojiKey: "history",
+        },
         {
           label: c(locale, "back"),
           action: "controlNavigate",
@@ -248,6 +255,7 @@ export async function analysisPreviewPanel(
         },
         {
           label: c(locale, "settings"),
+          emojiKey: "settings",
           action: "controlNavigate",
           data: { page: "settings" },
         },
@@ -288,7 +296,7 @@ export async function analysisHistoryPanel(
       ),
     );
   return nexusPanel({
-    title: c(locale, "history"),
+    title: panelIconText("history", c(locale, "history")),
     children,
     rows: [
       {
@@ -457,35 +465,43 @@ export async function analysisResultPanel(
         callout(
           name(locale, metric.key),
           [
-            hasObservedValue(metric.evidence)
-              ? metricValue(
-                  locale,
-                  metric.key,
-                  metric.evidence.value!,
-                  metric.unit,
+            ...new Set(
+              [
+                hasObservedValue(metric.evidence)
+                  ? metricValue(
+                      locale,
+                      metric.key,
+                      metric.evidence.value!,
+                      metric.unit,
+                    )
+                  : c(locale, "valueUnknown"),
+                evidenceState(locale, metric.evidence),
+                metricDescription(locale, metric, run.analysis_type),
+                ["UNKNOWN", "COLLECTING"].includes(
+                  metric.evidence.observationState,
                 )
-              : c(locale, "valueUnknown"),
-            evidenceState(locale, metric.evidence),
-            metricDescription(locale, metric, run.analysis_type),
-            ["UNKNOWN", "COLLECTING"].includes(metric.evidence.observationState)
-              ? c(locale, "sampleUnknown")
-              : c(
-                  locale,
-                  [
-                    "new_members",
-                    "voice_copresence",
-                    "poll_participants",
-                  ].includes(metric.key)
-                    ? "samplePeople"
-                    : "sampleRecords",
-                  { count: metric.evidence.sampleSize },
-                ),
-            showEvidence
-              ? evidenceDetails(locale, metric)
-              : evidenceReasons(locale, metric.evidence).slice(0, 2).join("\n"),
-          ]
-            .filter(Boolean)
-            .join("\n"),
+                  ? c(locale, "sampleUnknown")
+                  : c(
+                      locale,
+                      [
+                        "new_members",
+                        "voice_copresence",
+                        "poll_participants",
+                      ].includes(metric.key)
+                        ? "samplePeople"
+                        : "sampleRecords",
+                      { count: metric.evidence.sampleSize },
+                    ),
+                showEvidence
+                  ? evidenceDetails(locale, metric)
+                  : evidenceReasons(locale, metric.evidence)
+                      .slice(0, 2)
+                      .join("\n"),
+              ]
+                .filter(Boolean)
+                .flatMap((line) => line.split("\n")),
+            ),
+          ].join("\n"),
         ),
       );
     if (visible.some((m) => m.key === "voice_copresence")) {
@@ -661,7 +677,11 @@ export async function analysisResultPanel(
           ]
         : []),
       await actionRow(issue, [
-        { label: c(locale, "history"), action: "analysisHistory" },
+        {
+          label: c(locale, "history"),
+          action: "analysisHistory",
+          emojiKey: "history",
+        },
         {
           label: c(locale, "responseRecords"),
           action: "analysisAttentionList",
@@ -742,7 +762,11 @@ export async function analysisComparisonPanel(
           action: "analysisResult",
           data: { runId: id },
         },
-        { label: c(locale, "history"), action: "analysisHistory" },
+        {
+          label: c(locale, "history"),
+          action: "analysisHistory",
+          emojiKey: "history",
+        },
         {
           label: c(locale, "responseRecords"),
           action: "analysisAttentionList",
@@ -788,7 +812,10 @@ export async function analysisAttentionListPanel(
       callout(c(locale, filter === "all" ? "recordEmpty" : "noReviews"), ""),
     );
   return nexusPanel({
-    title: c(locale, filter === "all" ? "responseRecords" : "analysisConcerns"),
+    title: panelIconText(
+      "attention",
+      c(locale, filter === "all" ? "responseRecords" : "analysisConcerns"),
+    ),
     children,
     rows: [
       await actionRow(issue, [
@@ -806,6 +833,7 @@ export async function analysisAttentionListPanel(
         },
         {
           label: c(locale, "home"),
+          emojiKey: "overview",
           action: "controlNavigate",
           data: { page: "overview" },
         },
@@ -816,7 +844,11 @@ export async function analysisAttentionListPanel(
           action: "analysisAttentionList",
           data: { filter: filter === "all" ? "active" : "all" },
         },
-        { label: c(locale, "history"), action: "analysisHistory" },
+        {
+          label: c(locale, "history"),
+          action: "analysisHistory",
+          emojiKey: "history",
+        },
       ]),
     ],
   });
@@ -894,7 +926,7 @@ export async function analysisAttentionItemPanel(
   const closed = ["RESOLVED", "DISMISSED"].includes(item.status);
   const runId = item.message_id.split(":")[1];
   return nexusPanel({
-    title: c(locale, "analysisConcerns"),
+    title: panelIconText("attention", c(locale, "analysisConcerns")),
     children: [
       callout(
         item.evidence.value === null
@@ -950,6 +982,7 @@ export async function analysisAttentionItemPanel(
         },
         {
           label: c(locale, "recordCompleted"),
+          emojiKey: "done",
           action: "analysisAttentionUpdate",
           data: {
             key: item.message_id,
@@ -982,7 +1015,11 @@ export async function analysisAttentionItemPanel(
           action: "analysisCompare",
           data: { runId },
         },
-        { label: c(locale, "history"), action: "analysisHistory" },
+        {
+          label: c(locale, "history"),
+          action: "analysisHistory",
+          emojiKey: "history",
+        },
       ]),
     ],
   });

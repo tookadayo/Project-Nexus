@@ -146,3 +146,30 @@ it.each(["explore", "operations"])(
     expect(fetcher).not.toHaveBeenCalled();
   },
 );
+
+it("rejects a stale pre-pagination Attention write instead of forwarding without current row and channel checks", async () => {
+  const response = await POST(
+    new NextRequest("http://localhost:3100/control", {
+      method: "POST",
+      headers: {
+        host: "localhost:3100",
+        origin: "http://localhost:3100",
+        "sec-fetch-site": "same-origin",
+        cookie: `nexus_session=synthetic;nexus_guild=${b}`,
+        "X-Nexus-Guild": b,
+      },
+      body: JSON.stringify({
+        action: "attention_action",
+        channelId: "333333333333333333",
+        messageId: "444444444444444444",
+        status: "RESOLVED",
+      }),
+    }),
+  );
+  expect(response.status).toBe(409);
+  expect(await response.json()).toMatchObject({
+    error: "REVISION_CONFLICT",
+    failure: { effect: "NOT_STARTED" },
+  });
+  expect(fetcher).not.toHaveBeenCalled();
+});

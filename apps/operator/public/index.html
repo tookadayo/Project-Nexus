@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>NEXUS Local Operations</title>
     <link rel="stylesheet" href="/operator-ui.css" />
+    <link rel="stylesheet" href="/publication-document.css" />
     <script defer src="/operator-ui.js"></script>
   </head>
   <body>
@@ -41,6 +42,8 @@
           ><button data-tab="register" data-copy="register"></button
           ><button data-tab="audit" data-copy="audit"></button
           ><button data-tab="sessions" data-copy="sessions"></button
+          ><button data-tab="publications" data-copy="publications"></button
+          ><button data-tab="legal" data-copy="legal"></button
           ><button id="reload" data-copy="reload"></button>
         </nav>
         <section id="overview"></section>
@@ -72,6 +75,8 @@
         </section>
         <section id="audit" hidden></section>
         <section id="sessions" hidden></section>
+        <section id="publications" hidden></section>
+        <section id="legal" hidden></section>
       </div>
       <dialog id="confirmation">
         <h2 id="confirm-title"></h2>
@@ -86,6 +91,25 @@
           <div class="actions">
             <button type="button" id="cancel" data-copy="cancel"></button
             ><button type="submit" data-copy="confirm"></button>
+          </div>
+        </form>
+      </dialog>
+      <dialog
+        id="publication-confirmation"
+        aria-labelledby="publication-confirm-title"
+      >
+        <h2 id="publication-confirm-title"></h2>
+        <div id="publication-confirm-details"></div>
+        <form id="publication-confirm-form">
+          <div id="publication-confirm-checks"></div>
+          <p id="publication-confirm-status" role="status"></p>
+          <div class="actions">
+            <button
+              type="button"
+              id="publication-cancel"
+              data-copy="cancel"
+            ></button>
+            <button type="submit" data-copy="confirm"></button>
           </div>
         </form>
       </dialog>

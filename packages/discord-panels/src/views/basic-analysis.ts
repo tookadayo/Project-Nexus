@@ -1,5 +1,6 @@
 import { ComponentType, ButtonStyle } from "discord-api-types/v10";
 import {
+  panelIconText,
   actionRow,
   callout,
   footer,
@@ -117,17 +118,23 @@ export async function basicAnalysisPanel(
             ],
           ),
           [
-            hasObservedValue(metric.evidence)
-              ? metricValue(
-                  locale,
-                  metric.key,
-                  metric.evidence.value!,
-                  metric.unit,
-                )
-              : c(locale, "valueUnknown"),
-            evidenceState(locale, metric.evidence),
-            metricDescription(locale, metric, "OVERALL"),
-            ...evidenceReasons(locale, metric.evidence).slice(0, 2),
+            ...new Set(
+              [
+                hasObservedValue(metric.evidence)
+                  ? metricValue(
+                      locale,
+                      metric.key,
+                      metric.evidence.value!,
+                      metric.unit,
+                    )
+                  : c(locale, "valueUnknown"),
+                evidenceState(locale, metric.evidence),
+                metricDescription(locale, metric, "OVERALL"),
+                ...evidenceReasons(locale, metric.evidence).slice(0, 2),
+              ]
+                .filter(Boolean)
+                .flatMap((line) => line.split("\n")),
+            ),
           ].join("\n"),
         ),
       );
@@ -159,7 +166,7 @@ export async function basicAnalysisPanel(
     children.push(callout(c(locale, "unknown"), c(locale, "reviewUnknown")));
   children.push(footer(c(locale, "unknownsDescription")));
   return nexusPanel({
-    title: localized(locale, views[selected]),
+    title: panelIconText("analysis", localized(locale, views[selected])),
     children,
     rows: [
       {
@@ -183,6 +190,7 @@ export async function basicAnalysisPanel(
       await actionRow(issue, [
         {
           label: c(locale, "detailedAction"),
+          emojiKey: "analysis",
           action: "analysisMenu",
           style: ButtonStyle.Primary,
         },
@@ -193,6 +201,7 @@ export async function basicAnalysisPanel(
         },
         {
           label: c(locale, "home"),
+          emojiKey: "overview",
           action: "controlNavigate",
           data: { page: "overview" },
         },
@@ -200,10 +209,15 @@ export async function basicAnalysisPanel(
       await actionRow(issue, [
         {
           label: c(locale, "responseRecords"),
+          emojiKey: "attention",
           action: "analysisAttentionList",
           data: { filter: "all" },
         },
-        { label: c(locale, "history"), action: "analysisHistory" },
+        {
+          label: c(locale, "history"),
+          action: "analysisHistory",
+          emojiKey: "history",
+        },
       ]),
     ],
   });

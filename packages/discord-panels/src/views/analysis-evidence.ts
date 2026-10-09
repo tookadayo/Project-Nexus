@@ -1,3 +1,4 @@
+import { panelIconText } from "../primitives";
 import type {
   AnalysisMetric,
   AnalysisRun,
@@ -279,5 +280,6 @@ export function recordState(locale: UiLocale, status: string) {
     RESOLVED: ["対応記録を完了", "Follow-up record completed"],
     DISMISSED: ["撤回済み", "Withdrawn"],
   };
-  return localized(locale, states[status]);
+  const label = localized(locale, states[status]);
+  return status === "RESOLVED" ? panelIconText("done", label) : label;
 }

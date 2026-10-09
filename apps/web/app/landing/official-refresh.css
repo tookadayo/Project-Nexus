@@ -1,0 +1,443 @@
+/* Approved R3 public layout. Product/dashboard visual tokens stay unchanged. */
+.nexus-site .nx-container {
+  width: min(1200px, calc(100% - 64px));
+}
+.nexus-site :is(main, section[id]) {
+  scroll-margin-top: 88px;
+}
+.nexus-site .nx-section-heading h2 {
+  margin-top: 0;
+}
+.nexus-site .nx-workflow li {
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
+  gap: 72px;
+  padding-block: 40px;
+}
+.nexus-site .nx-workflow-main h3 {
+  font-size: clamp(23px, 2.5vw, 30px);
+  line-height: 1.5;
+}
+.nexus-site .nx-workflow-main > p:last-child {
+  max-width: 64ch;
+  line-height: 1.85;
+}
+.nexus-site .nx-workflow-detail {
+  grid-column: auto;
+  margin-top: 38px !important;
+  font-size: 15px;
+  line-height: 1.85;
+  padding-left: 24px;
+}
+.nexus-site .nx-hero-example {
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  border: 1px solid #dbe1e8;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 16px 48px #17212b08;
+  transform: none;
+  overflow: hidden;
+}
+.nexus-site .nx-hero-example figcaption {
+  padding: 16px 24px;
+  border-bottom: 1px solid #e4e8ed;
+  background: #f7f9fc;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  color: #526171;
+  font-size: 13px;
+}
+.nexus-site .nx-hero-example figcaption strong {
+  color: #17212b;
+  font-size: 14px;
+  font-weight: 550;
+}
+.nexus-site .nx-hero-screen-scroll {
+  overflow-x: auto;
+}
+.nexus-site .nx-hero-screen-scroll img {
+  display: block;
+  width: 100%;
+  min-width: 960px;
+  height: auto;
+}
+.nexus-site .nx-hero-example .nx-example-footnote {
+  margin: 0;
+  padding: 16px 24px;
+  font-size: 14px;
+  color: #526171;
+  border-top: 1px solid #e4e8ed;
+  line-height: 1.7;
+}
+.nexus-site .nx-hero-screen-scroll:focus-visible {
+  outline: 3px solid #2758ca;
+  outline-offset: -3px;
+}
+.nexus-site.nx-home-r3 .nx-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 52px;
+  padding-block: 88px 88px;
+}
+.nexus-site.nx-home-r3 .nx-hero-copy {
+  width: 100%;
+  max-width: 950px;
+  text-align: center;
+}
+.nexus-site.nx-home-r3 .nx-hero h1 {
+  margin: 0 auto;
+  max-width: 950px;
+  font-size: clamp(42px, 4.6vw, 64px);
+  line-height: 1.16;
+  font-weight: 550;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+.nexus-site.nx-home-r3[lang="ja"] .nx-hero h1 {
+  font-size: clamp(36px, 3.8vw, 54px);
+  line-height: 1.45;
+  letter-spacing: -0.035em;
+}
+.nexus-site.nx-home-r3 .nx-hero .nx-heading-phrase {
+  display: block;
+}
+.nexus-site.nx-home-r3 .nx-lead {
+  margin: 24px auto 0 !important;
+  max-width: 66ch;
+  font-size: 18px;
+  line-height: 1.85;
+}
+.nexus-site.nx-home-r3[lang="ja"] .nx-lead {
+  max-width: 40em;
+}
+.nexus-site.nx-home-r3 .nx-hero .nx-cta-row {
+  justify-content: center;
+  margin-top: 28px;
+}
+.nexus-site.nx-home-r3 .nx-availability {
+  margin-top: 18px !important;
+  font-size: 13px;
+  line-height: 1.75;
+}
+.nexus-site.nx-home-r3 .nx-demo-jump {
+  margin-top: 16px;
+}
+.nexus-site.nx-home-r3 .nx-hero-example {
+  width: 100%;
+  max-width: 1024px;
+  text-align: left;
+}
+.nexus-site.nx-home-r3 :is(.nx-section, .nx-demo-section) {
+  padding-block: 96px;
+}
+.nexus-site.nx-home-r3 .nx-section-heading {
+  max-width: 780px;
+}
+.nexus-site.nx-home-r3 .nx-section-heading h2 {
+  font-size: clamp(30px, 3.2vw, 42px);
+  line-height: 1.45;
+  font-weight: 550;
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+.nexus-site.nx-home-r3 .nx-section-heading > p {
+  max-width: 68ch;
+  line-height: 1.85;
+}
+.nexus-site.nx-home-r3[lang="ja"] .nx-section-heading > p {
+  max-width: 42em;
+}
+.nexus-site.nx-home-r3 .nx-demo-section {
+  background: #f7f9fc;
+  border-block: 1px solid #e9edf2;
+}
+.nexus-site.nx-home-r3 .nx-demo-intro {
+  align-items: start;
+  gap: 64px;
+  margin-bottom: 40px;
+}
+.nexus-site.nx-home-r3 .nx-demo-intro > p {
+  max-width: 64ch;
+  line-height: 1.85;
+}
+.nexus-site.nx-home-r3 .nx-demo-section .nx-interactive-preview {
+  border-color: #dbe1e8;
+  box-shadow: none;
+}
+.nexus-site.nx-home-r3 .nx-tinted-section {
+  background: #fff;
+  border-block: 1px solid #e4e8ed;
+}
+.nexus-site.nx-home-r3 .nx-setup-steps {
+  gap: 40px;
+  margin-block: 40px 24px !important;
+}
+.nexus-site.nx-home-r3 .nx-setup-steps h3 {
+  font-size: 22px;
+  line-height: 1.5;
+  font-weight: 550;
+}
+.nexus-site.nx-home-r3 .nx-setup-steps p {
+  font-size: 16px;
+  line-height: 1.85;
+}
+.nexus-site.nx-home-r3 .nx-privacy-section {
+  gap: 88px;
+}
+.nexus-site.nx-home-r3 .nx-privacy-list h3 {
+  font-size: 21px;
+  line-height: 1.55;
+  font-weight: 550;
+}
+.nexus-site.nx-home-r3 .nx-privacy-list p {
+  line-height: 1.8;
+}
+.nexus-site.nx-home-r3 .nx-beta-section {
+  padding-block: 0 32px;
+}
+.nexus-site.nx-home-r3 .nx-beta-notice {
+  padding: 40px;
+  background: #f3f6fc;
+  border: 0;
+}
+.nexus-site.nx-home-r3 .nx-beta-notice h2 {
+  font-size: 28px;
+  line-height: 1.5;
+  font-weight: 550;
+}
+.nexus-site.nx-home-r3 .nx-beta-notice p {
+  max-width: 90ch;
+  font-size: 16px;
+  line-height: 1.85;
+}
+.nexus-site.nx-home-r3[lang="ja"] .nx-beta-notice p {
+  max-width: 44em;
+}
+.nexus-site.nx-home-r3 .nx-beta-notice a {
+  display: inline-flex;
+  padding-block: 10px;
+  margin-top: 8px;
+}
+.nexus-site.nx-home-r3 .nx-plan-note {
+  padding: 32px 0 64px;
+  gap: 48px;
+  border: 0;
+  border-bottom: 1px solid #e4e8ed;
+  border-radius: 0;
+  background: #fff;
+}
+.nexus-site.nx-home-r3 .nx-plan-note h2 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.5;
+  font-weight: 550;
+}
+.nexus-site.nx-home-r3 .nx-plan-note p {
+  max-width: 76ch;
+  line-height: 1.85;
+}
+.nexus-site.nx-home-r3 .nx-news-entry {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 40px;
+  padding-block: 64px;
+  border-bottom: 1px solid #e4e8ed;
+}
+.nexus-site.nx-home-r3 .nx-news-entry h2 {
+  font-size: 28px;
+  line-height: 1.5;
+  font-weight: 550;
+}
+.nexus-site.nx-home-r3 .nx-news-entry p {
+  margin-top: 12px;
+  max-width: 68ch;
+  color: #526171;
+  line-height: 1.85;
+}
+.nexus-site.nx-home-r3 .nx-news-entry > a {
+  flex-shrink: 0;
+}
+.nexus-site.nx-home-r3 .nx-faq {
+  grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
+  gap: 80px;
+}
+.nexus-site.nx-home-r3 .nx-faq summary {
+  min-height: 64px;
+  font-size: 17px;
+  line-height: 1.7;
+}
+.nexus-site.nx-home-r3 .nx-faq details p {
+  font-size: 16px;
+  line-height: 1.85;
+}
+.nexus-site.nx-home-r3 .nx-final-cta {
+  padding-block: 64px;
+  background: #f3f6fc;
+  color: #17212b;
+}
+.nexus-site.nx-home-r3 .nx-final-cta h2 {
+  margin: 0;
+  font-size: clamp(26px, 3vw, 36px);
+  line-height: 1.5;
+  font-weight: 550;
+  letter-spacing: -0.025em;
+}
+.nexus-site.nx-home-r3 .nx-final-cta p {
+  margin-top: 14px;
+  max-width: 68ch;
+  color: #526171;
+  font-size: 16px;
+}
+.nexus-site.nx-home-r3 .nx-final-cta .nx-cta-row {
+  margin-top: 24px;
+}
+.nexus-site.nx-home-r3 .nx-button {
+  min-height: 48px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+@media (max-width: 960px) {
+  .nexus-site.nx-home-r3 .nx-privacy-section {
+    gap: 40px;
+  }
+  .nexus-site.nx-home-r3 .nx-faq {
+    gap: 40px;
+  }
+  .nexus-site .nx-workflow li {
+    gap: 40px;
+  }
+  .nexus-site.nx-home-r3 .nx-demo-intro {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .nexus-site.nx-home-r3 .nx-plan-note,
+  .nexus-site.nx-home-r3 .nx-news-entry {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 24px;
+  }
+}
+@media (max-width: 640px) {
+  .nexus-site .nx-container {
+    width: calc(100% - 40px);
+  }
+  .nexus-site.nx-home-r3 .nx-hero {
+    padding-block: 52px 56px;
+    gap: 36px;
+  }
+  .nexus-site.nx-home-r3 .nx-hero h1 {
+    font-size: 38px;
+    line-height: 1.18;
+  }
+  .nexus-site.nx-home-r3[lang="ja"] .nx-hero h1 {
+    font-size: clamp(28px, 7.9vw, 38px);
+    line-height: 1.5;
+  }
+  .nexus-site.nx-home-r3 .nx-hero .nx-heading-phrase {
+    display: inline;
+  }
+  .nexus-site.nx-home-r3 .nx-lead {
+    font-size: 16px;
+    margin-top: 20px !important;
+    text-align: left;
+  }
+  .nexus-site.nx-home-r3 .nx-hero .nx-cta-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .nexus-site.nx-home-r3 .nx-availability {
+    font-size: 12px;
+    text-align: left;
+  }
+  .nexus-site .nx-hero-example figcaption,
+  .nexus-site .nx-hero-example .nx-example-footnote {
+    padding: 14px 16px;
+    font-size: 12px;
+  }
+  .nexus-site.nx-home-r3 :is(.nx-section, .nx-demo-section) {
+    padding-block: 56px;
+  }
+  .nexus-site.nx-home-r3 .nx-section-heading h2 {
+    font-size: 28px;
+    line-height: 1.55;
+  }
+  .nexus-site.nx-home-r3 .nx-section-heading > p {
+    font-size: 16px;
+    margin-top: 16px;
+  }
+  .nexus-site.nx-home-r3 .nx-demo-intro {
+    margin-bottom: 28px;
+  }
+  .nexus-site.nx-home-r3 .nx-demo-section .nx-interactive-preview {
+    padding: 16px;
+  }
+  .nexus-site .nx-workflow li {
+    grid-template-columns: 1fr;
+    gap: 18px;
+    padding-block: 28px;
+  }
+  .nexus-site .nx-workflow-detail {
+    margin-top: 0 !important;
+    padding-left: 16px;
+  }
+  .nexus-site .nx-workflow-main h3 {
+    font-size: 24px;
+  }
+  .nexus-site.nx-home-r3 .nx-setup-steps {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+  .nexus-site.nx-home-r3 .nx-privacy-section,
+  .nexus-site.nx-home-r3 .nx-faq {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+  .nexus-site.nx-home-r3 .nx-beta-notice {
+    padding: 24px 20px;
+  }
+  .nexus-site.nx-home-r3 .nx-beta-notice h2 {
+    font-size: 24px;
+  }
+  .nexus-site.nx-home-r3 .nx-beta-notice p {
+    font-size: 15px;
+  }
+  .nexus-site.nx-home-r3 .nx-plan-note {
+    padding-block: 0 48px;
+  }
+  .nexus-site.nx-home-r3 .nx-news-entry {
+    padding-block: 48px;
+  }
+  .nexus-site.nx-home-r3 :is(.nx-plan-note, .nx-news-entry) h2 {
+    font-size: 25px;
+  }
+  .nexus-site.nx-home-r3 .nx-final-cta {
+    padding-block: 48px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nexus-site.nx-home-r3 *,
+  .nexus-site.nx-home-r3 *::before,
+  .nexus-site.nx-home-r3 *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.nexus-site .nx-workflow-onboarding {
+  margin: 0 0 32px;
+  max-width: 76ch;
+  color: #526171;
+  font-size: 16px;
+  line-height: 1.85;
+}
+.nexus-site[lang="ja"] .nx-workflow-onboarding {
+  max-width: 42em;
+}

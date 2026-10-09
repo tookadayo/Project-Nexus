@@ -161,12 +161,12 @@ const copy = {
     "There are items for your team to review.",
   ],
   reviewClear: [
-    "現在、対応が必要な項目はありません。",
-    "No items currently require action.",
+    "現在の条件で、追加された要確認の記録はありません。",
+    "No review records are listed under the current conditions.",
   ],
   reviewUnknown: [
-    "現在の状況を確認できません。接続状況を確認してください。",
-    "The current situation is unavailable. Check the connection.",
+    "現在の状態を確認できません。時間をおいて更新してください。",
+    "We cannot determine the current status. Refresh again later.",
   ],
   detailedDescription: [
     "設定した用途に合わせて、変化と確認したい点をまとめます。",
@@ -434,7 +434,7 @@ const copy = {
   detailedAction: ["詳しく分析する", "Start detailed analysis"],
   recent: ["最近の詳しい分析: {time}", "Latest detailed analysis: {time}"],
   notYet: ["まだ実行していません", "Not run yet"],
-  resolved: ["対応を完了する", "Mark resolved"],
+  resolved: ["対応済みとして記録", "Mark as handled"],
   acknowledge: ["確認済みにする", "Acknowledge"],
 } as const;
 export const analysisCopyKeys = Object.keys(copy) as (keyof typeof copy)[];

@@ -1,5 +1,6 @@
 import { ButtonStyle } from "discord-api-types/v10";
 import {
+  panelIconText,
   nexusPanel,
   footer,
   sectionWithAccessory,
@@ -36,7 +37,7 @@ export async function workflowHome(
   return nexusPanel({
     title: "NEXUS",
     subtitle:
-      c(locale, "homeTitle") +
+      panelIconText("overview", c(locale, "homeTitle")) +
       (data.sharedEntry
         ? ""
         : `${data.community?.range ? ` · ${c(locale, "days", { count: data.community.range })}` : ""}${data.updatedAt ? ` · <t:${Math.floor(data.updatedAt.getTime() / 1000)}:R>` : ""}`),
@@ -46,6 +47,7 @@ export async function workflowHome(
         `${basicDescription}\n${c(locale, "basic")}`,
         await actionButton(issue, {
           label: c(locale, "basicAction"),
+          emojiKey: "analysis",
           action: "controlNavigate",
           data: { page: "analysis" },
           publicEntry: true,
@@ -64,6 +66,7 @@ export async function workflowHome(
             : c(locale, "reviewUnknown"),
         await actionButton(issue, {
           label: c(locale, "reviewAction"),
+          emojiKey: "attention",
           action: "controlNavigate",
           data: { page: "attention" },
           publicEntry: true,
@@ -86,6 +89,7 @@ export async function workflowHome(
               })),
         await actionButton(issue, {
           label: c(locale, "detailedAction"),
+          emojiKey: "analysis",
           action: "analysisMenu",
           publicEntry: true,
           style: ButtonStyle.Primary,
@@ -107,10 +111,17 @@ export async function workflowHome(
     rows: [
       await actionRow(issue, [
         ...(!data.sharedEntry
-          ? [{ label: c(locale, "history"), action: "analysisHistory" }]
+          ? [
+              {
+                label: c(locale, "history"),
+                action: "analysisHistory",
+                emojiKey: "history" as const,
+              },
+            ]
           : []),
         {
           label: c(locale, "settings"),
+          emojiKey: "settings",
           action: "controlNavigate",
           data: { page: "settings" },
           publicEntry: true,

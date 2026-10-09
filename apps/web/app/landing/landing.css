@@ -1258,3 +1258,446 @@
     font-size: 22px;
   }
 }
+
+/* alpha.14: one clear promise, one product example, then a full-width demo. */
+.nexus-site .nx-hero {
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.85fr);
+  gap: clamp(40px, 6vw, 88px);
+  padding-block: 88px 80px;
+}
+.nexus-site .nx-hero h1 {
+  max-width: 690px;
+  font-size: clamp(44px, 4.35vw, 62px);
+  line-height: 1.12;
+}
+.nexus-site[lang="ja"] .nx-hero h1 {
+  font-size: clamp(40px, 3.85vw, 54px);
+  line-height: 1.4;
+  letter-spacing: -0.045em;
+}
+.nx-heading-phrase {
+  max-width: 100%;
+}
+.nx-hero .nx-lead {
+  max-width: 600px;
+  font-size: 18px;
+}
+.nx-availability a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.nx-demo-jump {
+  margin-top: 24px;
+  min-height: 44px;
+}
+.nx-hero-example {
+  min-width: 0;
+  border: 1px solid #cdd9eb;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 18px 56px #1e407d0c;
+  transform: translateY(8px);
+}
+.nx-hero-example figcaption {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 24px;
+  border-bottom: 1px solid #e3eaf4;
+  background: #f5f8fe;
+  border-radius: 14px 14px 0 0;
+  font-size: 12px;
+  color: #526171;
+}
+.nx-example-content {
+  padding: 28px;
+}
+.nexus-site .nx-example-content h2 {
+  font-size: 26px;
+  line-height: 1.4;
+  margin-top: 10px;
+  letter-spacing: -0.025em;
+}
+.nx-example-post {
+  margin-top: 26px;
+  border-left: 3px solid #2758ca;
+  padding: 4px 0 4px 18px;
+}
+.nx-example-channel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+}
+.nx-example-channel svg {
+  color: #2758ca;
+}
+.nx-example-post p {
+  font-size: 13px;
+  color: #526171;
+  margin-top: 7px;
+}
+.nx-example-post .nx-example-status {
+  color: #253d65;
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 14px;
+}
+.nx-example-next {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 24px !important;
+  font-size: 14px;
+}
+.nx-example-next svg {
+  margin-top: 3px;
+  color: #2758ca;
+}
+.nx-example-footnote {
+  border-top: 1px solid #e3eaf4;
+  padding: 16px 28px;
+  font-size: 12px;
+  color: #526171;
+}
+.nx-demo-section {
+  padding-block: 64px 72px;
+  background: #f3f6fc;
+  border-block: 1px solid #e0e7f1;
+}
+.nx-demo-intro {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  align-items: end;
+  gap: 64px;
+  margin-bottom: 32px;
+}
+.nx-demo-intro > p {
+  color: #526171;
+  font-size: 16px;
+  max-width: 470px;
+}
+.nx-demo-intro h2 {
+  font-size: clamp(28px, 3vw, 38px);
+}
+.nx-demo-section .nx-interactive-preview {
+  background: #fff;
+  border-color: #cdd9eb;
+  padding: 28px;
+  box-shadow: 0 8px 28px #1e407d06;
+}
+.nx-demo-section .nx-interactive-preview > p {
+  margin-top: 16px;
+  max-width: 880px;
+  color: #526171;
+}
+.nx-demo-section .nx-demo-card {
+  background: #f6f8fc;
+  border: 1px solid #dbe4f0;
+  padding: 28px;
+  min-height: 240px;
+}
+.nx-demo-section .nx-demo-card h3 {
+  font-size: 24px;
+  margin-bottom: 14px;
+}
+.nx-demo-section .nx-demo-card p {
+  max-width: 880px;
+  margin-block: 14px;
+}
+.nx-demo-section .nx-demo-card details {
+  margin-block: 20px;
+}
+.nx-demo-section .nx-demo-card summary {
+  display: flex;
+  align-items: center;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.nx-demo-section .nx-interactive-preview .observation-chart {
+  border-radius: 8px;
+  padding: 24px;
+}
+.nx-demo-section .nx-demo-controls {
+  margin-block: 22px;
+}
+.nx-demo-section .nx-demo-controls > button {
+  margin-left: auto;
+}
+.nx-demo-section .nx-demo-tabs {
+  gap: 4px;
+  margin-bottom: 22px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #dbe4f0;
+}
+.nx-demo-section .nx-demo-tabs button {
+  padding-inline: 20px;
+  border-color: transparent;
+}
+.nx-demo-section .nx-demo-tabs [aria-selected="true"] {
+  border-color: #c6d6f2;
+  font-weight: 600;
+}
+.nx-workflow {
+  padding: 0;
+  margin-block: 46px 32px !important;
+  list-style: none;
+}
+.nx-workflow li {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1.2fr) minmax(0, 0.7fr);
+  gap: 32px;
+  padding-block: 36px;
+  border-top: 1px solid #dbe1e8;
+  align-items: start;
+}
+.nx-workflow li:last-child {
+  border-bottom: 1px solid #dbe1e8;
+}
+.nx-workflow-number {
+  color: #8da5cc;
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+.nx-workflow-destination {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #2758ca;
+  font-size: 13px;
+  font-weight: 600;
+}
+.nx-workflow-main h3 {
+  margin-top: 10px;
+}
+.nx-workflow-main > p:last-child {
+  margin-top: 14px;
+  color: #526171;
+  max-width: 620px;
+}
+.nx-workflow-detail {
+  margin-top: 35px !important;
+  padding-left: 24px;
+  border-left: 2px solid #dce6f7;
+  color: #526171;
+  font-size: 14px;
+}
+.nx-beta-section {
+  padding-top: 64px;
+}
+.nx-beta-section .nx-beta-notice {
+  max-width: none;
+  margin: 0;
+  padding: 32px 36px;
+  background: #f8faff;
+}
+.nx-beta-section .nx-beta-notice h2 {
+  font-size: 26px;
+}
+.nx-beta-section .nx-beta-notice p {
+  font-size: 15px;
+  max-width: 1020px;
+}
+.nx-product-surfaces {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 56px;
+  margin-top: 42px;
+}
+.nx-product-surfaces article {
+  border-top: 2px solid #bdd0ed;
+  padding-top: 26px;
+}
+.nx-product-surfaces h3 {
+  font-size: 24px;
+}
+.nx-product-surfaces p {
+  margin-top: 16px;
+  color: #526171;
+  max-width: 540px;
+}
+.nx-product-access-note {
+  color: #526171;
+  font-size: 14px;
+  max-width: 960px;
+  margin-top: 32px !important;
+}
+.nx-product-boundaries h2 {
+  font-size: 32px;
+}
+.nx-product-boundaries ul {
+  margin-block: 24px;
+  padding-left: 22px;
+  color: #526171;
+  max-width: 980px;
+}
+.nx-product-boundaries li + li {
+  margin-top: 14px;
+}
+.nx-product-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 28px;
+}
+.nx-product-links a {
+  min-height: 44px;
+}
+@media (max-width: 1100px) {
+  .nexus-site .nx-hero {
+    grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+    gap: 36px;
+    padding-block: 64px;
+  }
+  .nexus-site .nx-hero h1 {
+    font-size: 47px;
+  }
+  .nexus-site[lang="ja"] .nx-hero h1 {
+    font-size: 40px;
+  }
+  .nx-hero .nx-lead {
+    font-size: 17px;
+  }
+  .nx-example-content {
+    padding: 24px;
+  }
+  .nx-demo-intro {
+    gap: 36px;
+  }
+  .nx-workflow li {
+    grid-template-columns: 48px minmax(0, 1.2fr) minmax(0, 0.8fr);
+    gap: 24px;
+  }
+}
+@media (max-width: 800px) {
+  .nexus-site .nx-hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 40px;
+  }
+  .nx-hero-example {
+    max-width: 620px;
+    transform: none;
+    width: 100%;
+  }
+  .nx-hero-copy {
+    max-width: 690px;
+  }
+  .nx-demo-intro {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .nx-demo-intro > p {
+    max-width: 660px;
+  }
+  .nx-demo-section {
+    padding-block: 48px;
+  }
+  .nx-demo-section .nx-interactive-preview {
+    padding: 22px;
+  }
+  .nx-workflow li {
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 16px 24px;
+  }
+  .nx-workflow-detail {
+    grid-column: 2;
+    margin-top: 0 !important;
+  }
+  .nx-product-surfaces {
+    gap: 32px;
+  }
+  .nx-beta-section {
+    padding-top: 48px;
+  }
+}
+@media (max-width: 540px) {
+  .nexus-site .nx-hero {
+    padding-block: 44px 48px;
+    gap: 32px;
+  }
+  .nexus-site .nx-hero h1 {
+    font-size: 42px;
+  }
+  .nexus-site[lang="ja"] .nx-hero h1 {
+    font-size: 35px;
+    line-height: 1.4;
+  }
+  .nx-hero .nx-lead {
+    font-size: 16px;
+  }
+  .nx-hero .nx-cta-row {
+    align-items: stretch;
+  }
+  .nx-hero-example figcaption {
+    padding: 16px 18px;
+  }
+  .nx-example-content {
+    padding: 22px 20px;
+  }
+  .nexus-site .nx-example-content h2 {
+    font-size: 24px;
+  }
+  .nx-example-footnote {
+    padding-inline: 20px;
+  }
+  .nx-demo-intro h2 {
+    font-size: 29px;
+    line-height: 1.3;
+  }
+  .nx-demo-intro > p {
+    font-size: 15px;
+  }
+  .nx-demo-section .nx-interactive-preview {
+    padding: 16px;
+  }
+  .nx-demo-section .nx-interactive-preview .observation-chart {
+    padding: 14px;
+  }
+  .nx-demo-section .nx-demo-tabs button {
+    padding-inline: 10px;
+    font-size: 13px;
+  }
+  .nx-demo-section .nx-demo-controls {
+    align-items: end;
+    gap: 10px;
+  }
+  .nx-demo-section .nx-demo-controls > button {
+    margin-left: 0;
+  }
+  .nx-demo-section .nx-demo-card {
+    padding: 18px;
+  }
+  .nx-demo-section .nx-demo-card h3 {
+    font-size: 21px;
+  }
+  .nx-workflow {
+    margin-top: 32px !important;
+  }
+  .nx-workflow li {
+    grid-template-columns: 30px minmax(0, 1fr);
+    gap: 16px;
+    padding-block: 28px;
+  }
+  .nx-workflow-number {
+    font-size: 22px;
+  }
+  .nx-workflow-main h3 {
+    font-size: 24px;
+  }
+  .nx-workflow-detail {
+    padding-left: 16px;
+  }
+  .nx-beta-section .nx-beta-notice {
+    margin: 0;
+    padding: 24px 20px;
+  }
+  .nx-beta-section .nx-beta-notice h2 {
+    font-size: 24px;
+  }
+  .nx-product-surfaces {
+    grid-template-columns: 1fr;
+  }
+  .nx-product-boundaries h2 {
+    font-size: 28px;
+  }
+}

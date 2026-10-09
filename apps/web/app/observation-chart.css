@@ -54,7 +54,7 @@
 .chart-gridline {
   stroke: #dbe1e8;
 }
-.chart-bar {
+.chart-point {
   fill: #2758ca;
   transition:
     height 0.18s ease,
@@ -167,7 +167,7 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chart-bar {
+  .chart-point {
     transition: none;
   }
 }
@@ -183,7 +183,7 @@
   font-size: 14px;
 }
 
-.chart-bar {
+.chart-point {
   animation: chart-enter 0.18s ease-out;
 }
 @keyframes chart-enter {
@@ -197,8 +197,40 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chart-bar {
+  .chart-point {
     animation: none;
     transition: none;
   }
+}
+.chart-purpose {
+  color: #53627a;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+.observation-chart .chart-total {
+  padding: 14px 18px;
+  background: #f3f6fd;
+  border-radius: 8px;
+  margin-block: 18px;
+}
+.chart-total strong {
+  font-size: 25px;
+  color: #172b4d;
+}
+.chart-line {
+  fill: none;
+  stroke: #2758ca;
+  stroke-width: 2.5;
+  pointer-events: none;
+}
+.chart-line-previous {
+  stroke: #765027;
+  stroke-width: 2;
+  stroke-dasharray: 6 5;
+}
+.chart-point {
+  fill: #2758ca;
+  stroke: white;
+  stroke-width: 1.5;
 }

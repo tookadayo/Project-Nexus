@@ -1,209 +1,194 @@
+import { FeatureComparison, publicFeatureLabel } from "./comparison";
+import { PricingFaq } from "./faq";
 import { BetaNotice } from "../landing/beta-notice";
 import { limitCopy } from "../../../../packages/settings/src/plan-copy";
 import {
-  canonicalFeatures,
   featureAvailability,
-  planCurrency,
   planRegistry,
   plans,
+  type EntitlementFeature,
+  type Plan,
 } from "../../../../packages/settings/src/plan-registry";
-import {
-  featureCopy,
-  planCopy,
-} from "../../../../packages/settings/src/plan-copy";
 import { SiteShell, copy, siteLocale } from "../public-ui";
 import { publicBillingCatalog } from "../billing/catalog";
+import { offeringAmount, offeringTaxLabel } from "../checkout/order";
+import "./pricing.css";
+const planNames = {
+  FREE: "Free",
+  STARTER: "Starter",
+  GROWTH: "Growth",
+  SCALE: "Scale",
+  ENTERPRISE: "Enterprise",
+} as const;
+const planPurposes: Record<Plan, readonly [string, string]> = {
+  FREE: ["活動の状況を確認する", "See community activity"],
+  STARTER: ["活動の流れを詳しく見る", "Explore activity in more detail"],
+  GROWTH: [
+    "運営の対応と記録を確認する",
+    "Review community actions and records",
+  ],
+  SCALE: [
+    "複数サーバーをチームで運営する",
+    "Manage multiple servers as a team",
+  ],
+  ENTERPRISE: ["利用条件を相談する", "Discuss your requirements"],
+};
+// An excerpt of existing available capabilities, not a second entitlement registry.
+const planHighlights: Record<Plan, readonly EntitlementFeature[]> = {
+  FREE: ["core_observation", "fallback_onboarding", "interventions"],
+  STARTER: ["csv_export", "saved_views", "heatmaps"],
+  GROWTH: ["attention_escalation", "scheduled_reports", "attention_inbox"],
+  SCALE: ["multi_guild", "rbac", "audit_export"],
+  ENTERPRISE: [],
+};
+
 export const dynamic = "force-dynamic";
 export default async function Pricing() {
   const locale = await siteLocale(),
     language = locale === "ja" ? 0 : 1;
-  const { launch, offerings } = await publicBillingCatalog();
-  const availableFeatures = canonicalFeatures.filter(
-    (feature) => featureAvailability[feature] === "available",
-  );
-  const publicPlanCopy = {
-    ...planCopy,
-    STARTER: {
-      ...planCopy.STARTER,
-      purpose: [
-        "参加の流れで、活動を確認できる段階と不足を調べる。",
-        "Review observed stages and gaps in community participation.",
-      ],
-    },
-    GROWTH: {
-      ...planCopy.GROWTH,
-      purpose: [
-        "発見を、繰り返し実行できる運営と改善につなげる。",
-        "Turn findings into recurring operations.",
-      ],
-    },
-    SCALE: {
-      ...planCopy.SCALE,
-      purpose: [
-        "複数のコミュニティを、チームと承認ルールで運営する。",
-        "Operate multiple communities as a team, with approval rules.",
-      ],
-    },
-    ENTERPRISE: {
-      heading: ["利用条件を相談する", "Discuss your usage requirements"],
-      purpose: ["個別の利用条件", "Custom usage terms"],
-    },
-  };
+  const { launch, offerings, status } = await publicBillingCatalog();
+  const canPurchase = status === "READY" && launch.checkoutEnabled;
   return (
     <SiteShell locale={locale}>
-      <BetaNotice locale={locale} />
-      <section className="site-section pricing-intro">
-        <p className="site-eyebrow">PLANS</p>
-        <h1>
-          {copy(
-            locale,
-            "Discordの運営に合うプランを選ぶ。",
-            "Choose a plan for Discord community operations.",
-          )}
-        </h1>
+      <BetaNotice
+        locale={locale}
+        purchaseMode={
+          launch.publishPrices
+            ? launch.livemode
+              ? "live"
+              : "sandbox"
+            : "closed"
+        }
+      />
+      <section className="site-section pricing-intro r3-pricing-intro">
+        <h1>{copy(locale, "プランを比較する", "Compare plans")}</h1>
         <p>
           {copy(
             locale,
-            "返信、スレッド、フォーラム、リアクション、投票、ボイス、イベント。どの場所を使うサーバーでも、基本観測と測定根拠はFreeから。必要になったら、履歴・分析・運営を深められます。",
-            "Replies, Threads, Forums, Reactions, Polls, Voice and Events. Free includes core observation and evidence for every community. Add deeper history, analysis and operations as you need them.",
+            "使える機能や利用上限を、プランごとに確認できます。",
+            "Compare the features and usage limits included in each plan.",
           )}
         </p>
-        <span className="badge badge-violet">
+        <p className="r3-pricing-status">
           {copy(
             locale,
-            launch.checkoutEnabled
+            canPurchase
               ? launch.livemode
                 ? "USD月額プラン"
                 : "Sandbox検証 · 暫定USD価格 · 実際の請求はありません"
-              : "有料決済は準備中。価格は承認後に公開。",
-            launch.checkoutEnabled
+              : status === "UNAVAILABLE"
+                ? "現在、料金を確認できません。"
+                : status === "EMPTY"
+                  ? "有料プランの準備中です。"
+                  : "有料プランの価格は未公開です。現在、購入はできません。",
+            canPurchase
               ? launch.livemode
                 ? "Monthly USD plans"
                 : "Sandbox testing · Provisional USD prices · No real-money charge"
-              : "Paid checkout is being prepared. Prices await approval.",
+              : status === "UNAVAILABLE"
+                ? "Prices are currently unavailable."
+                : status === "EMPTY"
+                  ? "Paid plans are being prepared."
+                  : "Paid plan prices are not published. Purchases are currently unavailable.",
           )}
-        </span>
+        </p>
+        {status === "UNAVAILABLE" && (
+          <p role="status">
+            {copy(
+              locale,
+              "現在、料金を取得できません。時間をおいて再読み込みしてください。価格の確認ができるまで購入手続きは開始できません。",
+              "Prices are temporarily unavailable. Reload this page shortly. Purchase cannot start until prices are confirmed.",
+            )}{" "}
+            <a href="/pricing">{copy(locale, "再読み込み", "Reload prices")}</a>
+          </p>
+        )}
+        {status === "EMPTY" && (
+          <p role="status">
+            {copy(
+              locale,
+              "現在、購入可能な有料プランはありません。",
+              "No paid plans are currently available for purchase.",
+            )}
+          </p>
+        )}
       </section>
       <section
-        className="pricing-grid"
-        aria-label={copy(locale, "プラン一覧", "Plans")}
+        className="pricing-grid r3-pricing-grid"
+        aria-label={copy(locale, "通常プラン一覧", "Standard plans")}
       >
         {plans.map((plan, index) => {
           const spec = planRegistry[plan],
-            previous = index ? planRegistry[plans[index - 1]!] : null;
+            previous = index ? plans[index - 1]! : null;
           const offering = offerings.find((o) => o.plan_key === plan);
-          const additional = availableFeatures.filter(
+          const highlights = planHighlights[plan].filter(
             (feature) =>
-              spec.features.includes(feature) &&
-              (!previous || !previous.features.includes(feature)),
+              featureAvailability[feature] === "available" &&
+              spec.features.includes(feature),
           );
-          const available = additional.length
-            ? additional
-            : availableFeatures.filter(
-                (feature) =>
-                  spec.features.includes(feature) &&
-                  [
-                    "custom_recipe",
-                    "attention_automation",
-                    "improvement_tracking",
-                    "csv_export",
-                  ].includes(feature),
-              );
           return (
-            <article className="price-card" key={plan}>
-              <p className="site-eyebrow">{plan}</p>
-              <h2>{publicPlanCopy[plan].heading[language]}</h2>
-              <p className="price-description">
-                {publicPlanCopy[plan].purpose[language]}
-              </p>
-              <div className="price">
-                {!launch.publishPrices ? (
-                  copy(
-                    locale,
-                    plan === "FREE" ? "無料" : "お問い合わせ",
-                    plan === "FREE" ? "Free" : "Contact us",
-                  )
-                ) : spec.price === null ? (
-                  copy(locale, "個別契約", "Custom contract")
-                ) : (
-                  <>
-                    {new Intl.NumberFormat(locale, {
-                      style: "currency",
-                      currency: offering?.currency ?? planCurrency,
-                      maximumFractionDigits: 0,
-                    }).format(
-                      offering ? offering.final_price_minor / 100 : spec.price,
-                    )}
-                    <small>/{copy(locale, "月", "month")}</small>
-                  </>
+            <article
+              className="price-card r3-price-card"
+              key={plan}
+              data-pricing-plan={plan}
+            >
+              <h2 className="r3-plan-name">{planNames[plan]}</h2>
+              <p className="r3-plan-purpose">{planPurposes[plan][language]}</p>
+              <div className="r3-plan-price">
+                <div className={"price" + (offering ? " r3-price-amount" : "")}>
+                  {plan === "FREE" ? (
+                    copy(locale, "無料", "Free")
+                  ) : plan === "ENTERPRISE" ? (
+                    copy(locale, "個別相談", "Contact us")
+                  ) : offering ? (
+                    <>
+                      {offeringAmount({
+                        locale,
+                        currency: offering.currency,
+                        amountMinor: offering.final_price_minor,
+                      })}
+                      <small>/{copy(locale, "月", "month")}</small>
+                    </>
+                  ) : status === "UNAVAILABLE" ? (
+                    copy(locale, "料金を確認できません", "Price unavailable")
+                  ) : (
+                    copy(locale, "価格は未公開", "Price not published")
+                  )}
+                </div>
+                {offering && (
+                  <p className="price-tax">
+                    {offeringTaxLabel(offering.tax_behavior, locale)}
+                    {" · "}
+                    {copy(locale, "月ごとに更新", "Renews monthly")}
+                  </p>
                 )}
               </div>
-              {previous && (
-                <p className="price-inherits">
-                  {copy(
-                    locale,
-                    `${previous.id}の利用可能な機能を含みます。`,
-                    `Includes available ${previous.id} features.`,
-                  )}
-                </p>
-              )}
-              <h3>
-                {copy(
-                  locale,
-                  "通常プランに含まれる実装済み機能",
-                  "Implemented features in this standard plan",
-                )}
-              </h3>
-              <ul>
-                {available.map((feature) => (
-                  <li key={feature}>✓ {featureCopy[feature][language]}</li>
-                ))}
-              </ul>
-              {plan === "FREE" && (
-                <p>
-                  {copy(
-                    locale,
-                    "コミュニティに合うプリセットを1つ確認して利用。基本Journeyも含みます。",
-                    "Confirm one matching preset recipe, with a basic Journey summary.",
-                  )}
-                </p>
-              )}
-              <p className="price-usage">
-                {plan === "ENTERPRISE"
-                  ? copy(
-                      locale,
-                      "利用条件は個別にお問い合わせください。",
-                      "Contact us to discuss custom usage terms.",
-                    )
-                  : plan === "SCALE"
-                    ? copy(
-                        locale,
-                        `${spec.limits.guilds}サーバーの組織運営 · ${spec.limits.historyDays}日の集計履歴`,
-                        `${spec.limits.guilds} communities per organization · ${spec.limits.historyDays} days of aggregate history`,
-                      )
-                    : copy(
-                        locale,
-                        `${spec.limits.guilds}サーバーの登録枠 · ${spec.limits.historyDays}日の集計履歴`,
-                        `${spec.limits.guilds} server allowance · ${spec.limits.historyDays} days of aggregate history`,
-                      )}
-              </p>
               {plan === "FREE" ? (
-                <a className="button button-primary" href="/support">
+                <a
+                  className="button button-primary r3-plan-cta"
+                  href="/support"
+                >
                   {copy(locale, "招待Betaの参加案内", "Invitation Beta access")}
                 </a>
-              ) : offering && launch.checkoutEnabled ? (
+              ) : offering && canPurchase ? (
                 <a
-                  className="button button-primary"
-                  href={`/checkout?offering=${offering.id}`}
+                  className="button button-primary r3-plan-cta"
+                  href={"/checkout?offering=" + offering.id}
                 >
                   {copy(
                     locale,
-                    `${plan}を選ぶ`,
-                    `Choose ${plan[0]}${plan.slice(1).toLowerCase()}`,
+                    launch.livemode
+                      ? plan + "を選ぶ"
+                      : plan + "をSandboxで確認",
+                    launch.livemode
+                      ? "Choose " + planNames[plan]
+                      : "Test " + planNames[plan] + " in Sandbox",
                   )}
                 </a>
               ) : (
-                <a className="button button-secondary" href="/support">
+                <a
+                  className="button button-secondary r3-plan-cta"
+                  href="/support"
+                >
                   {copy(
                     locale,
                     plan === "ENTERPRISE"
@@ -213,18 +198,121 @@ export default async function Pricing() {
                   )}
                 </a>
               )}
+              <div className="r3-plan-conditions">
+                {previous && plan !== "ENTERPRISE" && (
+                  <p className="price-inherits">
+                    {copy(
+                      locale,
+                      planNames[previous] + "の利用可能な機能を含みます。",
+                      "Includes available " +
+                        planNames[previous] +
+                        " features.",
+                    )}
+                  </p>
+                )}
+                <p className="price-usage">
+                  {plan === "ENTERPRISE"
+                    ? copy(
+                        locale,
+                        "利用条件は個別にお問い合わせください。",
+                        "Contact us to discuss custom usage terms.",
+                      )
+                    : plan === "SCALE"
+                      ? copy(
+                          locale,
+                          spec.limits.guilds +
+                            "サーバーの組織運営 · " +
+                            spec.limits.historyDays +
+                            "日の集計履歴",
+                          spec.limits.guilds +
+                            " communities per organization · " +
+                            spec.limits.historyDays +
+                            " days of aggregate history",
+                        )
+                      : copy(
+                          locale,
+                          spec.limits.guilds +
+                            "サーバーの登録枠 · " +
+                            spec.limits.historyDays +
+                            "日の集計履歴",
+                          spec.limits.guilds +
+                            " server allowance · " +
+                            spec.limits.historyDays +
+                            " days of aggregate history",
+                        )}
+                </p>
+              </div>
+              <div className="r3-plan-features">
+                <h3>{copy(locale, "主な機能", "Key features")}</h3>
+                {plan === "ENTERPRISE" ? (
+                  <p>
+                    {copy(
+                      locale,
+                      "Scaleの利用可能な機能を含みます。",
+                      "Includes available Scale features.",
+                    )}
+                  </p>
+                ) : (
+                  <ul>
+                    {highlights.map((feature) => (
+                      <li key={feature} data-highlight-feature={feature}>
+                        <span aria-hidden="true">✓</span>
+                        {publicFeatureLabel(feature, locale)}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <a className="r3-plan-details" href="#feature-comparison-title">
+                {copy(locale, "すべての機能を比較", "Compare all features")}
+                <span aria-hidden="true"> →</span>
+              </a>
             </article>
           );
         })}
       </section>
-      <section className="site-section">
-        <h2>
+      <div className="site-section r3-plan-note">
+        <p>
           {copy(
             locale,
-            "通常プランの利用枠と条件",
-            "Standard plan allowances and conditions",
-          )}
+            "Freeでは、コミュニティに合うプリセットを1つ確認して利用できます。基本的な行動の流れ（Journey）の集計も含みます。各カードは主な機能の抜粋です。",
+            "Free lets you confirm and use one matching preset recipe, including a basic Journey summary. Each card shows selected features.",
+          )}{" "}
+          <a href="#feature-comparison-title">
+            {copy(locale, "全機能を比較", "Compare all features")}
+          </a>
+          {" · "}
+          <a href="#plan-limits">
+            {copy(locale, "利用上限と条件", "Limits and conditions")}
+          </a>
+        </p>
+      </div>
+      <section className="site-section pricing-payment-info">
+        <h2>
+          {copy(locale, "購入と支払いについて", "Purchases and payments")}
         </h2>
+        <p>
+          {copy(
+            locale,
+            "有料プランの購入には、DiscordのServer Owner確認と対象サーバーの選択が必要です。料金表でプランを選択するだけでは支払いは始まりません。",
+            "Purchasing a paid plan requires Discord Server Owner verification and a server selection. Selecting a plan here does not start a payment.",
+          )}
+        </p>
+        {canPurchase && (
+          <p>
+            {copy(
+              locale,
+              "表示額は通常の月額料金です。適用される割引・税・最終合計は、支払いを確定する前にStripeの決済画面で確認してください。",
+              "The displayed price is the standard monthly amount. Review applicable discounts, tax and the final total in the Stripe payment form before confirming payment.",
+            )}
+          </p>
+        )}
+        <a href="/billing/manage">
+          {copy(locale, "既存の支払いを管理", "Manage existing billing")}
+        </a>
+      </section>
+      <section className="site-section" id="plan-limits">
+        <h2>{copy(locale, "通常プランの利用上限", "Standard plan limits")}</h2>
         <p>
           {copy(
             locale,
@@ -269,12 +357,21 @@ export default async function Pricing() {
                   "analysisConcurrency",
                   "guilds",
                   "historyDays",
+                  "monthlyObservedMembers",
                   "teamSeats",
                   "apiRequestsMonthly",
                 ] as const
               ).map((key) => (
-                <tr key={key}>
-                  <th scope="row">{limitCopy[key][language]}</th>
+                <tr key={key} data-limit-id={key}>
+                  <th scope="row">
+                    {key === "monthlyObservedMembers"
+                      ? copy(
+                          locale,
+                          "月間の集計対象人数（目安）",
+                          "Members per month (guideline)",
+                        )
+                      : limitCopy[key][language]}
+                  </th>
                   {plans.map((p) => (
                     <td key={p}>
                       {planRegistry[p].limits[key] ??
@@ -295,7 +392,6 @@ export default async function Pricing() {
         </p>
       </section>
       <section className="site-section comparison-section">
-        <p className="site-eyebrow">COMMUNITY WORKFLOWS</p>
         <h2>
           {copy(
             locale,
@@ -334,128 +430,13 @@ export default async function Pricing() {
           ))}
         </ul>
       </section>
-      <section className="site-section comparison-section">
-        <h2>{copy(locale, "機能を比較する", "Compare features")}</h2>
-        <p className="comparison-hint">
-          {copy(
-            locale,
-            "横にスクロールして比較できます。",
-            "Swipe horizontally to compare.",
-          )}
-        </p>
-        <div
-          className="comparison-scroll"
-          tabIndex={0}
-          role="region"
-          aria-label={copy(
-            locale,
-            "機能比較表。横にスクロールできます。",
-            "Feature comparison. Scroll horizontally.",
-          )}
-        >
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">{copy(locale, "機能", "Feature")}</th>
-                {plans.map((plan) => (
-                  <th scope="col" key={plan}>
-                    {plan}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {availableFeatures.map((feature) => (
-                <tr key={feature}>
-                  <th scope="row">{featureCopy[feature][language]}</th>
-                  {plans.map((plan) => (
-                    <td key={plan}>
-                      {planRegistry[plan].features.includes(feature)
-                        ? "✓"
-                        : "—"}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-      <section className="site-section faq">
-        <h2>{copy(locale, "利用枠と測定について", "Usage and measurement")}</h2>
-        <details>
-          <summary>
-            {copy(
-              locale,
-              "月間観測人数とは？",
-              "What is a monthly observed member?",
-            )}
-          </summary>
-          <p>
-            {copy(
-              locale,
-              "活動を観測したメンバーを各サーバーで月1回数えます。現在は運用上の目安で、自動課金や観測の停止は行いません。",
-              "Members with observed activity count once per server per month. This is a soft operational allowance, without automatic charges or dropped measurement.",
-            )}
-          </p>
-          <p>
-            {plans
-              .map(
-                (plan) =>
-                  `${plan}: ${planRegistry[plan].included?.toLocaleString() ?? copy(locale, "個別", "Custom")}`,
-              )
-              .join(" · ")}
-          </p>
-        </details>
-        <details>
-          <summary>
-            {copy(
-              locale,
-              "有料プランで測定の正確さは変わりますか？",
-              "Does payment change measurement correctness?",
-            )}
-          </summary>
-          <p>
-            {copy(
-              locale,
-              "測定根拠、UNKNOWN・PARTIAL、観測範囲、接続障害、プライバシーと削除は全プラン共通です。Voice同席は会話の証明ではなく、絵文字から感情を推測せず、外部イベントの出席は観測できません。",
-              "Evidence, UNKNOWN/PARTIAL states, coverage, integration warnings, privacy and deletion are included in every plan. Voice co-presence does not prove conversation. Emoji do not imply sentiment. External Event attendance is unobservable.",
-            )}
-          </p>
-        </details>
-        <details>
-          <summary>
-            {copy(locale, "履歴とダウングレード", "History and downgrades")}
-          </summary>
-          <p>
-            {copy(
-              locale,
-              "有料期間の終了後は下位プランの表示範囲になります。上位の集計履歴は原則30日の復旧期間を設けます。メンバーに紐づく詳細データのプライバシー保持設定は別に適用されます。",
-              "Lower-plan visibility applies after the paid period ends. Higher-plan aggregate history has a default 30-day recovery period. Member-linked detail follows separate privacy retention settings.",
-            )}
-          </p>
-        </details>
-        <details>
-          <summary>
-            {copy(locale, "今すぐ購入できますか？", "Can I buy now?")}
-          </summary>
-          <p>
-            {copy(
-              locale,
-              launch.checkoutEnabled
-                ? launch.livemode
-                  ? "プランは決済側の契約を確認した後に反映されます。"
-                  : "Sandboxではテスト購入できます。プランは決済側の契約を確認した後に反映されます。"
-                : "決済は現在準備中です。問い合わせやリンクのクリックだけでは購入やプラン変更は完了しません。",
-              launch.checkoutEnabled
-                ? launch.livemode
-                  ? "A plan activates after authoritative subscription confirmation."
-                  : "Test purchases are available in Sandbox. A plan activates after authoritative subscription confirmation."
-                : "Checkout is currently unconfigured. Contacting support or clicking a link does not purchase or activate a plan.",
-            )}
-          </p>
-        </details>
-      </section>
+      <FeatureComparison locale={locale} />
+      <PricingFaq
+        locale={locale}
+        purchaseMode={
+          canPurchase ? (launch.livemode ? "live" : "sandbox") : "closed"
+        }
+      />
     </SiteShell>
   );
 }

@@ -83,6 +83,7 @@ export async function migrate(
       "049_analysis_stabilization",
       "050_location_population_coverage",
       "051_hosted_beta",
+      "052_official_publications",
     ].entries()) {
       const version = index + 1;
       if (

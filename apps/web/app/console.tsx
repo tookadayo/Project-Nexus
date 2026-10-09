@@ -5,7 +5,7 @@ import {
   TeamQueue,
   type IntegrationData,
 } from "./operations-ui";
-import { Attention } from "./attention";
+import { AttentionQueueView } from "./attention-queue-view";
 import { useState, useEffect, useRef } from "react";
 import { BrandAsset } from "./brand-asset";
 import { ProductMenu, NavIcon } from "./product-navigation";
@@ -26,7 +26,7 @@ import { failureCopy } from "../../../packages/discord-panels/src/i18n/errors";
 import { activityWindow } from "../../../packages/discord-panels/src/i18n/terminology";
 import type { CommunityService } from "../../../packages/presentation/src/community";
 import { t } from "../../../packages/discord-panels/src/i18n/index";
-import { VERSION, RELEASE_CHANNEL } from "../../../packages/shared/src/version";
+import { VERSION } from "../../../packages/shared/src/version";
 import { AdaptiveCommunity, CommunityModelEditor } from "./community-model";
 import { communityModelSchema } from "../../../packages/shared/src/community-model";
 import {
@@ -336,16 +336,17 @@ export default function Console({
     [testActionId, setTestActionId] = useState<string | null>(null),
     [actions, setActions] = useState(data.actions),
     [results, setResults] = useState(data.results),
-    [attentionItems, setAttentionItems] = useState(
-      data.community?.attention ?? [],
-    ),
-    [attentionRemoved, setAttentionRemoved] = useState(0),
-    [attentionSnooze, setAttentionSnooze] = useState<
-      Record<string, "30" | "60" | "today">
-    >({});
+    [attentionActiveCount, setAttentionActiveCount] = useState<
+      number | null | undefined
+    >(undefined);
   const displayCommunity = [1, 5].includes(page)
     ? communityData
     : data.community;
+  const displayAttentionCount = displayCommunity?.daily.ready
+    ? attentionActiveCount === undefined
+      ? displayCommunity.daily.attentionCount
+      : attentionActiveCount
+    : null;
   const c = messages[locale];
   const requestInFlight = useRef(false);
   const [modelDirty, setModelDirty] = useState(false);
@@ -580,33 +581,6 @@ export default function Console({
           crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase(),
       });
       return null;
-    }
-  }
-  async function changeAttention(
-    item: { channelId: string; messageId: string },
-    status: "ACKNOWLEDGED" | "SNOOZED" | "RESOLVED",
-  ) {
-    const choice = attentionSnooze[item.messageId] ?? "30";
-    const result = await request({
-      action: "attention_action",
-      channelId: item.channelId,
-      messageId: item.messageId,
-      status,
-      ...(status === "SNOOZED"
-        ? choice === "today"
-          ? { untilToday: true }
-          : { minutes: Number(choice) }
-        : {}),
-    });
-    if (result) {
-      setAttentionItems((current) =>
-        status === "ACKNOWLEDGED"
-          ? current.map((row) =>
-              row.messageId === item.messageId ? { ...row, status } : row,
-            )
-          : current.filter((row) => row.messageId !== item.messageId),
-      );
-      if (status !== "ACKNOWLEDGED") setAttentionRemoved((count) => count + 1);
     }
   }
   async function prepare(body: unknown, kind: typeof previewKind) {
@@ -923,20 +897,11 @@ export default function Console({
         <div>
           <p className="eyebrow">{t(locale, "control.attention")}</p>
           <h2>
-            {!displayCommunity?.daily.ready ||
-            displayCommunity.daily.attentionCount === null
+            {displayAttentionCount === null
               ? t(locale, "control.queueUnavailable")
-              : Math.max(
-                    0,
-                    (displayCommunity.daily.attentionCount ?? 0) -
-                      attentionRemoved,
-                  ) > 0
+              : displayAttentionCount > 0
                 ? t(locale, "experience.needsReply", {
-                    count: Math.max(
-                      0,
-                      (displayCommunity.daily.attentionCount ?? 0) -
-                        attentionRemoved,
-                    ),
+                    count: displayAttentionCount,
                   })
                 : t(locale, "experience.allClear")}
           </h2>
@@ -1070,14 +1035,10 @@ export default function Console({
                   <article className="metric-card">
                     <h3>{t(locale, "polish.waiting")}</h3>
                     <strong>
-                      {displayCommunity.daily.attentionCount === null
+                      {displayAttentionCount === null
                         ? t(locale, "polish.unavailable")
                         : t(locale, "polish.count", {
-                            count: Math.max(
-                              0,
-                              displayCommunity.daily.attentionCount -
-                                attentionRemoved,
-                            ),
+                            count: displayAttentionCount,
                           })}
                     </strong>
                   </article>
@@ -1159,16 +1120,19 @@ export default function Console({
           </section>
           <section className="chart-grid">
             <TrendChart
+              locale={locale}
               title={c.trendActivation}
               points={journey.trends.activation}
               emptyLabel={c.emptyDetail}
             />
             <TrendChart
+              locale={locale}
               title={c.trendConnection}
               points={journey.trends.connection}
               emptyLabel={c.emptyDetail}
             />
             <TrendChart
+              locale={locale}
               title={c.trendRetention}
               points={journey.trends.d7_retention}
               emptyLabel={c.emptyDetail}
@@ -1176,6 +1140,7 @@ export default function Console({
           </section>
           <section className="chart-grid two">
             <CohortHeatmap
+              locale={locale}
               cohorts={journey.retention}
               labels={{
                 cohort: c.retention,
@@ -1184,6 +1149,7 @@ export default function Console({
               }}
             />
             <ResponseDistributionChart
+              locale={locale}
               rows={journey.firstReplyDistribution}
               title={c.reply}
               labels={replyLabels(locale)}
@@ -1630,6 +1596,7 @@ export default function Console({
                 </details>
                 <h4>{c.delivery}</h4>
                 <DeliveryFunnelChart
+                  locale={locale}
                   action={item}
                   labels={{
                     triggered: c.triggered,
@@ -1826,6 +1793,7 @@ export default function Console({
               </div>
               <div className="result-grid">
                 <ExperimentComparison
+                  locale={locale}
                   item={item}
                   labels={{
                     control: c.control,
@@ -2450,20 +2418,16 @@ export default function Console({
   );
 
   const attentionView = (
-    <Attention
+    <AttentionQueueView
+      key={data.selectedGuildId}
+      guildId={data.selectedGuildId ?? ""}
       ready={Boolean(displayCommunity?.daily.ready)}
-      items={attentionItems}
       locale={locale}
       channels={data.options.surfaces ?? data.options.channels}
       minutes={savedResponseMinutes}
-      busy={busy}
-      snooze={attentionSnooze}
-      onRefresh={() => window.location.reload()}
       onRules={() => setPage(9)}
-      onSnooze={(id, value) =>
-        setAttentionSnooze((current) => ({ ...current, [id]: value }))
-      }
-      onChange={(item, status) => void changeAttention(item, status)}
+      onScopeChanged={() => setScopeChanged(true)}
+      onActiveCount={setAttentionActiveCount}
     />
   );
   const ruleValue = (
@@ -2923,26 +2887,6 @@ export default function Console({
           </div>
         )}
         <div className="dashboard-topbar">
-          <div>
-            <span>
-              {data.guilds?.find((guild) => guild.id === data.selectedGuildId)
-                ?.name ?? "NEXUS"}
-            </span>
-            <small>
-              {data.admin?.usage.plan ??
-                (locale === "ja"
-                  ? "利用情報未確認"
-                  : "Access information unavailable")}{" "}
-              ·{" "}
-              {data.runtime === undefined
-                ? locale === "ja"
-                  ? "接続状態未確認"
-                  : "Connection status unknown"
-                : data.runtime.gatewayConnected
-                  ? t(locale, "control.on")
-                  : t(locale, "common.needsAttention")}
-            </small>
-          </div>
           <div className="server-picker">
             <label>
               {t(locale, "web.server")}
@@ -2987,7 +2931,7 @@ export default function Console({
             </button>
           </section>
         )}
-        {data.betaState && (
+        {data.betaState && page !== 0 && (
           <AccessNotice
             state={data.betaState}
             locale={locale}
@@ -2998,7 +2942,7 @@ export default function Console({
           <HomeSummary
             data={{ ...data, results }}
             locale={locale}
-            removed={attentionRemoved}
+            activeCount={attentionActiveCount}
             onNavigate={setPage}
             detailsOpen={showHomeDetail}
             onDetails={() => {
@@ -3132,7 +3076,7 @@ export default function Console({
                 channels={data.options.surfaces ?? data.options.channels}
                 attention={{
                   ready: displayCommunity.daily.ready,
-                  total: displayCommunity.daily.attentionCount,
+                  total: displayAttentionCount,
                   items: displayCommunity.attention,
                 }}
               />
@@ -3182,11 +3126,18 @@ export default function Console({
             rulesView
           ) : page === 8 ? (
             <>
-              <TeamQueue
-                operations={displayCommunity?.operations}
-                locale={locale}
-              />
               {attentionView}
+              <details className="attention-history-detail">
+                <summary>
+                  {locale === "ja"
+                    ? "最近の対応記録と所要時間"
+                    : "Recent response records and timing"}
+                </summary>
+                <TeamQueue
+                  operations={displayCommunity?.operations}
+                  locale={locale}
+                />
+              </details>
             </>
           ) : page === 5 ? (
             <>
@@ -3285,12 +3236,14 @@ export default function Console({
         </p>
         <footer className="product-footer">
           <BrandAsset variant="navy" />
-          {t(locale, "web.uses_only_the_activity_data_needed")} · NEXUS{" "}
-          {VERSION} · {data.runtime?.buildSha ?? "unknown"} · {RELEASE_CHANNEL}{" "}
-          ·{" "}
-          <a href="/privacy">{locale === "ja" ? "プライバシー" : "Privacy"}</a>{" "}
-          · <a href="/terms">{locale === "ja" ? "利用条件" : "Terms"}</a> ·{" "}
-          <a href="/support">{locale === "ja" ? "サポート" : "Support"}</a>
+          <span>{locale === "ja" ? "Alpha 試験提供中" : "Alpha preview"}</span>
+          <a href="/support#product-info">
+            {locale === "ja"
+              ? "製品情報・既知の制約"
+              : "Product information & known limitations"}
+          </a>
+          <a href="/privacy">{locale === "ja" ? "プライバシー" : "Privacy"}</a>
+          <a href="/terms">{locale === "ja" ? "利用規約" : "Terms"}</a>
         </footer>
       </main>
     </div>

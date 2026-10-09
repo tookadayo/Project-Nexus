@@ -1,8 +1,16 @@
 # NEXUS documentation
 
-Current release: **0.6.0-alpha.12** — Local operations and invited Beta foundations. PostgreSQL is the normalized billing and
+Current release: **0.6.0-alpha.14** — Community operations UX, official announcements and private legal review. PostgreSQL is the normalized billing and
 entitlement source of truth. Current documents retain their established paths
 where moving them would create unnecessary link churn.
+
+## alpha14
+
+- [Scope and local verification](alpha14-acceptance.md)
+- [Official site](official-site-r3.md)
+- [Announcements and private legal review](alpha14-official-publications-acceptance.md)
+- [Publication conditions](alpha14-publication-gates.md)
+- [Existing test failures](alpha14-existing-test-failures.md)
 
 ## Website design
 

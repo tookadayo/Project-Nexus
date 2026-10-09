@@ -19,3 +19,7 @@ build/
 *.tmp
 *.bak
 *.orig
+
+# Private legal review inputs must never be committed.
+/legal/sources/
+/legal/private/

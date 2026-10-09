@@ -26,7 +26,10 @@ export function dashboardLocation(
   filters?: DashboardFilters,
 ): string {
   const url = new URL(href);
-  // Only existing non-sensitive view / range / analysis-tab identifiers.
+  // Preserve the Attention position only while normalizing that same view.
+  // Server switches use a new URL; the server also binds every cursor to scope.
+  const previous = new URLSearchParams(url.search);
+  // Only explicit view, filter and signed paging identifiers.
   url.search = "";
   url.hash = "";
   if (view === 0) url.searchParams.delete("view");
@@ -35,5 +38,21 @@ export function dashboardLocation(
     url.searchParams.set("range", String(filters.range));
   if (filters?.tab && filters.tab !== "overall")
     url.searchParams.set("tab", filters.tab);
+  if (view === 8 && dashboardView(previous.get("view")) === 8) {
+    const state = previous.get("attentionState"),
+      channel = previous.get("attentionChannel"),
+      cursor = previous.get("attentionCursor");
+    if (
+      state &&
+      ["OPEN", "ACKNOWLEDGED", "IN_PROGRESS", "SNOOZED", "RESOLVED"].includes(
+        state,
+      )
+    )
+      url.searchParams.set("attentionState", state);
+    if (channel && /^\d{17,20}$/.test(channel))
+      url.searchParams.set("attentionChannel", channel);
+    if (cursor && cursor.length <= 2048)
+      url.searchParams.set("attentionCursor", cursor);
+  }
   return url.pathname + url.search;
 }

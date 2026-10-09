@@ -15,7 +15,7 @@
   gap: 8px;
   flex-wrap: wrap;
 }
-.nx-interactive-preview figcaption span:last-child {
+.nx-interactive-preview figcaption > span:last-child {
   flex: 1;
   min-width: 180px;
 }

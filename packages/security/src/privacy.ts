@@ -69,6 +69,11 @@ export class PrivacyService {
           tx,
         )
       ).rows.map((r) => r.id);
+      // Paging membership may reference this participant through an existing post ID.
+      // Revoke all tenant page cursors before erasure rather than retain that metadata.
+      await sql`DELETE FROM component_tokens WHERE ${tenant(s)} AND intent->>'kind'='attention-page'`.execute(
+        tx,
+      );
       // Invalidate affected immutable aggregates before erasing their sources.
       // History and financial usage remain recorded; unavailable payloads cannot
       // be redisplayed, compared or reused after a participant privacy deletion.
@@ -424,6 +429,10 @@ export class PrivacyService {
         tx,
       );
       await sql`DELETE FROM helper_alerts WHERE ${tenant(s)} AND created_at<${cutoff}`.execute(
+        tx,
+      );
+      // Do not retain paging membership beyond the source retention cleanup.
+      await sql`DELETE FROM component_tokens WHERE ${tenant(s)} AND intent->>'kind'='attention-page' AND EXISTS(SELECT 1 FROM attention_items WHERE ${tenant(s)} AND detected_at<${cutoff})`.execute(
         tx,
       );
       await sql`DELETE FROM attention_items WHERE ${tenant(s)} AND detected_at<${cutoff}`.execute(

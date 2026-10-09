@@ -1,0 +1,361 @@
+.product .home-overview {
+  --home-soft-blue: #f2f6ff;
+  display: grid;
+  gap: 24px;
+  max-width: 1320px;
+  margin: 0 auto;
+}
+.product .home-overview .home-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 20px;
+  margin: 0;
+}
+.product .home-overview h1 {
+  margin: 0 0 8px;
+  font-size: clamp(28px, 3vw, 36px);
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+.product .home-overview h2 {
+  margin: 0;
+  font-size: 21px;
+  line-height: 1.5;
+}
+.product .home-overview p {
+  margin: 0;
+  line-height: 1.75;
+}
+.product .home-overview .home-heading p {
+  font-size: 15px;
+}
+.product .home-overview .home-update {
+  text-align: right;
+  flex-shrink: 0;
+}
+.product .home-overview .home-update p {
+  font-size: 12px;
+}
+.product .home-overview .home-update time {
+  display: block;
+}
+.product .home-overview .home-text-button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--nx-accent);
+  min-height: 44px;
+  padding: 8px 4px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: left;
+}
+.product .home-overview .home-text-button:hover {
+  background: var(--home-soft-blue);
+}
+.product .home-overview button:focus-visible,
+.product .home-overview a.home-text-button:focus-visible {
+  outline: 3px solid var(--nx-focus);
+  outline-offset: 3px;
+}
+.product .home-overview .home-state {
+  display: flex;
+  gap: 12px;
+  padding: 16px 20px;
+  background: var(--nx-surface);
+  border: 1px solid var(--nx-border);
+  border-radius: 10px;
+}
+.product .home-overview .home-state strong {
+  font-size: 15px;
+  line-height: 1.6;
+}
+.product .home-overview .home-state p {
+  margin-top: 3px;
+  font-size: 13px;
+  max-width: 90ch;
+}
+.product .home-overview .home-state-mark {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  border: 1px solid var(--nx-secondary);
+  border-radius: 50%;
+  color: var(--nx-secondary);
+  font-weight: 700;
+  font-size: 13px;
+  display: grid;
+  place-items: center;
+}
+.product .home-overview .home-state--paused,
+.product .home-overview .home-state--expired {
+  border-left: 4px solid var(--nx-warning);
+}
+.product .home-overview .home-priority-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr);
+  align-items: stretch;
+  gap: 24px;
+}
+.product .home-overview .home-focus {
+  padding: 28px 32px;
+  border: 1px solid var(--nx-border);
+  border-radius: 14px;
+  background: #fff;
+  min-width: 0;
+}
+.product .home-overview .home-focus--attention {
+  background: var(--home-soft-blue);
+  border-color: #c6d7fa;
+}
+.product .home-overview .home-section-label {
+  color: var(--nx-accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  margin-bottom: 8px;
+}
+.product .home-overview .home-count-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 20px 0 10px;
+}
+.product .home-overview .home-attention-count {
+  color: var(--nx-text);
+  font-size: clamp(48px, 5vw, 64px);
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.product .home-overview .home-count-line > span {
+  color: var(--nx-secondary);
+  font-size: 14px;
+}
+.product .home-overview .home-count-description {
+  margin-left: 8px;
+}
+.product .home-overview .home-unavailable-value {
+  color: var(--nx-text);
+  font-size: 20px;
+  font-weight: 650;
+  margin: 24px 0 12px;
+}
+.product .home-overview .home-focus-description {
+  font-size: 14px;
+  max-width: 52ch;
+}
+.product .home-overview .home-focus-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 24px;
+}
+.product .home-overview .home-focus-actions .primary {
+  min-height: 46px;
+  border-radius: 8px;
+  padding: 11px 20px;
+  font-size: 15px;
+}
+.product .home-overview .home-scope-note {
+  border-top: 1px solid var(--nx-border);
+  padding-top: 16px;
+  margin-top: 24px;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.product .home-overview .home-recent {
+  min-width: 0;
+  padding: 12px 0 4px;
+}
+.product .home-overview .home-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.product .home-overview .home-section-heading h2 {
+  font-size: 18px;
+}
+.product .home-overview .home-section-heading button {
+  flex-shrink: 0;
+}
+.product .home-overview .home-records {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.product .home-overview .home-records li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 12px;
+  border-top: 1px solid var(--nx-border);
+  padding: 16px 0;
+}
+.product .home-overview .home-records strong {
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.product .home-overview .home-record-state {
+  color: var(--nx-secondary);
+  font-size: 12px;
+  line-height: 1.85;
+  text-align: right;
+}
+.product .home-overview .home-record-time {
+  grid-column: 1 / -1;
+  color: var(--nx-secondary);
+  font-size: 12px;
+}
+.product .home-overview .home-records-empty {
+  border-top: 1px solid var(--nx-border);
+  padding: 24px 0;
+  font-size: 14px;
+}
+.product .home-overview .home-records-empty p + p {
+  margin-top: 8px;
+  font-size: 13px;
+}
+.product .home-overview .home-history-note {
+  border-top: 1px solid var(--nx-border);
+  padding-top: 12px;
+  font-size: 12px;
+}
+.product .home-overview .home-activity {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 18px 28px;
+  padding: 24px 28px;
+  border: 1px solid var(--nx-border);
+  border-radius: 12px;
+}
+.product .home-overview .home-activity h2 {
+  font-size: 18px;
+}
+.product .home-overview .home-activity p {
+  font-size: 13px;
+}
+.product .home-overview .home-activity .home-section-label {
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+.product .home-overview .home-activity-values {
+  display: flex;
+  gap: 32px;
+  margin: 0;
+}
+.product .home-overview .home-activity-values dt {
+  color: var(--nx-secondary);
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+.product .home-overview .home-activity-values dd {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.4;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.product .home-overview .home-activity-values dd span {
+  color: var(--nx-secondary);
+  margin-left: 5px;
+  font-size: 12px;
+  font-weight: 400;
+}
+.product .home-overview .home-activity-values dd .home-small-value {
+  font-size: 14px;
+  margin: 0;
+}
+.product .home-overview .home-activity .home-activity-note {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--nx-border);
+  padding-top: 12px;
+  font-size: 12px;
+}
+.product .home-overview .home-footnote {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 0 4px;
+}
+.product .home-overview .home-footnote p {
+  max-width: 78ch;
+  font-size: 12px;
+}
+.product .home-overview .home-footnote button {
+  flex-shrink: 0;
+}
+@media (max-width: 1100px) {
+  .product .home-overview .home-priority-layout {
+    grid-template-columns: minmax(0, 1.3fr) minmax(260px, 1fr);
+    gap: 20px;
+  }
+  .product .home-overview .home-focus {
+    padding: 24px;
+  }
+  .product .home-overview .home-activity {
+    grid-template-columns: 1fr auto;
+  }
+  .product .home-overview .home-activity > button {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+@media (max-width: 850px) {
+  .product .home-overview .home-priority-layout {
+    grid-template-columns: 1fr;
+  }
+  .product .home-overview .home-recent {
+    padding: 4px 0;
+  }
+}
+@media (max-width: 600px) {
+  .product .home-overview {
+    gap: 20px;
+  }
+  .product .home-overview .home-heading {
+    display: block;
+  }
+  .product .home-overview .home-update {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    text-align: left;
+    margin-top: 12px;
+  }
+  .product .home-overview .home-state {
+    padding: 14px;
+  }
+  .product .home-overview .home-focus {
+    padding: 22px 20px;
+  }
+  .product .home-overview .home-count-description {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+  .product .home-overview .home-activity {
+    grid-template-columns: 1fr;
+    padding: 20px;
+    gap: 18px;
+  }
+  .product .home-overview .home-activity-values {
+    justify-content: start;
+    gap: 44px;
+  }
+  .product .home-overview .home-footnote {
+    display: block;
+  }
+  .product .home-overview .home-footnote button {
+    margin-top: 8px;
+  }
+}

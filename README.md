@@ -2,7 +2,7 @@
 
 NEXUS は Discord Community Operations 製品です。サーバーの運営目的に合う計測方法を保存し、Discordで確認できた投稿・返信・参加の範囲と、集計できていないデータを示します。新しいメンバーへの対応、最初の返信やVoice同席、参加後の活動を確認し、運営の対応とその後の結果をつなげます。比較から原因を断定せず、個人の活動点数やスタッフ評価を作りません。
 
-現在のリリースは **0.6.0-alpha.12** です。バージョンはルートの `package.json` を唯一のリリース版ソースとし、`MAJOR.MINOR.PATCH-prerelease` の SemVer に従います。例: `0.6.0-alpha.2`、`0.6.0-beta.1`、`0.6.0-rc.1`、`0.6.0`。Build は Git の短縮 SHA です。パッケージ環境では `NEXUS_BUILD_SHA` を指定できます。
+現在のリリースは **0.6.0-alpha.14** です。バージョンはルートの `package.json` を唯一のリリース版ソースとし、`MAJOR.MINOR.PATCH-prerelease` の SemVer に従います。例: `0.6.0-alpha.2`、`0.6.0-beta.1`、`0.6.0-rc.1`、`0.6.0`。Build は Git の短縮 SHA です。パッケージ環境では `NEXUS_BUILD_SHA` を指定できます。
 
 ## Project Nexus 製品サイト
 

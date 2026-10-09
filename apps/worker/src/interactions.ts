@@ -18,6 +18,7 @@ import { operationsAccess } from "../../../packages/operations/src/policy";
 import { ExploreService } from "../../../packages/analytics/src/explore";
 import { chartQuerySchema } from "../../../packages/analytics/src/chart-spec";
 import { renderChartPng } from "../../../packages/analytics/src/chart-renderer";
+import { chartLocale, chartSummary, chartCaveat } from "../../../packages/analytics/src/chart-language";
 import {
   connectionCodePanel,
   disconnectPanel,
@@ -500,7 +501,7 @@ export class InteractionWorker {
           action === "support-health" || action === "newcomer-flow"
             ? await explore.saved(s, action)
             : await explore.chart(s, query);
-      const image = await renderChartPng(spec),
+      const image = await renderChartPng(spec, chartLocale(locale)),
         files = [
           { filename: "nexus-chart.png", dataBase64: image.toString("base64") },
         ];
@@ -520,7 +521,7 @@ export class InteractionWorker {
         );
       const buttons = await actionRow(issueChart, [
         ...[7, 30, 90].map((days) => ({
-          label: `${days} days`,
+          label: locale === "en" ? `${days} days` : `${days}日間`,
           action: "chartPeriod",
           data: { metric: spec.metric, days, compare: query.compare },
           disabled:
@@ -538,9 +539,9 @@ export class InteractionWorker {
         },
       ]);
       const body: Panel & { nexusFiles?: typeof files } = {
-        content: `**${spec.title}**\n${spec.range.from.slice(0, 10)} — ${spec.range.to.slice(0, 10)} · ${spec.evidence.coverageState}\n${locale === "ja" ? "観測された集計です。欠測を0や原因に置き換えません。" : "Aggregate observations. Missing data is not zero; changes are not causal claims."}`,
+        content: `${chartSummary(spec, chartLocale(locale))}\n${chartCaveat(chartLocale(locale))}`,
         allowed_mentions: { parse: [] },
-        embeds: [{ image: { url: "attachment://nexus-chart.png" } }],
+        embeds: [{ color: 0x2758ca, image: { url: "attachment://nexus-chart.png" } }],
         components: [
           buttons,
           ...(web.url

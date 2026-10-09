@@ -3,7 +3,7 @@ import { useId, useRef, useState, type KeyboardEvent } from "react";
 import { ObservationChart } from "../observation-chart";
 import { demoChart } from "./demo-data";
 import { text, type Locale } from "./content";
-import { NexusMark } from "./primitives";
+import { Brand } from "./primitives";
 import "./interactive-preview.css";
 const views = ["overview", "attention", "evidence"] as const;
 export function ProductPreview({ locale }: { locale: Locale }) {
@@ -40,8 +40,7 @@ export function ProductPreview({ locale }: { locale: Locale }) {
       )}
     >
       <figcaption>
-        <NexusMark size={20} />
-        <strong>NEXUS</strong>
+        <Brand small />
         <span>
           {text(
             locale,
@@ -117,17 +116,13 @@ export function ProductPreview({ locale }: { locale: Locale }) {
             <h3>
               {text(
                 locale,
-                "A post waiting for a direct reply",
-                "直接の返信を待っている投稿",
+                "A post with no response detected",
+                "返信を確認できない投稿",
               )}
             </h3>
             <p>
-              #sample-welcome ·{" "}
-              {text(
-                locale,
-                "45 minutes since the observed post",
-                "投稿の確認から45分",
-              )}
+              #sample-help ·{" "}
+              {text(locale, "45 minutes since the post", "投稿から45分")}
             </p>
             <details>
               <summary>

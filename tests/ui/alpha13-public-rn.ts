@@ -157,7 +157,7 @@ try {
           .first(),
       ).toBeVisible();
       await demo.screenshot({ path: `${out}/demo-${width}.png` });
-      await expect(demo.locator(".chart-bar").first()).toHaveCSS(
+      await expect(demo.locator(".chart-point").first()).toHaveCSS(
         "animation-name",
         "none",
       );
@@ -200,12 +200,12 @@ try {
       if (width === 1440) {
         await page.emulateMedia({ reducedMotion: "no-preference" });
         await demo.getByRole("tab", { name: "Overview", exact: true }).click();
-        await expect(demo.locator(".chart-bar").first()).toHaveCSS(
+        await expect(demo.locator(".chart-point").first()).toHaveCSS(
           "animation-duration",
           "0.18s",
         );
         await page.emulateMedia({ reducedMotion: "reduce" });
-        await expect(demo.locator(".chart-bar").first()).toHaveCSS(
+        await expect(demo.locator(".chart-point").first()).toHaveCSS(
           "animation-name",
           "none",
         );

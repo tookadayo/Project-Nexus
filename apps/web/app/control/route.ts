@@ -131,14 +131,12 @@ export async function POST(req: NextRequest) {
       });
     }
     if (action === "attention_action") {
-      url = base + "/attention/action";
-      payload = JSON.stringify({
-        channelId: parsed.channelId,
-        messageId: parsed.messageId,
-        status: parsed.status,
-        minutes: parsed.minutes,
-        untilToday: parsed.untilToday,
-      });
+      // Old tabs have no row version or current per-channel authorization.
+      // Reload into the scoped Attention route before recording a response.
+      return failureResponse(
+        new DomainError("REVISION_CONFLICT", 409),
+        "NOT_STARTED",
+      );
     }
     if (action === "action_template") {
       url = base + "/actions/draft";
