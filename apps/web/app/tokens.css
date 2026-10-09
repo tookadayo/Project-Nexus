@@ -1,0 +1,14 @@
+:root {
+  --nx-background: #ffffff;
+  --nx-text: #17212b;
+  --nx-secondary: #526171;
+  --nx-accent: #2758ca;
+  --nx-accent-hover: #1f47a8;
+  --nx-border: #dbe1e8;
+  --nx-control-border: #8291a3;
+  --nx-surface: #f7f9fc;
+  --nx-focus: #4275e2;
+  --nx-success: #176b43;
+  --nx-warning: #805100;
+  --nx-error: #ad2737;
+}

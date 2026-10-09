@@ -1,6 +1,6 @@
 {
   "name": "nexus",
-  "version": "0.6.0-alpha.12",
+  "version": "0.6.0-alpha.13",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.19.0",

@@ -1,14 +1,14 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap");
+@import "./tokens.css";
 :root {
-  color-scheme: dark;
-  font-family: "DM Sans", system-ui, sans-serif;
-  background: #0d120e;
-  color: #eef3eb;
-  --line: #2a342b;
-  --panel: #151c16;
-  --panel2: #1b241c;
-  --muted: #8d9a8e;
-  --lime: #c8f169;
+  color-scheme: light;
+  font-family: "Geist", "Noto Sans JP", system-ui, sans-serif;
+  background: var(--nx-background);
+  color: var(--nx-text);
+  --line: var(--nx-border);
+  --panel: var(--nx-background);
+  --panel2: var(--nx-surface);
+  --muted: var(--nx-secondary);
+  --lime: var(--nx-accent);
   --mint: #7ce0b1;
   --blue: #79a7ff;
   --amber: #f4c56a;
@@ -20,8 +20,7 @@ html,
 body {
   margin: 0;
   min-height: 100%;
-  background:
-    radial-gradient(circle at 75% -10%, #21331f 0, transparent 28%), #0d120e;
+  background: var(--nx-background);
 }
 button,
 input,
@@ -1945,11 +1944,11 @@ h3 {
   }
 }
 .product {
-  --line: var(--line);
+  --line: var(--nx-border);
   --panel: #fff;
   --panel2: #fff;
   --muted: var(--nexus-muted);
-  --lime: var(--lime);
+  --lime: var(--nx-accent);
   --mint: #078252;
   --blue: #4d56ce;
   --amber: #925800;
@@ -2757,29 +2756,29 @@ h3 {
 .team-queue .cards article,
 .operations-view .cards article {
   background: var(--panel);
-  color: #eef3eb;
+  color: var(--nx-text);
   border-color: var(--line);
 }
 .priority-attention {
-  background: #222b20;
-  color: #eef3eb;
-  border: 1px solid #536644;
+  background: #fff7e8;
+  color: var(--nx-warning);
+  border: 1px solid #b28a41;
 }
 .collection-warning {
-  background: #332c1c;
-  color: #f7e6bf;
-  border-color: #a88037;
+  background: #fff7e8;
+  color: var(--nx-warning);
+  border-color: #b28a41;
 }
 .transition-list article,
 .channel-inspector article,
 .recommendations article {
   background: var(--panel);
-  color: #eef3eb;
+  color: var(--nx-text);
 }
 
 .recipe-wizard {
   background: var(--panel2);
-  color: #eef3eb;
+  color: var(--nx-text);
   border-color: var(--line);
 }
 .evidence-method summary {

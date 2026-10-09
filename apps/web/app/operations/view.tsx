@@ -1,4 +1,5 @@
 "use client";
+import {safeError} from "../safe-error";
 import {
   createContext,
   useContext,
@@ -405,6 +406,7 @@ export function OperationsControls({
   }
   useEffect(() => {
     let active = true;
+    setData(null);
     setBusy(true);
     fetch("/operations/data?view=" + view, { cache: "no-store" })
       .then(async (response) => {
@@ -511,7 +513,7 @@ export function OperationsControls({
       </header>
       {error && (
         <p role="alert">
-          {error}{" "}
+          {safeError(error, locale)}{" "}
           {error === "SESSION_EXPIRED" && (
             <a href="/auth/login">{t("Sign in", "ログイン")}</a>
           )}

@@ -6,7 +6,12 @@ import {
   type IntegrationData,
 } from "./operations-ui";
 import { Attention } from "./attention";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { BrandAsset } from "./brand-asset";
+import { ProductMenu, NavIcon } from "./product-navigation";
+import { dashboardLocation, dashboardView } from "./navigation-model";
+import { AccessNotice, type AccessState } from "./access-notice";
+import { HomeSummary } from "./home-summary";
 import { Measurements, AnalysisSummary } from "./measurements";
 import { ServerConnection } from "./link/connection";
 import { FailureNotice } from "./failure-ui";
@@ -88,7 +93,8 @@ type Admin = {
   capability: Record<string, unknown> | null;
 };
 export type ProductData = {
-  hostedBeta?:boolean;
+  hostedBeta?: boolean;
+  betaState?: AccessState;
   integration?: IntegrationData | null;
   failures?: Record<string, UserFailure>;
   home: HomePresentation | null;
@@ -179,7 +185,9 @@ export default function Console({
   initialView?: number;
 }) {
   const [locale, setLocale] = useState<Locale>(initialLocale),
-    [page, setPage] = useState(initialView),
+    [page, setPageState] = useState(initialView),
+    [showHomeDetail, setShowHomeDetail] = useState(false),
+    [switchingGuild, setSwitchingGuild] = useState(false),
     [analysisTab, setAnalysisTab] = useState<
       "overall" | "channels" | "behavior"
     >("overall"),
@@ -324,12 +332,28 @@ export default function Console({
       Record<string, "30" | "60" | "today">
     >({});
   const c = messages[locale];
+  const requestInFlight = useRef(false);
+  const setPage = (view: number) => {
+    const next = dashboardView(String(view));
+    if (next !== page)
+      window.history.pushState(
+        null,
+        "",
+        dashboardLocation(window.location.href, next),
+      );
+    setPageState(next);
+    setShowHomeDetail(false);
+  };
   useEffect(() => {
-    const url = new URL(window.location.href);
-    if (page === 0) url.searchParams.delete("view");
-    else url.searchParams.set("view", String(page));
-    window.history.replaceState(null, "", url);
-  }, [page]);
+    const restore = () => {
+      setPageState(
+        dashboardView(new URL(window.location.href).searchParams.get("view")),
+      );
+      setShowHomeDetail(false);
+    };
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, []);
   const suggestedExcludedChannels = data.options.channels
     .filter((option) =>
       /^#?(?:bot|logs?|staff|mod(?:erator)?)(?:[-_]|$)/i.test(option.label),
@@ -350,6 +374,12 @@ export default function Console({
   const selected = actions?.templates.find((t) => t.key === template),
     selectedAction = actions?.items.find((a) => a.id === testActionId);
   async function request(body: unknown) {
+    if (requestInFlight.current) return null;
+    if (data.betaState && data.betaState !== "ACTIVE") {
+      setOperationFailure({ category: "BETA_ACCESS", effect: "NOT_STARTED" });
+      return null;
+    }
+    requestInFlight.current = true;
     setBusy(true);
     setOperationFailure(null);
     let knownFailure: UserFailure | undefined;
@@ -394,6 +424,7 @@ export default function Console({
       setStatus("");
       return null;
     } finally {
+      requestInFlight.current = false;
       setBusy(false);
     }
   }
@@ -720,7 +751,8 @@ export default function Console({
         <div>
           <p className="eyebrow">{t(locale, "control.attention")}</p>
           <h2>
-            {!data.community?.daily.ready
+            {!data.community?.daily.ready ||
+            data.community.daily.attentionCount === null
               ? t(locale, "control.queueUnavailable")
               : Math.max(
                     0,
@@ -1738,7 +1770,7 @@ export default function Console({
             guildId={data.selectedGuildId}
             locale={locale}
             development={data.developmentAuth === true}
-            beta={data.hostedBeta===true}
+            beta={data.hostedBeta === true}
           />
         )}
         <article className="surface">
@@ -2576,56 +2608,68 @@ export default function Console({
       )}
     </section>,
   ];
-  return (
-    <div className="product">
-      <aside className="sidebar">
-        <a className="brand" href="/">
-          N<span>✦</span>XUS
-        </a>
-        <p>NEXUS</p>
-        {data.guilds && data.guilds.length > 1 && (
-          <>
-            <label>
-              {t(locale, "web.server")}
-              <select
-                value={data.selectedGuildId}
-                onChange={(e) => {
-                  window.location.href = `/auth/select?guild=${encodeURIComponent(e.target.value)}`;
-                }}
-              >
-                {data.guilds
-                  .filter((guild) => guild.installed)
-                  .map((guild) => (
-                    <option key={guild.id} value={guild.id}>
-                      {guild.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <a href="/servers">
-              {locale === "ja" ? "サーバーを管理" : "Manage servers"}
-            </a>
-          </>
-        )}
+  const navItem = (view: number) =>
+    navPages.find((item) => item.view === view)!;
+  const group = (views: number[]) =>
+    views.map((view) => (
+      <button
+        key={view}
+        aria-current={page === view ? "page" : undefined}
+        onClick={() => setPage(view)}
+      >
+        {t(locale, navItem(view).label)}
+      </button>
+    ));
+  const navigation = (
+    <>
+      <nav aria-label={locale === "ja" ? "主要メニュー" : "Main navigation"}>
+        {(
+          [
+            [0, "home", "ホーム", "Home"],
+            [5, "analysis", "分析", "Analysis"],
+            [8, "attention", "要確認", "Needs attention"],
+            [3, "history", "履歴", "History"],
+          ] as const
+        ).map(([view, kind, ja, en]) => (
+          <button
+            key={view}
+            aria-current={page === view ? "page" : undefined}
+            onClick={() => setPage(view)}
+          >
+            <NavIcon kind={kind} />
+            {locale === "ja" ? ja : en}
+          </button>
+        ))}
+      </nav>
+      <details className="nav-group">
+        <summary>{locale === "ja" ? "分析の詳細" : "Analysis details"}</summary>
         <nav>
-          {navPages.map((item) => (
-            <button
-              key={item.label}
-              aria-current={page === item.view ? "page" : undefined}
-              onClick={() => setPage(item.view)}
-            >
-              <span aria-hidden="true">{item.icon}</span>
-              {t(locale, item.label)}
-            </button>
-          ))}
+          {group([1, 10])}
           <a href="/explore">
             {locale === "ja" ? "分析と保存ビュー" : "Explore & saved views"}
           </a>
+        </nav>
+      </details>
+      <details className="nav-group">
+        <summary>
+          {locale === "ja" ? "対応とレポート" : "Responses & reports"}
+        </summary>
+        <nav>
+          {group([2])}
           <a href="/operations?view=attention">
             {locale === "ja"
               ? "対応・自動化・レポート"
               : "Attention, automation & reports"}
           </a>
+        </nav>
+      </details>
+      <details className="nav-group">
+        <summary>
+          <NavIcon kind="settings" />
+          {locale === "ja" ? "設定" : "Settings"}
+        </summary>
+        <nav>
+          {group([4, 9, 11, 12, 13, 14])}
           <a href="/operations?view=organization">
             {locale === "ja" ? "組織とチーム" : "Organization & teams"}
           </a>
@@ -2635,42 +2679,58 @@ export default function Console({
               : "API & webhook integrations"}
           </a>
         </nav>
-        <div className="sidebar-bottom">
-          <button
-            onClick={() => {
-              const next = locale === "en" ? "ja" : "en";
-              setLocale(next);
-              document.cookie = `nexus_locale=${next}; Path=/; Max-Age=31536000; SameSite=Lax`;
-            }}
-          >
-            {locale === "en"
-              ? t("ja", "settings.japanese")
-              : t("ja", "settings.english")}
-          </button>
-          <small>
-            NEXUS {VERSION} · {data.runtime?.buildSha ?? "unknown"} ·{" "}
-            {RELEASE_CHANNEL}
-          </small>
-          {data.guilds?.[0]?.name !== "Development guild" && (
-            <a href="/auth/logout">{t(locale, "web.sign_out")}</a>
-          )}
-        </div>
+      </details>
+      <div className="sidebar-bottom">
+        <a href="/auth/disconnect">
+          {locale === "ja" ? "個人の接続を解除" : "Disconnect my account"}
+        </a>
+        <a href="/support">
+          <NavIcon kind="help" />
+          {locale === "ja" ? "ヘルプ・サポート" : "Help & support"}
+        </a>
+        <a href="/privacy">{locale === "ja" ? "プライバシー" : "Privacy"}</a>
+        <a href="/terms">{locale === "ja" ? "利用条件" : "Terms"}</a>
+        <button
+          data-keep-menu
+          onClick={() => {
+            const next = locale === "en" ? "ja" : "en";
+            setLocale(next);
+            document.documentElement.lang = next;
+            document.cookie = `nexus_locale=${next}; Path=/; Max-Age=31536000; SameSite=Lax`;
+          }}
+        >
+          {locale === "en" ? "日本語" : "English"}
+        </button>
+        {data.guilds?.[0]?.name !== "Development guild" && (
+          <a href="/auth/logout">{t(locale, "web.sign_out")}</a>
+        )}
+      </div>
+    </>
+  );
+  if (switchingGuild)
+    return (
+      <main className="servers-content" aria-busy="true">
+        <p role="status">
+          {locale === "ja"
+            ? "サーバーの権限と利用状態を確認しています。"
+            : "Checking server permissions and access."}
+        </p>
+      </main>
+    );
+  return (
+    <div className="product">
+      <aside className="sidebar">
+        <a className="brand" href="/">
+          <BrandAsset />
+        </a>
+        {navigation}
       </aside>
       <main className="content">
         <div className="mobile-head">
           <a className="brand" href="/">
-            N<span>✦</span>XUS
+            <BrandAsset variant="blue" />
           </a>
-          <select
-            value={page}
-            onChange={(e) => setPage(Number(e.target.value))}
-          >
-            {navPages.map((item) => (
-              <option value={item.view} key={item.label}>
-                {t(locale, item.label)}
-              </option>
-            ))}
-          </select>
+          <ProductMenu locale={locale}>{navigation}</ProductMenu>
         </div>
         {data.developmentAuth && (
           <div className="development-auth" role="status">
@@ -2687,140 +2747,94 @@ export default function Console({
                 ?.name ?? "NEXUS"}
             </span>
             <small>
-              {data.admin?.usage.plan ?? "Free"} ·{" "}
-              {data.runtime?.gatewayConnected
-                ? t(locale, "control.on")
-                : t(locale, "common.needsAttention")}
+              {data.admin?.usage.plan ??
+                (locale === "ja"
+                  ? "利用情報未確認"
+                  : "Access information unavailable")}{" "}
+              ·{" "}
+              {data.runtime === undefined
+                ? locale === "ja"
+                  ? "接続状態未確認"
+                  : "Connection status unknown"
+                : data.runtime.gatewayConnected
+                  ? t(locale, "control.on")
+                  : t(locale, "common.needsAttention")}
             </small>
           </div>
-          <a href="/servers">{t(locale, "web.server")} ▾</a>
+          <div className="server-picker">
+            <label>
+              {t(locale, "web.server")}
+              <select
+                value={data.selectedGuildId ?? ""}
+                onChange={(e) => {
+                  setSwitchingGuild(true);
+                  window.location.assign(
+                    `/auth/select?guild=${encodeURIComponent(e.target.value)}`,
+                  );
+                }}
+              >
+                {data.guilds
+                  ?.filter((guild) => guild.installed)
+                  .map((guild) => (
+                    <option key={guild.id} value={guild.id}>
+                      {guild.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <a href="/servers">
+              {locale === "ja" ? "サーバー一覧" : "Server list"}
+            </a>
+          </div>
         </div>
-        {page >= 12 && page <= 14 ? (
-          <OperationsView
-            data={data.integration}
-            model={data.community?.adaptive}
+        {data.betaState && (
+          <AccessNotice
+            state={data.betaState}
             locale={locale}
-            view={page}
-            channels={data.options.surfaces ?? data.options.channels}
+            onSettings={() => setPage(4)}
           />
-        ) : page === 10 && data.community?.adaptive ? (
-          <JourneysView model={data.community.adaptive} locale={locale} />
-        ) : page === 11 ? (
-          <CommunityModelEditor
-            initial={communityModelSchema.parse(
-              data.admin?.settings.communityModel ?? {},
-            )}
-            snapshot={data.community?.adaptive?.capabilities ?? null}
+        )}
+        {page === 0 && (
+          <HomeSummary
+            data={data}
             locale={locale}
-            channels={data.options.surfaces ?? data.options.channels}
-            tags={data.options.forumTags}
-            onSave={async (profile) => {
-              const updated = await request({
-                action: "community_model",
-                profile,
-                revision: notificationRevision,
-              });
-              if (!updated) return false;
-              setNotificationRevision(Number(updated.revision));
-              return true;
+            removed={attentionRemoved}
+            onNavigate={setPage}
+            detailsOpen={showHomeDetail}
+            onDetails={() => {
+              setShowHomeDetail(true);
+              requestAnimationFrame(() =>
+                document.getElementById("home-overview-detail")?.focus(),
+              );
             }}
-            onRefresh={async () =>
-              Boolean(await request({ action: "capability_refresh" }))
-            }
           />
-        ) : data.failures?.[
-            page === 0
-              ? "home"
-              : page === 1
-                ? "journey"
-                : page === 5 || page === 8 || page === 9
-                  ? "community"
-                  : page === 2
-                    ? "actions"
-                    : page === 3
-                      ? "results"
-                      : "dashboard"
-          ] ? (
-          <FailureNotice
-            locale={locale}
-            failure={
-              data.failures[
-                page === 0
-                  ? "home"
-                  : page === 1
-                    ? "journey"
-                    : page === 5 || page === 8 || page === 9
-                      ? "community"
-                      : page === 2
-                        ? "actions"
-                        : page === 3
-                          ? "results"
-                          : "dashboard"
-              ]!
-            }
-            onCheck={() => window.location.reload()}
-          />
-        ) : data.community?.adaptive && [0, 1, 5, 9].includes(page) ? (
-          <>
-            {page === 1 && (
-              <div className="segmented">
-                {([7, 30, 90] as const).map((value) => (
-                  <button
-                    key={value}
-                    aria-pressed={range === value}
-                    onClick={() => void changeRange(value)}
-                  >
-                    {value}D
-                  </button>
-                ))}
-              </div>
-            )}
-            {page === 5 && (
-              <div className="surface" role="tablist">
-                {(["overall", "channels", "behavior"] as const).map((tab) => (
-                  <button
-                    key={tab}
-                    role="tab"
-                    aria-selected={analysisTab === tab}
-                    onClick={() => setAnalysisTab(tab)}
-                  >
-                    {t(locale, `control.${tab}`)}
-                  </button>
-                ))}
-              </div>
-            )}
-            <AdaptiveCommunity
-              model={adaptiveData ?? data.community.adaptive}
+        )}
+        {page === 3 && (
+          <section className="surface">
+            <h1>{locale === "ja" ? "履歴" : "History"}</h1>
+            <p>
+              {locale === "ja"
+                ? "ここでは保存された対応結果を確認できます。詳細分析の履歴・比較はDiscordのNEXUSパネルの「履歴を見る」から開けます。"
+                : "Review saved response results here. For detailed analysis history and comparisons, choose View history in the NEXUS panel in Discord."}
+            </p>
+          </section>
+        )}
+        <div
+          id="home-overview-detail"
+          tabIndex={-1}
+          hidden={page === 0 && !showHomeDetail}
+        >
+          {page >= 12 && page <= 14 ? (
+            <OperationsView
+              data={data.integration}
+              model={data.community?.adaptive}
               locale={locale}
               view={page}
-              analysisView={analysisTab}
-              operations={data.community.operations}
-              onSettings={() => setPage(4)}
               channels={data.options.surfaces ?? data.options.channels}
-              attention={{
-                ready: data.community.daily.ready,
-                total: data.community.daily.attentionCount,
-                items: data.community.attention,
-              }}
             />
-            {page === 0 && data.home?.setup.required && (
-              <Setup
-                data={data.home}
-                c={c}
-                locale={locale}
-                busy={busy}
-                preview={
-                  previewKind === "activation" || previewKind === "onboarding"
-                    ? preview
-                    : null
-                }
-                prepare={prepare}
-                publish={publish}
-              />
-            )}
-          </>
-        ) : page === 4 ? (
-          <>
+          ) : page === 10 && data.community?.adaptive ? (
+            <JourneysView model={data.community.adaptive} locale={locale} />
+          ) : page === 11 ? (
             <CommunityModelEditor
               initial={communityModelSchema.parse(
                 data.admin?.settings.communityModel ?? {},
@@ -2843,100 +2857,218 @@ export default function Console({
                 Boolean(await request({ action: "capability_refresh" }))
               }
             />
-            {views[4]}
-          </>
-        ) : page === 9 ? (
-          rulesView
-        ) : page === 8 ? (
-          <>
-            <TeamQueue
-              operations={data.community?.operations}
+          ) : data.failures?.[
+              page === 0
+                ? "home"
+                : page === 1
+                  ? "journey"
+                  : page === 5 || page === 8 || page === 9
+                    ? "community"
+                    : page === 2
+                      ? "actions"
+                      : page === 3
+                        ? "results"
+                        : "dashboard"
+            ] ? (
+            <FailureNotice
               locale={locale}
+              failure={
+                data.failures[
+                  page === 0
+                    ? "home"
+                    : page === 1
+                      ? "journey"
+                      : page === 5 || page === 8 || page === 9
+                        ? "community"
+                        : page === 2
+                          ? "actions"
+                          : page === 3
+                            ? "results"
+                            : "dashboard"
+                ]!
+              }
+              onCheck={() => window.location.reload()}
             />
-            {attentionView}
-          </>
-        ) : page === 5 ? (
-          <>
-            <div
-              className="surface"
-              role="tablist"
-              aria-label={t(locale, "control.analysis")}
-            >
-              {(["overall", "channels", "behavior"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  role="tab"
-                  aria-selected={analysisTab === tab}
-                  onClick={() => setAnalysisTab(tab)}
-                >
-                  {t(locale, `control.${tab}`)}
-                </button>
-              ))}
-            </div>
-            {analysisTab === "overall" ? (
-              <>
-                {views[5]}
-                {views[6]}
-                {opportunityView}
-              </>
-            ) : analysisTab === "channels" ? (
-              views[7]
-            ) : (
-              <section className="surface">
-                <h1>{t(locale, "control.behavior")}</h1>
-                {data.community?.compare.available ? (
-                  <>
-                    <p>
-                      {t(locale, "control.replyAlert")}:{" "}
-                      {wholePercent(
-                        data.community.compare.newcomers
-                          ?.receivedReplyPercent ?? null,
-                      )}
-                    </p>
-                    <p>
-                      {t(locale, "control.voice")}:{" "}
-                      {wholePercent(
-                        data.community.compare.newcomers?.voicePercent ?? null,
-                      )}
-                    </p>
-                    <p>
-                      {t(locale, "control.goalEvent")}:{" "}
-                      {wholePercent(
-                        data.community.compare.newcomers?.eventPercent ?? null,
-                      )}
-                    </p>
-                  </>
-                ) : (
-                  <p>{t(locale, "control.noComparison")}</p>
+          ) : data.community?.adaptive && [0, 1, 5, 9].includes(page) ? (
+            <>
+              {page === 1 && (
+                <div className="segmented">
+                  {([7, 30, 90] as const).map((value) => (
+                    <button
+                      key={value}
+                      aria-pressed={range === value}
+                      onClick={() => void changeRange(value)}
+                    >
+                      {value}D
+                    </button>
+                  ))}
+                </div>
+              )}
+              {page === 5 && (
+                <div className="surface" role="tablist">
+                  {(["overall", "channels", "behavior"] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      role="tab"
+                      aria-selected={analysisTab === tab}
+                      onClick={() => setAnalysisTab(tab)}
+                    >
+                      {t(locale, `control.${tab}`)}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <AdaptiveCommunity
+                model={adaptiveData ?? data.community.adaptive}
+                locale={locale}
+                view={page}
+                analysisView={analysisTab}
+                operations={data.community.operations}
+                onSettings={() => setPage(4)}
+                channels={data.options.surfaces ?? data.options.channels}
+                attention={{
+                  ready: data.community.daily.ready,
+                  total: data.community.daily.attentionCount,
+                  items: data.community.attention,
+                }}
+              />
+              {page === 0 && data.home?.setup.required && (
+                <Setup
+                  data={data.home}
+                  c={c}
+                  locale={locale}
+                  busy={busy}
+                  preview={
+                    previewKind === "activation" || previewKind === "onboarding"
+                      ? preview
+                      : null
+                  }
+                  prepare={prepare}
+                  publish={publish}
+                />
+              )}
+            </>
+          ) : page === 4 ? (
+            <>
+              <CommunityModelEditor
+                initial={communityModelSchema.parse(
+                  data.admin?.settings.communityModel ?? {},
                 )}
-                {data.community?.transitions.length ? (
-                  <>
-                    <h2>{t(locale, "control.moves")}</h2>
-                    {data.community.transitions
-                      .slice(0, 5)
-                      .map((move, index) => (
-                        <p key={index}>
-                          {move.from === "voice"
-                            ? t(locale, "control.voice")
-                            : (data.options.channels.find(
-                                (item) => item.id === move.from,
-                              )?.label ?? `#${move.from}`)}{" "}
-                          →{" "}
-                          {move.to === "voice"
-                            ? t(locale, "control.voice")
-                            : (data.options.channels.find(
-                                (item) => item.id === move.to,
-                              )?.label ?? `#${move.to}`)}
-                        </p>
-                      ))}
-                  </>
-                ) : null}
-              </section>
-            )}
-          </>
-        ) : (
-          views[page]
-        )}
+                snapshot={data.community?.adaptive?.capabilities ?? null}
+                locale={locale}
+                channels={data.options.surfaces ?? data.options.channels}
+                tags={data.options.forumTags}
+                onSave={async (profile) => {
+                  const updated = await request({
+                    action: "community_model",
+                    profile,
+                    revision: notificationRevision,
+                  });
+                  if (!updated) return false;
+                  setNotificationRevision(Number(updated.revision));
+                  return true;
+                }}
+                onRefresh={async () =>
+                  Boolean(await request({ action: "capability_refresh" }))
+                }
+              />
+              {views[4]}
+            </>
+          ) : page === 9 ? (
+            rulesView
+          ) : page === 8 ? (
+            <>
+              <TeamQueue
+                operations={data.community?.operations}
+                locale={locale}
+              />
+              {attentionView}
+            </>
+          ) : page === 5 ? (
+            <>
+              <div
+                className="surface"
+                role="tablist"
+                aria-label={t(locale, "control.analysis")}
+              >
+                {(["overall", "channels", "behavior"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    role="tab"
+                    aria-selected={analysisTab === tab}
+                    onClick={() => setAnalysisTab(tab)}
+                  >
+                    {t(locale, `control.${tab}`)}
+                  </button>
+                ))}
+              </div>
+              {analysisTab === "overall" ? (
+                <>
+                  {views[5]}
+                  {views[6]}
+                  {opportunityView}
+                </>
+              ) : analysisTab === "channels" ? (
+                views[7]
+              ) : (
+                <section className="surface">
+                  <h1>{t(locale, "control.behavior")}</h1>
+                  {data.community?.compare.available ? (
+                    <>
+                      <p>
+                        {t(locale, "control.replyAlert")}:{" "}
+                        {wholePercent(
+                          data.community.compare.newcomers
+                            ?.receivedReplyPercent ?? null,
+                        )}
+                      </p>
+                      <p>
+                        {t(locale, "control.voice")}:{" "}
+                        {wholePercent(
+                          data.community.compare.newcomers?.voicePercent ??
+                            null,
+                        )}
+                      </p>
+                      <p>
+                        {t(locale, "control.goalEvent")}:{" "}
+                        {wholePercent(
+                          data.community.compare.newcomers?.eventPercent ??
+                            null,
+                        )}
+                      </p>
+                    </>
+                  ) : (
+                    <p>{t(locale, "control.noComparison")}</p>
+                  )}
+                  {data.community?.transitions.length ? (
+                    <>
+                      <h2>{t(locale, "control.moves")}</h2>
+                      {data.community.transitions
+                        .slice(0, 5)
+                        .map((move, index) => (
+                          <p key={index}>
+                            {move.from === "voice"
+                              ? t(locale, "control.voice")
+                              : (data.options.channels.find(
+                                  (item) => item.id === move.from,
+                                )?.label ?? `#${move.from}`)}{" "}
+                            →{" "}
+                            {move.to === "voice"
+                              ? t(locale, "control.voice")
+                              : (data.options.channels.find(
+                                  (item) => item.id === move.to,
+                                )?.label ?? `#${move.to}`)}
+                          </p>
+                        ))}
+                    </>
+                  ) : null}
+                </section>
+              )}
+            </>
+          ) : (
+            views[page]
+          )}
+        </div>
         {operationFailure && (
           <FailureNotice
             failure={operationFailure}
@@ -2948,10 +3080,13 @@ export default function Console({
           {status}
         </p>
         <footer className="product-footer">
+          <BrandAsset variant="navy" />
           {t(locale, "web.uses_only_the_activity_data_needed")} · NEXUS{" "}
           {VERSION} · {data.runtime?.buildSha ?? "unknown"} · {RELEASE_CHANNEL}{" "}
-          · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> ·{" "}
-          <a href="/support">Support</a>
+          ·{" "}
+          <a href="/privacy">{locale === "ja" ? "プライバシー" : "Privacy"}</a>{" "}
+          · <a href="/terms">{locale === "ja" ? "利用条件" : "Terms"}</a> ·{" "}
+          <a href="/support">{locale === "ja" ? "サポート" : "Support"}</a>
         </footer>
       </main>
     </div>

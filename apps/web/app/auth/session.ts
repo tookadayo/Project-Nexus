@@ -235,7 +235,7 @@ export async function dashboardContext(
   if (!process.env.API_KEY)
     throw new Error("API_KEY is required for OAuth dashboard access");
   const scope = scopeForGuild(selected.id);
-  if(hostedBetaEnabled())await serverServices().db.transaction().execute(tx=>betaAccess(tx,scope,"read"));
+  const invitation = hostedBetaEnabled() ? await serverServices().db.transaction().execute(tx=>betaAccess(tx,scope,"read")) : null;
   return {
     base,
     organizationId: scope.organizationId,
@@ -243,6 +243,7 @@ export async function dashboardContext(
     token: apiToken(process.env.API_KEY, scope),
     guilds: [selected],
     userId: session.userId,
+    betaState: invitation ? (invitation.expires_at! <= new Date() ? "EXPIRED" as const : invitation.status === "PAUSED" ? "PAUSED" as const : "ACTIVE" as const) : undefined,
     operationsRole: connection.operationsRole,
     operationsCanConfigure: connection.operationsCanConfigure,
   };

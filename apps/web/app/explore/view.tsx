@@ -1,4 +1,5 @@
 "use client";
+import {safeError} from "../safe-error";
 import { useEffect, useState } from "react";
 import {
   chartQuerySchema,
@@ -29,6 +30,7 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
     [selected, setSelected] = useState<View | null>(null);
   const url = "/explore/data?q=" + encodeURIComponent(JSON.stringify(query));
   async function load() {
+    setData(null);
     setBusy(true);
     setError("");
     try {
@@ -44,6 +46,7 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
   }
   useEffect(() => {
     let active = true;
+    setData(null);
     setBusy(true);
     fetch(url, { cache: "no-store" })
       .then(async (response) => {
@@ -285,7 +288,7 @@ export function ExploreControls({ locale }: { locale: "ja" | "en" }) {
           </>
         )}
       </section>
-      {error && <p role="alert">{error}</p>}
+      {error && <p role="alert">{safeError(error, locale)}</p>}
       {busy && <p role="status">{ja ? "確認中…" : "Loading…"}</p>}
       {spec && (
         <>

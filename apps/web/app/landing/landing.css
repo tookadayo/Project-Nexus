@@ -1,9 +1,5 @@
 .nexus-site {
   color-scheme: light;
-  --nx-text: #17212b;
-  --nx-secondary: #526171;
-  --nx-accent: #2758ca;
-  --nx-border: #dbe1e8;
   color: var(--nx-text);
   background: #fff;
   font-family: var(--nx-font-sans), "Noto Sans JP", system-ui, sans-serif;

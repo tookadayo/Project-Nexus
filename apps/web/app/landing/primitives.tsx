@@ -1,3 +1,4 @@
+import {BrandAsset} from "../brand-asset";
 import type { ReactNode } from "react";
 
 const paths: Record<string, ReactNode> = {
@@ -160,8 +161,7 @@ export function NexusMark({ size = 28 }: { size?: number }) {
 export function Brand({ small = false }: { small?: boolean }) {
   return (
     <span className={`nx-brand${small ? " nx-brand-small" : ""}`}>
-      <NexusMark size={small ? 23 : 30} />
-      <span>NEXUS</span>
+      <BrandAsset variant={small ? "blue" : "wordmark"}/>
     </span>
   );
 }
