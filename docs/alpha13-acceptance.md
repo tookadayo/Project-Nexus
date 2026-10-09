@@ -107,3 +107,8 @@ pnpm exec vitest run --config vitest.integration.ts tests/integration/alpha12-be
 テストは合成データと隔離ローカルDB。UIのAPI応答はmock、外部browser要求は遮断。実Discord/OAuth、Windows 11、重い全体E2E、性能/容量、本番backup復元、screenreaderはNOT RUN。40P01、SHOWCASE sourceメタデータ、実環境受入、最新削除状態を含むbackup復元、容量/Windowsの公開前ゲートを維持する。alpha.12毎分上限テストの過去の一過性FAILは原因未確定のまま。公開可能とは宣言しない。
 
 push・PR・merge・deploy・本番操作・実資格情報設定・実Discord送信は未実施。
+
+
+## R1–R5 / N1–N2 追加実装（2026-10-09）
+
+`ff2e403`からの追加承認範囲、再現・修正・検証・残る制約は [alpha13-rn-acceptance.md](alpha13-rn-acceptance.md) に記録する。上記の旧検証結果は各旧SHAの証跡として保持する。

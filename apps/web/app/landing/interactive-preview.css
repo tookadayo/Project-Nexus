@@ -1,0 +1,114 @@
+.nx-interactive-preview {
+  margin: 0;
+  min-width: 0;
+  border: 1px solid #dbe1e8;
+  border-radius: 10px;
+  background: #f7f9fc;
+  padding: 20px;
+  color: #17212b;
+  font-size: 14px;
+  line-height: 1.65;
+}
+.nx-interactive-preview figcaption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.nx-interactive-preview figcaption span:last-child {
+  flex: 1;
+  min-width: 180px;
+}
+.nx-demo-controls {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-block: 16px;
+}
+.nx-demo-controls label {
+  display: grid;
+  gap: 4px;
+}
+.nx-interactive-preview button,
+.nx-interactive-preview select {
+  font: inherit;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #8190a0;
+  border-radius: 6px;
+  background: white;
+  color: #17212b;
+  cursor: pointer;
+}
+.nx-demo-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.nx-demo-tabs [aria-selected="true"] {
+  color: #1f47a8;
+  border-color: #2758ca;
+  background: #edf2ff;
+}
+.nx-demo-card {
+  padding: 20px;
+  background: white;
+  border-radius: 10px;
+}
+.nx-demo-card summary {
+  min-height: 44px;
+  cursor: pointer;
+}
+.nx-interactive-preview :focus-visible {
+  outline: 3px solid #4275e2;
+  outline-offset: 3px;
+}
+.nx-interactive-preview button {
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+.nx-interactive-preview button:hover {
+  background: #edf2ff;
+  border-color: #2758ca;
+}
+.nx-demo-card {
+  animation: nx-demo-reveal 0.18s ease-out;
+}
+.nx-interactive-preview .observation-chart {
+  padding: 16px;
+}
+.nx-interactive-preview .observation-chart h2 {
+  font-size: 20px;
+}
+@keyframes nx-demo-reveal {
+  from {
+    opacity: 0.65;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (max-width: 767px) {
+  .nx-interactive-preview {
+    padding: 14px;
+  }
+  .nx-interactive-preview .observation-chart {
+    padding: 12px;
+  }
+  .nx-demo-tabs button {
+    flex: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nx-demo-card {
+    animation: none;
+  }
+  .nx-interactive-preview button {
+    transition: none;
+  }
+}

@@ -7,12 +7,14 @@ export function ConfirmationDialog({
   onCancel,
   busy = false,
   returnFocus,
+  className,
 }: {
   label: string;
   children: ReactNode;
   onCancel: () => void;
   busy?: boolean;
-  returnFocus?: RefObject<HTMLElement | null>;
+  returnFocus?: RefObject<HTMLElement | SVGElement | null>;
+  className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -27,6 +29,7 @@ export function ConfirmationDialog({
   return (
     <dialog
       ref={ref}
+      className={className}
       aria-label={label}
       aria-busy={busy}
       onCancel={(event) => {

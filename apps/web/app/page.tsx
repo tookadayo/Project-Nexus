@@ -1,8 +1,9 @@
+import { BetaNotice } from "./landing/beta-notice";
+import { GentleReveal } from "./landing/reveal";
 import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import { headers } from "next/headers";
 import { webOrigin } from "../../../packages/config/src/web-origin";
-import { installUrl } from "./auth/session";
 import { siteLocale } from "./public-ui";
 import { faqs, text, type Locale } from "./landing/content";
 import { Navigation } from "./landing/navigation";
@@ -85,20 +86,16 @@ export async function generateMetadata(): Promise<Metadata> {
 
 function Cta({
   locale,
-  add,
   secondary = true,
 }: {
   locale: Locale;
-  add: string | null;
   secondary?: boolean;
 }) {
   return (
     <div className="nx-cta-row">
-      <a className="nx-button nx-button-primary" href={add ?? "/support"}>
-        {add
-          ? text(locale, "Add to Discord", "Discordに追加")
-          : text(locale, "Ask about installation", "導入について問い合わせる")}
-        <Icon name={add ? "external" : "arrow"} size={18} />
+      <a className="nx-button nx-button-primary" href="/support">
+        {text(locale, "Check invitation Beta access", "招待Betaの参加案内")}
+        <Icon name="arrow" size={18} />
       </a>
       {secondary && (
         <a className="nx-button nx-button-outline" href="/product">
@@ -111,10 +108,10 @@ function Cta({
 }
 
 export default async function Home() {
-  const locale = await siteLocale(),
-    add = installUrl();
+  const locale = await siteLocale();
   return (
     <div className={`nexus-site ${geist.variable}`} lang={locale} id="top">
+      <GentleReveal />
       <a className="nx-skip-link" href="#main-content">
         {text(locale, "Skip to content", "本文へスキップ")}
       </a>
@@ -143,18 +140,19 @@ export default async function Home() {
                 "NEXUSはDiscordコミュニティの運営ツールです。新規メンバーの活動と返信状況を確認し、対応が必要な投稿を整理できます。",
               )}
             </p>
-            <Cta locale={locale} add={add} />
+            <Cta locale={locale} />
             <p className="nx-availability">
               {text(
                 locale,
-                "Alpha release · Ask about availability for your server",
-                "アルファ版 · サーバーでの利用はお問い合わせください",
+                "Free invitation Beta · Check the participation conditions",
+                "無料招待Beta · 参加条件をご確認ください",
               )}
             </p>
           </div>
           <ProductPreview locale={locale} />
         </section>
 
+        <BetaNotice locale={locale} />
         <div className="nx-surface-strip nx-container">
           <p>
             {text(
@@ -609,7 +607,7 @@ export default async function Home() {
                 "観測できることを確認し、サーバーでの利用についてご相談ください。",
               )}
             </p>
-            <Cta locale={locale} add={add} />
+            <Cta locale={locale} />
           </div>
         </section>
       </main>

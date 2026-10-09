@@ -34,8 +34,8 @@ export const faqs = [
   {
     question: ["How can I use NEXUS?", "利用するにはどうすればよいですか？"],
     answer: [
-      "NEXUS is currently an alpha release. Development self-host setup is documented in the repository. Ask support about availability for your server. Paid checkout is not configured and paid prices are not published.",
-      "現在はアルファ版です。開発用セルフホストの手順をリポジトリで公開しています。サーバーでの利用についてはサポートにお問い合わせください。有料決済は未設定で、有料価格は公開していません。",
+      "NEXUS currently offers free, time-limited Beta access to invited servers. General registration, paid checkout, Live and extra analysis packs are not open. Check the participation information on Support; developer self-host setup remains documented in the repository.",
+      "現在は招待されたサーバーへ、期限・上限つきのBetaを無料提供しています。一般登録・有料決済・Live・追加回数パックは開始していません。参加案内はサポートで確認できます。開発用セルフホストの手順はリポジトリにあります。",
     ],
   },
 ] as const;

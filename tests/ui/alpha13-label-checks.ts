@@ -10,7 +10,14 @@ export async function labelChecks(page: Page, origin: string) {
         views: [],
         segments: [],
         channels: [],
-        capabilities: { advanced: true, csv: false, historyDays: 90 },
+        capabilities: {
+          canSave: true,
+          saveReason: null,
+          compare: true,
+          advanced: true,
+          csv: false,
+          historyDays: 90,
+        },
       }),
     }),
   );

@@ -1,3 +1,4 @@
+import { operationsPresentation } from "../../../../../packages/operations/src/access-presentation";
 import { failureResponse } from "../../auth/failure-response";
 import { isDomainError } from "../../../../../packages/shared/src/index";
 import { assertDisplayedGuild } from "../../auth/displayed-guild";
@@ -60,20 +61,18 @@ export async function GET(request: NextRequest) {
       return new Response(new Uint8Array(await renderChartPng(spec)), {
         headers: { "Content-Type": "image/png", "Cache-Control": "no-store" },
       });
-    const advanced = (
-      await entitlements.check(context.scope, "surface_breakdowns")
-    ).allowed;
+    const capabilities = await context.services.db
+      .transaction()
+      .execute((tx) =>
+        operationsPresentation(tx, context.scope, context.actor),
+      );
+    const advanced = capabilities.advanced;
     return NextResponse.json(
       {
         spec,
         views: advanced ? await explore.list(context.scope) : [],
         segments: advanced ? await explore.segments(context.scope) : [],
-        capabilities: {
-          advanced,
-          csv: (await entitlements.check(context.scope, "csv_export")).allowed,
-          historyDays: (await entitlements.effective(context.scope)).limits
-            .historyDays,
-        },
+        capabilities,
         channels:
           (
             await latestCapability(context.services.db, context.scope)

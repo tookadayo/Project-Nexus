@@ -1201,3 +1201,60 @@
     scroll-behavior: auto !important;
   }
 }
+
+.nx-beta-notice {
+  max-width: 1200px;
+  margin: 24px auto;
+  padding: 24px;
+  border: 1px solid #dbe1e8;
+  border-radius: 10px;
+  background: #f7f9fc;
+  color: #17212b;
+  line-height: 1.65;
+}
+.nx-beta-notice h2 {
+  font-size: 24px;
+  margin: 0 0 12px;
+}
+.nx-beta-notice p {
+  margin: 12px 0;
+}
+.nx-beta-notice a {
+  color: #1f47a8;
+  text-decoration: underline;
+}
+.pricing-limits {
+  overflow: auto;
+  max-width: 100%;
+  margin-block: 20px;
+}
+.pricing-limits table {
+  min-width: 700px;
+  width: 100%;
+  border-collapse: collapse;
+}
+.pricing-limits th,
+.pricing-limits td {
+  padding: 12px;
+  border-bottom: 1px solid #dbe1e8;
+  text-align: left;
+}
+.pricing-limits caption {
+  text-align: left;
+  font-weight: 600;
+  padding-block: 12px;
+}
+.pricing-limits:focus-visible,
+.comparison-scroll:focus-visible {
+  outline: 3px solid #4275e2;
+  outline-offset: 3px;
+}
+@media (max-width: 767px) {
+  .nx-beta-notice {
+    padding: 16px;
+    margin: 16px;
+  }
+  .nx-beta-notice h2 {
+    font-size: 22px;
+  }
+}

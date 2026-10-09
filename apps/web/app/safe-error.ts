@@ -13,6 +13,18 @@ export function safeError(code: string, locale: "ja" | "en"): string {
     return ja
       ? "この操作を行う権限がありません。"
       : "You do not have permission to perform this action.";
+  if (code === "HISTORY_PLAN_LIMIT")
+    return ja
+      ? "選択した期間または比較期間が、利用できる履歴の範囲外です。比較を解除するか、期間を変更してください。"
+      : "The selected period or comparison period is outside your available history. Turn off comparison or change the period.";
+  if (code === "PLAN_FEATURE_REQUIRED" || code === "PLAN_REQUIRED")
+    return ja
+      ? "現在の利用条件ではこの機能を利用できません。利用条件を確認してください。"
+      : "This feature is unavailable under your current access conditions. Review your access conditions.";
+  if (code === "BETA_UNAVAILABLE")
+    return ja
+      ? "このサーバーでは現在この操作を利用できません。履歴の表示には現在の権限と保持条件の確認が必要です。"
+      : "This action is not currently available for this server. Viewing history requires current permission and retention checks.";
   if (code === "INVALID_PNG_LOGO")
     return ja ? "PNG形式の画像を選んでください。" : "Choose a PNG image.";
   return ja

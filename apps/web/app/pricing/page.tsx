@@ -1,3 +1,5 @@
+import { BetaNotice } from "../landing/beta-notice";
+import { limitCopy } from "../../../../packages/settings/src/plan-copy";
 import {
   canonicalFeatures,
   featureAvailability,
@@ -10,13 +12,11 @@ import {
   planCopy,
 } from "../../../../packages/settings/src/plan-copy";
 import { SiteShell, copy, siteLocale } from "../public-ui";
-import { installUrl } from "../auth/session";
 import { publicBillingCatalog } from "../billing/catalog";
 export const dynamic = "force-dynamic";
 export default async function Pricing() {
   const locale = await siteLocale(),
-    language = locale === "ja" ? 0 : 1,
-    add = installUrl();
+    language = locale === "ja" ? 0 : 1;
   const { launch, offerings } = await publicBillingCatalog();
   const availableFeatures = canonicalFeatures.filter(
     (feature) => featureAvailability[feature] === "available",
@@ -26,8 +26,8 @@ export default async function Pricing() {
     STARTER: {
       ...planCopy.STARTER,
       purpose: [
-        "参加の流れが、なぜ・どこで止まるかを理解する。",
-        "See why and where community flow breaks.",
+        "参加の流れで、活動を確認できる段階と不足を調べる。",
+        "Review observed stages and gaps in community participation.",
       ],
     },
     GROWTH: {
@@ -51,6 +51,7 @@ export default async function Pricing() {
   };
   return (
     <SiteShell locale={locale}>
+      <BetaNotice locale={locale} />
       <section className="site-section pricing-intro">
         <p className="site-eyebrow">PLANS</p>
         <h1>
@@ -63,7 +64,7 @@ export default async function Pricing() {
         <p>
           {copy(
             locale,
-            "Reply、Thread、Forum、Reaction、Poll、Voice、Event。どの場所を使うサーバーでも、基本観測と測定根拠はFreeから。必要になったら、履歴・分析・運営を深められます。",
+            "返信、スレッド、フォーラム、リアクション、投票、ボイス、イベント。どの場所を使うサーバーでも、基本観測と測定根拠はFreeから。必要になったら、履歴・分析・運営を深められます。",
             "Replies, Threads, Forums, Reactions, Polls, Voice and Events. Free includes core observation and evidence for every community. Add deeper history, analysis and operations as you need them.",
           )}
         </p>
@@ -146,7 +147,13 @@ export default async function Pricing() {
                   )}
                 </p>
               )}
-              <h3>{copy(locale, "現在利用可能", "Available features")}</h3>
+              <h3>
+                {copy(
+                  locale,
+                  "通常プランに含まれる実装済み機能",
+                  "Implemented features in this standard plan",
+                )}
+              </h3>
               <ul>
                 {available.map((feature) => (
                   <li key={feature}>✓ {featureCopy[feature][language]}</li>
@@ -180,9 +187,9 @@ export default async function Pricing() {
                         `${spec.limits.guilds} server allowance · ${spec.limits.historyDays} days of aggregate history`,
                       )}
               </p>
-              {plan === "FREE" && add ? (
-                <a className="button button-discord" href={add}>
-                  {copy(locale, "Discordに追加", "Add to Discord")}
+              {plan === "FREE" ? (
+                <a className="button button-primary" href="/support">
+                  {copy(locale, "招待Betaの参加案内", "Invitation Beta access")}
                 </a>
               ) : offering && launch.checkoutEnabled ? (
                 <a
@@ -209,6 +216,83 @@ export default async function Pricing() {
             </article>
           );
         })}
+      </section>
+      <section className="site-section">
+        <h2>
+          {copy(
+            locale,
+            "通常プランの利用枠と条件",
+            "Standard plan allowances and conditions",
+          )}
+        </h2>
+        <p>
+          {copy(
+            locale,
+            "詳細分析は1回の受付につき1回分を予約し、結果の保存成功時に消費します。基本状況の確認、条件プレビュー、保存結果の再表示は消費しません。失敗や取消時の予約は解放します。月次付与はサーバーごと・UTCの暦月単位で、追加枠には別の期限があります。",
+            "A detailed analysis reserves one credit on acceptance and consumes it when its result is saved successfully. Basic status, condition previews and saved-result reads use no credits. Failed or cancelled runs release reservations. Monthly allocations are per server and UTC calendar month; extra allocations may have separate expiry dates.",
+          )}
+        </p>
+        <div
+          className="pricing-limits"
+          tabIndex={0}
+          role="region"
+          aria-label={copy(
+            locale,
+            "利用枠の比較。横にスクロールできます。",
+            "Allowance comparison. Scroll horizontally.",
+          )}
+        >
+          <table>
+            <caption>
+              {copy(
+                locale,
+                "通常プランの上限。招待Beta・追加利用権の条件は利用者画面で確認。",
+                "Standard plan limits. Check your account for invitation Beta and additional access conditions.",
+              )}
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">
+                  {copy(locale, "項目・単位", "Allowance / unit")}
+                </th>
+                {plans.map((p) => (
+                  <th key={p} scope="col">
+                    {p}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(
+                [
+                  "analysisRunsMonthly",
+                  "analysisConcurrency",
+                  "guilds",
+                  "historyDays",
+                  "teamSeats",
+                  "apiRequestsMonthly",
+                ] as const
+              ).map((key) => (
+                <tr key={key}>
+                  <th scope="row">{limitCopy[key][language]}</th>
+                  {plans.map((p) => (
+                    <td key={p}>
+                      {planRegistry[p].limits[key] ??
+                        copy(locale, "個別契約", "Custom contract")}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p>
+          {copy(
+            locale,
+            "期間比較には比較機能の利用権と、両期間を含む履歴日数が必要です。指標の定義・対象範囲・取得条件が合わなければ比較できません。集計履歴の表示範囲と、個人データの保持・削除設定は別です。Liveと追加回数パックは現在提供していません。",
+            "Period comparisons require comparison access and enough history for both periods. Definitions, scope and coverage must be compatible. Aggregate history visibility is separate from personal-data retention and deletion. Live and extra analysis packs are not currently offered.",
+          )}
+        </p>
       </section>
       <section className="site-section comparison-section">
         <p className="site-eyebrow">COMMUNITY WORKFLOWS</p>
@@ -259,7 +343,16 @@ export default async function Pricing() {
             "Swipe horizontally to compare.",
           )}
         </p>
-        <div className="comparison-scroll">
+        <div
+          className="comparison-scroll"
+          tabIndex={0}
+          role="region"
+          aria-label={copy(
+            locale,
+            "機能比較表。横にスクロールできます。",
+            "Feature comparison. Scroll horizontally.",
+          )}
+        >
           <table>
             <thead>
               <tr>

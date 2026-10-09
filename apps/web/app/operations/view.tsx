@@ -1,4 +1,6 @@
 "use client";
+import { CurrentAccessPanel } from "../current-access";
+import type { CurrentAccess } from "../../../../packages/operations/src/access-presentation";
 import { metricLabels, nexusRoleLabel } from "../analysis-labels";
 import { useUnsavedChanges } from "../navigation-safety";
 import { safeError } from "../safe-error";
@@ -57,6 +59,7 @@ type Data = {
   view: Tab;
   guildId: string;
   access: {
+    current?: CurrentAccess;
     plan: string;
     role: string | null;
     permissions: string[];
@@ -348,15 +351,36 @@ function Gate({
   permission?: string;
 }) {
   const { ja, data } = useContext(UiContext);
-  return data?.access.features[feature] &&
-    data.access.permissions.includes(permission) ? (
+  if (!data)
+    return (
+      <p role="status">
+        {ja ? "利用条件を確認中です。" : "Checking access conditions…"}
+      </p>
+    );
+  if (!data.access.permissions.includes(permission))
+    return (
+      <p className="inline-note">
+        {ja
+          ? "この操作を行う権限がありません。"
+          : "You do not have permission to perform this action."}
+      </p>
+    );
+  if (permission !== "READ" && data.access.current?.workAllowed === false)
+    return (
+      <p className="inline-note">
+        {safeError("BETA_UNAVAILABLE", ja ? "ja" : "en")}
+      </p>
+    );
+  return data.access.features[feature] ? (
     <>{children}</>
   ) : (
     <p className="inline-note">
       {ja
-        ? "現在のプランまたはチーム権限ではこの操作を利用できません。保存した設定は保持されます。"
-        : "Your current plan or team role does not allow this action. Saved settings are retained."}{" "}
-      <a href="/billing/manage">{ja ? "プランを確認" : "View plan"}</a>
+        ? "現在の利用条件ではこの機能を利用できません。保存した設定は保持されます。"
+        : "This feature is unavailable under your current access conditions. Saved settings are retained."}{" "}
+      <a href="/billing/manage">
+        {ja ? "利用条件を確認" : "Review access conditions"}
+      </a>
     </p>
   );
 }
@@ -488,10 +512,17 @@ export function OperationsControls({
   const can = (feature: string, permission = "CONFIGURE") =>
       Boolean(
         data?.access.features[feature] &&
+        (permission === "READ" || data.access.current?.workAllowed !== false) &&
         data.access.permissions.includes(permission),
       ),
-    configure = Boolean(data?.access.permissions.includes("CONFIGURE")),
-    govern = Boolean(data?.access.permissions.includes("GOVERN"));
+    configure = Boolean(
+      data?.access.current?.workAllowed !== false &&
+      data?.access.permissions.includes("CONFIGURE"),
+    ),
+    govern = Boolean(
+      data?.access.current?.workAllowed !== false &&
+      data?.access.permissions.includes("GOVERN"),
+    );
   async function send(action: string, input: unknown) {
     if (busy || sendingRef.current) return;
     sendingRef.current = true;
@@ -584,6 +615,9 @@ export function OperationsControls({
           </p>
         )}
       </header>
+      {data?.access.current && (
+        <CurrentAccessPanel access={data.access.current} locale={locale} />
+      )}
       {error && (
         <p role="alert">
           {safeError(error, locale)}{" "}
@@ -1289,7 +1323,8 @@ export function OperationsControls({
             <h2>{t("Delivery history", "送信履歴")}</h2>
             {data?.reports?.runs.map((run) => (
               <p key={run.id}>
-                {run.scheduled_at} · {state(run.state)} · {run.last_error ?? ""}
+                {run.scheduled_at} · {state(run.state)} ·{" "}
+                {run.last_error ? safeError(run.last_error, locale) : ""}
               </p>
             ))}
           </section>
@@ -1297,6 +1332,12 @@ export function OperationsControls({
       )}
       {view === "improvements" && (
         <>
+          <p>
+            {t(
+              "Saved results are shown only within current access and retention conditions. Results that cannot be safely separated from restricted or deleted data are unavailable.",
+              "保存結果は現在の利用権と保持条件の範囲で表示します。制限対象や削除済みのデータを安全に分離できない結果は表示しません。",
+            )}
+          </p>
           <section className="surface">
             <h2>{t("Record an intervention", "施策を記録")}</h2>
             <Gate feature="improvement_tracking" permission="OPERATE">

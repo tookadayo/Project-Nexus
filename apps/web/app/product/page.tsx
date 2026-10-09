@@ -1,3 +1,4 @@
+import { BetaNotice } from "../landing/beta-notice";
 import { Preview, SiteCta, SiteShell, copy, siteLocale } from "../public-ui";
 export default async function Product() {
   const locale = await siteLocale();
@@ -11,8 +12,8 @@ export default async function Product() {
       ),
       body: copy(
         locale,
-        "参加、最初の活動、他の人との交流、再訪、参加後の活動を、観測できた範囲で分けて表示します。",
-        "Separate joining, first activity, human connection, repeat activity, and activity after joining using observed data.",
+        "参加、最初の活動、他の人との交流、参加後の活動を、取得できた範囲で分けて表示します。",
+        "Separate joining, first activity, human connection, and activity after joining using observed data.",
       ),
       detail: copy(
         locale,
@@ -95,6 +96,7 @@ export default async function Product() {
   ];
   return (
     <SiteShell locale={locale}>
+      <BetaNotice locale={locale} />
       <section className="site-hero product-hero">
         <div className="hero-copy">
           <p className="site-eyebrow">PRODUCT / NEXUS</p>
@@ -111,7 +113,7 @@ export default async function Product() {
           <p className="site-lead">
             {copy(
               locale,
-              "NEXUSはDiscord Community Operations製品です。サーバーの目的、観測できる事実、対応が必要な場所、変更後の結果をつなぎます。",
+              "NEXUSはDiscordコミュニティの運営を支援する製品です。サーバーの目的、観測できる事実、対応が必要な場所、変更後の結果をつなぎます。",
               "NEXUS supports Discord community operations: choose a community purpose, inspect observed evidence, handle attention items, and review what changed.",
             )}
           </p>

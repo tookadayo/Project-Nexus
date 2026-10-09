@@ -1,4 +1,7 @@
 "use client";
+import { ObservationChart } from "../observation-chart";
+import { CurrentAccessPanel } from "../current-access";
+import type { CurrentAccess } from "../../../../packages/operations/src/access-presentation";
 import { metricLabels, surfaceLabels } from "../analysis-labels";
 import { useDraft, useUnsavedChanges } from "../navigation-safety";
 import { exploreLocation, exploreQuery } from "./navigation";
@@ -19,7 +22,15 @@ type Data = {
   spec: ChartSpec;
   views: View[];
   segments: { id: string; name: string; filters: ChartQuery["filter"] }[];
-  capabilities: { advanced: boolean; csv: boolean; historyDays: number | null };
+  capabilities: {
+    advanced: boolean;
+    compare: boolean;
+    canSave: boolean;
+    saveReason: string | null;
+    csv: boolean;
+    historyDays: number | null;
+    access?: CurrentAccess;
+  };
   channels: { id: string; type: number; observable: boolean }[];
 };
 const defaultQuery = chartQuerySchema.parse({});
@@ -133,7 +144,7 @@ export function ExploreControls({
     };
   }, [url, reload]);
   async function save(action: "saveView" | "saveSegment") {
-    if (savingRef.current) return;
+    if (savingRef.current || !data?.capabilities.canSave) return;
     savingRef.current = true;
     setSaving(true);
     setBusy(true);
@@ -180,13 +191,7 @@ export function ExploreControls({
       filter: { ...current.filter, ...patch },
     }));
   }
-  const spec = data?.spec,
-    maximum = Math.max(
-      1,
-      ...(spec?.series.flatMap((series) =>
-        series.points.map((p) => p.value ?? 0),
-      ) ?? []),
-    );
+  const spec = data?.spec;
   return (
     <>
       {filtersReset && (
@@ -204,6 +209,9 @@ export function ExploreControls({
             : "Compare aggregate observations and inspect operational changes. A change does not establish its cause."}
         </p>
       </header>
+      {data?.capabilities.access && (
+        <CurrentAccessPanel access={data.capabilities.access} locale={locale} />
+      )}
       <section className="surface explore-controls">
         <label>
           {ja ? "指標" : "Metric"}
@@ -241,8 +249,8 @@ export function ExploreControls({
                 key={days}
                 value={days}
                 disabled={
-                  data?.capabilities.historyDays !== null &&
-                  days > (data?.capabilities.historyDays ?? 30)
+                  data?.capabilities.historyDays != null &&
+                  days > data.capabilities.historyDays
                 }
               >
                 {days} {ja ? "日" : "days"}
@@ -254,11 +262,19 @@ export function ExploreControls({
           <input
             type="checkbox"
             checked={query.compare}
-            disabled={!data?.capabilities.advanced}
+            disabled={!query.compare && !data?.capabilities.compare}
             onChange={(e) => setQuery({ ...query, compare: e.target.checked })}
           />
           {ja ? "前の同期間と比較" : "Compare previous period"}
         </label>
+        {query.compare && (
+          <button
+            type="button"
+            onClick={() => setQuery({ ...query, compare: false })}
+          >
+            {ja ? "比較を解除" : "Turn off comparison"}
+          </button>
+        )}
         {data?.capabilities.advanced && (
           <>
             <label>
@@ -300,7 +316,18 @@ export function ExploreControls({
                     value={channel.id}
                     disabled={!channel.observable}
                   >
-                    #{channel.id} · {channel.type}
+                    #{channel.id} ·{" "}
+                    {channel.type === 15
+                      ? ja
+                        ? "フォーラム"
+                        : "Forum"
+                      : [2, 13].includes(channel.type)
+                        ? ja
+                          ? "ボイス"
+                          : "Voice"
+                        : ja
+                          ? "テキスト"
+                          : "Text"}
                   </option>
                 ))}
               </select>
@@ -387,64 +414,12 @@ export function ExploreControls({
       {busy && <p role="status">{ja ? "確認中…" : "Loading…"}</p>}
       {spec && (
         <>
-          <section className="surface">
-            <h2>{spec.title}</h2>
-            <p>
-              {spec.range.from.slice(0, 10)} — {spec.range.to.slice(0, 10)} ·{" "}
-              {spec.evidence.coverageState}
-            </p>
-            <strong>{spec.evidence.value ?? "NO DATA"}</strong>
-            <svg
-              role="img"
-              aria-label={spec.title}
-              viewBox="0 0 960 310"
-              style={{ width: "100%", maxHeight: 350 }}
-            >
-              {spec.series[0]?.points.map((point, index) => {
-                const width = 900 / spec.series[0]!.points.length,
-                  height = ((point.value ?? 0) / maximum) * 240;
-                return (
-                  <g key={point.bucket}>
-                    <title>
-                      {point.bucket}: {point.value ?? "NO DATA"} ·{" "}
-                      {point.evidence.coverageState}
-                    </title>
-                    <rect
-                      x={30 + index * width}
-                      y={270 - height}
-                      width={Math.max(1, width - 2)}
-                      height={point.value === null ? 5 : Math.max(1, height)}
-                      fill={point.value === null ? "#707e74" : "#a5cd51"}
-                    />
-                    {spec.series[1]?.points[index]?.value != null && (
-                      <circle
-                        cx={30 + (index + 0.5) * width}
-                        cy={
-                          270 -
-                          (spec.series[1]!.points[index]!.value! / maximum) *
-                            240
-                        }
-                        r={3}
-                        fill="#71b8ee"
-                      />
-                    )}
-                  </g>
-                );
-              })}
-            </svg>
-            {spec.comparison && (
-              <p>
-                {ja ? "前の期間" : "Previous"}:{" "}
-                {spec.comparison.value ?? "UNKNOWN"} ·{" "}
-                {spec.comparison.comparable
-                  ? (spec.comparison.absoluteChange ?? "UNKNOWN")
-                  : spec.comparison.blockers.join(", ")}{" "}
-                {spec.comparison.comparable &&
-                spec.comparison.relativeChange !== null
-                  ? `(${Math.round(spec.comparison.relativeChange * 100)}%)`
-                  : ""}
-              </p>
-            )}
+          <ObservationChart
+            spec={spec}
+            locale={locale}
+            onChannelSelect={(id) => patchFilter({ channelIds: [id] })}
+          />
+          <p>
             <a href={url + "&format=png"}>
               {ja ? "Discordと同じPNGを保存" : "Download the Discord PNG"}
             </a>
@@ -457,70 +432,7 @@ export function ExploreControls({
                 </a>
               </>
             )}
-            <details>
-              <summary>Evidence</summary>
-              <p>{spec.evidence.definition}</p>
-              <p>{spec.evidence.coverageReasons.join(", ") || "COMPLETE"}</p>
-              <p>{spec.evidence.observationState}</p>
-              {spec.caveats.map((caveat) => (
-                <p key={caveat}>{caveat}</p>
-              ))}
-            </details>
-          </section>
-          {!!spec.breakdowns?.length && (
-            <section className="surface">
-              <h2>
-                {ja
-                  ? "チャンネル比較とDrilldown"
-                  : "Channel comparison and drilldown"}
-              </h2>
-              {spec.breakdowns.map((target) => (
-                <details key={target.channelId}>
-                  <summary>
-                    #{target.channelId} · {target.evidence.value ?? "NO DATA"}
-                  </summary>
-                  {target.points.map((point) => (
-                    <p key={point.bucket}>
-                      {point.bucket.slice(0, 10)} · {point.value ?? "NO DATA"} ·{" "}
-                      {point.evidence.coverageState}
-                    </p>
-                  ))}
-                  <button
-                    onClick={() =>
-                      patchFilter({ channelIds: [target.channelId] })
-                    }
-                  >
-                    {ja ? "このチャンネルを分析" : "Explore this channel"}
-                  </button>
-                </details>
-              ))}
-            </section>
-          )}
-          {!!spec.heatmap.length && (
-            <section className="surface">
-              <h2>{ja ? "曜日 × 時間" : "Weekday × hour"}</h2>
-              <p>
-                {query.timezone} · ? = NO DATA · 0 ={" "}
-                {ja ? "観測済み、該当なし" : "observed, none recorded"}
-              </p>
-              <div className="heatmap-grid">
-                {spec.heatmap.map((cell) => (
-                  <span
-                    key={cell.weekday + ":" + cell.hour}
-                    title={`${cell.weekday} · ${cell.hour}:00 · ${cell.value ?? "NO DATA"}`}
-                    style={{
-                      background:
-                        cell.value === null
-                          ? "#26342b"
-                          : `rgba(165,205,81,${Math.min(1, 0.08 + (cell.value ?? 0) / Math.max(1, ...spec.heatmap.map((c) => c.value ?? 0)))})`,
-                    }}
-                  >
-                    {cell.value === null ? "?" : cell.value}
-                  </span>
-                ))}
-              </div>
-            </section>
-          )}
+          </p>
         </>
       )}
       {data?.capabilities.advanced && (
@@ -530,6 +442,11 @@ export function ExploreControls({
               ? "保存ビューとレポートショートカット"
               : "Saved views and report shortcuts"}
           </h2>
+          {!data.capabilities.canSave && (
+            <p role="status">
+              {safeError(data.capabilities.saveReason ?? "UNAVAILABLE", locale)}
+            </p>
+          )}
           <label>
             {ja ? "名前" : "Name"}
             <input
@@ -551,7 +468,7 @@ export function ExploreControls({
           </label>
           <button
             className="primary"
-            disabled={busy || !name}
+            disabled={busy || !name || !data.capabilities.canSave}
             onClick={() => void save("saveView")}
           >
             {selected
@@ -563,7 +480,7 @@ export function ExploreControls({
                 : "Save view"}
           </button>
           <button
-            disabled={busy || !name}
+            disabled={busy || !name || !data.capabilities.canSave}
             onClick={() => void save("saveSegment")}
           >
             {ja ? "絞り込み条件を保存" : "Save filters"}

@@ -1,3 +1,4 @@
+import { operationsPresentation } from "../../../../../packages/operations/src/access-presentation";
 import { failureResponse } from "../../auth/failure-response";
 import { isDomainError } from "../../../../../packages/shared/src/index";
 import { assertDisplayedGuild } from "../../auth/displayed-guild";
@@ -134,6 +135,7 @@ export async function GET(request: NextRequest) {
           ),
         );
       return {
+        current: (await operationsPresentation(tx, s, a)).access,
         plan: state.plan,
         permissions: await actorPermissions(tx, s, a),
         role,

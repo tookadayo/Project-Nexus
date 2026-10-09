@@ -1,7 +1,6 @@
 import { cookies, headers } from "next/headers";
 import { Geist } from "next/font/google";
 import type { ReactNode } from "react";
-import { installUrl } from "./auth/session";
 import { Navigation } from "./landing/navigation";
 import { Brand } from "./landing/primitives";
 import { ProductPreview } from "./landing/product-preview";
@@ -85,19 +84,8 @@ export function SiteCta({
   locale: SiteLocale;
   secondary?: boolean;
 }) {
-  const add = installUrl();
   return (
-    <div className="cta-row">
-      {add ? (
-        <a className="button button-discord" href={add}>
-          {copy(locale, "Discordに追加", "Add NEXUS to Discord")}{" "}
-          <span aria-hidden="true">↗</span>
-        </a>
-      ) : (
-        <a className="button button-primary" href="/support">
-          {copy(locale, "導入について問い合わせる", "Ask about installation")}
-        </a>
-      )}
+    <div className="cta-row"><a className="button button-primary" href="/support">{copy(locale,"招待Betaの参加案内","Check invitation Beta access")}</a>
       {secondary && (
         <a className="button button-secondary" href="/product">
           {copy(locale, "製品を見る", "Explore the product")}

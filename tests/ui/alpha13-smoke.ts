@@ -1,3 +1,4 @@
+import { rnChecks } from "./alpha13-rn-checks";
 import { labelChecks } from "./alpha13-label-checks";
 import { followupChecks } from "./alpha13-followup-checks";
 import { chromium, expect } from "@playwright/test";
@@ -27,9 +28,13 @@ await build({
 });
 const css = (
   await Promise.all(
-    ["tokens.css", "style.css", "product.css", "brand.css"].map((file) =>
-      readFile("apps/web/app/" + file, "utf8"),
-    ),
+    [
+      "tokens.css",
+      "style.css",
+      "product.css",
+      "brand.css",
+      "observation-chart.css",
+    ].map((file) => readFile("apps/web/app/" + file, "utf8")),
   )
 )
   .join("\n")
@@ -81,7 +86,13 @@ try {
       ? route.continue()
       : route.abort(),
   );
-  if (process.env.NEXUS_UI_LABELS_ONLY === "1") {
+  if (process.env.NEXUS_UI_RN_ONLY === "1") {
+    await rnChecks(page, origin);
+    expect(errors).toEqual([]);
+    console.log(
+      "PASS alpha13 R2/R3/R4/R5 browser flows: comparison recovery, graph values/focus, current rights and role restrictions. Synthetic data; external requests blocked.",
+    );
+  } else if (process.env.NEXUS_UI_LABELS_ONLY === "1") {
     await labelChecks(page, origin);
     expect(errors).toEqual([]);
     console.log(
