@@ -107,3 +107,22 @@ The final local production Next build, repository typecheck, ESLint and secret
 scan passed. The separate same-drive validation checkout was used for the Web
 build. The Windows operator credential-file acceptance limitation above remains
 open; no execution-policy or real credential ACL setting was changed.
+
+## Hosted DB fixture shutdown (2026-10-11)
+
+At `70d3df8`, both hosted workflows passed the secret scan, lint, typecheck,
+all 792 unit tests, production build, browser checks and Windows runtime job.
+All 495 DB integration assertions passed, but the integration command failed
+because PostgreSQL reported unhandled administrator-termination errors during
+fixture shutdown. The PR run attributed these to `alpha12-beta` and
+`analysis-stabilization`; the push run attributed them to `alpha12-beta`.
+Performance checks did not run.
+
+The isolated PostgreSQL fixture now waits until other client backends have
+disconnected before stopping its private cluster. This closes the gap between
+`pg-pool.end()` resolving and client sockets finishing their shutdown. The wait
+is bounded, leaked connections still fail, and unexpected errors are not ignored.
+The two affected files plus the Beta API regression file passed **34/34** locally.
+A new real-database regression passed **1/1**, verifying that shutdown keeps an
+existing connection usable until it closes. Typecheck, focused ESLint and the
+secret scan passed. Hosted CI must still validate this correction at its new head.
