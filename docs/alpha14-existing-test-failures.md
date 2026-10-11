@@ -135,3 +135,12 @@ values. The expected duration now subtracts exact integer-microsecond endpoints
 before converting to seconds and requires exact equality with the aggregate.
 The affected Attention/analysis file passed **4/4** locally after this correction;
 no product behavior or timing tolerance was changed.
+
+The `327c09f` push workflow also exposed a Windows runtime-fixture failure that
+depended on the randomly allocated ports. Repeated substring replacement could
+map `55432` to `53001` and then replace its `3001` substring again, producing the
+invalid port `553004`. The fixture now replaces complete numeric tokens in one
+pass. A deterministic collision case covers replacement values and unrelated
+numbers, and the full local Windows runtime-manager script passed its
+start/stop/restart and unrelated-process protection checks. Production launcher
+code and machine-wide execution-policy settings are unchanged.
