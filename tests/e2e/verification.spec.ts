@@ -1,5 +1,4 @@
 import { test, expect, type BrowserContext } from "@playwright/test";
-import { createHash, createCipheriv, randomBytes } from "node:crypto";
 import { navigateDashboard } from "./dashboard-navigation";
 const base = `http://127.0.0.1:${process.env.NEXUS_VERIFICATION_WEB_PORT ?? 3150}`,
   fixture = `http://127.0.0.1:${process.env.NEXUS_VERIFICATION_API_PORT ?? 3151}`;
@@ -12,28 +11,18 @@ const ids = [
   user = "911111111111111111",
   other = "911111111111111112";
 async function signIn(context: BrowserContext, userId = user, locale = "en") {
-  const iv = randomBytes(12),
-    cipher = createCipheriv(
-      "aes-256-gcm",
-      createHash("sha256").update("s".repeat(64)).digest(),
-      iv,
-    ),
-    bytes = Buffer.concat([
-      cipher.update(
-        JSON.stringify({
-          userId,
-          accessToken: `verification-oauth-${userId}`,
-          expiresAt: Date.now() + 600000,
-        }),
-      ),
-      cipher.final(),
-    ]);
+  const response = await context.request.post(`${fixture}/fixture/session`, {
+    data: { userId },
+  });
+  expect(response.status()).toBe(200);
+  const { reference } = (await response.json()) as { reference: string };
+  // Check the opaque format without including a session value in assertion logs.
+  expect(typeof reference).toBe("string");
+  expect(/^[A-Za-z0-9_-]{43}$/.test(reference)).toBe(true);
   await context.addCookies([
     {
       name: "nexus_session",
-      value: Buffer.concat([iv, cipher.getAuthTag(), bytes]).toString(
-        "base64url",
-      ),
+      value: reference,
       url: base,
       httpOnly: true,
       sameSite: "Lax",
@@ -123,7 +112,7 @@ test("unverified and arbitrary URLs cannot expose dashboard data", async ({
   });
   expect(cross.status()).toBe(403);
 });
-test("issuer-only redemption, confirmed disconnect and relinking preserve settings", async ({
+test("issuer-only redemption and confirmed disconnect preserve settings while Beta deletion prevents renewed access", async ({
   page,
   context,
   request,
@@ -161,7 +150,12 @@ test("issuer-only redemption, confirmed disconnect and relinking preserve settin
     await request.get(`${fixture}/fixture/data/${ids[1]}`)
   ).json();
   await navigateDashboard(page, "en", 4);
-  await page.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await page
+    .getByRole("button", {
+      name: "Disconnect (review scope and impact)",
+      exact: true,
+    })
+    .click();
   await expect(
     page.getByRole("dialog", { name: "Confirm disconnect" }),
   ).toBeVisible();
@@ -172,7 +166,12 @@ test("issuer-only redemption, confirmed disconnect and relinking preserve settin
     path: "test-results/verification-settings-connection.png",
     fullPage: true,
   });
-  await page.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await page
+    .getByRole("button", {
+      name: "Disconnect (review scope and impact)",
+      exact: true,
+    })
+    .click();
   await page
     .getByRole("button", { name: "Confirm disconnect", exact: true })
     .click();
@@ -182,6 +181,7 @@ test("issuer-only redemption, confirmed disconnect and relinking preserve settin
   ).json();
   expect(after.settings).toEqual(before.settings);
   expect(after.connection.state).toBe("INSTALLED_NOT_VERIFIED");
+  expect(after.betaState).toBe("DELETING");
   const fresh = await (
     await request.post(`${fixture}/fixture/code`, { data: { guildId: ids[1] } })
   ).json();
@@ -190,8 +190,14 @@ test("issuer-only redemption, confirmed disconnect and relinking preserve settin
   await page
     .getByRole("button", { name: "Connect server", exact: true })
     .click();
-  await page.getByRole("link", { name: "Open Dashboard", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/dashboard/${ids[1]}$`));
+  await expect(page.getByRole("heading", { name: "Connected" })).toBeVisible();
+  // Re-verifying Discord ownership cannot cancel an operator lifecycle fence.
+  await context.addCookies([
+    { name: "nexus_guild", value: ids[1]!, url: base },
+  ]);
+  const stopped = await page.request.get("/operations/data?view=attention");
+  expect(stopped.status()).toBe(403);
+  expect(await stopped.text()).toContain("BETA_UNAVAILABLE");
 });
 test("permission loss blocks a verified dashboard on revalidation", async ({
   page,
@@ -288,9 +294,7 @@ for (const locale of ["en", "ja"])
         },
       });
       expect(checkout.status()).toBe(409);
-      expect(await checkout.text()).toContain(
-        "BILLING_OFFERING_UNAVAILABLE",
-      );
+      expect(await checkout.text()).toContain("BILLING_OFFERING_UNAVAILABLE");
       const portal = await page.request.post("/billing/actions", {
         headers,
         data: {
@@ -378,17 +382,23 @@ for (const locale of ["en", "ja"])
     context,
     request,
   }) => {
-    const guildId = locale === "ja" ? ids[1]! : ids[0]!;
+    const guildId = locale === "ja" ? ids[2]! : ids[0]!;
     await signIn(context, user, locale);
     await context.addCookies([
       { name: "nexus_guild", value: guildId, url: base },
     ]);
     await page.setViewportSize({ width: 360, height: 800 });
-    const headers = { origin: base, "sec-fetch-site": "same-origin" };
+    const headers = {
+      origin: base,
+      "sec-fetch-site": "same-origin",
+      "X-Nexus-Guild": guildId,
+    };
+    const get = (path: string) =>
+      page.request.get(path, { headers: { "X-Nexus-Guild": guildId } });
     // Reuse the earlier verified connection in the full suite. A filtered run
     // establishes its own connection instead of consuming redundant redemption
     // attempts and tripping the real user-wide verification rate limit.
-    if (!(await page.request.get("/operations/data?view=attention")).ok()) {
+    if (!(await get("/operations/data?view=attention")).ok()) {
       const { code } = await (
         await request.post(`${fixture}/fixture/code`, { data: { guildId } })
       ).json();
@@ -408,7 +418,7 @@ for (const locale of ["en", "ja"])
       ).toBe(true);
     }
     async function data(view: string) {
-      const response = await page.request.get(`/operations/data?view=${view}`);
+      const response = await get(`/operations/data?view=${view}`);
       expect(response.status()).toBe(200);
       return response.json();
     }
@@ -417,18 +427,16 @@ for (const locale of ["en", "ja"])
     expect(free.access.features.basic_attention).toBe(true);
     expect(free.access.features.discord_charts).toBe(true);
     expect(free.access.features.api).toBe(false);
-    const chart = await page.request.get("/explore/data");
+    const chart = await get("/explore/data");
     expect(chart.status()).toBe(200);
     expect((await chart.json()).spec.evidence.value).toBeNull();
-    const png = await page.request.get("/explore/data?format=png");
+    const png = await get("/explore/data?format=png");
     expect(png.status()).toBe(200);
     expect(png.headers()["content-type"]).toBe("image/png");
     expect((await png.body()).subarray(0, 8)).toEqual(
       Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
     );
-    expect((await page.request.get("/explore/data?format=csv")).status()).toBe(
-      403,
-    );
+    expect((await get("/explore/data?format=csv")).status()).toBe(403);
     const denied = await page.request.post("/operations/data", {
       headers,
       data: {
@@ -493,7 +501,7 @@ for (const locale of ["en", "ja"])
     await expect(
       page.getByRole("button", { name: `Support ${locale} · 7d`, exact: true }),
     ).toBeVisible();
-    const csv = await page.request.get("/explore/data?format=csv");
+    const csv = await get("/explore/data?format=csv");
     expect(csv.status()).toBe(200);
     expect(await csv.text()).toContain("coverage");
     expect(
@@ -532,9 +540,7 @@ for (const locale of ["en", "ja"])
     const event = (await data("events")).events.find(
       (e: { title: string }) => e.title === `Weekly review ${locale}`,
     );
-    const ics = await page.request.get(
-      `/operations/data?format=ics&id=${event.id}`,
-    );
+    const ics = await get(`/operations/data?format=ics&id=${event.id}`);
     expect(ics.status()).toBe(200);
     expect(await ics.text()).toContain("RRULE:FREQ=WEEKLY");
     await page
@@ -652,9 +658,7 @@ for (const locale of ["en", "ja"])
       paused.events.find((e: { id: string }) => e.id === event.id).state,
     ).toBe("PAUSED_PLAN_LIMIT");
     expect(
-      (
-        await page.request.get(`/operations/data?format=ics&id=${event.id}`)
-      ).status(),
+      (await get(`/operations/data?format=ics&id=${event.id}`)).status(),
     ).toBe(403);
     await tier("STARTER");
   });
@@ -672,7 +676,11 @@ test("explicit Viewer reads operations but cannot configure despite a Discord ma
   await context.addCookies([
     { name: "nexus_guild", value: ids[0]!, url: base },
   ]);
-  const headers = { origin: base, "sec-fetch-site": "same-origin" };
+  const headers = {
+    origin: base,
+    "sec-fetch-site": "same-origin",
+    "X-Nexus-Guild": ids[0]!,
+  };
   expect(
     (
       await page.request.post("/operations/data", {
@@ -708,7 +716,9 @@ test("explicit Viewer reads operations but cannot configure despite a Discord ma
         await reader.request.post("/link/redeem", { headers, data: { code } })
       ).ok(),
     ).toBe(true);
-    const model = await reader.request.get("/operations/data?view=reports");
+    const model = await reader.request.get("/operations/data?view=reports", {
+      headers,
+    });
     expect(model.status()).toBe(200);
     expect((await model.json()).access.permissions).toEqual(["READ"]);
     const write = await reader.request.post("/operations/data", {

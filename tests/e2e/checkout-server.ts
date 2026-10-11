@@ -99,6 +99,8 @@ app.addContentTypeParser(
 app.get("/health", async () => ({ ok: true }));
 app.post("/fixture/discord/oauth2/token", async (request) => ({
   access_token: `checkout-oauth-${(request.body as URLSearchParams).get("code") === "other-user" ? other : user}`,
+  refresh_token: "synthetic-checkout-refresh-token",
+  token_type: "Bearer",
   expires_in: 3600,
   scope: "identify guilds",
 }));

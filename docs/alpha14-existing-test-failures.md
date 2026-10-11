@@ -73,3 +73,37 @@ Record the current command, platform, selected tests and PASS/FAIL/NOT RUN
 separately. Focused checks and historical comparisons cannot substitute for a
 current full-suite result or deployment acceptance. Publication conditions are
 tracked in [publication gates](alpha14-publication-gates.md).
+
+## Authorized follow-up checks (2026-10-11)
+
+Token authentication and transaction fences now enforce Beta admission, while
+retained reads remain distinct from new work. Organization aggregates check the
+caller and every returned guild, with final tenant fences acquired in a stable
+order on one transaction before the organization lock. A fresh review caught a
+cross-connection wait cycle in the initial candidate; two concurrent aggregate
+callers and two pending stops reproduced it before the final correction. The
+complete Beta API regression file then passed **9/9**, and the related API and
+organization files passed **15/15**. Dismissed Attention records retain their
+completion timestamp and remain represented in completion aggregates.
+
+The OAuth verification fixture now creates real opaque database sessions and
+real synthetic Beta invitations. It preserves current grant, CSRF, scope and
+disconnect boundaries. The local OAuth browser suite passed **11/11**. Checkout
+uses a complete synthetic OAuth response, the current Sandbox-specific pricing
+link, and a portable file URL for its test-process import. Its browser suite
+passed **2/2**, and the dedicated local Discord layout suite passed **1/1**.
+No real provider request or payment is required for these fixture checks.
+
+A full local DB integration run completed **495 tests: 488 passed, 7 failed**.
+All seven failures were traced to older assertions: a migration count of 50
+instead of the current 52, a fixed alpha.10 version, and an immutable-row
+comparison that omitted the nullable Beta generation added by migration 051.
+The corrections retain all historical-field and saved-result comparisons,
+including an explicit null Beta generation for older runs. The four affected
+files then passed **64/64**. This targeted rerun is not described as a second
+green full-suite run; hosted results must be recorded against their actual head.
+
+The final local production Next build, repository typecheck, ESLint and secret
+scan passed. The separate same-drive validation checkout was used for the Web
+build. The Windows operator credential-file acceptance limitation above remains
+open; no execution-policy or real credential ACL setting was changed.

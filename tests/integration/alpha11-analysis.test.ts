@@ -17,6 +17,7 @@ import { Components } from "../../packages/security/src/index";
 import { analysisInteraction } from "../../apps/worker/src/analysis-interactions";
 import { validatePanel } from "../../packages/discord-panels/src/primitives";
 import { analysisFixture } from "../fixtures/analysis";
+import { teamOperations } from "../../packages/operations/src/attention";
 import { isolatedPostgres as infrastructure } from "../fixtures/postgres";
 let infra: Awaited<ReturnType<typeof infrastructure>>,
   db: Database,
@@ -112,6 +113,32 @@ it("reuses one Attention row and event history, supports withdrawal, and keeps t
   );
   const withdrawn = await service.attentionItem(f.s, f.actor, key);
   expect(withdrawn.status).toBe("DISMISSED");
+  const closed = (
+    await sql<{
+      opened_at: Date;
+      resolved_at: Date | null;
+      updated_at: Date;
+    }>`SELECT opened_at,resolved_at,updated_at FROM attention_items WHERE ${tenant(f.s)} AND message_id=${key}`.execute(
+      db,
+    )
+  ).rows[0]!;
+  expect(closed.resolved_at).not.toBeNull();
+  expect(closed.resolved_at!.getTime()).toBeGreaterThanOrEqual(
+    closed.opened_at.getTime(),
+  );
+  expect(closed.resolved_at).toEqual(closed.updated_at);
+  const completion = await teamOperations(
+    db,
+    f.s,
+    new Date(closed.opened_at.getTime() - 1),
+    new Date(closed.updated_at.getTime() + 1),
+  );
+  expect(completion.itemsResolved).toBe(1);
+  expect(completion.resolutionSample).toBe(1);
+  expect(completion.medianResolutionSeconds).toBeCloseTo(
+    (closed.resolved_at!.getTime() - closed.opened_at.getTime()) / 1000,
+    3,
+  );
   expect(withdrawn.events.map((event) => event.state)).toEqual([
     "DISMISSED",
     "ACKNOWLEDGED",

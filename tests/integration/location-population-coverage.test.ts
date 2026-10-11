@@ -141,12 +141,14 @@ it("upgrades v3 rows conservatively, closes epochs and rejects replay without re
     const id = randomUUID(), saved = {schemaVersion:1,metrics:[],dataQuality:"COMPLETE",fixture:"immutable before050"};
     await sql`INSERT INTO analysis_runs(id,organization_id,guild_id,scheduler_organization_id,analysis_type,status,request_key,period_start,period_end,period_days,recipe_version,scope_identity,config_revision,data_revision,input_fingerprint,plan_at_request,priority_class,retention_until) VALUES(${id}::uuid,${f.s.organizationId}::uuid,${f.s.guildId},${f.s.organizationId}::uuid,'OVERALL','COMPLETED','pre050',${f.start},${f.end},30,'analysis-observation-v2:fixture','population',1,0,${"a".repeat(64)},'FREE','FREE',now()+interval '30 days')`.execute(upgrade);
     await sql`INSERT INTO analysis_results(run_id,organization_id,guild_id,result) VALUES(${id}::uuid,${f.s.organizationId}::uuid,${f.s.guildId},${json(saved)})`.execute(upgrade);
-    const oldRun = (await sql<{row:unknown}>`SELECT to_jsonb(r) AS row FROM analysis_runs r WHERE id=${id}::uuid`.execute(upgrade)).rows[0]!.row;
+    const oldRun = (await sql<{row:Record<string,unknown>}>`SELECT to_jsonb(r) AS row FROM analysis_runs r WHERE id=${id}::uuid`.execute(upgrade)).rows[0]!.row;
     await migrate(upgrade); await migrate(upgrade);
     const marker = (await locationPopulationIntroduction(upgrade,f.s))!;
     expect((await sql<{n:number}>`SELECT count(*)::int AS n FROM location_post_observations WHERE ${tenant(f.s)} AND definition_version='observation-v3' AND population_source='LEGACY_PARTICIPANT_ONLY'`.execute(upgrade)).rows[0]!.n).toBe(7);
     expect((await sql<{ended_at:Date;end_reason:string}>`SELECT ended_at,end_reason FROM collection_epochs WHERE ${tenant(f.s)}`.execute(upgrade)).rows[0]).toEqual({ended_at:marker,end_reason:"LOCATION_POPULATION_COLLECTOR_UPGRADE"});
-    expect((await sql<{row:unknown}>`SELECT to_jsonb(r) AS row FROM analysis_runs r WHERE id=${id}::uuid`.execute(upgrade)).rows[0]!.row).toEqual(oldRun);
+    // Migration 051 adds a nullable admission generation; all prior fields and
+    // saved results remain unchanged, and pre-Beta runs gain no admission.
+    expect((await sql<{row:unknown}>`SELECT to_jsonb(r) AS row FROM analysis_runs r WHERE id=${id}::uuid`.execute(upgrade)).rows[0]!.row).toEqual({...oldRun,beta_generation:null});
     expect((await sql<{result:unknown}>`SELECT result FROM analysis_results WHERE run_id=${id}::uuid`.execute(upgrade)).rows[0]!.result).toEqual(saved);
     const base: Envelope = {...f.s,shardId:0,gatewaySessionId:"reclaimed",sequence:1,context:"PRODUCTION",kind:"telemetry.connected",at:new Date(marker.getTime()-1000).toISOString(),observedAt:new Date(marker.getTime()-1000).toISOString()};
     await projectObservation(upgrade,f.s,base);
