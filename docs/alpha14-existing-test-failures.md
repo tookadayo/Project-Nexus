@@ -126,3 +126,12 @@ The two affected files plus the Beta API regression file passed **34/34** locall
 A new real-database regression passed **1/1**, verifying that shutdown keeps an
 existing connection usable until it closes. Typecheck, focused ESLint and the
 secret scan passed. Hosted CI must still validate this correction at its new head.
+
+At `d20a502`, the PR integration run completed without unhandled shutdown errors,
+including the new fixture regression. It passed 495/496 assertions and exposed a
+precision mismatch in the Attention completion assertion: PostgreSQL preserves
+microseconds, while node-postgres converts timestamps to millisecond `Date`
+values. The expected duration now subtracts exact integer-microsecond endpoints
+before converting to seconds and requires exact equality with the aggregate.
+The affected Attention/analysis file passed **4/4** locally after this correction;
+no product behavior or timing tolerance was changed.

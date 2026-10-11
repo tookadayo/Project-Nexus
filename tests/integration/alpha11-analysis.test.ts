@@ -118,7 +118,12 @@ it("reuses one Attention row and event history, supports withdrawal, and keeps t
       opened_at: Date;
       resolved_at: Date | null;
       updated_at: Date;
-    }>`SELECT opened_at,resolved_at,updated_at FROM attention_items WHERE ${tenant(f.s)} AND message_id=${key}`.execute(
+      opened_micros: string;
+      resolved_micros: string | null;
+    }>`SELECT opened_at,resolved_at,updated_at,
+      (extract(epoch FROM opened_at)*1000000)::bigint::text AS opened_micros,
+      (extract(epoch FROM resolved_at)*1000000)::bigint::text AS resolved_micros
+      FROM attention_items WHERE ${tenant(f.s)} AND message_id=${key}`.execute(
       db,
     )
   ).rows[0]!;
@@ -135,9 +140,12 @@ it("reuses one Attention row and event history, supports withdrawal, and keeps t
   );
   expect(completion.itemsResolved).toBe(1);
   expect(completion.resolutionSample).toBe(1);
-  expect(completion.medianResolutionSeconds).toBeCloseTo(
-    (closed.resolved_at!.getTime() - closed.opened_at.getTime()) / 1000,
-    3,
+  // PostgreSQL preserves microseconds; pg's Date values truncate to milliseconds.
+  // Subtract exact endpoint timestamps before converting the duration to seconds.
+  const elapsedMicros =
+    BigInt(closed.resolved_micros!) - BigInt(closed.opened_micros);
+  expect(completion.medianResolutionSeconds).toBe(
+    Number(elapsedMicros) / 1_000_000,
   );
   expect(withdrawn.events.map((event) => event.state)).toEqual([
     "DISMISSED",
