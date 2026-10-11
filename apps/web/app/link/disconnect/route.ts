@@ -8,7 +8,7 @@ import {failureResponse} from '../../auth/failure-response';
 export async function POST(req:NextRequest){
  const reply=(data:unknown,status=200)=>NextResponse.json(data,{status,headers:{'Cache-Control':'no-store'}});
  if(!sameOrigin(req))return failureResponse(new DomainError('ORIGIN_REJECTED',403),'NOT_STARTED');
- const session=openSession(req.cookies.get('nexus_session')?.value);
+ const session=await openSession(req.cookies.get('nexus_session')?.value);
  if(!session||authMode()!=='oauth')return failureResponse(new DomainError('SESSION_EXPIRED',401),'NOT_STARTED');
  try{await validateOAuthSession(session);}catch(error){return failureResponse(error,'NOT_STARTED');}
  try{

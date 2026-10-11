@@ -12,7 +12,7 @@ import {
   analysisUsage,
 } from "../../packages/analysis/src/index";
 import { analysisFixture } from "../fixtures/analysis";
-import { infrastructure } from "../fixtures/infrastructure";
+import { isolatedPostgres as infrastructure } from "../fixtures/postgres";
 
 let infra: Awaited<ReturnType<typeof infrastructure>>,
   db: Database,

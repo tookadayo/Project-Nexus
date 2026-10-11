@@ -1,0 +1,112 @@
+.explore-workspace {
+  min-width: 0;
+}
+.explore-workspace .page-head {
+  display: block;
+  margin: 28px 0 24px;
+}
+.explore-workspace .page-head h1 {
+  margin: 0 0 12px;
+}
+.explore-workspace .page-head p {
+  max-width: 70ch;
+  color: var(--nx-secondary);
+  line-height: 1.7;
+}
+.explore-workspace .explore-controls {
+  display: block;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+.explore-primary-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) minmax(100px, 1fr) minmax(
+      180px,
+      2fr
+    ) auto;
+  gap: 16px;
+  align-items: end;
+}
+.explore-primary-controls > label {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.explore-primary-controls > label:has(input[type="checkbox"]) {
+  display: flex;
+  align-items: center;
+  align-self: end;
+  min-height: 44px;
+}
+.explore-workspace :is(input, select, button) {
+  min-height: 44px;
+  font: inherit;
+  max-width: 100%;
+}
+.explore-workspace input[type="checkbox"] {
+  min-height: 18px;
+  flex-shrink: 0;
+}
+.explore-read-note {
+  font-size: 14px;
+  color: var(--nx-secondary);
+  margin: 16px 0 0;
+}
+.explore-filter-details {
+  border-top: 1px solid var(--nx-border);
+  margin-top: 20px;
+  padding-top: 8px;
+}
+.explore-filter-details summary {
+  min-height: 44px;
+  align-content: center;
+  cursor: pointer;
+  font-weight: 600;
+}
+.explore-filter-details summary span {
+  font-weight: 400;
+  color: var(--nx-accent);
+}
+.explore-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  padding: 16px 0 4px;
+}
+.explore-filter-grid label {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  margin: 0;
+  min-width: 0;
+}
+.explore-filter-grid :is(input, select) {
+  width: 100%;
+}
+.explore-filter-grid p {
+  font-size: 14px;
+  color: var(--nx-secondary);
+  margin: 0;
+  line-height: 1.7;
+}
+.explore-save > label {
+  display: grid;
+  gap: 6px;
+  margin: 16px 0;
+  max-width: 560px;
+}
+.explore-save > button {
+  margin: 0 12px 12px 0;
+}
+@media (max-width: 767px) {
+  .explore-primary-controls,
+  .explore-filter-grid {
+    grid-template-columns: 1fr;
+  }
+  .explore-workspace .explore-controls {
+    padding: 18px;
+  }
+  .explore-workspace .page-head {
+    margin-top: 20px;
+  }
+}

@@ -1,3 +1,7 @@
+import {finalizeUsage} from './usage';
+export {finalizeUsage} from './usage';
+import {betaAccess,betaAnalysisCapacity} from '../../security/src/hosted-beta';
+import {hostedBetaEnabled} from '../../config/src/hosted-beta';
 import { randomUUID } from "node:crypto";
 import { logFailure } from "../../shared/src/diagnostics";
 import { z } from "zod";
@@ -18,7 +22,12 @@ import {
   operationsAudit,
   actorPermissions,
 } from "../../operations/src/policy";
-import { comparisonEligibility } from "../../shared/src/metric-evidence";
+import {
+  compareAnalyses,
+  metricComparisonReasons,
+  observedChanges,
+  type ComparisonRun,
+} from "./comparison";
 import type { InternalBillingActor } from "../../security/src/billing-authorization";
 import { AttentionOperations } from "../../operations/src/attention";
 import type { MetricEvidence } from "../../shared/src/metric-evidence";
@@ -46,6 +55,7 @@ import {
 } from "./identity";
 export * from "./domain";
 export * from "./policy";
+export * from "./comparison";
 function inputIdentity(
   s: Scope,
   type: string,
@@ -171,24 +181,6 @@ async function validateRunConditions(
   );
   return resolved;
 }
-function observedChanges(current: AnalysisResult, previous: AnalysisResult) {
-  return current.metrics.flatMap((metric) => {
-    const before = previous.metrics.find((m) => m.key === metric.key);
-    return before &&
-      comparisonEligibility(metric.evidence, before.evidence).comparable &&
-      metric.evidence.value !== null &&
-      before.evidence.value !== null
-      ? [
-          {
-            key: metric.key,
-            before: before.evidence.value,
-            after: metric.evidence.value,
-            unit: metric.unit,
-          },
-        ]
-      : [];
-  });
-}
 async function availableStoredTargets(tx: Tx, s: Scope) {
   const cfg = await new SettingsService(tx).get(s),
     resolved = await analysisChannelScope(tx, s, cfg);
@@ -238,19 +230,25 @@ async function comparisonResult(
   historyDays: number,
 ) {
   const compatible = result.metrics
-    .filter((m) => m.evidence.comparable && m.evidence.value !== null)
+    .filter((m) => !metricComparisonReasons(m).length)
     .map((m) => ({
       key: m.key,
       definitionVersion: m.evidence.definitionVersion,
+      unit: m.unit,
+      windowStart: m.evidence.windowStart,
+      windowEnd: m.evidence.windowEnd,
+      windowKind: m.evidence.windowKind ?? "",
     }));
   if (!compatible.length) return null;
   const targets = await availableStoredTargets(tx, s);
   return (
     (
-      await sql<{
-        run_id: string;
-        result: AnalysisResult;
-      }>`SELECT r.run_id,r.result FROM analysis_runs a JOIN analysis_results r ON r.run_id=a.id AND r.organization_id=a.organization_id AND r.guild_id=a.guild_id WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND a.status='COMPLETED' AND a.invalidated_at IS NULL AND a.id<>${run.id}::uuid AND a.period_end<=${run.period_start} AND a.analysis_type=${run.analysis_type} AND a.recipe_version=${run.recipe_version} AND a.scope_identity=${run.scope_identity} AND a.period_days=${run.period_days} AND a.retention_until>now() AND a.target_channel_ids<@${targets}::text[] AND a.requested_at>=now()-make_interval(days=>${historyDays}) AND EXISTS(SELECT 1 FROM jsonb_array_elements(r.result->'metrics') m JOIN jsonb_array_elements(${json(compatible)}) c ON m->>'key'=c->>'key' AND m->'evidence'->>'definitionVersion'=c->>'definitionVersion' WHERE m->'evidence'->'comparisonBlockers'='[]'::jsonb AND jsonb_typeof(m->'evidence'->'value')='number') ORDER BY a.period_end DESC,a.requested_at DESC,a.id DESC LIMIT 1`.execute(
+      await sql<
+        ComparisonRun & {
+          run_id: string;
+          result: AnalysisResult;
+        }
+      >`SELECT a.id,a.analysis_type,a.period_start,a.period_end,a.period_days,a.recipe_version,a.scope_identity,r.run_id,r.result FROM analysis_runs a JOIN analysis_results r ON r.run_id=a.id AND r.organization_id=a.organization_id AND r.guild_id=a.guild_id WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND a.status='COMPLETED' AND a.invalidated_at IS NULL AND a.id<>${run.id}::uuid AND a.period_end<=${run.period_start} AND a.analysis_type=${run.analysis_type} AND a.recipe_version=${run.recipe_version} AND a.scope_identity=${run.scope_identity} AND a.period_days=${run.period_days} AND a.period_end-a.period_start=${run.period_end}::timestamptz-${run.period_start}::timestamptz AND a.retention_until>now() AND a.target_channel_ids<@${targets}::text[] AND a.requested_at>=now()-make_interval(days=>${historyDays}) AND EXISTS(SELECT 1 FROM jsonb_array_elements(r.result->'metrics') m JOIN jsonb_array_elements(${json(compatible)}) c ON m->>'key'=c->>'key' AND m->'evidence'->>'definitionVersion'=c->>'definitionVersion' AND m->>'unit'=c->>'unit' WHERE r.result->'schemaVersion'=${json(result.schemaVersion)} AND m->'evidence'->>'comparable'='true' AND m->'evidence'->'comparisonBlockers'='[]'::jsonb AND m->'evidence'->>'observationState'='OBSERVED' AND m->'evidence'->>'coverageState'='COMPLETE' AND jsonb_array_length(m->'evidence'->'collectionEpochIds')>0 AND jsonb_typeof(m->'evidence'->'value')='number' AND COALESCE(m->'evidence'->>'windowKind','')=c->>'windowKind' AND (m->'evidence'->>'windowEnd')::timestamptz>(m->'evidence'->>'windowStart')::timestamptz AND (m->'evidence'->>'windowEnd')::timestamptz-(m->'evidence'->>'windowStart')::timestamptz=(c->>'windowEnd')::timestamptz-(c->>'windowStart')::timestamptz AND (m->'evidence'->>'windowEnd')::timestamptz<=(c->>'windowStart')::timestamptz) ORDER BY a.period_end DESC,a.requested_at DESC,a.id DESC LIMIT 1`.execute(
         tx,
       )
     ).rows[0] ?? null
@@ -485,6 +483,8 @@ export class AnalysisService {
     analysisEvent("analysis_requested");
     const accepted = await this.db.transaction().execute(async (tx) => {
       await privacyReadLock(tx, s);
+      const beta=await betaAccess(tx,s);
+      if(beta)await sql`SELECT pg_advisory_xact_lock(763212)`.execute(tx);
       const state = await operationsAccess(tx, s, actor, "ANALYZE");
       const root =
         (
@@ -548,6 +548,7 @@ export class AnalysisService {
           return { run: duplicate, reused: true };
         }
       }
+      if(beta)await betaAnalysisCapacity(tx,s,beta);
       const pending = (
         await sql<{
           guild: number;
@@ -595,10 +596,11 @@ export class AnalysisService {
             tx,
           )
         ).rows[0]!;
-      await sql`UPDATE analysis_runs SET confirmation_fingerprint=${p.confirmationFingerprint},data_identity=${p.dataIdentity},target_channel_ids=${p.targetChannelIds}::text[],conditions=${json(p.conditions)},scope_bug_impact='CORRECTED_DEFINITION',correction_of=${data.correctionOf ?? null}::uuid WHERE id=${id}::uuid`.execute(
+      await sql`UPDATE analysis_runs SET beta_generation=${beta?.generation??null},confirmation_fingerprint=${p.confirmationFingerprint},data_identity=${p.dataIdentity},target_channel_ids=${p.targetChannelIds}::text[],conditions=${json(p.conditions)},scope_bug_impact='CORRECTED_DEFINITION',correction_of=${data.correctionOf ?? null}::uuid WHERE id=${id}::uuid`.execute(
         tx,
       );
       Object.assign(run, {
+        beta_generation:beta?.generation??null,
         confirmation_fingerprint: p.confirmationFingerprint,
         data_identity: p.dataIdentity,
         target_channel_ids: p.targetChannelIds,
@@ -776,6 +778,15 @@ export class AnalysisService {
         ).rows[0]?.result ?? null;
       return {
         run,
+        canOperate: (await actorPermissions(tx, s, actor)).includes("OPERATE"),
+        reviews: (
+          await sql<{
+            message_id: string;
+            status: string;
+          }>`SELECT message_id,status FROM attention_items WHERE ${tenant(s)} AND item_type='ANALYSIS_CONCERN' AND split_part(message_id,':',2)=${id}`.execute(
+            tx,
+          )
+        ).rows,
         result: await visibleStoredResult(
           tx,
           s,
@@ -799,16 +810,31 @@ export class AnalysisService {
           )
         ).rows[0]?.result;
       assert(result, "ANALYSIS_RESULT_UNAVAILABLE", 409);
-      const previous = await comparisonResult(
+      let previous = await comparisonResult(
         tx,
         s,
         run,
         result,
         state.limits.historyDays ?? 3650,
       );
-      if (!previous) return { comparable: false, changes: [] };
-      const changes = observedChanges(result, previous.result);
-      return { comparable: changes.length > 0, changes };
+      if (!previous) {
+        const targets = await availableStoredTargets(tx, s);
+        // Explain the most recent visible prior result when no eligible baseline exists.
+        // Hidden, removed or expired results are never used for diagnostics.
+        previous =
+          (
+            await sql<
+              ComparisonRun & { run_id: string; result: AnalysisResult }
+            >`SELECT a.id,a.analysis_type,a.period_start,a.period_end,a.period_days,a.recipe_version,a.scope_identity,r.run_id,r.result FROM analysis_runs a JOIN analysis_results r ON r.run_id=a.id AND r.organization_id=a.organization_id AND r.guild_id=a.guild_id WHERE a.organization_id=${s.organizationId}::uuid AND a.guild_id=${s.guildId} AND a.id<>${id}::uuid AND a.status='COMPLETED' AND a.analysis_type=${run.analysis_type} AND a.period_end<=${run.period_end} AND a.invalidated_at IS NULL AND a.retention_until>now() AND a.requested_at>=now()-make_interval(days=>${state.limits.historyDays ?? 3650}) AND a.target_channel_ids<@${targets}::text[] ORDER BY a.period_end DESC,a.requested_at DESC,a.id DESC LIMIT 1`.execute(
+              tx,
+            )
+          ).rows[0] ?? null;
+      }
+      return compareAnalyses(
+        run,
+        result,
+        previous ? { run: previous, result: previous.result } : null,
+      );
     });
   }
   async attention(s: Scope, actor: Actor, id: string, concernKey: string) {
@@ -835,22 +861,30 @@ export class AnalysisService {
       const concern = row?.result.concerns.find((c) => c.key === concernKey);
       assert(concern, "ANALYSIS_CONCERN_UNAVAILABLE", 404);
       const key = "analysis:" + id + ":" + concernKey;
-      await sql`INSERT INTO attention_items(organization_id,guild_id,channel_id,message_id,detected_at,status,opened_at,item_type,target_surface,reason,evidence,updated_at,last_actor_hash) VALUES(${s.organizationId}::uuid,${s.guildId},'',${key},now(),'OPEN',now(),'ANALYSIS_CONCERN','AGGREGATE','ANALYSIS_WAITING_RESPONSE',${json(concern.evidence)},now(),${actor.key}) ON CONFLICT DO NOTHING`.execute(
-        tx,
-      );
-      await operationsAudit(
-        tx,
-        s,
-        actor.key,
-        "ANALYSIS_ATTENTION_ADDED",
-        key,
-        0,
-      );
+      const inserted =
+        await sql`INSERT INTO attention_items(organization_id,guild_id,channel_id,message_id,detected_at,status,opened_at,item_type,target_surface,reason,evidence,updated_at,last_actor_hash) VALUES(${s.organizationId}::uuid,${s.guildId},'',${key},now(),'OPEN',now(),'ANALYSIS_CONCERN','AGGREGATE','ANALYSIS_WAITING_RESPONSE',${json(concern.evidence)},now(),${actor.key}) ON CONFLICT DO NOTHING RETURNING message_id`.execute(
+          tx,
+        );
+      if (inserted.rows.length)
+        await operationsAudit(
+          tx,
+          s,
+          actor.key,
+          "ANALYSIS_ATTENTION_ADDED",
+          key,
+          0,
+        );
       return key;
     });
   }
-  async attentionList(s: Scope, actor: Actor, offset = 0) {
+  async attentionList(
+    s: Scope,
+    actor: Actor,
+    offset = 0,
+    filter: "active" | "all" = "active",
+  ) {
     z.number().int().min(0).max(1000).parse(offset);
+    z.enum(["active", "all"]).parse(filter);
     return this.db.transaction().execute(async (tx) => {
       await privacyReadLock(tx, s);
       const state = await operationsAccess(
@@ -868,7 +902,7 @@ export class AnalysisService {
           status: string;
           evidence: MetricEvidence;
           detected_at: Date;
-        }>`SELECT i.message_id,i.version,i.status,i.evidence,i.detected_at FROM attention_items i JOIN analysis_runs a ON a.organization_id=i.organization_id AND a.guild_id=i.guild_id AND a.id::text=split_part(i.message_id,':',2) WHERE i.organization_id=${s.organizationId}::uuid AND i.guild_id=${s.guildId} AND i.item_type='ANALYSIS_CONCERN' AND i.status IN ('OPEN','ACKNOWLEDGED','IN_PROGRESS','SNOOZED') AND a.invalidated_at IS NULL AND a.retention_until>now() AND a.requested_at>=now()-make_interval(days=>${state.limits.historyDays ?? 3650}) AND a.target_channel_ids<@${targets}::text[] ORDER BY i.detected_at DESC,i.message_id LIMIT 5 OFFSET ${offset}`.execute(
+        }>`SELECT i.message_id,i.version,i.status,i.evidence,i.detected_at FROM attention_items i JOIN analysis_runs a ON a.organization_id=i.organization_id AND a.guild_id=i.guild_id AND a.id::text=split_part(i.message_id,':',2) WHERE i.organization_id=${s.organizationId}::uuid AND i.guild_id=${s.guildId} AND i.item_type='ANALYSIS_CONCERN' ${filter === "active" ? sql`AND i.status IN ('OPEN','ACKNOWLEDGED','IN_PROGRESS','SNOOZED')` : sql``} AND a.invalidated_at IS NULL AND a.retention_until>now() AND a.requested_at>=now()-make_interval(days=>${state.limits.historyDays ?? 3650}) AND a.target_channel_ids<@${targets}::text[] ORDER BY i.detected_at DESC,i.message_id LIMIT 5 OFFSET ${offset}`.execute(
           tx,
         )
       ).rows;
@@ -900,12 +934,28 @@ export class AnalysisService {
           status: string;
           evidence: MetricEvidence;
           detected_at: Date;
-        }>`SELECT message_id,version,status,evidence,detected_at FROM attention_items WHERE ${tenant(s)} AND item_type='ANALYSIS_CONCERN' AND message_id=${key}`.execute(
+          opened_at: Date | null;
+          acknowledged_at: Date | null;
+          resolved_at: Date | null;
+          updated_at: Date | null;
+        }>`SELECT message_id,version,status,evidence,detected_at,opened_at,acknowledged_at,resolved_at,updated_at FROM attention_items WHERE ${tenant(s)} AND item_type='ANALYSIS_CONCERN' AND message_id=${key}`.execute(
           tx,
         )
       ).rows[0];
       assert(row, "ATTENTION_NOT_FOUND", 404);
-      return row;
+      return {
+        ...row,
+        canOperate: (await actorPermissions(tx, s, actor)).includes("OPERATE"),
+        events: (
+          await sql<{
+            state: string;
+            version: number;
+            occurred_at: Date;
+          }>`SELECT state,version,occurred_at FROM attention_events WHERE ${tenant(s)} AND attention_key=${key} ORDER BY version DESC LIMIT 5`.execute(
+            tx,
+          )
+        ).rows,
+      };
     });
   }
   async attentionUpdate(
@@ -913,12 +963,13 @@ export class AnalysisService {
     actor: Actor,
     key: string,
     version: number,
-    status: "ACKNOWLEDGED" | "RESOLVED",
+    status: "ACKNOWLEDGED" | "RESOLVED" | "DISMISSED",
   ) {
     z.string()
       .regex(/^analysis:[a-f0-9-]{36}:waiting_response$/)
       .parse(key);
     z.number().int().nonnegative().parse(version);
+    z.enum(["ACKNOWLEDGED", "RESOLVED", "DISMISSED"]).parse(status);
     return new AttentionOperations(this.db).action(
       s,
       key,
@@ -926,7 +977,7 @@ export class AnalysisService {
       status,
       new Date(),
       null,
-      "MANUAL",
+      status === "DISMISSED" ? "MANUAL_WITHDRAWAL" : "MANUAL",
       async (tx) => {
         await privacyReadLock(tx, s);
         const state = await operationsAccess(
@@ -961,6 +1012,7 @@ export class AnalysisService {
         );
       },
       version,
+      actor.key,
     );
   }
   async manualGrant(s: Scope, actor: InternalBillingActor, input: unknown) {
@@ -1023,6 +1075,9 @@ export class AnalysisService {
     let released = false;
     const claimed = await this.db.transaction().execute(async (tx) => {
       await privacyReadLock(tx, s);
+      let betaAllowed=true;
+      try{await betaAccess(tx,s,'work',known.beta_generation??null);}catch(error){if(error instanceof Error&&error.message==='BETA_UNAVAILABLE')betaAllowed=false;else throw error;}
+      if(hostedBetaEnabled())await sql`SELECT pg_advisory_xact_lock(763212)`.execute(tx);
       const link = (
         await sql<{
           root_organization_id: string;
@@ -1043,7 +1098,7 @@ export class AnalysisService {
       ).rows[0];
       if (!run) return null;
       const state = await new EntitlementService(tx).effective(s);
-      if (state.privacyDeleted) {
+      if (state.privacyDeleted||!betaAllowed) {
         released = await finalizeUsage(tx, s, id, "RELEASED");
         await sql`UPDATE analysis_runs SET status='CANCELED',failure_class='AUTHORIZATION',failed_at=now(),updated_at=now() WHERE id=${id}::uuid`.execute(
           tx,
@@ -1065,6 +1120,7 @@ export class AnalysisService {
         )
       ).rows[0]!;
       if (
+        hostedBetaEnabled()&&(await sql<{n:number}>`SELECT count(*)::int AS n FROM analysis_runs WHERE status=ANY(${liveStates}::text[]) AND lease_until>clock_timestamp()`.execute(tx)).rows[0]!.n>=1 ||
         active.guild >= analysisPolicy.guildConcurrency ||
         active.org >= (rootState.limits.analysisConcurrency ?? 1)
       ) {
@@ -1109,6 +1165,7 @@ export class AnalysisService {
         .setIsolationLevel("repeatable read")
         .execute(async (tx) => {
           await privacyReadLock(tx, s);
+          await betaAccess(tx,s,'work',run.beta_generation??null);
           const state = await new EntitlementService(tx).effective(s);
           assert(!state.privacyDeleted, "PRIVACY_DELETED", 403);
           await sql`SET LOCAL statement_timeout='60s'`.execute(tx);
@@ -1158,6 +1215,7 @@ export class AnalysisService {
         });
       await this.db.transaction().execute(async (tx) => {
         await privacyReadLock(tx, s);
+        await betaAccess(tx,s,'work',run.beta_generation??null);
         await analysisLock(tx, s);
         await authorize?.(tx);
         assert(
@@ -1305,26 +1363,4 @@ export class AnalysisService {
       )
     ).rows;
   }
-}
-async function finalizeUsage(
-  tx: Tx,
-  s: Scope,
-  id: string,
-  outcome: "CONSUMED" | "RELEASED",
-) {
-  const r = (
-    await sql<{
-      grant_id: string;
-    }>`UPDATE analysis_reservations SET state=${outcome},finalized_at=now() WHERE ${tenant(s)} AND run_id=${id}::uuid AND state='RESERVED' RETURNING grant_id`.execute(
-      tx,
-    )
-  ).rows[0];
-  if (!r) return false;
-  await sql`UPDATE analysis_grants SET reserved=reserved-1,consumed=consumed+${outcome === "CONSUMED" ? 1 : 0} WHERE id=${r.grant_id}::uuid`.execute(
-    tx,
-  );
-  await sql`INSERT INTO analysis_usage_ledger(run_id,organization_id,guild_id,grant_id,outcome) VALUES(${id}::uuid,${s.organizationId}::uuid,${s.guildId},${r.grant_id}::uuid,${outcome})`.execute(
-    tx,
-  );
-  return true;
 }

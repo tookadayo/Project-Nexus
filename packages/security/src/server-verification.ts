@@ -1,3 +1,5 @@
+import { betaLock, requestBetaDeletion } from "./hosted-beta";
+import { hostedBetaEnabled } from "../../config/src/hosted-beta";
 import { randomInt, randomUUID } from "node:crypto";
 import {
   ensureGuild,
@@ -331,6 +333,8 @@ export class ServerVerification {
     this.authority.require(snapshot);
     const now = new Date(this.clock());
     await this.db.transaction().execute(async (tx) => {
+      await privacyReadLock(tx, s);
+      if (hostedBetaEnabled()) await betaLock(tx, s, true);
       await this.lock(tx, s);
       const actor = await this.authority.revalidate(s, userId, snapshot, tx);
       const link = (
@@ -345,6 +349,7 @@ export class ServerVerification {
       await sql`UPDATE server_verification_challenges SET revoked_at=${now} WHERE ${tenant(s)} AND used_at IS NULL AND revoked_at IS NULL`.execute(
         tx,
       );
+      if (hostedBetaEnabled()) await requestBetaDeletion(tx, s, "UNLINK");
       await audit(tx, s, actor, "server_verification.revoked", null, {
         state: "INSTALLED_NOT_VERIFIED",
       });

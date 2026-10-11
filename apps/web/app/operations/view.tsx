@@ -1,9 +1,15 @@
 "use client";
+import { CurrentAccessPanel } from "../current-access";
+import type { CurrentAccess } from "../../../../packages/operations/src/access-presentation";
+import { metricLabels, nexusRoleLabel } from "../analysis-labels";
+import { useUnsavedChanges } from "../navigation-safety";
+import { safeError } from "../safe-error";
 import {
   createContext,
   useContext,
   useEffect,
   useState,
+  useRef,
   type ReactNode,
   type FormEvent,
 } from "react";
@@ -53,6 +59,7 @@ type Data = {
   view: Tab;
   guildId: string;
   access: {
+    current?: CurrentAccess;
     plan: string;
     role: string | null;
     permissions: string[];
@@ -199,7 +206,14 @@ const labels: Record<Tab, [string, string]> = {
   organization: ["Organization", "組織"],
   integrations: ["Integrations", "連携"],
 };
-const metrics = ["reply", "forum", "voice", "event", "reaction", "poll"];
+const metrics = [
+  "reply",
+  "forum",
+  "voice",
+  "event",
+  "reaction",
+  "poll",
+] as const;
 const text = (f: FormData, key: string) => String(f.get(key) ?? "").trim();
 const number = (f: FormData, key: string) => Number(text(f, key));
 function query(f: FormData, prefix = "") {
@@ -248,7 +262,9 @@ function MetricFields({
       >
         <select name={prefix + "metric"} defaultValue={defaults?.metric}>
           {metrics.map((value) => (
-            <option key={value}>{value}</option>
+            <option key={value} value={value}>
+              {metricLabels[value][ja ? "ja" : "en"]}
+            </option>
           ))}
         </select>
       </Field>
@@ -335,15 +351,36 @@ function Gate({
   permission?: string;
 }) {
   const { ja, data } = useContext(UiContext);
-  return data?.access.features[feature] &&
-    data.access.permissions.includes(permission) ? (
+  if (!data)
+    return (
+      <p role="status">
+        {ja ? "利用条件を確認中です。" : "Checking access conditions…"}
+      </p>
+    );
+  if (!data.access.permissions.includes(permission))
+    return (
+      <p className="inline-note">
+        {ja
+          ? "この操作を行う権限がありません。"
+          : "You do not have permission to perform this action."}
+      </p>
+    );
+  if (permission !== "READ" && data.access.current?.workAllowed === false)
+    return (
+      <p className="inline-note">
+        {safeError("BETA_UNAVAILABLE", ja ? "ja" : "en")}
+      </p>
+    );
+  return data.access.features[feature] ? (
     <>{children}</>
   ) : (
     <p className="inline-note">
       {ja
-        ? "現在のプランまたはチーム権限ではこの操作を利用できません。保存した設定は保持されます。"
-        : "Your current plan or team role does not allow this action. Saved settings are retained."}{" "}
-      <a href="/billing/manage">{ja ? "プランを確認" : "View plan"}</a>
+        ? "現在の利用条件ではこの機能を利用できません。保存した設定は保持されます。"
+        : "This feature is unavailable under your current access conditions. Saved settings are retained."}{" "}
+      <a href="/billing/manage">
+        {ja ? "利用条件を確認" : "Review access conditions"}
+      </a>
     </p>
   );
 }
@@ -358,9 +395,11 @@ function Button({ children }: { children: ReactNode }) {
 export function OperationsControls({
   locale,
   initialView,
+  scope = "",
 }: {
   locale: "ja" | "en";
   initialView: string;
+  scope?: string;
 }) {
   const ja = locale === "ja",
     view = tabs.includes(initialView as Tab)
@@ -395,9 +434,50 @@ export function OperationsControls({
       },
     ]),
     [logo, setLogo] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+  const formRoot = useRef<HTMLElement>(null);
+  const changedForms = useRef(new Map<HTMLFormElement, number>());
+  useEffect(() => {
+    const root = formRoot.current?.closest(".operations-page");
+    const changed = (event: Event) => {
+      const form = (event.target as HTMLElement).closest("form");
+      if (form) {
+        changedForms.current.set(
+          form,
+          (changedForms.current.get(form) ?? 0) + 1,
+        );
+        setUnsaved(true);
+      }
+    };
+    const clicked = (event: Event) => {
+      if ((event.target as HTMLElement).closest("[data-draft-change]"))
+        changed(event);
+    };
+    root?.addEventListener("click", clicked, true);
+    root?.addEventListener("input", changed, true);
+    root?.addEventListener("change", changed, true);
+    return () => {
+      root?.removeEventListener("click", clicked, true);
+      root?.removeEventListener("input", changed, true);
+      root?.removeEventListener("change", changed, true);
+    };
+  }, []);
+  const [unsaved, setUnsaved] = useState(false);
+  const canLeave = useUnsavedChanges(unsaved || sending, locale);
+  useEffect(() => {
+    for (const form of changedForms.current.keys())
+      if (!form.isConnected) changedForms.current.delete(form);
+    if (!changedForms.current.size && unsaved) setUnsaved(false);
+  });
+  const discardForm = () => {
+    if (!canLeave()) return false;
+    return true;
+  };
   async function load() {
     const response = await fetch("/operations/data?view=" + view, {
         cache: "no-store",
+        headers: { "X-Nexus-Guild": scope },
       }),
       body = await response.json();
     if (!response.ok) throw new Error(body.error ?? "OPERATIONS_UNAVAILABLE");
@@ -405,8 +485,12 @@ export function OperationsControls({
   }
   useEffect(() => {
     let active = true;
+    setData(null);
     setBusy(true);
-    fetch("/operations/data?view=" + view, { cache: "no-store" })
+    fetch("/operations/data?view=" + view, {
+      cache: "no-store",
+      headers: { "X-Nexus-Guild": scope },
+    })
       .then(async (response) => {
         const body = await response.json();
         if (!response.ok) throw new Error(body.error);
@@ -424,16 +508,25 @@ export function OperationsControls({
     return () => {
       active = false;
     };
-  }, [view]);
+  }, [view, scope]);
   const can = (feature: string, permission = "CONFIGURE") =>
       Boolean(
         data?.access.features[feature] &&
+        (permission === "READ" || data.access.current?.workAllowed !== false) &&
         data.access.permissions.includes(permission),
       ),
-    configure = Boolean(data?.access.permissions.includes("CONFIGURE")),
-    govern = Boolean(data?.access.permissions.includes("GOVERN"));
+    configure = Boolean(
+      data?.access.current?.workAllowed !== false &&
+      data?.access.permissions.includes("CONFIGURE"),
+    ),
+    govern = Boolean(
+      data?.access.current?.workAllowed !== false &&
+      data?.access.permissions.includes("GOVERN"),
+    );
   async function send(action: string, input: unknown) {
-    if (busy) return;
+    if (busy || sendingRef.current) return;
+    sendingRef.current = true;
+    setSending(true);
     setBusy(true);
     setError("");
     setResult(null);
@@ -441,7 +534,10 @@ export function OperationsControls({
     try {
       const response = await fetch("/operations/data", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "X-Nexus-Guild": scope,
+          },
           body: JSON.stringify({ action, input }),
         }),
         body = await response.json();
@@ -459,6 +555,8 @@ export function OperationsControls({
       setError(e instanceof Error ? e.message : "OPERATIONS_UNAVAILABLE");
       return false;
     } finally {
+      sendingRef.current = false;
+      setSending(false);
       setBusy(false);
     }
   }
@@ -466,7 +564,14 @@ export function OperationsControls({
     return (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       try {
-        void send(action, build(new FormData(event.currentTarget)));
+        const form = event.currentTarget;
+        const version = changedForms.current.get(form);
+        void send(action, build(new FormData(form))).then((saved) => {
+          // A response may arrive after the user has continued editing.
+          if (saved && changedForms.current.get(form) === version)
+            changedForms.current.delete(form);
+          setUnsaved(changedForms.current.size > 0);
+        });
       } catch (e) {
         setError(e instanceof Error ? e.message : "INVALID_REQUEST");
       }
@@ -493,7 +598,7 @@ export function OperationsControls({
   );
   return (
     <UiContext value={{ ja, data, busy }}>
-      <header className="page-head">
+      <header ref={formRoot} className="page-head">
         <h1>{labels[view][ja ? 1 : 0]}</h1>
         <p>
           {t(
@@ -504,14 +609,18 @@ export function OperationsControls({
         {data && (
           <p>
             {data.access.plan} ·{" "}
-            {data.access.role ??
-              t("Discord operations staff", "Discord運営担当")}
+            {data.access.role
+              ? nexusRoleLabel(data.access.role, locale)
+              : t("Discord operations staff", "Discord運営担当")}
           </p>
         )}
       </header>
+      {data?.access.current && (
+        <CurrentAccessPanel access={data.access.current} locale={locale} />
+      )}
       {error && (
         <p role="alert">
-          {error}{" "}
+          {safeError(error, locale)}{" "}
           {error === "SESSION_EXPIRED" && (
             <a href="/auth/login">{t("Sign in", "ログイン")}</a>
           )}
@@ -878,6 +987,7 @@ export function OperationsControls({
                   <button
                     type="button"
                     onClick={() => {
+                      if (!discardForm()) return;
                       setEditing(null);
                       setTrigger("FORUM_SUPPORT");
                     }}
@@ -910,6 +1020,7 @@ export function OperationsControls({
                 <button
                   disabled={busy || !can("playbooks")}
                   onClick={() => {
+                    if (!discardForm()) return;
                     setEditing(book);
                     setTrigger(
                       book.definition.trigger.kind === "ATTENTION"
@@ -1212,7 +1323,8 @@ export function OperationsControls({
             <h2>{t("Delivery history", "送信履歴")}</h2>
             {data?.reports?.runs.map((run) => (
               <p key={run.id}>
-                {run.scheduled_at} · {state(run.state)} · {run.last_error ?? ""}
+                {run.scheduled_at} · {state(run.state)} ·{" "}
+                {run.last_error ? safeError(run.last_error, locale) : ""}
               </p>
             ))}
           </section>
@@ -1220,6 +1332,12 @@ export function OperationsControls({
       )}
       {view === "improvements" && (
         <>
+          <p>
+            {t(
+              "Saved results are shown only within current access and retention conditions. Results that cannot be safely separated from restricted or deleted data are unavailable.",
+              "保存結果は現在の利用権と保持条件の範囲で表示します。制限対象や削除済みのデータを安全に分離できない結果は表示しません。",
+            )}
+          </p>
           <section className="surface">
             <h2>{t("Record an intervention", "施策を記録")}</h2>
             <Gate feature="improvement_tracking" permission="OPERATE">
@@ -1368,6 +1486,7 @@ export function OperationsControls({
                         </label>
                         <button
                           type="button"
+                          data-draft-change
                           disabled={formFields.length === 1}
                           onClick={() =>
                             setFormFields(
@@ -1381,6 +1500,7 @@ export function OperationsControls({
                     ))}
                     <button
                       type="button"
+                      data-draft-change
                       disabled={formFields.length >= 5}
                       onClick={() =>
                         setFormFields([
@@ -1403,7 +1523,9 @@ export function OperationsControls({
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => setEditingPanel(null)}
+                    onClick={() => {
+                      if (discardForm()) setEditingPanel(null);
+                    }}
                   >
                     {t("Create new", "新規作成")}
                   </button>
@@ -1428,6 +1550,7 @@ export function OperationsControls({
                   <button
                     disabled={busy}
                     onClick={() => {
+                      if (!discardForm()) return;
                       setEditingPanel(panel);
                       setFormFields(panel.fields);
                     }}
@@ -1568,7 +1691,12 @@ export function OperationsControls({
                 </div>
                 <Button>{t("Save event", "イベントを保存")}</Button>
                 {editingEvent && (
-                  <button type="button" onClick={() => setEditingEvent(null)}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (discardForm()) setEditingEvent(null);
+                    }}
+                  >
                     {t("New event", "新しいイベント")}
                   </button>
                 )}
@@ -1583,7 +1711,14 @@ export function OperationsControls({
                 {state(event.state)}
               </p>
               {can("event_operations", "READ") && event.state === "ENABLED" && (
-                <a href={"/operations/data?format=ics&id=" + event.id}>
+                <a
+                  href={
+                    "/operations/data?guild=" +
+                    encodeURIComponent(scope) +
+                    "&format=ics&id=" +
+                    event.id
+                  }
+                >
                   {t("Calendar link / ICS export", "カレンダーリンク・ICS出力")}
                 </a>
               )}
@@ -1591,6 +1726,7 @@ export function OperationsControls({
                 <button
                   disabled={busy}
                   onClick={() => {
+                    if (!discardForm()) return;
                     setEditingEvent(event);
                     window.scrollTo(0, 0);
                   }}
@@ -1721,7 +1857,9 @@ export function OperationsControls({
                     <select name="role">
                       {["OWNER", "ADMIN", "OPERATOR", "ANALYST", "VIEWER"].map(
                         (value) => (
-                          <option key={value}>{value}</option>
+                          <option key={value} value={value}>
+                            {nexusRoleLabel(value, locale)}
+                          </option>
                         ),
                       )}
                     </select>
@@ -1743,8 +1881,8 @@ export function OperationsControls({
             </Gate>
             {data?.members?.map((member) => (
               <p key={member.id}>
-                {member.name} · {member.role} · {state(member.state ?? "")} · r
-                {member.revision}{" "}
+                {member.name} · {nexusRoleLabel(member.role, locale)} ·{" "}
+                {state(member.state ?? "")} · r{member.revision}{" "}
                 {govern && (
                   <button
                     disabled={busy}
@@ -1793,8 +1931,25 @@ export function OperationsControls({
           {can("audit_export", "GOVERN") && (
             <section className="surface">
               <h2>{t("Audit export", "監査記録の出力")}</h2>
-              <a href="/operations/data?format=audit-csv">CSV</a> ·{" "}
-              <a href="/operations/data?format=audit-json">JSON</a>
+              <a
+                href={
+                  "/operations/data?guild=" +
+                  encodeURIComponent(scope) +
+                  "&format=audit-csv"
+                }
+              >
+                CSV
+              </a>{" "}
+              ·{" "}
+              <a
+                href={
+                  "/operations/data?guild=" +
+                  encodeURIComponent(scope) +
+                  "&format=audit-json"
+                }
+              >
+                JSON
+              </a>
             </section>
           )}
           <p>

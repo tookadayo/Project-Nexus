@@ -22,6 +22,11 @@ import { DiscordFailure } from "../../packages/discord/src/rest.js";
 import { FakeDiscord } from "../fixtures/discord.js";
 import { PromotionService } from "../../packages/settings/src/billing/index.js";
 import { internalBillingActor } from "../../packages/security/src/billing-authorization.js";
+import { PublicSessions } from "../../packages/security/src/public-sessions.js";
+import { randomUUID } from "node:crypto";
+import { BetaOperator } from "../../packages/security/src/beta-operator.js";
+import { betaInvitation } from "../../packages/security/src/hosted-beta.js";
+process.env.NEXUS_HOSTED_BETA = "on";
 const port = Number(process.env.NEXUS_VERIFICATION_API_PORT ?? 3151),
   user = "911111111111111111",
   other = "911111111111111112",
@@ -88,16 +93,39 @@ discord.member = async (guildId, userId) => {
       ? [manager, ...(billingAdmins.has(`${guildId}:${userId}`) ? [admin] : [])]
       : [],
     permissions: "0",
-    ownerId:billingAdmins.has(`${guildId}:${userId}`)?userId:"999111111111111111",
+    ownerId: billingAdmins.has(`${guildId}:${userId}`)
+      ? userId
+      : "999111111111111111",
     bot: false,
     joinedAt: "2026-01-01T00:00:00.000Z",
   };
 };
 const authority = new ServerAuthorization(discord, settings, vault),
   verification = new ServerVerification(db, vault, authority);
+const beta = new BetaOperator(db, async (guildId) => ({
+  name: names[ids.indexOf(guildId)]!,
+  present: installed.has(guildId),
+  canObserve: true,
+  checkedAt: Date.now(),
+}));
 for (const guildId of installed) {
   const s = scopeForGuild(guildId);
   await ensureGuild(db, s);
+  for (const action of ["register", "activate"] as const) {
+    const invitation = await betaInvitation(db, s);
+    await beta.change({
+      guildId,
+      action,
+      generation: invitation?.generation ?? null,
+      requestId: randomUUID(),
+      reason: "Synthetic browser verification invitation",
+    });
+  }
+  // Admission remains real and enabled. Keep this isolated grant featureless
+  // so the existing suite can test each subscription tier independently.
+  await sql`UPDATE entitlement_grants SET features='[]'::jsonb,limits='{}'::jsonb WHERE id=(SELECT grant_id FROM beta_guild_invitations WHERE ${tenant(s)})`.execute(
+    db,
+  );
   await settings.update(
     s,
     {
@@ -127,7 +155,24 @@ const api = createApi(
 );
 await api.listen({ host: "127.0.0.1", port: port + 2 });
 const fixture = Fastify({ logger: false });
+// This isolated loopback fixture shares its database and synthetic session secret
+// with verification-web.ts. Session creation does not contact Discord.
+const sessions = new PublicSessions(db, "s".repeat(64), async () => {
+  throw new Error("VERIFICATION_REFRESH_UNAVAILABLE");
+});
+const sessionInput = z.object({ userId: z.enum([user, other]) }).strict();
 fixture.get("/health", async () => ({ ok: true }));
+fixture.post("/fixture/session", async (request, reply) => {
+  const input = sessionInput.safeParse(request.body);
+  if (!input.success)
+    return reply.code(400).send({ error: "INVALID_FIXTURE_SESSION" });
+  const reference = await sessions.create(
+    input.data.userId,
+    { accessToken: `verification-oauth-${input.data.userId}` },
+    600,
+  );
+  return reply.header("Cache-Control", "no-store").send({ reference });
+});
 fixture.get("/fixture/discord/users/@me", async (request) => ({
   id: request.headers.authorization?.split("-").at(-1) ?? user,
 }));
@@ -143,7 +188,12 @@ fixture.get("/fixture/discord/users/@me/guilds", async (request) =>
 fixture.get("/fixture/discord/guilds/:guildId", async (request, reply) => {
   const { guildId } = request.params as { guildId: string };
   return installed.has(guildId)
-    ? { id: guildId, owner_id: billingAdmins.has(`${guildId}:${user}`)?user:"999111111111111111" }
+    ? {
+        id: guildId,
+        owner_id: billingAdmins.has(`${guildId}:${user}`)
+          ? user
+          : "999111111111111111",
+      }
     : reply.code(404).send({});
 });
 fixture.get("/fixture/discord/guilds/:guildId/roles", async (request) => {
@@ -203,9 +253,16 @@ fixture.post("/fixture/billing-authority", async (request) => {
   if (enabled) billingAdmins.add(key);
   else billingAdmins.delete(key);
   // Explicit fixture Owner + Primary authority, separate from Discord Admin.
-  const scope=scopeForGuild(guildId),hash=vault.digest("billing-org-actor",scope.organizationId+":"+user);
-  if(enabled) await sql`INSERT INTO billing_authorizations(organization_id,actor_hash,role) VALUES(${scope.organizationId}::uuid,${hash},'PRIMARY_BILLING_PRINCIPAL') ON CONFLICT(organization_id,actor_hash) DO UPDATE SET role='PRIMARY_BILLING_PRINCIPAL',revoked_at=NULL`.execute(db);
-  else await sql`DELETE FROM billing_authorizations WHERE organization_id=${scope.organizationId}::uuid AND actor_hash=${hash}`.execute(db);
+  const scope = scopeForGuild(guildId),
+    hash = vault.digest("billing-org-actor", scope.organizationId + ":" + user);
+  if (enabled)
+    await sql`INSERT INTO billing_authorizations(organization_id,actor_hash,role) VALUES(${scope.organizationId}::uuid,${hash},'PRIMARY_BILLING_PRINCIPAL') ON CONFLICT(organization_id,actor_hash) DO UPDATE SET role='PRIMARY_BILLING_PRINCIPAL',revoked_at=NULL`.execute(
+      db,
+    );
+  else
+    await sql`DELETE FROM billing_authorizations WHERE organization_id=${scope.organizationId}::uuid AND actor_hash=${hash}`.execute(
+      db,
+    );
 
   return { ok: true };
 });
@@ -239,7 +296,7 @@ fixture.post("/fixture/operations-plan", async (request) => {
       .strict()
       .parse(request.body),
     s = scopeForGuild(guildId);
-  await sql`UPDATE entitlement_grants SET revoked_at=now() WHERE ${tenant(s)} AND revoked_at IS NULL`.execute(
+  await sql`UPDATE entitlement_grants SET revoked_at=now() WHERE ${tenant(s)} AND revoked_at IS NULL AND id IS DISTINCT FROM (SELECT grant_id FROM beta_guild_invitations WHERE ${tenant(s)})`.execute(
     db,
   );
   await sql`INSERT INTO guild_subscriptions(organization_id,guild_id,plan_key,status) VALUES(${s.organizationId}::uuid,${s.guildId},${plan},'active') ON CONFLICT(organization_id,guild_id) DO UPDATE SET plan_key=EXCLUDED.plan_key,status='active'`.execute(
@@ -252,6 +309,7 @@ fixture.get("/fixture/data/:guildId", async (request) => {
   return {
     settings: await settings.get(scopeForGuild(guildId)),
     connection: await verification.connection(scopeForGuild(guildId)),
+    betaState: (await betaInvitation(db, scopeForGuild(guildId)))?.status,
   };
 });
 fixture.get("/fixture/constants", async () => ({ ids, user, other }));

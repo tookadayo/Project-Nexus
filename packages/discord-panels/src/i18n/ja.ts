@@ -645,8 +645,7 @@ export const ja = {
   "control.queueTitle": "<#{channel}>",
   "control.queueDetail":
     "直接の返信が確認できません · {minutes}分 · [投稿を見る]({url})",
-  "control.queueUnavailable":
-    "最近の活動を確認できません。診断を確認してください。",
+  "control.queueUnavailable": "現在の収集状態では新しい返信を判断できません。収集状況の詳細をご確認ください。",
   "control.replySuggestion":
     "新しいメンバーへの返信が遅くなっています。20分以上直接返信が確認できない投稿をスタッフへ知らせる方法を試せます。",
   "helper.title": "返信を手伝う人への通知",
@@ -695,7 +694,7 @@ export const ja = {
   "control.summaryTimezone": "タイムゾーン",
   "control.timezone": "タイムゾーン",
   "control.queueUnconfirmed": "直接の返信が確認できません",
-  "control.openPost": "投稿を見る",
+  "control.openPost": "Discordで確認",
   "control.gateway": "Gateway",
   "control.webhook": "Webhook",
   "control.ackSuccess": "正常",
@@ -847,13 +846,11 @@ export const ja = {
     "NEXUSが更新されました。新しい設定項目を確認するか、現在の設定を使ってください。",
   "control.todayJoined": "新しく参加: {count}人",
   "control.todayConnected": "最初の交流: {count}人",
-  "experience.allClear": "今すぐ対応が必要な投稿はありません",
-  "experience.needsReply": "返信待ちの新規メンバーの投稿: {count}件",
-  "experience.queueRule":
-    "参加後72時間以内のメンバーの投稿に、{count}分間直接返信を確認できないと対象にします。",
-  "experience.staffAcknowledged": "スタッフ確認済み · 対応前",
-  "experience.waitReason":
-    "参加後72時間以内のメンバーの投稿に、直接返信を確認できません。",
+  "experience.allClear": "現在の条件で返信待ちの候補はありません",
+  "experience.needsReply": "返信を確認したい投稿: {count}件",
+  "experience.queueRule": "サポート・不具合相談・募集の対象で、過去24時間の投稿に{count}分を過ぎても返信・参加を確認できないものを候補にします。",
+  "experience.staffAcknowledged": "確認を記録済み · 対応完了の記録はまだありません",
+  "experience.waitReason": "対象条件に合う投稿で、取得範囲内では直接返信を確認できていません。",
   "experience.rules": "判定ルール",
   "experience.observed": "観測できたメンバー: {count}人",
   "experience.pending": "測定中",
@@ -878,10 +875,10 @@ export const ja = {
   "experience.improvements": "改善案",
   "experience.needsAttention": "対応が必要",
   "experience.waiting": "待機時間",
-  "experience.ack": "スタッフ確認済みにする",
+  "experience.ack": "確認したことを記録",
   "experience.snooze": "後で確認",
-  "experience.resolve": "対応済みにする",
-  "experience.openPost": "投稿を開く",
+  "experience.resolve": "対応済みとして記録",
+  "experience.openPost": "Discordで確認",
   "experience.howMeasured": "何を数える？",
   "experience.settingsLink": "設定を編集",
   "experience.noData":

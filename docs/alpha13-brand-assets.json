@@ -1,0 +1,29 @@
+{
+  "source": "User-supplied /Users/rei/Downloads, authorized after Library retrieval failed. Local files are visually matched, not byte-verified against Library copies. No recoloring, tracing, cropping or re-encoding.",
+  "assets": [
+    {
+      "source": "透明背景の青いNロゴ-4.png",
+      "file": "blue-n.png",
+      "bytes": 406108,
+      "sha256": "3094134758c7156113c62f12b0ef913b38c19d99c53eb92988d8254b64f8ff7d"
+    },
+    {
+      "source": "透明背景の幾何学Nロゴ-2.png",
+      "file": "navy-n.png",
+      "bytes": 325570,
+      "sha256": "899a505db131c4755fc97a602c297a9a8cd5fd5bc66c33df3e87a966fd65a29a"
+    },
+    {
+      "source": "ノードNのNEXUSワードマーク-1.png",
+      "file": "nexus-wordmark.png",
+      "bytes": 364154,
+      "sha256": "f82024eae0505e0b2fbdb40ee495e75da7e77c3ee7bcd4b57885419668916446"
+    },
+    {
+      "source": "ChatGPT 画像 2026年10月9日 10_03_21.png",
+      "file": "navy-tile.png",
+      "bytes": 516213,
+      "sha256": "7986bc3f28a1788dafb3e79f040c8d4784aacc0d422932a9481a5eddf920121a"
+    }
+  ]
+}

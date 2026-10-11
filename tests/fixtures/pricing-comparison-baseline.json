@@ -1,0 +1,254 @@
+{
+  "description": "Synthetic regression contract for the five existing plans; no pricing or entitlement changes.",
+  "plans": ["FREE", "STARTER", "GROWTH", "SCALE", "ENTERPRISE"],
+  "rows": [
+    {
+      "id": "core_observation",
+      "values": [true, true, true, true, true]
+    },
+    {
+      "id": "basic_attention",
+      "values": [true, true, true, true, true]
+    },
+    {
+      "id": "connection_metrics",
+      "values": [true, true, true, true, true]
+    },
+    {
+      "id": "thread_forum_metrics",
+      "values": [true, true, true, true, true]
+    },
+    {
+      "id": "reaction_poll_metrics",
+      "values": [true, true, true, true, true]
+    },
+    {
+      "id": "voice_metrics",
+      "values": [true, true, true, true, true]
+    },
+    {
+      "id": "event_metrics",
+      "values": [true, true, true, true, true]
+    },
+    {
+      "id": "coverage_health",
+      "values": [true, true, true, true, true]
+    },
+    {
+      "id": "all_recipe_presets",
+      "values": [false, true, true, true, true]
+    },
+    {
+      "id": "surface_breakdowns",
+      "values": [false, true, true, true, true]
+    },
+    {
+      "id": "percentile_metrics",
+      "values": [false, true, true, true, true]
+    },
+    {
+      "id": "advanced_journeys",
+      "values": [false, true, true, true, true]
+    },
+    {
+      "id": "comparable_periods",
+      "values": [false, true, true, true, true]
+    },
+    {
+      "id": "scheduled_digest",
+      "values": [false, true, true, true, true]
+    },
+    {
+      "id": "basic_improvement_tracking",
+      "values": [false, true, true, true, true]
+    },
+    {
+      "id": "custom_recipe",
+      "values": [false, false, true, true, true]
+    },
+    {
+      "id": "attention_automation",
+      "values": [false, false, true, true, true]
+    },
+    {
+      "id": "attention_escalation",
+      "values": [false, false, true, true, true]
+    },
+    {
+      "id": "improvement_tracking",
+      "values": [false, false, true, true, true]
+    },
+    {
+      "id": "scheduled_reports",
+      "values": [false, false, true, true, true]
+    },
+    {
+      "id": "team_routing",
+      "values": [false, false, true, true, true]
+    },
+    {
+      "id": "csv_export",
+      "values": [false, true, true, true, true]
+    },
+    {
+      "id": "webhooks",
+      "values": [false, false, true, true, true]
+    },
+    {
+      "id": "multi_guild",
+      "values": [false, false, false, true, true]
+    },
+    {
+      "id": "rbac",
+      "values": [false, false, false, true, true]
+    },
+    {
+      "id": "api",
+      "values": [false, false, true, true, true]
+    },
+    {
+      "id": "audit_export",
+      "values": [false, false, false, true, true]
+    },
+    {
+      "id": "fallback_onboarding",
+      "values": [true, true, true, true, true]
+    },
+    {
+      "id": "hybrid_onboarding",
+      "values": [true, true, true, true, true]
+    },
+    {
+      "id": "custom_activation",
+      "values": [false, true, true, true, true]
+    },
+    {
+      "id": "interventions",
+      "values": [true, true, true, true, true]
+    },
+    {
+      "id": "discord_charts",
+      "values": [true, true, true, true, true]
+    },
+    {
+      "id": "saved_views",
+      "values": [false, true, true, true, true]
+    },
+    {
+      "id": "heatmaps",
+      "values": [false, true, true, true, true]
+    },
+    {
+      "id": "event_operations",
+      "values": [false, true, true, true, true]
+    },
+    {
+      "id": "intake_panels",
+      "values": [true, true, true, true, true]
+    },
+    {
+      "id": "attention_inbox",
+      "values": [false, false, true, true, true]
+    },
+    {
+      "id": "playbooks",
+      "values": [false, false, true, true, true]
+    },
+    {
+      "id": "report_branding",
+      "values": [false, false, true, true, true]
+    },
+    {
+      "id": "team_assignment",
+      "values": [false, false, false, true, true]
+    },
+    {
+      "id": "approval_workflow",
+      "values": [false, false, false, true, true]
+    },
+    {
+      "id": "automation_sandbox",
+      "values": [false, false, false, true, true]
+    },
+    {
+      "id": "recurring_exports",
+      "values": [false, false, false, true, true]
+    },
+    {
+      "id": "advanced_api",
+      "values": [false, false, false, true, true]
+    }
+  ],
+  "limits": {
+    "FREE": {
+      "guilds": 1,
+      "historyDays": 30,
+      "monthlyObservedMembers": 250,
+      "customRecipes": 0,
+      "automationRules": 0,
+      "scheduledReports": 0,
+      "teamSeats": 1,
+      "webhooks": 0,
+      "apiRequestsMonthly": 0,
+      "intakePanels": 1,
+      "analysisRunsMonthly": 1,
+      "analysisConcurrency": 1
+    },
+    "STARTER": {
+      "guilds": 1,
+      "historyDays": 90,
+      "monthlyObservedMembers": 1000,
+      "customRecipes": 0,
+      "automationRules": 0,
+      "scheduledReports": 1,
+      "teamSeats": 1,
+      "webhooks": 0,
+      "apiRequestsMonthly": 0,
+      "intakePanels": 5,
+      "analysisRunsMonthly": 3,
+      "analysisConcurrency": 1
+    },
+    "GROWTH": {
+      "guilds": 1,
+      "historyDays": 365,
+      "monthlyObservedMembers": 5000,
+      "customRecipes": 5,
+      "automationRules": 10,
+      "scheduledReports": 10,
+      "teamSeats": 5,
+      "webhooks": 5,
+      "apiRequestsMonthly": 10000,
+      "intakePanels": 25,
+      "analysisRunsMonthly": 5,
+      "analysisConcurrency": 2
+    },
+    "SCALE": {
+      "guilds": 5,
+      "historyDays": 730,
+      "monthlyObservedMembers": 25000,
+      "customRecipes": 25,
+      "automationRules": 50,
+      "scheduledReports": 50,
+      "teamSeats": 20,
+      "webhooks": 20,
+      "apiRequestsMonthly": 100000,
+      "intakePanels": 100,
+      "analysisRunsMonthly": 10,
+      "analysisConcurrency": 4
+    },
+    "ENTERPRISE": {
+      "guilds": null,
+      "historyDays": null,
+      "monthlyObservedMembers": null,
+      "customRecipes": null,
+      "automationRules": null,
+      "scheduledReports": null,
+      "teamSeats": null,
+      "webhooks": null,
+      "apiRequestsMonthly": null,
+      "intakePanels": null,
+      "analysisRunsMonthly": null,
+      "analysisConcurrency": 4
+    }
+  }
+}

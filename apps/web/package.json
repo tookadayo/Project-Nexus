@@ -1,6 +1,6 @@
 {
   "name": "@nexus/web",
-  "version": "0.6.0-alpha.10",
+  "version": "0.6.0-alpha.14",
   "private": true,
   "type": "module",
   "scripts": {

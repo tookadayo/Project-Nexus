@@ -1,3 +1,5 @@
+import { dashboardView, dashboardFilters } from "./navigation-model";
+import { hostedBetaEnabled } from "../../../packages/config/src/hosted-beta";
 import Console, { type ProductData } from "./console";
 import type {
   ActionsPresentation,
@@ -20,13 +22,18 @@ export const dynamic = "force-dynamic";
 export default async function Page({
   guildId,
   view,
-}: { guildId?: string; view?: string } = {}) {
+  range,
+  tab,
+}: { guildId?: string; view?: string; range?: string; tab?: string } = {}) {
+  const filters = dashboardFilters(
+    new URLSearchParams({ range: range ?? "", tab: tab ?? "" }),
+  );
   const started = Date.now();
   const cookieStore = await cookies();
   const selectedCookie = cookieStore.get("nexus_guild")?.value;
   if (guildId && !/^\d{17,20}$/.test(guildId)) redirect("/servers");
   const sessionCookie = cookieStore.get("nexus_session")?.value;
-  if (guildId && authMode() === "oauth" && !openSession(sessionCookie))
+  if (guildId && authMode() === "oauth" && !(await openSession(sessionCookie)))
     redirect(`/auth/login?next=/dashboard/${guildId}`);
   if (guildId && selectedCookie !== guildId)
     redirect(`/auth/select?guild=${guildId}`);
@@ -49,12 +56,14 @@ export default async function Page({
   if (guildId && context?.guildId !== guildId) redirect("/servers");
   if (!context) {
     if (authMode() === "oauth" && !sessionCookie) redirect("/auth/login");
-    if (authMode() === "oauth" && !openSession(sessionCookie))
+    if (authMode() === "oauth" && !(await openSession(sessionCookie)))
       redirect("/auth/expired");
     redirect("/servers");
   }
   if (!context.operationsCanConfigure) redirect("/operations?view=attention");
   const data: ProductData = {
+    hostedBeta: hostedBetaEnabled(),
+    betaState: context.betaState,
     failures: {},
     home: null,
     journey: null,
@@ -112,9 +121,9 @@ export default async function Page({
       integration,
     ] = await Promise.all([
       read<HomePresentation>(base + "/home"),
-      read<JourneyPresentation>(base + "/journey?range=30"),
+      read<JourneyPresentation>(base + `/journey?range=${filters.range}`),
       read<Awaited<ReturnType<CommunityService["overview"]>>>(
-        base + "/community?range=30&limit=50",
+        base + `/community?range=${filters.range}&limit=50`,
       ),
       read<OpportunitiesPresentation>(base + "/opportunities"),
       read<ActionsPresentation>(base + "/actions"),
@@ -200,13 +209,11 @@ export default async function Page({
           : "en";
   return (
     <Console
+      key={context.guildId}
       data={data}
       initialLocale={initialLocale}
-      initialView={
-        typeof view === "string" && /^\d{1,2}$/.test(view) && Number(view) <= 14
-          ? Number(view)
-          : 0
-      }
+      initialView={dashboardView(view)}
+      initialFilters={filters}
     />
   );
 }

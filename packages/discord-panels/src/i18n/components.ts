@@ -1,5 +1,7 @@
 import type { UiLocale } from "./index";
 const copy = {
+  handled: ["対応済み", "Handled"],
+  markHandled: ["対応済みにする", "Mark handled"],
   serverOverview: ["サーバー概要", "Server overview"],
   newMembers: ["新しいメンバー", "New members"],
   analysis: ["分析", "Analysis"],

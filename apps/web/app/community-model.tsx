@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   EvidenceDetails,
   IntegrationWarning,
@@ -14,6 +14,7 @@ import {
 } from "../../../packages/shared/src/measurement-view";
 import { recipeNames } from "../../../packages/shared/src/operations-copy";
 import type { TeamOperations } from "../../../packages/operations/src/attention";
+import { useDraft } from "./navigation-safety";
 import { RecipeWizard } from "./recipe-wizard";
 import {
   communityModes,
@@ -258,6 +259,7 @@ export function CommunityModelEditor({
   tags = [],
   onSave,
   onRefresh,
+  onDirtyChange,
 }: {
   initial: CommunityModel;
   snapshot: CapabilitySnapshot | null;
@@ -266,22 +268,30 @@ export function CommunityModelEditor({
   tags?: { channelId: string; id: string; label: string }[];
   onSave: (profile: CommunityModel) => Promise<boolean>;
   onRefresh: () => Promise<boolean>;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [profile, setProfile] = useState(initial),
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState(""),
     ja = locale === "ja";
+  const draft = useDraft(profile);
+  useEffect(() => {
+    onDirtyChange?.(draft.dirty || busy);
+    return () => onDirtyChange?.(false);
+  }, [draft.dirty, busy, onDirtyChange]);
   const name = (id: string) =>
     channels.find((c) => c.id === id)?.label ?? `#${id}`;
   const submit = async () => {
     setBusy(true);
     try {
-      if (await onSave({ ...profile, confirmed: true }))
+      if (await onSave({ ...profile, confirmed: true })) {
+        draft.saved();
         setNotice(
           ja
             ? "運営目的を保存しました。画面を再読み込みすると反映されます。"
             : "Community purposes saved. Reload to see adapted measurements.",
         );
+      }
     } finally {
       setBusy(false);
     }

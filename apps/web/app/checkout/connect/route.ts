@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
       })
       .strict()
       .parse(JSON.parse(await billingBody(request)));
-    const session = openSession(request.cookies.get("nexus_session")?.value);
+    const session = await openSession(request.cookies.get("nexus_session")?.value);
     assert(session, "SESSION_EXPIRED", 401);
     await validateOAuthSession(session);
     const result = await serverServices().verification.connectOwner(

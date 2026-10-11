@@ -1,3 +1,7 @@
+import { operationsPresentation } from "../../../../../packages/operations/src/access-presentation";
+import { failureResponse } from "../../auth/failure-response";
+import { isDomainError } from "../../../../../packages/shared/src/index";
+import { assertDisplayedGuild } from "../../auth/displayed-guild";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { operationsContext } from "../../operations/context";
@@ -17,6 +21,8 @@ import { latestCapability } from "../../../../../packages/lifecycle/src/discover
 import { assert } from "../../../../../packages/shared/src/index";
 export const runtime = "nodejs";
 function failure(error: unknown) {
+  if (isDomainError(error) && error.code === "SERVER_SELECTION_CHANGED")
+    return failureResponse(error, "NOT_STARTED");
   if (error instanceof z.ZodError || error instanceof SyntaxError)
     return NextResponse.json(
       { error: "INVALID_EXPLORE_REQUEST" },
@@ -31,6 +37,10 @@ export async function GET(request: NextRequest) {
       params = request.nextUrl.searchParams,
       q = params.get("q") ?? "{}";
     assert(q.length <= 4096, "REQUEST_TOO_LARGE", 413);
+    assertDisplayedGuild(
+      request.headers.get("X-Nexus-Guild") ?? params.get("guild"),
+      context.scope.guildId,
+    );
     const query = chartQuerySchema.parse(JSON.parse(q)),
       saved = params.get("saved"),
       spec = saved
@@ -48,23 +58,29 @@ export async function GET(request: NextRequest) {
       });
     }
     if (params.get("format") === "png")
-      return new Response(new Uint8Array(await renderChartPng(spec)), {
-        headers: { "Content-Type": "image/png", "Cache-Control": "no-store" },
-      });
-    const advanced = (
-      await entitlements.check(context.scope, "surface_breakdowns")
-    ).allowed;
+      return new Response(
+        new Uint8Array(
+          await renderChartPng(
+            spec,
+            request.cookies.get("nexus_locale")?.value === "ja" ? "ja" : "en",
+          ),
+        ),
+        {
+          headers: { "Content-Type": "image/png", "Cache-Control": "no-store" },
+        },
+      );
+    const capabilities = await context.services.db
+      .transaction()
+      .execute((tx) =>
+        operationsPresentation(tx, context.scope, context.actor),
+      );
+    const advanced = capabilities.advanced;
     return NextResponse.json(
       {
         spec,
         views: advanced ? await explore.list(context.scope) : [],
         segments: advanced ? await explore.segments(context.scope) : [],
-        capabilities: {
-          advanced,
-          csv: (await entitlements.check(context.scope, "csv_export")).allowed,
-          historyDays: (await entitlements.effective(context.scope)).limits
-            .historyDays,
-        },
+        capabilities,
         channels:
           (
             await latestCapability(context.services.db, context.scope)
@@ -95,6 +111,10 @@ export async function POST(request: NextRequest) {
         ])
         .parse(JSON.parse(await billingBody(request, 8192))),
       explore = new ExploreService(context.services.db);
+    assertDisplayedGuild(
+      request.headers.get("X-Nexus-Guild"),
+      context.scope.guildId,
+    );
     const result =
       input.action === "saveView"
         ? await explore.save(context.scope, context.actor, input.view)

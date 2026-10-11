@@ -1,0 +1,70 @@
+/* Measured alpha>=32 bounds; originals remain unmodified and retained. */
+.brand-asset {
+  display: inline-block;
+  position: relative;
+  overflow: hidden;
+  flex: none;
+  vertical-align: middle;
+  width: 32px;
+  height: 32px;
+}
+.brand-asset img {
+  display: block;
+  position: absolute;
+  max-width: none;
+  object-fit: contain;
+  filter: none;
+}
+.brand-asset-wordmark {
+  width: 152px;
+  height: 38px;
+}
+.brand-asset-wordmark img {
+  width: 209px;
+  height: auto;
+  left: -28.7px;
+  top: -15.4px;
+}
+.brand-asset-blue img {
+  width: 44.69px;
+  height: 44.69px;
+  left: -7.05px;
+  top: -8.21px;
+}
+.brand-asset-navy img {
+  width: 50.03px;
+  height: 50.03px;
+  left: -9.78px;
+  top: -11.5px;
+}
+.brand-asset-tile img {
+  width: 44.89px;
+  height: 44.89px;
+  left: -6.44px;
+  top: -6.9px;
+}
+.product .brand {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+.product .product-footer .brand-asset {
+  margin-right: 8px;
+}
+.nexus-site .nx-brand {
+  gap: 0;
+}
+.product .nav-group summary::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+  flex: none;
+  margin-left: auto;
+  color: var(--nx-secondary);
+}
+.product .nav-group[open] summary::after {
+  transform: rotate(225deg);
+}

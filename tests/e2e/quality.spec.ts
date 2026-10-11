@@ -1,4 +1,5 @@
 import {test,expect} from '@playwright/test';
+import { navigateDashboard } from './dashboard-navigation';
 for(const locale of ['ja','en'] as const){
  test(`quality: public and all dashboard surfaces (${locale})`,async({page,context})=>{
   test.setTimeout(120000);
@@ -9,9 +10,9 @@ for(const locale of ['ja','en'] as const){
    await page.setViewportSize({width:375,height:812});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
   }
   await page.setViewportSize({width:1440,height:1000});await page.goto('/dashboard');
-  const views=[['home','0'],['new-members','1'],['attention','8'],['insights','5'],['improvements','2'],['results','3'],['rules','9'],['settings','4']];
+  const views=[['home',0],['new-members',1],['attention',8],['insights',5],['improvements',2],['results',3],['rules',9],['settings',4]] as const;
   for(const [name,value] of views){
-   await page.setViewportSize({width:375,height:812});await page.locator('.mobile-head select').selectOption(value!);
+   await page.setViewportSize({width:375,height:812});await navigateDashboard(page,locale,value);
    await expect(page.locator('main')).not.toContainText(/普段から参加|最近の活動なし|最初の成功|\b(?:Eligibility|Maturity|Cohort)\b/);
    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
    await page.screenshot({caret:'initial',path:`test-results/quality-${locale}-${name}-mobile.png`,fullPage:true});

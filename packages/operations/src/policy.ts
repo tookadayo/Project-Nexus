@@ -1,3 +1,4 @@
+import {betaAccess} from '../../security/src/hosted-beta';
 import { randomUUID } from "node:crypto";
 import { sql, privacyReadLock, type Tx } from "../../db/src/index";
 import { assert, type Scope } from "../../shared/src/index";
@@ -103,8 +104,10 @@ export async function operationsAccess(
   actor: Actor,
   permission: OperationPermission,
   feature?: Feature,
+  lifecycle=false,
 ) {
   await privacyReadLock(tx, s);
+  if(!lifecycle)await betaAccess(tx,s,permission==='READ'?'read':'work');
   const entitlements = new EntitlementService(tx),
     state = await entitlements.effective(s);
   assert(!state.privacyDeleted, "PRIVACY_DELETED", 403);

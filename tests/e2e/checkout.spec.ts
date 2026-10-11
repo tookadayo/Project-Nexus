@@ -17,7 +17,7 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
   await context.addCookies([{ name: "nexus_locale", value: "en", url: base }]);
   await page.goto("/pricing");
   await expect(
-    page.getByRole("link", { name: "Choose Growth", exact: true }),
+    page.getByRole("link", { name: "Test Growth in Sandbox", exact: true }),
   ).toBeVisible();
   await page.goto(`/checkout?offering=${offering}`);
   await expect(

@@ -38,6 +38,7 @@ export async function analysisInteraction(
   const service = new AnalysisService(db),
     action = String(intent.action);
   if (action === "analysisAttentionList") {
+    const filter = z.enum(["active", "all"]).parse(intent.filter ?? "active");
     const offset = z
       .number()
       .int()
@@ -46,9 +47,10 @@ export async function analysisInteraction(
       .parse(intent.offset ?? 0);
     return analysisAttentionListPanel(
       issue,
-      await service.attentionList(s, actor, offset),
+      await service.attentionList(s, actor, offset, filter),
       offset,
       locale,
+      filter,
     );
   }
   if (
@@ -62,7 +64,7 @@ export async function analysisInteraction(
         actor,
         key,
         z.number().int().nonnegative().parse(intent.version),
-        z.enum(["ACKNOWLEDGED", "RESOLVED"]).parse(intent.status),
+        z.enum(["ACKNOWLEDGED", "RESOLVED", "DISMISSED"]).parse(intent.status),
       );
     return analysisAttentionItemPanel(
       issue,
@@ -82,9 +84,15 @@ export async function analysisInteraction(
       await service.preview(s, actor, {
         type: z.enum(analysisTypes).parse(values?.[0] ?? intent.type),
         days: days(intent.days),
-        periodStart: intent.periodStart ? z.iso.datetime().parse(intent.periodStart) : undefined,
-        periodEnd: intent.periodEnd ? z.iso.datetime().parse(intent.periodEnd) : undefined,
-        correctionOf: intent.correctionOf ? z.uuid().parse(intent.correctionOf) : undefined,
+        periodStart: intent.periodStart
+          ? z.iso.datetime().parse(intent.periodStart)
+          : undefined,
+        periodEnd: intent.periodEnd
+          ? z.iso.datetime().parse(intent.periodEnd)
+          : undefined,
+        correctionOf: intent.correctionOf
+          ? z.uuid().parse(intent.correctionOf)
+          : undefined,
       }),
       locale,
     );
@@ -97,7 +105,9 @@ export async function analysisInteraction(
         days: days(intent.days),
         periodStart: z.iso.datetime().parse(intent.periodStart),
         periodEnd: z.iso.datetime().parse(intent.periodEnd),
-        correctionOf: intent.correctionOf ? z.uuid().parse(intent.correctionOf) : undefined,
+        correctionOf: intent.correctionOf
+          ? z.uuid().parse(intent.correctionOf)
+          : undefined,
       },
       fingerprint([customId]),
       {
@@ -117,15 +127,38 @@ export async function analysisInteraction(
   }
   if (action === "analysisHistory") {
     const filter = {
-      type: intent.field === "type" ? values?.[0] === "all" ? undefined : z.enum(analysisTypes).parse(values?.[0]) : intent.type ? z.enum(analysisTypes).parse(intent.type) : undefined,
-      status: intent.status ? z.enum(["QUEUED","PREPARING","RUNNING","FINALIZING","COMPLETED","FAILED","CANCELED"]).parse(intent.status) : undefined,
+      type:
+        intent.field === "type"
+          ? values?.[0] === "all"
+            ? undefined
+            : z.enum(analysisTypes).parse(values?.[0])
+          : intent.type
+            ? z.enum(analysisTypes).parse(intent.type)
+            : undefined,
+      status: intent.status
+        ? z
+            .enum([
+              "QUEUED",
+              "PREPARING",
+              "RUNNING",
+              "FINALIZING",
+              "COMPLETED",
+              "FAILED",
+              "CANCELED",
+            ])
+            .parse(intent.status)
+        : undefined,
     };
     return analysisHistoryPanel(
       issue,
       await service.historyPage(s, actor, {
         ...filter,
-        cursor: intent.cursor ? z.string().max(100).parse(intent.cursor) : undefined,
-        direction: intent.direction ? z.enum(["next", "previous"]).parse(intent.direction) : undefined,
+        cursor: intent.cursor
+          ? z.string().max(100).parse(intent.cursor)
+          : undefined,
+        direction: intent.direction
+          ? z.enum(["next", "previous"]).parse(intent.direction)
+          : undefined,
         limit: 5,
       }),
       locale,
@@ -143,13 +176,28 @@ export async function analysisInteraction(
   let notice: string | undefined;
   if (action === "analysisCancel") {
     const canceled = await service.cancel(s, actor, id);
-    notice = analysisCopy(locale, canceled.canceled ? "canceled" : "cancelStarted");
+    notice = analysisCopy(
+      locale,
+      canceled.canceled ? "canceled" : "cancelStarted",
+    );
   }
   if (action === "analysisAttention") {
     const data = await service.result(s, actor, id);
     const concernKey = z.string().max(64).parse(intent.concernKey);
-    const duplicate = (await sql<{ exists: boolean }>`SELECT EXISTS(SELECT 1 FROM attention_items WHERE ${tenant(s)} AND message_id=${"analysis:" + id + ":" + concernKey}) AS exists`.execute(db)).rows[0]!.exists;
-    return analysisAttentionConfirmationPanel(issue, data, concernKey, duplicate, locale);
+    const duplicate = (
+      await sql<{
+        exists: boolean;
+      }>`SELECT EXISTS(SELECT 1 FROM attention_items WHERE ${tenant(s)} AND message_id=${"analysis:" + id + ":" + concernKey}) AS exists`.execute(
+        db,
+      )
+    ).rows[0]!.exists;
+    return analysisAttentionConfirmationPanel(
+      issue,
+      data,
+      concernKey,
+      duplicate,
+      locale,
+    );
   }
   if (action === "analysisAttentionConfirm") {
     await service.attention(
@@ -166,6 +214,17 @@ export async function analysisInteraction(
     locale,
     notice,
     action === "analysisEvidence",
-    z.number().int().nonnegative().max(1000).parse(intent.detailPage ?? 0),
+    z
+      .number()
+      .int()
+      .nonnegative()
+      .max(1000)
+      .parse(intent.detailPage ?? 0),
+    z
+      .number()
+      .int()
+      .nonnegative()
+      .max(1000)
+      .parse(intent.placePage ?? 0),
   );
 }

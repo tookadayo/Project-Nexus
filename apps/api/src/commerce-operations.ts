@@ -56,24 +56,29 @@ export function registerOperationsApi(
     });
     return {
       organization: { id: group.id, name: group.name },
-      guilds: await organizationAggregate(db, group.id, async (tx) => {
-        await credentials.fence(
-          tx,
-          auth.scope,
-          auth.credentialId,
-          "organization:read",
-        );
-        assert(
-          await nexusRole(tx, auth.scope, auth.actorHash),
-          "NEXUS_ROLE_REQUIRED",
-          403,
-        );
-        assert(
-          (await organizationBinding(tx, auth.scope))?.id === group.id,
-          "ORGANIZATION_REQUIRED",
-          409,
-        );
-      }),
+      guilds: await organizationAggregate(
+        db,
+        group.id,
+        auth.scope,
+        async (tx) => {
+          await credentials.fence(
+            tx,
+            auth.scope,
+            auth.credentialId,
+            "organization:read",
+          );
+          assert(
+            await nexusRole(tx, auth.scope, auth.actorHash),
+            "NEXUS_ROLE_REQUIRED",
+            403,
+          );
+          assert(
+            (await organizationBinding(tx, auth.scope))?.id === group.id,
+            "ORGANIZATION_REQUIRED",
+            409,
+          );
+        },
+      ),
     };
   });
   app.get("/v1/guild", async (req, reply) => {

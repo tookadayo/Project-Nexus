@@ -13,9 +13,9 @@ export async function errorPanel(issue:Issue,kind:ErrorKind|UserFailure='generic
  const failure:UserFailure=typeof kind==='string'?{category,effect:'UNKNOWN',reference}:kind;
  const copy=failureCopy(locale==='en'?'en':'ja',failure),page=context.page??'overview',expired=category==='COMPONENT_EXPIRED';
  const read={action:'controlNavigate',data:{page}},back=expired?{action:'panel'}:read;
- const fix=category==='ANALYSIS_USAGE'?{action:'controlNavigate',data:{page:'analysis'}}:category==='CHANNEL_PERMISSION'?{action:'controlSettings',data:{section:'notifications'}}:category==='ENTITLEMENT'?{action:'billing'}:back;
+ const fix=category==='ANALYSIS_RESULT'?{action:'analysisHistory'}:category==='ANALYSIS_USAGE'?{action:'controlNavigate',data:{page:'analysis'}}:category==='CHANNEL_PERMISSION'?{action:'controlSettings',data:{section:'notifications'}}:category==='ENTITLEMENT'?{action:'billing'}:back;
  return nexusPanel({title:copy.title,subtitle:copy.detail,accent:'critical',children:[divider(),callout(componentCopy(locale,'operationResult'),copy.effect),...(failure.reference?[callout(t(locale,'error.ref'),`**${failure.reference}**`)]:[])],rows:[await actionRow(issue,[
-  {label:expired||category==='ANALYSIS_USAGE'||category==='CHANNEL_PERMISSION'||category==='ENTITLEMENT'?copy.action:context.retryRead?(componentCopy(locale,'retry')):(componentCopy(locale,'checkCurrentState')),...fix,style:ButtonStyle.Primary},
+  {label:expired||category==='ANALYSIS_RESULT'||category==='ANALYSIS_USAGE'||category==='CHANNEL_PERMISSION'||category==='ENTITLEMENT'?copy.action:context.retryRead?(componentCopy(locale,'retry')):(componentCopy(locale,'checkCurrentState')),...fix,style:ButtonStyle.Primary},
   {label:componentCopy(locale,'checkStatus'),action:'status'},
   {label:`${t(locale,`control.${page}`)}${componentCopy(locale,'back')}`,...back}
  ])]});

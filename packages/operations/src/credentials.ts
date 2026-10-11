@@ -12,6 +12,8 @@ import { assert, type Scope } from "../../shared/src/index";
 import type { Actor } from "../../settings/src/index";
 import { EntitlementService } from "../../settings/src/billing/entitlements";
 import type { IdentityVault } from "../../identity/src/index";
+import { hostedBetaEnabled } from "../../config/src/hosted-beta";
+import { betaAccess, betaLock } from "../../security/src/hosted-beta";
 import {
   operationsAccess,
   operationsLock,
@@ -46,6 +48,7 @@ export class ApiCredentials {
   ) {}
   async fence(tx: Tx, scope: Scope, id: string, required?: ApiScope) {
     await privacyReadLock(tx, scope);
+    await betaAccess(tx, scope, required?.endsWith(":write") ? "work" : "read");
     const row = (
       await sql<{
         kind: string;
@@ -219,6 +222,9 @@ export class ApiCredentials {
         guildId: candidate.guild_id,
       };
       await privacyReadLock(tx, scope);
+      // Match lifecycle lock order, but validate the token before revealing
+      // admission state or recording usage for this request.
+      if (hostedBetaEnabled()) await betaLock(tx, scope);
       const row = (
         await sql<{
           id: string;
@@ -244,6 +250,7 @@ export class ApiCredentials {
         401,
       );
       assert(row.scopes.includes(required), "API_SCOPE_REQUIRED", 403);
+      await betaAccess(tx, scope, required.endsWith(":write") ? "work" : "read");
       const entitlements = new EntitlementService(tx);
       await entitlements.require(scope, "api");
       if (

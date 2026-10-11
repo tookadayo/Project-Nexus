@@ -1,4 +1,5 @@
 import {ButtonStyle,ComponentType,MessageFlags,SeparatorSpacingSize,type APIActionRowComponent,type APIButtonComponent,type APIComponentInMessageActionRow,type APIComponentInContainer,type APIMessageTopLevelComponent,type APISectionAccessoryComponent,type APISectionComponent,type RESTPostAPIChannelMessageJSONBody} from 'discord-api-types/v10';
+import {componentEmoji,readApplicationEmojiConfig,withEmojiText,type ApplicationEmojiKey} from '../../shared/src/application-emoji.js';
 import {colors,type Accent} from './theme.js';
 import type {Issue} from './types.js';
 
@@ -6,7 +7,10 @@ export type Panel=RESTPostAPIChannelMessageJSONBody;
 export type PanelChild=APIComponentInContainer;
 export type ActionRow=APIActionRowComponent<APIComponentInMessageActionRow>;
 export type InteractiveButtonStyle=ButtonStyle.Primary|ButtonStyle.Secondary|ButtonStyle.Success|ButtonStyle.Danger;
-export type ButtonSpec={label:string;action:string;emoji?:string;style?:InteractiveButtonStyle;data?:Record<string,unknown>;publicEntry?:boolean;disabled?:boolean};
+export type ButtonSpec={label:string;action:string;emoji?:string;emojiKey?:ApplicationEmojiKey;style?:InteractiveButtonStyle;data?:Record<string,unknown>;publicEntry?:boolean;disabled?:boolean};
+
+// Body text stays Unicode: retry safety identifies dedicated component emoji fields only.
+export const panelIconText=(key:ApplicationEmojiKey,label:string)=>withEmojiText(key,label,{mode:readApplicationEmojiConfig().mode==='text'?'text':'unicode'});
 
 // Escape only user supplied names; product copy intentionally uses Discord markdown.
 export const escapeUserText=(value:string)=>value.replaceAll(/([\\`*_~|>[\]()])/g,'\\$1').replaceAll('@','@\u200b').replaceAll('<','\\<');
@@ -44,7 +48,7 @@ export const thumbnail=(url:string,description:string)=>({type:ComponentType.Thu
 export async function actionButton(issue:Issue,spec:ButtonSpec):Promise<APIButtonComponent>{
  const customId=await issue({action:spec.action,...spec.data},spec.publicEntry);
  if(customId.length>100||!customId.length||spec.label.length>80||!spec.label.length)throw new Error('DISCORD_BUTTON_LIMIT');
- return {type:ComponentType.Button,style:spec.style??ButtonStyle.Secondary,label:spec.label,emoji:spec.emoji?{name:spec.emoji}:undefined,custom_id:customId,disabled:spec.disabled};
+ return {type:ComponentType.Button,style:spec.style??ButtonStyle.Secondary,label:spec.label,emoji:spec.emojiKey?componentEmoji(spec.emojiKey):spec.emoji&&readApplicationEmojiConfig().mode!=='text'?{name:spec.emoji}:undefined,custom_id:customId,disabled:spec.disabled};
 }
 export const divider=(large=false):PanelChild=>({type:ComponentType.Separator,divider:true,spacing:large?SeparatorSpacingSize.Large:SeparatorSpacingSize.Small});
 export const panelHeader=(title:string,subtitle?:string):PanelChild[]=>[text(`## ${title}${subtitle?`\n-# ${subtitle}`:''}`)];

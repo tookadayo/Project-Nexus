@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { navigateDashboard } from "./dashboard-navigation";
 
 for (const locale of ["en", "ja"] as const) {
   test(`polish: public mobile navigation, pricing and landing (${locale})`, async ({
@@ -17,7 +18,10 @@ for (const locale of ["en", "ja"] as const) {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto("/");
     await expect(page.locator(".nx-faq details")).toHaveCount(4);
-    const menu = page.locator(".nx-mobile-menu");
+    const menu = page.getByRole("dialog", {
+      name: locale === "ja" ? "メニュー" : "Menu",
+      exact: true,
+    });
     await page
       .getByRole("button", {
         name: locale === "ja" ? "メニューを開く" : "Open menu",
@@ -40,27 +44,50 @@ for (const locale of ["en", "ja"] as const) {
     });
     await menu
       .getByRole("link", {
-        name: locale === "ja" ? "プラン" : "Pricing",
+        name: locale === "ja" ? "料金" : "Pricing",
         exact: true,
       })
       .click();
     await expect(page).toHaveURL(/\/pricing$/);
     await expect(page.locator(".planned-features")).toHaveCount(0);
-    await expect(page.getByRole("table")).not.toContainText(
-      /Planned|準備中|AI explanations|AIによる説明|Google Calendar|SAML|SCIM/,
-    );
+    await expect(page.getByRole("table")).toHaveCount(2);
+    for (const table of await page.getByRole("table").all())
+      await expect(table).not.toContainText(
+        /Planned|準備中|AI explanations|AIによる説明|Google Calendar|SAML|SCIM/,
+      );
+    await expect(page.locator(".price-card h2")).toHaveText([
+      "Free",
+      "Starter",
+      "Growth",
+      "Scale",
+      "Enterprise",
+    ]);
     await expect(page.locator("main")).toContainText(
       locale === "ja"
-        ? "有料決済は準備中。価格は承認後に公開。"
-        : "Paid checkout is being prepared. Prices await approval.",
+        ? "有料プランの価格は未公開です。現在、購入はできません。"
+        : "Paid plan prices are not published. Purchases are currently unavailable.",
     );
     for (const plan of ["Scale", "Enterprise"]) {
-      const card = page.locator(".price-card").filter({
-        has: page.locator(".site-eyebrow", { hasText: plan.toUpperCase() }),
-      });
-      await expect(card.locator("li")).not.toHaveCount(0);
-      await expect(card).toContainText(
-        locale === "ja" ? "現在利用可能" : "Available features",
+      const card = page.locator(
+        '[data-pricing-plan="' + plan.toUpperCase() + '"]',
+      );
+      await expect(card.getByRole("heading", { level: 2 })).toHaveText(plan);
+      await expect(card.getByRole("heading", { level: 3 })).toHaveText(
+        locale === "ja" ? "主な機能" : "Key features",
+      );
+      if (plan === "Scale") {
+        await expect(card.locator("[data-highlight-feature]")).toHaveCount(3);
+      } else {
+        await expect(card.locator("[data-highlight-feature]")).toHaveCount(0);
+        await expect(card.locator(".r3-plan-features")).toContainText(
+          locale === "ja"
+            ? "Scaleの利用可能な機能を含みます。"
+            : "Includes available Scale features.",
+        );
+      }
+      await expect(card.locator(".r3-plan-details")).toHaveAttribute(
+        "href",
+        "#feature-comparison-title",
       );
       await expect(card).toContainText(
         plan === "Scale"
@@ -76,13 +103,29 @@ for (const locale of ["en", "ja"] as const) {
       );
       await expect(card).not.toContainText("$149");
     }
+    // Both comparison tables deliberately scroll within their own regions.
+    // They must remain keyboard reachable and must not widen the document.
+    for (const selector of [".comparison-scroll", ".pricing-limits"]) {
+      const region = page.locator(selector);
+      await expect(region).toHaveAttribute("tabindex", "0");
+      expect(
+        await region.evaluate(
+          (element) => element.scrollWidth > element.clientWidth,
+        ),
+      ).toBe(true);
+      await region.focus();
+      await page.keyboard.press("ArrowRight");
+      await expect
+        .poll(() => region.evaluate((element) => element.scrollLeft))
+        .toBeGreaterThan(0);
+    }
     const overflow = await page.evaluate(() =>
       Array.from(document.querySelectorAll("body *"))
         .filter(
           (element) =>
             element.getBoundingClientRect().right > innerWidth + 1 &&
             getComputedStyle(element).display !== "none" &&
-            !element.closest(".comparison-scroll"),
+            !element.closest(".comparison-scroll, .pricing-limits"),
         )
         .map((element) => ({
           tag: element.tagName,
@@ -101,7 +144,7 @@ for (const locale of ["en", "ja"] as const) {
         .filter(
           (e) =>
             e.scrollWidth > e.clientWidth + 1 &&
-            !e.closest(".comparison-scroll"),
+            !e.closest(".comparison-scroll, .pricing-limits"),
         )
         .map((e) => ({
           tag: e.tagName,
@@ -144,7 +187,10 @@ for (const locale of ["en", "ja"] as const) {
       })
       .click();
     await page
-      .locator(".nx-mobile-menu")
+      .getByRole("dialog", {
+        name: locale === "ja" ? "メニュー" : "Menu",
+        exact: true,
+      })
       .getByRole("link", {
         name: locale === "ja" ? "ログイン" : "Log in",
         exact: true,
@@ -172,12 +218,7 @@ for (const locale of ["en", "ja"] as const) {
       path: `test-results/polish-${locale}-dashboard-desktop.png`,
       fullPage: true,
     });
-    await page
-      .getByRole("button", {
-        name: locale === "ja" ? "目標と判定ルール" : "Goals & Rules",
-        exact: true,
-      })
-      .click();
+    await navigateDashboard(page, locale, 9);
     const intro = page.getByTestId("adaptive-community");
     await expect(intro).toContainText(locale === "ja" ? "対象:" : "Sample:");
     await expect(intro).not.toContainText(
@@ -200,7 +241,8 @@ for (const locale of ["en", "ja"] as const) {
       path: `test-results/polish-${locale}-rules-mobile.png`,
       fullPage: true,
     });
-    await page.locator(".mobile-head select").selectOption("0");
+    await navigateDashboard(page, locale, 0);
+    await expect(page.locator(".home-overview")).toBeVisible();
     await page.screenshot({
       caret: "initial",
       path: `test-results/polish-${locale}-dashboard-mobile.png`,

@@ -670,8 +670,7 @@ export const en = {
   "control.queueTitle": "<#{channel}>",
   "control.queueDetail":
     "No direct reply confirmed · {minutes} min · [Open post]({url})",
-  "control.queueUnavailable":
-    "Recent activity is unavailable. Check Diagnostics.",
+  "control.queueUnavailable": "New responses cannot be determined from the current collection state. Check collection details.",
   "control.replySuggestion":
     "New members wait longer for replies. Try alerting staff after 20 minutes without a confirmed direct reply.",
   "helper.title": "Helper alerts",
@@ -721,7 +720,7 @@ export const en = {
   "control.summaryTimezone": "Time zone",
   "control.timezone": "Time zone",
   "control.queueUnconfirmed": "No direct reply confirmed",
-  "control.openPost": "Open post",
+  "control.openPost": "Open in Discord",
   "control.gateway": "Gateway",
   "control.webhook": "Webhook",
   "control.ackSuccess": "Normal",
@@ -868,13 +867,11 @@ export const en = {
     "NEXUS has been updated. Review the new settings or keep your current choices.",
   "control.todayJoined": "Newly joined: {count}",
   "control.todayConnected": "Connected with someone: {count}",
-  "experience.allClear": "No posts need attention right now",
-  "experience.needsReply": "{count} newcomer post(s) need a reply",
-  "experience.queueRule":
-    "A post by a member in their first 72 hours is flagged after {count} minutes without a confirmed direct reply.",
-  "experience.staffAcknowledged": "Staff acknowledged · not yet resolved",
-  "experience.waitReason":
-    "A post by a member who joined within the last 72 hours has no confirmed direct reply.",
+  "experience.allClear": "No response-waiting candidates under the current conditions",
+  "experience.needsReply": "{count} post(s) to review",
+  "experience.queueRule": "Eligible support, bug report and LFG posts from the past 24 hours enter the queue after {count} minutes without a detected response.",
+  "experience.staffAcknowledged": "Acknowledged by staff · not marked as handled",
+  "experience.waitReason": "No direct reply was detected for this eligible post within the available data.",
   "experience.rules": "How this is measured",
   "experience.observed": "Observed members: {count}",
   "experience.pending": "Still collecting data",
@@ -901,10 +898,10 @@ export const en = {
   "experience.improvements": "Improvements",
   "experience.needsAttention": "Needs attention",
   "experience.waiting": "Waiting",
-  "experience.ack": "Acknowledge",
+  "experience.ack": "Mark as acknowledged",
   "experience.snooze": "Snooze",
-  "experience.resolve": "Resolve",
-  "experience.openPost": "Open post",
+  "experience.resolve": "Mark as handled",
+  "experience.openPost": "Open in Discord",
   "experience.howMeasured": "What counts",
   "experience.settingsLink": "Edit settings",
   "experience.noData":

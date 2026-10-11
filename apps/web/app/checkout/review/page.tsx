@@ -130,6 +130,7 @@ export default async function Review({
         )}
         <CheckoutReview
           connected={connected}
+          taxBehavior={offering.tax_behavior}
           order={{
             offeringId: offering.id,
             plan: offering.plan_key,

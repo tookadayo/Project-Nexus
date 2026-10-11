@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 const { databaseUrl } = JSON.parse(
   await readFile(".local/checkout-e2e.json", "utf8"),
 ) as { databaseUrl: string };
@@ -22,7 +23,7 @@ const child = spawn(
     env: {
       ...process.env,
       NODE_ENV: "development",
-      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import="${resolve("tests/e2e/checkout-fetch.mjs")}"`,
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import="${pathToFileURL(resolve("tests/e2e/checkout-fetch.mjs")).href}"`,
       NEXUS_VERIFICATION_API_PORT: String(apiPort),
       DATABASE_URL: databaseUrl,
       IDENTITY_KEY: "aa".repeat(32),

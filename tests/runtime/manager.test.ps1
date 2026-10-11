@@ -8,6 +8,12 @@ for($i=0;$i -lt 5;$i++){ $listener=[System.Net.Sockets.TcpListener]::new([System
 $pgPort=$chosen[0];$redisPort=$chosen[1];$apiPort=$chosen[2];$interactionPort=$chosen[3];$webPort=$chosen[4]
 $portMap=@{'55432'=[string]$pgPort;'56379'=[string]$redisPort;'3001'=[string]$apiPort;'3002'=[string]$interactionPort;'3100'=[string]$webPort}
 function Assert($Condition,[string]$Message) { if (-not $Condition) { throw $Message } }
+function ConvertTo-TestPorts([string]$Contents,[System.Collections.IDictionary]$Mapping=$portMap) {
+    $pattern='(?<![0-9])('+(($Mapping.Keys | ForEach-Object {[regex]::Escape([string]$_)}) -join '|')+')(?![0-9])'
+    # One pass over original, complete numeric tokens. A replacement can itself
+    # contain an old port (for example 53001) and must never be replaced again.
+    return [regex]::Replace($Contents,$pattern,[System.Text.RegularExpressions.MatchEvaluator]{param($match) [string]$Mapping[$match.Value]})
+}
 function Invoke-Launcher([string]$Name,[string]$Extra='') {
     $info=New-Object System.Diagnostics.ProcessStartInfo
     $info.FileName='powershell.exe';$info.Arguments='-NoLogo -NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $root $Name)+'" '+$Extra;$info.UseShellExecute=$false;$info.CreateNoWindow=$true
@@ -20,8 +26,11 @@ function PortOwner([int]$Port) {
     if($null -eq $row){return 0};return [int]$row.OwningProcess
 }
 try {
+    $collisionMap=[ordered]@{'55432'='53001';'56379'='55379';'3001'='53004';'3002'='53002';'3100'='53100'}
+    $portExample='55432,56379,http://127.0.0.1:3001/,3002,3100,53001,13001'
+    Assert ((ConvertTo-TestPorts $portExample $collisionMap) -eq '53001,55379,http://127.0.0.1:53004/,53002,53100,53001,13001') 'Port substitution cascaded or changed a different numeric token'
     New-Item -ItemType Directory -Path $bin,(Join-Path $root 'node_modules') -Force | Out-Null
-    foreach($name in @('runtime-common.ps1','runtime-child.ps1','start-nexus.ps1','stop-nexus.ps1','restart-nexus.ps1','status-nexus.ps1','doctor-nexus.ps1','setup-nexus.ps1')) { $contents=Get-Content -LiteralPath (Join-Path $source $name) -Raw;foreach($old in $portMap.Keys){$contents=$contents.Replace($old,$portMap[$old])};Set-Content -LiteralPath (Join-Path $root $name) -Value $contents -Encoding UTF8 }
+    foreach($name in @('runtime-common.ps1','runtime-child.ps1','start-nexus.ps1','stop-nexus.ps1','restart-nexus.ps1','status-nexus.ps1','doctor-nexus.ps1','setup-nexus.ps1')) { $contents=ConvertTo-TestPorts (Get-Content -LiteralPath (Join-Path $source $name) -Raw);Set-Content -LiteralPath (Join-Path $root $name) -Value $contents -Encoding UTF8 }
     Set-Content -LiteralPath (Join-Path $root '.env') -Value 'NEXUS_WEB_AUTH_MODE=development' -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $root 'package.json') -Value '{}' -Encoding ASCII
     @'
@@ -31,7 +40,7 @@ if(process.env.NEXUS_FAKE_FAIL===role)process.exit(9);
 const ports={infra:[55432,56379],nexus:[3001,3002],web:[3100],ngrok:[],occupy:[3100]}[role]||[];
 for(const port of ports){const server=net.createServer(()=>{});server.on('error',()=>process.exit(8));server.listen(port,'127.0.0.1');}
 setInterval(()=>{},1000);
-'@ | ForEach-Object {$contents=$_;foreach($old in $portMap.Keys){$contents=$contents.Replace($old,$portMap[$old])};$contents} | Set-Content -LiteralPath (Join-Path $bin 'fake-service.cjs') -Encoding ASCII
+'@ | ForEach-Object {ConvertTo-TestPorts $_} | Set-Content -LiteralPath (Join-Path $bin 'fake-service.cjs') -Encoding ASCII
 @'
 @echo off
 set "role=%2"

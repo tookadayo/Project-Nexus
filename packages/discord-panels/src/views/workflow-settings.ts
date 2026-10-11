@@ -1,5 +1,6 @@
+import { componentEmoji } from "../../../shared/src/application-emoji";
 import { ComponentType } from "discord-api-types/v10";
-import { nexusPanel, callout, actionRow } from "../primitives";
+import { panelIconText, nexusPanel, callout, actionRow } from "../primitives";
 import { analysisCopy as c } from "../i18n/analysis";
 import type { UiLocale } from "../i18n";
 import type { Issue } from "../types";
@@ -10,7 +11,7 @@ export async function workflowSettings(
   locale: UiLocale,
 ) {
   return nexusPanel({
-    title: c(locale, "settings"),
+    title: panelIconText("settings", c(locale, "settings")),
     children: [
       callout(
         c(locale, "scope"),
@@ -56,7 +57,11 @@ export async function workflowSettings(
             ),
             placeholder: c(locale, "more"),
             options: [
-              { label: c(locale, "support"), value: "other" },
+              {
+                label: c(locale, "support"),
+                value: "other",
+                emoji: componentEmoji("help"),
+              },
               { label: c(locale, "advanced"), value: "advanced" },
             ],
           },
@@ -66,6 +71,7 @@ export async function workflowSettings(
         { label: c(locale, "setup"), action: "setupWizard" },
         {
           label: c(locale, "home"),
+          emojiKey: "overview",
           action: "controlNavigate",
           data: { page: "overview" },
           publicEntry: true,

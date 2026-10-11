@@ -1,3 +1,14 @@
+import {
+  betaMaintenanceAction,
+  betaReadAction,
+} from "../../../packages/security/src/beta-interactions";
+import {
+  betaAccess,
+  betaInvitation,
+  betaLock,
+} from "../../../packages/security/src/hosted-beta";
+import { certifyBetaReply } from "../../../packages/security/src/beta-outbox";
+import { hostedBetaEnabled } from "../../../packages/config/src/hosted-beta";
 import { setupInteraction } from "./setup-interactions";
 import { analysisInteraction } from "./analysis-interactions";
 import {analysisUsage} from "../../../packages/analysis/src/index";
@@ -7,6 +18,7 @@ import { operationsAccess } from "../../../packages/operations/src/policy";
 import { ExploreService } from "../../../packages/analytics/src/explore";
 import { chartQuerySchema } from "../../../packages/analytics/src/chart-spec";
 import { renderChartPng } from "../../../packages/analytics/src/chart-renderer";
+import { chartLocale, chartSummary, chartCaveat } from "../../../packages/analytics/src/chart-language";
 import {
   connectionCodePanel,
   disconnectPanel,
@@ -205,6 +217,7 @@ export class InteractionWorker {
       privateError = false,
       stage = "dispatch",
       action = input.command ?? "unknown",
+      dispatched = false,
       challengeId: string | undefined,
       returnPage:
         | "overview"
@@ -228,6 +241,7 @@ export class InteractionWorker {
           challengeId = id;
         },
       );
+      dispatched = true;
       if (challengeId) {
         stage = "verification_reply";
         // Verification codes live only in memory and the ephemeral Discord reply.
@@ -346,19 +360,25 @@ export class InteractionWorker {
         nexusFiles?: { filename: string; dataBase64: string }[];
       };
       const interactionHash = this.vault.hash(s, input.id);
-      await enqueue(
-        tx,
-        s,
-        `reply:${input.id}`,
-        privateError ? "REPLY_FOLLOWUP" : "REPLY_EDIT",
-        {
-          applicationId: input.applicationId,
-          encryptedToken: this.vault.seal(s, input.token),
-          body: replyBody,
-          ...(nexusFiles ? { files: nexusFiles } : {}),
-          interactionHash,
-        },
-      );
+      const kind = privateError ? "REPLY_FOLLOWUP" : "REPLY_EDIT";
+      if (hostedBetaEnabled()) await betaLock(tx, s);
+      const generation =
+        dispatched && betaMaintenanceAction(action)
+          ? ((await betaInvitation(tx, s))?.generation ?? null)
+          : (input.betaGeneration ?? null);
+      const payload: Record<string, unknown> = {
+        applicationId: input.applicationId,
+        encryptedToken: this.vault.seal(s, input.token),
+        body: replyBody,
+        ...(nexusFiles ? { files: nexusFiles } : {}),
+        interactionHash,
+        ...(hostedBetaEnabled() ? { betaGeneration: generation } : {}),
+      };
+      const certificate = dispatched
+        ? certifyBetaReply(this.vault, s, kind, payload, action, input.userId)
+        : undefined;
+      if (certificate) payload.betaReply = certificate;
+      await enqueue(tx, s, `reply:${input.id}`, kind, payload, generation);
       await sql`UPDATE interaction_diagnostics SET result='queued' WHERE ${tenant(s)} AND interaction_hash=${interactionHash}`.execute(
         tx,
       );
@@ -409,6 +429,20 @@ export class InteractionWorker {
       ? await this.tokens.read(this.db, s, input.customId, actorHash)
       : { action: input.command };
     const action = String(intent.action ?? "");
+    onStage(`action:${action}`);
+    if (!betaMaintenanceAction(action)) {
+      const invitation = await this.db
+        .transaction()
+        .execute((tx) =>
+          betaAccess(
+            tx,
+            s,
+            betaReadAction(action) ? "read" : "work",
+            betaReadAction(action) ? undefined : (input.betaGeneration ?? null),
+          ),
+        );
+      if (invitation) input.betaGeneration = invitation.generation;
+    }
     if (action === "intakeSubmit") {
       const result = await new OperationsIntake(
         this.db,
@@ -467,7 +501,7 @@ export class InteractionWorker {
           action === "support-health" || action === "newcomer-flow"
             ? await explore.saved(s, action)
             : await explore.chart(s, query);
-      const image = await renderChartPng(spec),
+      const image = await renderChartPng(spec, chartLocale(locale)),
         files = [
           { filename: "nexus-chart.png", dataBase64: image.toString("base64") },
         ];
@@ -487,7 +521,7 @@ export class InteractionWorker {
         );
       const buttons = await actionRow(issueChart, [
         ...[7, 30, 90].map((days) => ({
-          label: `${days} days`,
+          label: locale === "en" ? `${days} days` : `${days}日間`,
           action: "chartPeriod",
           data: { metric: spec.metric, days, compare: query.compare },
           disabled:
@@ -505,9 +539,9 @@ export class InteractionWorker {
         },
       ]);
       const body: Panel & { nexusFiles?: typeof files } = {
-        content: `**${spec.title}**\n${spec.range.from.slice(0, 10)} — ${spec.range.to.slice(0, 10)} · ${spec.evidence.coverageState}\n${locale === "ja" ? "観測された集計です。欠測を0や原因に置き換えません。" : "Aggregate observations. Missing data is not zero; changes are not causal claims."}`,
+        content: `${chartSummary(spec, chartLocale(locale))}\n${chartCaveat(chartLocale(locale))}`,
         allowed_mentions: { parse: [] },
-        embeds: [{ image: { url: "attachment://nexus-chart.png" } }],
+        embeds: [{ color: 0x2758ca, image: { url: "attachment://nexus-chart.png" } }],
         components: [
           buttons,
           ...(web.url
@@ -555,7 +589,6 @@ export class InteractionWorker {
       body.nexusFiles = files;
       return body;
     }
-    onStage(`action:${action}`);
     const requested = String(intent.page ?? input.values?.[0] ?? "");
     const returnPage = [
       "overview",
@@ -741,7 +774,7 @@ export class InteractionWorker {
       adminActions.includes(action) ||
       ["link", "unlink", "unlinkConfirm", "unlinkCancel"].includes(action)
     )
-      await this.db.transaction().execute(tx=>operationsAccess(tx,s,actor,['controlNavigate','controlRefresh','controlAnalysis','controlChannelPage','controlAttentionPage','controlSettings','controlRules','overview','lifecycle','cohorts','diagnose','experiments','reports','status','settings','billing','panel'].includes(action)?'READ':['contextAdd','contextResolve','controlResolve','controlAcknowledge','controlSnoozeMenu','controlSnooze'].includes(action)?'OPERATE':'CONFIGURE'));
+      await this.db.transaction().execute(tx=>operationsAccess(tx,s,actor,['controlNavigate','controlRefresh','controlAnalysis','controlChannelPage','controlAttentionPage','controlSettings','controlRules','overview','lifecycle','cohorts','diagnose','experiments','reports','status','settings','billing','panel'].includes(action)?'READ':['contextAdd','contextResolve','controlResolve','controlAcknowledge','controlSnoozeMenu','controlSnooze'].includes(action)?'OPERATE':'CONFIGURE',undefined,betaMaintenanceAction(action)));
     onStage("operation");
     if(action==="controlTestAlertPreview"){
       assert(current.helperChannelId,"CHANNEL_REQUIRED");
@@ -817,7 +850,7 @@ export class InteractionWorker {
     }
     if (action === "unlink") {
       const connection = await this.verification.connection(s);
-      return disconnectPanel(issue, connection.version, locale);
+      return disconnectPanel(issue, connection.version, locale,hostedBetaEnabled());
     }
     if (action === "unlinkConfirm") {
       assert(input.customId, "CONFIRMATION_REQUIRED");
@@ -841,8 +874,8 @@ export class InteractionWorker {
           callout(
             "NEXUS",
             locale === "ja"
-              ? "データは保持されています。再接続には /nexus link を実行してください。"
-              : "Your data is preserved. Run /nexus link to reconnect.",
+              ? hostedBetaEnabled()?"新しい収集を停止し、このサーバーのデータ削除を受け付けました。":"データは保持されています。再接続には /nexus link を実行してください。"
+              : hostedBetaEnabled()?"New collection is stopped. Data deletion for this server has been requested.":"Your data is preserved. Run /nexus link to reconnect.",
           ),
         ],
       });

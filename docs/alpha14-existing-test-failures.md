@@ -1,0 +1,146 @@
+# Known historical unit failures
+
+The earlier alpha14 verification recorded **19 existing failures: 18 stale
+presentation/version assertions and one unresolved Windows operator
+credential-file ACL acceptance failure**. A comparison against the preceding
+baseline reproduced the same failing names. This is historical evidence, not a
+fresh test run of the current checkout and not a claim that the suite passes.
+
+| Test file | Recorded failures | Classification |
+| --- | ---: | --- |
+| `tests/unit/alpha10-ui.test.ts` | 2 | Old Home button inventories |
+| `tests/unit/alpha12-configuration.test.ts` | 1 | Windows credential-file ACL acceptance |
+| `tests/unit/alpha3-polish.test.ts` | 3 | Earlier wording/action-count expectations |
+| `tests/unit/alpha3-product.test.ts` | 1 | Earlier zero-state wording |
+| `tests/unit/alpha5-payloads.test.ts` | 9 | Earlier Discord presentation snapshots |
+| `tests/unit/stabilization-ui.test.ts` | 2 | Earlier Home intent inventories |
+| `tests/unit/v060.test.ts` | 1 | Fixed older prerelease-version expectation |
+
+Do not update snapshots or weaken security assertions merely to obtain a green
+result. Reconcile presentation expectations against the intended behavior and
+review the change. Compare current failing test names with this baseline;
+unrelated assertion failures must not automatically be classified as historical.
+
+## Public-branch verification
+
+The public-branch preparation reproduced the 19 failures, then reconciled the
+18 presentation/version assertions against the implemented Home actions,
+conditional status wording, Discord presentation and alpha14 version. Component
+limits, action authorization and unknown-versus-zero assertions remain in place.
+The six affected test files passed 59/59 after those corrections.
+
+A subsequent full Windows unit run with the cache disabled completed with
+**792 tests: 791 passed and one failed**, the credential-file test below. This
+is not a green full-suite result. The remaining failure occurs while the test
+prepares its disposable Windows ACL fixture, before credential verification.
+A disposable-fixture diagnostic identified PowerShell execution-policy rejection
+(`SecurityError` / `UnauthorizedAccess`) before the ACL script body starts.
+This does not demonstrate an ACL bypass, but real file-based operator acceptance
+on this Windows environment remains unverified. No real credentials, ACLs or
+execution-policy settings were changed, and the security check was not skipped
+or weakened.
+
+The Windows failure remains an operational acceptance gap for the real
+file-based operator credential path. Synthetic in-memory authentication tests
+do not close it, and this diagnostic does not establish successful Windows operator operation.
+Do not relax ACLs or execution security settings as a test workaround.
+
+## Initial hosted CI and browser-test corrections
+
+The initial public commit's push and pull-request CI runs passed the secret scan,
+lint, TypeScript checks, all **792 Linux unit tests**, production builds and the
+Windows runtime job. Both runs then failed the main browser suite with
+**19 failed and 21 passed**; later verification, checkout, integration and
+performance steps did not run. These browser failures are separate from the
+historical unit failures above.
+
+The browser fixtures now bundle imported production CSS, including its token
+imports, instead of asking Node to import CSS directly. Navigation and pricing
+assertions follow the implemented menus, mobile dialog, five plans and comparison
+tables. The Attention UI scenario uses stateful synthetic data while separately
+checking that Basic development authentication is rejected by the real operations
+route. It does not establish successful OAuth authorization or database writes.
+No production authentication checks or test assertions were skipped to obtain a
+passing result. Record the follow-up CI result against its actual commit.
+
+A local Windows browser run after these corrections passed all **40 tests**, with
+no failures, skips or retries. It used isolated synthetic services and a separate
+same-drive checkout for the Web server to avoid the cross-drive dependency path
+limitation. This run does not replace the later hosted OAuth, Checkout, database
+integration or performance checks.
+
+Record the current command, platform, selected tests and PASS/FAIL/NOT RUN
+separately. Focused checks and historical comparisons cannot substitute for a
+current full-suite result or deployment acceptance. Publication conditions are
+tracked in [publication gates](alpha14-publication-gates.md).
+
+## Authorized follow-up checks (2026-10-11)
+
+Token authentication and transaction fences now enforce Beta admission, while
+retained reads remain distinct from new work. Organization aggregates check the
+caller and every returned guild, with final tenant fences acquired in a stable
+order on one transaction before the organization lock. A fresh review caught a
+cross-connection wait cycle in the initial candidate; two concurrent aggregate
+callers and two pending stops reproduced it before the final correction. The
+complete Beta API regression file then passed **9/9**, and the related API and
+organization files passed **15/15**. Dismissed Attention records retain their
+completion timestamp and remain represented in completion aggregates.
+
+The OAuth verification fixture now creates real opaque database sessions and
+real synthetic Beta invitations. It preserves current grant, CSRF, scope and
+disconnect boundaries. The local OAuth browser suite passed **11/11**. Checkout
+uses a complete synthetic OAuth response, the current Sandbox-specific pricing
+link, and a portable file URL for its test-process import. Its browser suite
+passed **2/2**, and the dedicated local Discord layout suite passed **1/1**.
+No real provider request or payment is required for these fixture checks.
+
+A full local DB integration run completed **495 tests: 488 passed, 7 failed**.
+All seven failures were traced to older assertions: a migration count of 50
+instead of the current 52, a fixed alpha.10 version, and an immutable-row
+comparison that omitted the nullable Beta generation added by migration 051.
+The corrections retain all historical-field and saved-result comparisons,
+including an explicit null Beta generation for older runs. The four affected
+files then passed **64/64**. This targeted rerun is not described as a second
+green full-suite run; hosted results must be recorded against their actual head.
+
+The final local production Next build, repository typecheck, ESLint and secret
+scan passed. The separate same-drive validation checkout was used for the Web
+build. The Windows operator credential-file acceptance limitation above remains
+open; no execution-policy or real credential ACL setting was changed.
+
+## Hosted DB fixture shutdown (2026-10-11)
+
+At `70d3df8`, both hosted workflows passed the secret scan, lint, typecheck,
+all 792 unit tests, production build, browser checks and Windows runtime job.
+All 495 DB integration assertions passed, but the integration command failed
+because PostgreSQL reported unhandled administrator-termination errors during
+fixture shutdown. The PR run attributed these to `alpha12-beta` and
+`analysis-stabilization`; the push run attributed them to `alpha12-beta`.
+Performance checks did not run.
+
+The isolated PostgreSQL fixture now waits until other client backends have
+disconnected before stopping its private cluster. This closes the gap between
+`pg-pool.end()` resolving and client sockets finishing their shutdown. The wait
+is bounded, leaked connections still fail, and unexpected errors are not ignored.
+The two affected files plus the Beta API regression file passed **34/34** locally.
+A new real-database regression passed **1/1**, verifying that shutdown keeps an
+existing connection usable until it closes. Typecheck, focused ESLint and the
+secret scan passed. Hosted CI must still validate this correction at its new head.
+
+At `d20a502`, the PR integration run completed without unhandled shutdown errors,
+including the new fixture regression. It passed 495/496 assertions and exposed a
+precision mismatch in the Attention completion assertion: PostgreSQL preserves
+microseconds, while node-postgres converts timestamps to millisecond `Date`
+values. The expected duration now subtracts exact integer-microsecond endpoints
+before converting to seconds and requires exact equality with the aggregate.
+The affected Attention/analysis file passed **4/4** locally after this correction;
+no product behavior or timing tolerance was changed.
+
+The `327c09f` push workflow also exposed a Windows runtime-fixture failure that
+depended on the randomly allocated ports. Repeated substring replacement could
+map `55432` to `53001` and then replace its `3001` substring again, producing the
+invalid port `553004`. The fixture now replaces complete numeric tokens in one
+pass. A deterministic collision case covers replacement values and unrelated
+numbers, and the full local Windows runtime-manager script passed its
+start/stop/restart and unrelated-process protection checks. Production launcher
+code and machine-wide execution-policy settings are unchanged.

@@ -1,12 +1,14 @@
 "use client";
 import { useRef, useState } from "react";
-import { offeringAmount, type CheckoutOrder } from "../order";
+import { offeringAmount, offeringTaxLabel, type CheckoutOrder } from "../order";
 export function CheckoutReview({
   order,
   connected,
+  taxBehavior,
 }: {
   order: CheckoutOrder;
   connected: boolean;
+  taxBehavior: "INCLUSIVE" | "EXCLUSIVE";
 }) {
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
@@ -99,6 +101,10 @@ export function CheckoutReview({
       <h2>{order.plan}</h2>
       <p className="checkout-price">
         {offeringAmount(order)} <small>/{ja ? "月" : "month"}</small>
+      </p>
+      <p>
+        {offeringTaxLabel(taxBehavior, order.locale)} ·{" "}
+        {ja ? "月ごとに更新" : "Renews monthly"}
       </p>
       <div className="checkout-guild">
         <span aria-hidden="true" className="checkout-guild-icon">

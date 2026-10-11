@@ -9,6 +9,7 @@ import {
 import { Kysely, PostgresDialect } from "kysely";
 import pg from "pg";
 import { randomUUID, generateKeyPairSync, sign } from "node:crypto";
+import { VERSION } from "../../packages/shared/src/version.js";
 import { createInteractionServer } from "../../apps/interaction/src/server.js";
 import { IdentityVault } from "../../packages/identity/src/index.js";
 import {
@@ -1020,7 +1021,7 @@ it("completes setup with optional choices and confirms manager role grants", asy
     id: "655555555555555580",
     command: "status",
   });
-  expect(JSON.stringify(status)).toContain("0.6.0-alpha.10");
+  expect(JSON.stringify(status)).toContain(VERSION);
   expect(JSON.stringify(status)).not.toContain("PID");
 });
 it("distinguishes setup approval from safe skip during a legacy guild review", async () => {

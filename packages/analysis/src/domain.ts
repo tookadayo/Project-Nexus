@@ -83,6 +83,7 @@ export type Availability =
   | "REQUIRES_SETUP"
   | "INSUFFICIENT_DATA";
 export type AnalysisRun = {
+  beta_generation?:number|null;
   id: string;
   organization_id: string;
   guild_id: string;

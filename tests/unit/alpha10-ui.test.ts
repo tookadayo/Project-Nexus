@@ -160,7 +160,7 @@ it.each(["ja", "en"] as const)(
     walk(home, (o) => {
       if (o.type === ComponentType.Button) buttons++;
     });
-    expect(buttons).toBe(5);
+    expect(buttons).toBe(6);
     expect(JSON.stringify(panels[1])).not.toMatch(
       /Redis|Gateway|Transport|BullMQ|Build SHA|worker|queue|database/i,
     );
@@ -181,13 +181,13 @@ it("enforces ordinary Japanese copy at the localized text boundary with explicit
 });
 it("renders missing measurements without numeric zero or claiming completeness", async () => {
   const panel = await analysisResultPanel(issue, { run, result }, "ja");
-  expect(JSON.stringify(panel)).toContain("データがありません");
-  expect(JSON.stringify(panel)).not.toContain("そろっています");
+  expect(JSON.stringify(panel)).toContain("値を確認できません");
+  expect(JSON.stringify(panel)).not.toContain("この範囲と期間で確認できています");
   const values: string[] = [];
   walk(panel, (o) => {
     if (typeof o.content === "string") values.push(o.content);
   });
-  expect(values.find((v) => v.includes("確認できた投稿"))).not.toMatch(/\n0\n/);
+  expect(values.find((v) => v.includes("確認できた投稿"))).not.toMatch(/\n0(?:件)?\n/);
 });
 it("validates shared primitives and traverses Section accessories", async () => {
   await expect(

@@ -1,0 +1,236 @@
+.observation-chart {
+  color: var(--nx-text, #17212b);
+  background: #fff;
+  border: 1px solid #dbe1e8;
+  border-radius: 10px;
+  padding: 24px;
+  min-width: 0;
+  line-height: 1.65;
+}
+.observation-chart h2 {
+  font-size: 24px;
+  line-height: 1.35;
+  margin: 0 0 12px;
+}
+.observation-chart p {
+  margin: 10px 0;
+}
+.observation-chart button,
+.chart-dialog button {
+  font: inherit;
+  color: #17212b;
+  background: #fff;
+  border: 1px solid #8190a0;
+  border-radius: 6px;
+  min-height: 44px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.observation-chart button:hover {
+  background: #edf2ff;
+}
+.observation-chart :focus-visible {
+  outline: 3px solid #4275e2;
+  outline-offset: 2px;
+}
+.chart-legend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.chart-current {
+  color: #2758ca;
+}
+.chart-previous {
+  color: #765027;
+}
+.observation-plot {
+  width: 100%;
+  min-height: 180px;
+  overflow: visible;
+  font-size: 13px;
+  fill: #17212b;
+}
+.chart-gridline {
+  stroke: #dbe1e8;
+}
+.chart-point {
+  fill: #2758ca;
+  transition:
+    height 0.18s ease,
+    y 0.18s ease;
+}
+.chart-dot {
+  fill: #9b601c;
+  stroke: white;
+  stroke-width: 1.5;
+}
+.chart-hit {
+  fill: transparent;
+}
+.observation-plot g[role="button"] {
+  cursor: pointer;
+}
+.observation-plot g[role="button"]:focus .chart-hit,
+.observation-plot g[role="button"]:hover .chart-hit {
+  fill: #2758ca12;
+}
+.chart-table-scroll {
+  max-width: 100%;
+  overflow: auto;
+  margin: 12px 0;
+}
+.observation-chart table {
+  border-collapse: collapse;
+  width: 100%;
+  white-space: nowrap;
+}
+.observation-chart th,
+.observation-chart td {
+  padding: 8px;
+  text-align: left;
+  border-bottom: 1px solid #dbe1e8;
+}
+.heatmap td {
+  padding: 2px;
+}
+.heatmap th {
+  font-size: 14px;
+}
+.heatmap th:first-child {
+  position: sticky;
+  left: 0;
+  background: white;
+  z-index: 1;
+}
+.heatmap button {
+  min-width: 44px;
+  padding: 6px;
+  border-color: transparent;
+}
+.heatmap .heat-high {
+  color: white;
+}
+.heatmap .heat-low,
+.heatmap .heat-unknown {
+  color: #17212b;
+}
+.heatmap .heat-unknown {
+  background: #edf0f4;
+  border: 1px dashed #758393;
+}
+.observation-chart summary {
+  cursor: pointer;
+  min-height: 44px;
+  padding: 8px 0;
+}
+.chart-dialog {
+  max-width: min(480px, calc(100% - 32px));
+  border: 1px solid #dbe1e8;
+  border-radius: 10px;
+  padding: 24px;
+  color: #17212b;
+  background: white;
+}
+.chart-dialog::backdrop {
+  background: #17212b88;
+}
+.current-access {
+  margin-block: 16px;
+}
+.current-access summary {
+  cursor: pointer;
+  min-height: 44px;
+}
+.current-access ul {
+  columns: 2;
+}
+.chart-note {
+  font-size: 14px;
+}
+@media (max-width: 767px) {
+  .observation-chart {
+    padding: 16px;
+  }
+  .observation-chart h2 {
+    font-size: 21px;
+  }
+  .observation-plot {
+    font-size: 16px;
+  }
+  .current-access ul {
+    columns: 1;
+  }
+  .observation-chart th,
+  .observation-chart td {
+    padding: 6px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chart-point {
+    transition: none;
+  }
+}
+
+.chart-plot-scroll {
+  max-width: 100%;
+  min-width: 0;
+}
+.observation-plot {
+  display: block;
+  height: 310px;
+  min-height: 0;
+  font-size: 14px;
+}
+
+.chart-point {
+  animation: chart-enter 0.18s ease-out;
+}
+@keyframes chart-enter {
+  from {
+    opacity: 0.7;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chart-point {
+    animation: none;
+    transition: none;
+  }
+}
+.chart-purpose {
+  color: #53627a;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+.observation-chart .chart-total {
+  padding: 14px 18px;
+  background: #f3f6fd;
+  border-radius: 8px;
+  margin-block: 18px;
+}
+.chart-total strong {
+  font-size: 25px;
+  color: #172b4d;
+}
+.chart-line {
+  fill: none;
+  stroke: #2758ca;
+  stroke-width: 2.5;
+  pointer-events: none;
+}
+.chart-line-previous {
+  stroke: #765027;
+  stroke-width: 2;
+  stroke-dasharray: 6 5;
+}
+.chart-point {
+  fill: #2758ca;
+  stroke: white;
+  stroke-width: 1.5;
+}

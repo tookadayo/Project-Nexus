@@ -16,7 +16,7 @@ import { assert } from "../../../../packages/shared/src/index";
 import { planRank } from "../../../../packages/settings/src/plan-registry";
 export async function checkoutReceiptContext(value: string | undefined) {
   const receipt = openCheckoutReceipt(value),
-    session = openSession((await cookies()).get("nexus_session")?.value);
+    session = await openSession((await cookies()).get("nexus_session")?.value);
   assert(session, "SESSION_EXPIRED", 401);
   assert(
     receipt && receipt.userId === session.userId,

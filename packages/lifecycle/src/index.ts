@@ -1,3 +1,4 @@
+import {betaAccess,betaWork} from '../../security/src/hosted-beta';
 import { traceStep } from "../../shared/src/observability.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -46,28 +47,24 @@ export class LifecycleService {
   ) {}
   async deliveryHealth(event: Envelope, pending: boolean) {
     const s = { organizationId: event.organizationId, guildId: event.guildId };
-    const reason = `pending:${dedupeKey(event)}`;
-    if (pending)
-      await sql`INSERT INTO telemetry_health(organization_id,guild_id,id,started_at,reason)
-   SELECT ${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${new Date(event.at)},${reason}
-   WHERE EXISTS(SELECT 1 FROM guilds WHERE ${tenant(s)}) AND NOT EXISTS(SELECT 1 FROM telemetry_health WHERE ${tenant(s)} AND reason=${reason})`.execute(
-        this.db,
-      );
-    else
-      await sql`DELETE FROM telemetry_health WHERE ${tenant(s)} AND reason=${reason}`.execute(
-        this.db,
-      );
+    await this.db.transaction().execute(async tx=>{
+     await privacyReadLock(tx,s);
+     try{await betaAccess(tx,s,'work',event.betaGeneration??null);}catch(error){if(error instanceof Error&&error.message==='BETA_UNAVAILABLE')return;throw error;}
+     const reason = `pending:${dedupeKey(event)}`;
+     if(pending)await sql`INSERT INTO telemetry_health(organization_id,guild_id,id,started_at,reason) SELECT ${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${new Date(event.at)},${reason} WHERE EXISTS(SELECT 1 FROM guilds WHERE ${tenant(s)}) AND NOT EXISTS(SELECT 1 FROM telemetry_health WHERE ${tenant(s)} AND reason=${reason})`.execute(tx);
+     else await sql`DELETE FROM telemetry_health WHERE ${tenant(s)} AND reason=${reason}`.execute(tx);
+    });
   }
   async streamReset(s: Scope) {
-    const now = new Date();
-    await sql`INSERT INTO telemetry_health(organization_id,guild_id,id,started_at,ended_at,reason)
-   SELECT organization_id,guild_id,${randomUUID()}::uuid,last_seen,${now},'Redis stream reset' FROM telemetry_cursor WHERE ${tenant(s)}`.execute(
-      this.db,
-    );
+    await this.db.transaction().execute(async tx=>{
+     await privacyReadLock(tx,s);
+     try{await betaAccess(tx,s);}catch(error){if(error instanceof Error&&error.message==='BETA_UNAVAILABLE')return;throw error;}
+     await sql`INSERT INTO telemetry_health(organization_id,guild_id,id,started_at,ended_at,reason) SELECT organization_id,guild_id,${randomUUID()}::uuid,last_seen,clock_timestamp(),'Redis stream reset' FROM telemetry_cursor WHERE ${tenant(s)}`.execute(tx);
+    });
   }
   async process(input: Envelope) {
     return traceStep("event.project", { "signal.kind": input.kind }, () =>
-      this.processInternal(input),
+      betaWork(this.db,{organizationId:input.organizationId,guildId:input.guildId},()=>this.processInternal(input)).catch(error=>{if(!(error instanceof Error)||error.message!=='BETA_UNAVAILABLE')throw error;}),
     );
   }
   private async processInternal(input: Envelope) {
@@ -76,6 +73,7 @@ export class LifecycleService {
       organizationId: event.organizationId,
       guildId: event.guildId,
     };
+    try{await this.db.transaction().execute(tx=>betaAccess(tx,s,'work',event.betaGeneration??null));}catch(error){if(error instanceof Error&&error.message==='BETA_UNAVAILABLE')return;throw error;}
     const at = new Date(event.at);
     let observedMember: Awaited<ReturnType<DiscordPort["member"]>> | undefined,
       observedMemberAt: Date | undefined;
@@ -114,6 +112,7 @@ export class LifecycleService {
     }
     return this.db.transaction().execute(async (tx) => {
       await privacyReadLock(tx, s);
+      try{await betaAccess(tx,s,'work',event.betaGeneration??null);}catch(error){if(error instanceof Error&&error.message==='BETA_UNAVAILABLE')return;throw error;}
       const guild = (
         await sql`SELECT guild_id FROM guilds WHERE ${tenant(s)}`.execute(tx)
       ).rows[0];

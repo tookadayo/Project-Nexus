@@ -13,6 +13,7 @@ import type { ServerAuthorization } from "../../security/src/server-authorizatio
 import type { DiscordPort } from "../../discord/src/rest";
 import { isDiscordFailure } from "../../discord/src/rest";
 import { scopeForGuild } from "../../security/src/scoping";
+import { betaAccess } from "../../security/src/hosted-beta";
 import { EntitlementService } from "../../settings/src/billing/entitlements";
 import { integrationHealth } from "../../lifecycle/src/observation";
 import { latestCapability } from "../../lifecycle/src/discovery";
@@ -461,7 +462,7 @@ export class OperationsOrganization {
       .execute((tx) => operationsAccess(tx, s, actor, "READ", "multi_guild"));
     const group = await organizationBinding(this.db, s);
     assert(group, "ORGANIZATION_REQUIRED", 409);
-    return organizationAggregate(this.db, group.id, async (tx) => {
+    return organizationAggregate(this.db, group.id, s, async (tx) => {
       await operationsAccess(tx, s, actor, "READ", "multi_guild");
       assert(await nexusRole(tx, s, actor.key), "NEXUS_ROLE_REQUIRED", 403);
       assert(
@@ -480,8 +481,18 @@ export async function organizationLock(tx: Tx, id: string) {
 export async function organizationAggregate(
   db: Database,
   id: string,
-  fence?: (tx: Tx) => Promise<void>,
+  caller: Scope,
+  fence: (tx: Tx) => Promise<void>,
 ) {
+  const initialGroup = (
+    await sql<{
+      home_guild_id: string;
+    }>`SELECT home_guild_id FROM operations_organizations WHERE id=${id}::uuid`.execute(
+      db,
+    )
+  ).rows[0];
+  assert(initialGroup, "ORGANIZATION_REQUIRED", 409);
+  const home = { organizationId: id, guildId: initialGroup.home_guild_id };
   const links = (
       await sql<{
         organization_id: string;
@@ -515,6 +526,7 @@ export async function organizationAggregate(
     }
     const summary = await db.transaction().execute(async (tx) => {
       await privacyReadLock(tx, scope);
+      await betaAccess(tx, scope, "read");
       const entitlement = await new EntitlementService(tx).effective(scope);
       assert(!entitlement.privacyDeleted, "PRIVACY_DELETED", 403);
       return {
@@ -529,10 +541,15 @@ export async function organizationAggregate(
         ).rows[0]!.n,
       };
     });
-    const chart = await new ExploreService(db).chart(scope, {
-      days: 7,
-      compare: true,
-    });
+    const chart = await new ExploreService(db).chart(
+      scope,
+      {
+        days: 7,
+        compare: true,
+      },
+      new Date(),
+      (tx) => betaAccess(tx, scope, "read"),
+    );
     results.push({
       guildId: link.guild_id,
       state: "ACTIVE",
@@ -544,8 +561,33 @@ export async function organizationAggregate(
   // Recheck every scope before returning the aggregate assembled across reads.
   // Revocation, deletion or loss of the home license must discard stale results.
   return db.transaction().execute(async (tx) => {
+    // All final fences belong to this transaction. Holding a caller's session
+    // lock across reads on other connections can deadlock concurrent callers
+    // when stops for their respective guilds are queued.
+    const key = (scope: Scope) => scope.organizationId + ":" + scope.guildId;
+    const admitted = new Set([
+      key(caller),
+      key(home),
+      ...results
+        .filter((result) => result.state === "ACTIVE")
+        .map((result) => key(scopeForGuild(result.guildId))),
+    ]);
+    const scopes = new Map(
+      [
+        caller,
+        home,
+        ...results.map((result) => scopeForGuild(result.guildId)),
+      ].map((scope) => [key(scope), scope]),
+    );
+    // Take tenant fences in a stable order before the organization lock, while
+    // leaving credential/member authorization after that lock.
+    for (const scopeKey of [...scopes.keys()].sort()) {
+      const scope = scopes.get(scopeKey)!;
+      await privacyReadLock(tx, scope);
+      if (admitted.has(scopeKey)) await betaAccess(tx, scope, "read");
+    }
     await organizationLock(tx, id);
-    if (fence) await fence(tx);
+    await fence(tx);
     const group = (
       await sql<{
         home_guild_id: string;
@@ -554,8 +596,11 @@ export async function organizationAggregate(
       )
     ).rows[0];
     assert(group, "ORGANIZATION_REQUIRED", 409);
-    const home = { organizationId: id, guildId: group.home_guild_id };
-    await privacyReadLock(tx, home);
+    assert(
+      group.home_guild_id === home.guildId,
+      "ORGANIZATION_ACCESS_CHANGED",
+      409,
+    );
     await new EntitlementService(tx).require(home, "multi_guild");
     for (const result of results) {
       const scope = scopeForGuild(result.guildId);

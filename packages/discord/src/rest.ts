@@ -1,3 +1,9 @@
+import { canReadPostMetadata } from "./attention-visibility";
+import {
+  readApplicationEmojiConfig,
+  type ApplicationEmojiConfig,
+} from "../../shared/src/application-emoji";
+import { fallbackRejectedApplicationEmoji } from "./emoji-fallback";
 import { traceStep } from "../../shared/src/observability";
 import {
   PermissionFlagsBits,
@@ -398,14 +404,33 @@ export class DiscordRest implements DiscordPort {
       })
     );
   }
+  private async requestMessage<T>(
+    path: string,
+    method: string,
+    body: unknown,
+    files?: DiscordAttachment[],
+    applicationId = this.botId,
+  ): Promise<T> {
+    const config = readApplicationEmojiConfig();
+    return this.request<T>(
+      path,
+      method,
+      body,
+      files,
+      config.applicationId === this.botId && applicationId === this.botId
+        ? config
+        : undefined,
+    );
+  }
   private async request<T>(
     path: string,
     method = "GET",
     body?: unknown,
     files?: DiscordAttachment[],
+    emojiConfig?: ApplicationEmojiConfig,
   ): Promise<T> {
     return traceStep("discord.rest", { stage: method }, () =>
-      this.requestInternal<T>(path, method, body, files),
+      this.requestInternal<T>(path, method, body, files, emojiConfig),
     );
   }
   private async requestInternal<T>(
@@ -413,7 +438,9 @@ export class DiscordRest implements DiscordPort {
     method = "GET",
     body?: unknown,
     files?: DiscordAttachment[],
+    emojiConfig?: ApplicationEmojiConfig,
   ): Promise<T> {
+    let emojiFallbackUsed = false;
     const route = this.route(path, method),
       signal = AbortSignal.timeout(20000);
     const retrySafe =
@@ -509,6 +536,27 @@ export class DiscordRest implements DiscordPort {
             throw new DiscordFailure(res.status, 0, {
               routeCategory: route.category,
             });
+          }
+        }
+        if (res.status === 400 && emojiConfig && !emojiFallbackUsed) {
+          let fallback: unknown = null;
+          try {
+            fallback = fallbackRejectedApplicationEmoji(
+              body,
+              await res.json(),
+              emojiConfig,
+            );
+          } catch {
+            // Malformed error bodies are never logged or treated as emoji failures.
+          }
+          if (fallback !== null) {
+            body = fallback;
+            emojiFallbackUsed = true;
+            // A definitive validation rejection did not create/update a message.
+            // Keep the same lock, deadline and transport retry budget; retry only
+            // the display payload, never an interaction's business operation.
+            attempt--;
+            continue;
           }
         }
         const retryHeader = res.headers.get("retry-after");
@@ -810,6 +858,32 @@ export class DiscordRest implements DiscordPort {
       );
     }
   }
+  async canReadAttentionChannel(
+    guildId: string,
+    channelId: string,
+    userId: string,
+    member: Member,
+  ) {
+    // Read channel metadata only. No message content or new collection is requested.
+    try {
+      let channel = await this.request<RawChannel & { guild_id: string }>(
+        `/channels/${channelId}`,
+      );
+      if (channel.guild_id !== guildId || channel.type === 12) return false;
+      if ([10, 11].includes(channel.type)) {
+        if (!channel.parent_id) return false;
+        channel = await this.request<RawChannel & { guild_id: string }>(
+          `/channels/${channel.parent_id}`,
+        );
+        if (channel.guild_id !== guildId) return false;
+      }
+      return canReadPostMetadata(channel, guildId, userId, member);
+    } catch (error) {
+      if (isDiscordFailure(error) && [403, 404].includes(error.status))
+        return false;
+      throw error;
+    }
+  }
   async channelVisibility(
     guildId: string,
     channelId: string,
@@ -894,7 +968,7 @@ export class DiscordRest implements DiscordPort {
     files?: DiscordAttachment[],
   ) {
     return (
-      await this.request<{ id: string }>(
+      await this.requestMessage<{ id: string }>(
         `/channels/${channelId}/messages`,
         "POST",
         {
@@ -923,7 +997,7 @@ export class DiscordRest implements DiscordPort {
     messageId: string,
     body: RESTPostAPIChannelMessageJSONBody,
   ) {
-    await this.request(
+    await this.requestMessage(
       `/channels/${channelId}/messages/${messageId}`,
       "PATCH",
       body,
@@ -941,11 +1015,12 @@ export class DiscordRest implements DiscordPort {
     body: RESTPostAPIChannelMessageJSONBody,
     files?: DiscordAttachment[],
   ) {
-    await this.request(
+    await this.requestMessage(
       `/webhooks/${applicationId}/${encodeURIComponent(token)}/messages/@original`,
       "PATCH",
       body,
       files,
+      applicationId,
     );
   }
   async followup(
@@ -953,10 +1028,12 @@ export class DiscordRest implements DiscordPort {
     token: string,
     body: RESTPostAPIChannelMessageJSONBody,
   ) {
-    await this.request(
+    await this.requestMessage(
       `/webhooks/${applicationId}/${encodeURIComponent(token)}`,
       "POST",
       { ...body, flags: 64 },
+      undefined,
+      applicationId,
     );
   }
 }

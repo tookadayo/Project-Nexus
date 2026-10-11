@@ -1,0 +1,33 @@
+.access-section {
+  margin: 16px 0 24px;
+  min-width: 0;
+}
+.access-section .current-access {
+  margin: 0;
+  padding: 16px 20px;
+}
+.access-section .current-access > summary {
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 44px;
+  align-content: center;
+}
+.access-state-band {
+  border-left: 3px solid var(--nx-accent, #2857d5);
+  background: #edf2ff;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+.access-state-band p {
+  margin: 6px 0 10px;
+}
+.access-state-band a {
+  display: inline-block;
+  min-height: 44px;
+  align-content: center;
+}
+.current-access p {
+  overflow-wrap: anywhere;
+}

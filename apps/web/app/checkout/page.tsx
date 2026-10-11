@@ -37,7 +37,7 @@ export default async function Checkout({
         </section>
       </SiteShell>
     );
-  const session = openSession((await cookies()).get("nexus_session")?.value);
+  const session = await openSession((await cookies()).get("nexus_session")?.value);
   if (!session)
     return (
       <SiteShell locale={locale}>

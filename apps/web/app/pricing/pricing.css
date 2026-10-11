@@ -1,0 +1,200 @@
+/* Pricing-only presentation. No billing, entitlement or dashboard styles. */
+.site.nexus-site .pricing-intro.r3-pricing-intro {
+  padding-block: 64px 40px;
+}
+.site.nexus-site .r3-pricing-intro h1 {
+  max-width: 900px;
+  text-wrap: balance;
+}
+.site.nexus-site .r3-pricing-intro > p {
+  max-width: 760px;
+  line-height: 1.7;
+}
+.site.nexus-site .r3-pricing-intro .r3-pricing-status {
+  font-size: 14px;
+  color: var(--nexus-muted);
+}
+.site.nexus-site .pricing-grid.r3-pricing-grid {
+  max-width: 1536px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-flow: row;
+  column-gap: 16px;
+  row-gap: 16px;
+  padding-bottom: 24px;
+}
+.site.nexus-site .r3-pricing-grid .r3-price-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto auto auto auto;
+  gap: 16px;
+  padding: 24px;
+  min-width: 0;
+  background: #fff;
+  border: 1px solid var(--nexus-border);
+  border-radius: 8px;
+}
+.site.nexus-site .r3-price-card > .r3-plan-name {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+}
+.site.nexus-site .r3-price-card > .r3-plan-purpose {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  min-height: 0;
+  color: var(--nexus-muted);
+  text-wrap: pretty;
+}
+.site.nexus-site .r3-price-card .r3-plan-price .price {
+  font-family: inherit;
+  font-size: 23px;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: -0.025em;
+  white-space: normal;
+  margin: 0;
+}
+.site.nexus-site .r3-price-card .r3-plan-price .r3-price-amount {
+  font-size: 28px;
+}
+.site.nexus-site .r3-price-card .price small {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 400;
+  margin-left: 4px;
+  letter-spacing: 0;
+}
+.site.nexus-site .r3-price-card .price-tax {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--nexus-muted);
+}
+.site.nexus-site .r3-price-card .r3-plan-cta {
+  align-self: stretch;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  margin: 0;
+  padding: 11px 12px;
+  text-align: center;
+  white-space: normal;
+  line-height: 1.6;
+}
+.site.nexus-site .r3-price-card .r3-plan-conditions {
+  padding-top: 2px;
+  color: var(--nexus-muted);
+}
+.site.nexus-site .r3-price-card .r3-plan-conditions p {
+  font-size: 12px;
+  line-height: 1.7;
+  min-height: 0;
+  margin: 0;
+}
+.site.nexus-site .r3-price-card .r3-plan-conditions p + p {
+  margin-top: 8px;
+}
+.site.nexus-site .r3-price-card .price-inherits {
+  font-weight: 500;
+}
+.site.nexus-site .r3-price-card .r3-plan-features {
+  padding-top: 18px;
+  border-top: 1px solid var(--nexus-border);
+}
+.site.nexus-site .r3-price-card .r3-plan-features h3 {
+  margin: 0 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.site.nexus-site .r3-price-card .r3-plan-features ul {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.site.nexus-site .r3-price-card .r3-plan-features li {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 7px;
+  font-size: 13px;
+  line-height: 1.7;
+  padding: 0;
+}
+.site.nexus-site .r3-price-card .r3-plan-features li + li {
+  margin-top: 10px;
+}
+.site.nexus-site .r3-price-card .r3-plan-features li > span {
+  color: var(--nexus-brand);
+}
+.site.nexus-site .r3-price-card .r3-plan-features p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.site.nexus-site .r3-price-card .r3-plan-details {
+  align-self: end;
+  padding-block: 12px;
+  min-height: 44px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--nexus-brand);
+}
+.site.nexus-site .site-section.r3-plan-note {
+  padding-block: 0 40px;
+}
+.site.nexus-site .r3-plan-note p {
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--nexus-muted);
+}
+.site.nexus-site .r3-plan-note a {
+  color: var(--nexus-brand);
+}
+.site.nexus-site #plan-limits,
+.site.nexus-site #feature-comparison-title {
+  scroll-margin-top: 96px;
+}
+/* Row subgrids align semantic regions only among cards on the same visual row.
+   Older browsers fall back to one natural column rather than false alignment. */
+@supports (grid-template-rows: subgrid) {
+  @media (min-width: 640px) {
+    .site.nexus-site .pricing-grid.r3-pricing-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .site.nexus-site .r3-pricing-grid .r3-price-card {
+      grid-row: span 7;
+      grid-template-rows: subgrid;
+      row-gap: 16px;
+      margin-bottom: 8px;
+    }
+  }
+  @media (min-width: 960px) {
+    .site.nexus-site .pricing-grid.r3-pricing-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+  @media (min-width: 1440px) {
+    .site.nexus-site .pricing-grid.r3-pricing-grid {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+  }
+}
+@media (max-width: 639px) {
+  .site.nexus-site .pricing-intro.r3-pricing-intro {
+    padding-block: 40px 32px;
+  }
+  .site.nexus-site .r3-pricing-grid .r3-price-card {
+    padding: 24px;
+  }
+  .site.nexus-site .site-section.r3-plan-note {
+    padding-bottom: 24px;
+  }
+}

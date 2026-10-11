@@ -15,6 +15,7 @@ import { IdentityVault } from "../../packages/identity/src/index";
 import { SettingsService, type Actor } from "../../packages/settings/src/index";
 import { OnboardingService } from "../../packages/onboarding/src/index";
 import { FakeDiscord } from "../fixtures/discord";
+import { validatePanel, type Panel } from "../../packages/discord-panels/src/primitives";
 import { OperationsIntake } from "../../packages/operations/src/intake";
 import { AttentionInbox } from "../../packages/operations/src/inbox";
 import { Playbooks } from "../../packages/operations/src/playbooks";
@@ -418,6 +419,14 @@ it("renders actual chart reports, deduplicates concurrent runs and cancels queue
   });
   const image = [...f.discord.attachments.values()][0]![0]!;
   expect(image.filename).toBe("nexus-report-0.png");
+  const body = [...f.discord.panels.values()][0] as Panel;
+  validatePanel(body);
+  expect(body.content?.length).toBeLessThanOrEqual(2000);
+  expect(body.content).toContain("Direct replies");
+  expect(body.content).toContain("Total:");
+  expect(body.content).toContain("Missing values are not zero");
+  expect(body.content).not.toMatch(/NO DATA|Coverage: UNKNOWN/);
+  expect(body.embeds?.[0]?.color).toBe(0x2758ca);
   expect(image.data.subarray(0, 8)).toEqual(
     Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
   );

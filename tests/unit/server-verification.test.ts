@@ -1,3 +1,4 @@
+vi.mock('../../apps/web/app/auth/public-session-store',async()=>{const {memoryPublicSessions}=await import('../fixtures/public-sessions');return {publicSessions:()=>memoryPublicSessions};});
 vi.mock("server-only",()=>({}));
 import {DomainError} from '../../packages/shared/src/index';
 import {afterEach,it,expect,vi} from 'vitest';
@@ -16,7 +17,7 @@ import {GET as callback} from '../../apps/web/app/auth/callback/route';
 import {proxy} from '../../apps/web/proxy';
 const user='811111111111111111',guild='821111111111111111';
 afterEach(()=>{vi.unstubAllGlobals();vi.unstubAllEnvs();vi.resetAllMocks();});
-function session(){vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,json:async()=>({id:user})})));vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_WEB_URL','https://nexus.example');vi.stubEnv('NEXUS_SESSION_SECRET','s'.repeat(64));return sealSession({userId:user,accessToken:'oauth-identity',expiresAt:Date.now()+600000});}
+async function session(){vi.stubGlobal('fetch',vi.fn(async()=>({ok:true,json:async()=>({id:user})})));vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_WEB_URL','https://nexus.example');vi.stubEnv('NEXUS_SESSION_SECRET','s'.repeat(64));return sealSession({userId:user,accessToken:'oauth-identity',expiresAt:Date.now()+600000});}
 function request(path:string,body:unknown,cookie?:string,origin='https://nexus.example'){return new NextRequest(`https://nexus.example${path}`,{method:'POST',headers:{origin,host:'nexus.example','sec-fetch-site':'same-origin',...(cookie?{cookie:`nexus_session=${cookie}`}:{})},body:JSON.stringify(body)});}
 it('generates long random readable codes with unambiguous characters and strict normalization',()=>{
  const codes=Array.from({length:1000},verificationCode);expect(new Set(codes).size).toBe(1000);
@@ -28,37 +29,37 @@ it('shares owner/admin/Manage Guild/NEXUS role authority while denying helper-on
  expect(canOperatePanel('8',[],[])).toBe(true);expect(canOperatePanel('32',[],[])).toBe(true);expect(canOperatePanel('0',['admin'],['admin',null])).toBe(true);expect(canOperatePanel('0',['manager'],[null,'manager'])).toBe(true);expect(canOperatePanel('0',['helper'],['manager'])).toBe(false);
 });
 it('requires valid OAuth sessions and rejects cross-origin writes before any redemption',async()=>{
- const cookie=session();for(const req of [request('/link/redeem',{code:'guess'}),request('/link/redeem',{code:'guess'},'tampered')])expect((await redeem(req)).status).toBe(401);
+ const cookie=await session();for(const req of [request('/link/redeem',{code:'guess'}),request('/link/redeem',{code:'guess'},'tampered')])expect((await redeem(req)).status).toBe(401);
  expect((await redeem(request('/link/redeem',{code:'guess'},cookie,'https://attacker.example'))).status).toBe(403);
  const missingFetch=request('/link/redeem',{code:'guess'},cookie);missingFetch.headers.delete('sec-fetch-site');expect((await redeem(missingFetch)).status).toBe(403);
  expect(mocks.redeem).not.toHaveBeenCalled();
 });
-it('trusts only the encrypted session identity and returns no supplied code in its response',async()=>{
- const cookie=session(),code=verificationCode();mocks.redeem.mockResolvedValue({guildId:guild});
+it('trusts only the server-side session identity and returns no supplied code in its response',async()=>{
+ const cookie=await session(),code=verificationCode();mocks.redeem.mockResolvedValue({guildId:guild});
  const response=await redeem(request('/link/redeem',{code,userId:'forged-user',guildId:'forged-guild'},cookie));
  expect(mocks.redeem).toHaveBeenCalledExactlyOnceWith(user,code);expect(await response.text()).not.toContain(code);expect(response.headers.get('cache-control')).toBe('no-store');
 });
 it('rejects revoked OAuth grants before redeeming or disconnecting',async()=>{
- const cookie=session();vi.stubGlobal('fetch',vi.fn(async()=>({ok:false,status:401})));
+ const cookie=await session();vi.stubGlobal('fetch',vi.fn(async()=>({ok:false,status:401})));
  const rejected=await redeem(request('/link/redeem',{code:'guess'},cookie));expect(rejected.status).toBe(401);expect((await rejected.json()).failure.category).toBe('AUTH_SESSION');expect(mocks.redeem).not.toHaveBeenCalled();
  const unlinked=await disconnect(request('/link/disconnect',{guildId:guild},cookie));expect(unlinked.status).toBe(401);expect(mocks.actor).not.toHaveBeenCalled();expect(mocks.disconnect).not.toHaveBeenCalled();
 });
 it('keeps unknown, expired, used and revoked failures generic without echoing input',async()=>{
- const cookie=session(),code=verificationCode();mocks.redeem.mockRejectedValue(new DomainError('VERIFICATION_INVALID'));
+ const cookie=await session(),code=verificationCode();mocks.redeem.mockRejectedValue(new DomainError('VERIFICATION_INVALID'));
  const response=await redeem(request('/link/redeem',{code},cookie));expect(response.status).toBe(400);expect(await response.json()).toEqual({error:'VERIFICATION_INVALID'});
  const module=await import('../../apps/web/app/link/redeem/route');expect('GET' in module).toBe(false);
 });
 it('returns logged-out verification pages through OAuth without copying query code into the return URL',async()=>{
- session();vi.stubEnv('DISCORD_APPLICATION_ID',guild);vi.stubEnv('DISCORD_CLIENT_SECRET','test-client-secret');
+ await session();vi.stubEnv('DISCORD_APPLICATION_ID',guild);vi.stubEnv('DISCORD_CLIENT_SECRET','test-client-secret');
  const unauth=proxy(new NextRequest('https://nexus.example/link?code=never-consumed'));expect(unauth.headers.get('location')).toBe('https://nexus.example/auth/login?next=%2Flink');
  const started=await login(new NextRequest('https://nexus.example/auth/login?next=/link'));expect(started.cookies.get('nexus_oauth_next')?.value).toBe('/link');
  const bad=await login(new NextRequest('https://nexus.example/auth/login?next=/link?code=never-consumed'));expect(bad.cookies.get('nexus_oauth_next')?.value).not.toBe('/link?code=never-consumed');
- vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce({ok:true,json:async()=>({access_token:'token',expires_in:3600,scope:'identify guilds'})}).mockResolvedValueOnce({ok:true,json:async()=>({id:user})}));
+ vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce({ok:true,json:async()=>({access_token:'token',refresh_token:'synthetic-refresh',token_type:'Bearer',expires_in:3600,scope:'identify guilds'})}).mockResolvedValueOnce({ok:true,json:async()=>({id:user})}));
  const returned=await callback(new NextRequest('https://nexus.example/auth/callback?state=state&code=oauth-grant',{headers:{cookie:'nexus_oauth_state=state; nexus_oauth_next=/link'}}));expect(returned.headers.get('location')).toBe('https://nexus.example/link');
  const post=proxy(request('/link/redeem',{code:'secret'}));expect(post.headers.get('location')).toBeNull();
 });
 it('gates dashboard access on backend verification and current authority on every request',async()=>{
- const cookie=session();vi.stubEnv('API_KEY','a'.repeat(64));vi.stubEnv('DISCORD_TOKEN','bot');
+ const cookie=await session();vi.stubEnv('API_KEY','a'.repeat(64));vi.stubEnv('DISCORD_TOKEN','bot');
  vi.stubGlobal('fetch',vi.fn(async(_url:string,init?:RequestInit)=>({ok:true,json:async()=>String(_url).endsWith('/users/@me')?{id:user}:JSON.stringify(init?.headers).includes('Bot ')?[{id:guild}]:[{id:guild,name:'Server',permissions:'0'}]})));
  mocks.manageable.mockResolvedValue({state:'INSTALLED_NOT_VERIFIED',version:null});expect(await dashboardContext(cookie,guild)).toBeNull();
  mocks.manageable.mockResolvedValue({state:'VERIFICATION_PENDING',version:null});expect(await dashboardContext(cookie,guild)).toBeNull();
@@ -67,7 +68,7 @@ it('gates dashboard access on backend verification and current authority on ever
  expect(mocks.manageable).toHaveBeenCalledWith(guild,user);
 });
 it('exposes the four real server states and includes configured managers without OAuth admin bits',async()=>{
- session();vi.stubEnv('DISCORD_TOKEN','bot');
+ await session();vi.stubEnv('DISCORD_TOKEN','bot');
  const ids=[guild,'841111111111111111','851111111111111111','861111111111111111'];
  vi.stubGlobal('fetch',vi.fn(async(_url:string,init?:RequestInit)=>({ok:true,json:async()=>JSON.stringify(init?.headers).includes('Bot ')?ids.slice(0,3).map(id=>({id})):ids.map(id=>({id,name:id,permissions:id===ids[3]?'32':'0'}))})));
  mocks.manageable.mockImplementation(async(id:string)=>({state:id===ids[0]?'VERIFIED':id===ids[1]?'INSTALLED_NOT_VERIFIED':'VERIFICATION_PENDING',version:null}));
@@ -76,7 +77,7 @@ it('exposes the four real server states and includes configured managers without
  try{const guilds=await authorizedGuilds('oauth',user);expect(guilds.map(g=>g.state)).toEqual(['VERIFIED','INSTALLED_NOT_VERIFIED','VERIFICATION_PENDING','NOT_INSTALLED']);}finally{vi.useRealTimers();}
 });
 it('requires signed actor-bound disconnect confirmation and rejects stale or lost-authority confirmation',async()=>{
- const cookie=session();mocks.actor.mockResolvedValue({key:'actor'});mocks.connection.mockResolvedValue({state:'VERIFIED',version:'v1'});mocks.issue.mockResolvedValue('signed-confirmation');
+ const cookie=await session();mocks.actor.mockResolvedValue({key:'actor'});mocks.connection.mockResolvedValue({state:'VERIFIED',version:'v1'});mocks.issue.mockResolvedValue('signed-confirmation');
  const prepared=await disconnect(request('/link/disconnect',{guildId:guild},cookie));expect(await prepared.json()).toEqual({confirmation:'signed-confirmation'});expect(mocks.disconnect).not.toHaveBeenCalled();
  mocks.read.mockResolvedValue({action:'webDisconnect',version:'v1'});expect((await disconnect(request('/link/disconnect',{guildId:guild,confirmation:'signed-confirmation'},cookie))).status).toBe(200);expect(mocks.disconnect).toHaveBeenCalledWith(expect.objectContaining({guildId:guild}),user,'v1','WEB_DASHBOARD',{key:'actor'});
  mocks.actor.mockRejectedValue(new DomainError('ADMIN_REQUIRED',403));expect((await disconnect(request('/link/disconnect',{guildId:guild,confirmation:'signed-confirmation'},cookie))).status).toBe(403);
