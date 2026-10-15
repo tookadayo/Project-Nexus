@@ -200,4 +200,3 @@ test("installation polling pauses in a hidden tab and reaches a manual retry bou
   await page.clock.runFor(65000);
   await expect(page.getByText("Automatic checks have paused.", {exact: false})).toBeVisible();
 });
-

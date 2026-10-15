@@ -85,4 +85,3 @@ it("requires explicit qualified intake events and keeps event success values out
   expect(simulateAutomationPlan(compileFlowDefinition(definition), { values: { "ticket-input": { type: "TicketRef", value: { id: "884111111111111111", guildId } } }, awaitEvents: { await: { state: "MATCHED", value: { state: "RESOLVED", version: 1 }, occurredAt: "2026-10-15T08:00:05Z" } } }, clock).status).toBe("FAILED");
   wait.timedOut = [{ kind: "declare", id: "leak", variable: { id: "leak", name: "Leak", type: recordType }, value: { kind: "variable", type: recordType, variableId: "event-result" } }]; expect(validateFlowDefinition(definition).valid).toBe(false);
 });
-

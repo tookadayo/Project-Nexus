@@ -356,4 +356,3 @@ export function SetupWizard({locale, guildId, installUrl, editing = false}: {loc
     <dialog ref={leaveRef} className="setup-status" onCancel={event => { event.preventDefault(); setLeaveDialog(false); }}><h2>{t("未保存の編集があります", "You have unsaved changes")}</h2><p>{t("保存済みの下書きは残ります。未保存の編集を破棄してサーバー選択へ戻ります。", "The saved draft is kept. Return to server selection and discard unsaved edits.")}</p><div className="setup-actions"><button autoFocus type="button" onClick={() => setLeaveDialog(false)}>{t("編集を続ける", "Keep editing")}</button><button type="button" onClick={() => { allowLeave.current = true; window.location.assign("/servers"); }}>{t("破棄して戻る", "Discard and return")}</button></div></dialog>
   </div>;
 }
-
