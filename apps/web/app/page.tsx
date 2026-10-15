@@ -241,8 +241,8 @@ export default async function Home() {
                 [
                   "Confirm access and connect",
                   "利用条件を確認して接続",
-                  "Once access is available, confirm the invitation conditions and access period, then add the bot with the required permissions. Open /nexus panel in a staff channel.",
-                  "利用開始時は招待条件と利用期間を確認し、必要な権限でBotを追加。スタッフ用チャンネルで /nexus panel を開きます。",
+                  "Once access is available, sign in on the web and select your server. We check your current permissions and bot installation, then guide you through web setup.",
+                  "利用開始時はWebにログインしてサーバーを選びます。現在の権限とBotの導入状態を確認し、そのままWebで初期設定を進めます。",
                 ],
                 [
                   "Choose what to collect",

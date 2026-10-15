@@ -84,6 +84,6 @@ it('requires signed actor-bound disconnect confirmation and rejects stale or los
  const module=await import('../../apps/web/app/link/disconnect/route');expect('GET' in module).toBe(false);
 });
 it('keeps production Discord links HTTPS and free of codes, tokens and unsafe base URLs',()=>{
- expect(discordDashboardLink('https://nexus.example',guild,false,false)).toBe('https://nexus.example/link');expect(discordDashboardLink('https://nexus.example',guild,false,true)).toBe(`https://nexus.example/dashboard/${guild}`);
+ expect(discordDashboardLink('https://nexus.example',guild,false,false)).toBe(`https://nexus.example/setup?guild=${guild}`);expect(discordDashboardLink('https://nexus.example',guild,false,true)).toBe(`https://nexus.example/dashboard/${guild}`);
  for(const base of ['http://localhost:3100','https://localhost','https://127.0.0.1','https://user:secret@nexus.example','https://nexus.example?code=secret','https://nexus.example#token','javascript:alert(1)'])expect(discordDashboardLink(base,guild,false,false)).toBeUndefined();
 });

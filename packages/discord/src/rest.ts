@@ -1,4 +1,9 @@
 import { canReadPostMetadata } from "./attention-visibility";
+import {roleCoverage,assertRoleCoverage} from './role-coverage';
+import {evaluateAutomationRolePolicy,type AutomationRolePolicyInput,type AutomationRolePolicy,type RolePolicyChannel} from './automation-role-policy';
+export type {AutomationRolePolicyInput,AutomationRolePolicy} from './automation-role-policy';
+import {validateCompiledLegacyMessage,type CompiledLegacyMessage} from './automation-message';
+export type {CompiledLegacyMessage} from './automation-message';
 import {
   readApplicationEmojiConfig,
   type ApplicationEmojiConfig,
@@ -10,7 +15,7 @@ import {
   type RESTPostAPIChannelMessageJSONBody,
 } from "discord-api-types/v10";
 import { createHash } from "node:crypto";
-import { assert } from "../../shared/src/index";
+import { assert, isDomainError } from "../../shared/src/index";
 import { z } from "zod";
 import type { APIEntitlement } from "discord-api-types/v10";
 import {
@@ -30,6 +35,25 @@ export type Member = {
   ownerId?: string;
 };
 export type DiscordAttachment = { filename: string; data: Buffer };
+export type AutomationDiscordWrite =
+  | {
+      kind: "message";
+      guildId: string;
+      channelId: string;
+      content?: string;
+      messageSpec?: CompiledLegacyMessage;
+      nonce: string;
+    }
+  | {kind:'editMessage';guildId:string;channelId:string;messageId:string;content?:string;messageSpec?:CompiledLegacyMessage}
+  | {
+      kind: "role";
+      guildId: string;
+      memberId: string;
+      roleId: string;
+      add: boolean;
+    }
+  | { kind: "channel"; guildId: string; parentId: string; name: string }
+  | { kind: "thread"; guildId: string; channelId: string; name: string };
 export const nativeOnboardingSchema = z.object({
   guild_id: z.string(),
   enabled: z.boolean(),
@@ -68,6 +92,7 @@ export type Role = {
   managed: boolean;
   permissions: string;
   name?: string;
+  tags?: Record<string,unknown>;
 };
 export type DiscordEntityOptions = {
   channels: { id: string; label: string }[];
@@ -77,6 +102,34 @@ export type DiscordEntityOptions = {
   forumTags?: { channelId: string; id: string; label: string }[];
 };
 const discordFailureBrand = Symbol.for("nexus.discord-failure");
+const discordWriteNotStartedBrand = Symbol.for(
+  "nexus.discord-write-not-started",
+);
+/** Issued only by a transport guard before any request bytes for that write are sent. */
+export class DiscordWriteNotStartedError extends Error {
+  readonly [discordWriteNotStartedBrand] = true;
+  readonly code: string;
+  constructor(code: string) {
+    const safeCode = /^[A-Z][A-Z0-9_]{0,100}$/.test(code)
+      ? code
+      : "AUTOMATION_PARENT_POLICY_UNVERIFIED";
+    super(safeCode);
+    this.name = "DiscordWriteNotStartedError";
+    this.code = safeCode;
+  }
+}
+export function isDiscordWriteNotStartedError(
+  error: unknown,
+): error is DiscordWriteNotStartedError {
+  return (
+    error instanceof DiscordWriteNotStartedError ||
+    Boolean(
+      error &&
+      typeof error === "object" &&
+      (error as Record<symbol, unknown>)[discordWriteNotStartedBrand] === true,
+    )
+  );
+}
 export class DiscordFailure extends Error {
   readonly [discordFailureBrand] = true;
   constructor(
@@ -126,6 +179,19 @@ export function isDiscordFailure(error: unknown): error is DiscordFailure {
   );
 }
 export interface DiscordPort {
+  automationPreflight?(
+    guildId: string,
+    actorId: string,
+    kind: "message" | "thread" | "channel",
+    channelId: string,
+  ): Promise<void>;
+  automationRolePreflight?(
+    input: AutomationRolePolicyInput,
+  ): Promise<AutomationRolePolicy>;
+  automationWrite?(
+    input: AutomationDiscordWrite,
+    beforeDispatch: () => Promise<void>,
+  ): Promise<string | null>;
   billingEntitlements?(guildId: string): Promise<APIEntitlement[]>;
   capabilityState?(
     guildId: string,
@@ -142,6 +208,7 @@ export interface DiscordPort {
   registerCommands(guildId: string, commands: unknown[]): Promise<void>;
   commandsMatch?(guildId: string, commands: unknown[]): Promise<boolean>;
   member(guildId: string, userId: string): Promise<Member>;
+  canReadAttentionChannel?(guildId:string,channelId:string,userId:string,member:Member):Promise<boolean>;
   roles(guildId: string): Promise<Role[]>;
   checkChannel(guildId: string, channelId: string): Promise<void>;
   validateRole(guildId: string, roleId: string): Promise<void>;
@@ -152,6 +219,15 @@ export interface DiscordPort {
     body: RESTPostAPIChannelMessageJSONBody,
     nonce: string,
     files?: DiscordAttachment[],
+  ): Promise<string>;
+  /** Current guild metadata only; never chooses the first channel in a list. */
+  installationSystemChannel?(guildId: string): Promise<string | null>;
+  /** Installation notices never retry inside the transport, including HTTP 429. */
+  sendInstallNotice?(
+    channelId: string,
+    body: RESTPostAPIChannelMessageJSONBody,
+    nonce: string,
+    beforeDispatch?: () => Promise<void>,
   ): Promise<string>;
   editPanel(
     channelId: string,
@@ -428,9 +504,21 @@ export class DiscordRest implements DiscordPort {
     body?: unknown,
     files?: DiscordAttachment[],
     emojiConfig?: ApplicationEmojiConfig,
+    writeOnce = false,
+    beforeDispatch?: () => Promise<void>,
+    retryRateLimits = true,
   ): Promise<T> {
     return traceStep("discord.rest", { stage: method }, () =>
-      this.requestInternal<T>(path, method, body, files, emojiConfig),
+      this.requestInternal<T>(
+        path,
+        method,
+        body,
+        files,
+        emojiConfig,
+        writeOnce,
+        beforeDispatch,
+        retryRateLimits,
+      ),
     );
   }
   private async requestInternal<T>(
@@ -439,20 +527,24 @@ export class DiscordRest implements DiscordPort {
     body?: unknown,
     files?: DiscordAttachment[],
     emojiConfig?: ApplicationEmojiConfig,
+    writeOnce = false,
+    beforeDispatch?: () => Promise<void>,
+    retryRateLimits = true,
   ): Promise<T> {
     let emojiFallbackUsed = false;
     const route = this.route(path, method),
       signal = AbortSignal.timeout(20000);
     const retrySafe =
-      method === "GET" ||
-      method === "PUT" ||
-      method === "DELETE" ||
-      method === "PATCH" ||
-      (method === "POST" &&
-        typeof body === "object" &&
-        body !== null &&
-        "enforce_nonce" in body &&
-        (body as { enforce_nonce?: unknown }).enforce_nonce === true);
+      !writeOnce &&
+      (method === "GET" ||
+        method === "PUT" ||
+        method === "DELETE" ||
+        method === "PATCH" ||
+        (method === "POST" &&
+          typeof body === "object" &&
+          body !== null &&
+          "enforce_nonce" in body &&
+          (body as { enforce_nonce?: unknown }).enforce_nonce === true));
     // Serialize each route, including the discovery request before Discord sends a bucket.
     // Known routes sharing a bucket also serialize against one another.
     const routeLock = this.acquire(route.key);
@@ -471,6 +563,7 @@ export class DiscordRest implements DiscordPort {
           signal,
         );
         let res: Response;
+        await beforeDispatch?.();
         try {
           res = await fetch(`https://discord.com/api/v10${path}`, {
             method,
@@ -603,7 +696,8 @@ export class DiscordRest implements DiscordPort {
             );
         }
         if (
-          (res.status === 429 || (res.status >= 500 && retrySafe)) &&
+          ((res.status === 429 && retryRateLimits) ||
+            (res.status >= 500 && retrySafe)) &&
           attempt < 2
         ) {
           const delay =
@@ -716,7 +810,7 @@ export class DiscordRest implements DiscordPort {
         .filter((c) => c.type === 0 || c.type === 5)
         .map((c) => ({ id: c.id, label: `#${c.name}` })),
       surfaces: channels
-        .filter((c) => [0, 2, 5, 13, 15, 16].includes(c.type))
+        .filter((c) => [0, 2, 4, 5, 13, 15, 16].includes(c.type))
         .map((c) => ({ id: c.id, label: `#${c.name}`, type: c.type })),
       forumTags: channels.flatMap((c) =>
         (c.available_tags ?? []).map((tag) => ({
@@ -949,6 +1043,326 @@ export class DiscordRest implements DiscordPort {
       "PRIVILEGED_ROLE_MAPPING_FORBIDDEN",
     );
   }
+  private async automationCategoryPolicy(guildId: string, parentId: string) {
+    const reference = z.string().regex(/^\d{17,20}$/);
+    const bits = z.string().regex(/^(0|[1-9]\d{0,77})$/);
+    const parsed = z
+      .object({
+        id: reference,
+        guild_id: reference,
+        type: z.literal(4),
+        permission_overwrites: z
+          .array(
+            z.object({
+              id: reference,
+              type: z.union([z.literal(0), z.literal(1)]),
+              allow: bits,
+              deny: bits,
+            }),
+          )
+          .max(100),
+        nsfw: z.boolean().optional(),
+      })
+      .safeParse(await this.request<unknown>(`/channels/${parentId}`));
+    assert(parsed.success, "AUTOMATION_PARENT_POLICY_UNVERIFIED", 503);
+    const policy = parsed.data;
+    assert(
+      policy.id === parentId && policy.guild_id === guildId,
+      "AUTOMATION_TARGET_GUILD",
+      403,
+    );
+    const seen = new Set<string>(),
+      maximumBits = (1n << 256n) - 1n;
+    for (const item of policy.permission_overwrites) {
+      assert(!seen.has(item.id), "AUTOMATION_PARENT_POLICY_UNVERIFIED", 503);
+      seen.add(item.id);
+      const allow = BigInt(item.allow),
+        deny = BigInt(item.deny);
+      assert(
+        allow <= maximumBits && deny <= maximumBits && (allow & deny) === 0n,
+        "AUTOMATION_PARENT_POLICY_UNVERIFIED",
+        503,
+      );
+    }
+    // Order does not affect Discord's overwrite semantics. All values themselves must match.
+    const fingerprint = createHash("sha256")
+      .update(
+        JSON.stringify({
+          ...policy,
+          permission_overwrites: [...policy.permission_overwrites].sort(
+            (a, b) => a.type - b.type || a.id.localeCompare(b.id),
+          ),
+        }),
+      )
+      .digest("hex");
+    return { ...policy, fingerprint };
+  }
+  private async automationCategoryCopyPermission(
+    guildId: string,
+    overwrites: { allow: string; deny: string }[],
+  ) {
+    const currentBot = await this.member(guildId, this.botId);
+    assert(
+      currentBot.bot && /^(0|[1-9]\d{0,77})$/.test(currentBot.permissions),
+      "AUTOMATION_BOT_PERMISSION",
+      403,
+    );
+    const bits = BigInt(currentBot.permissions);
+    if ((bits & PermissionFlagsBits.Administrator) !== 0n) return;
+    assert(
+      (bits & PermissionFlagsBits.ManageChannels) !== 0n,
+      "AUTOMATION_BOT_PERMISSION",
+      403,
+    );
+    if (!overwrites.length) return;
+    assert(
+      (bits & PermissionFlagsBits.ManageRoles) !== 0n,
+      "AUTOMATION_BOT_PERMISSION",
+      403,
+    );
+    for (const item of overwrites) {
+      const changed = BigInt(item.allow) | BigInt(item.deny);
+      // Discord permits only native guild permissions, and only Administrator may
+      // set ManageRoles in channel overwrites. Never omit an uncopyable overwrite.
+      assert(
+        (changed & ~bits) === 0n &&
+          (changed & PermissionFlagsBits.ManageRoles) === 0n,
+        "AUTOMATION_PARENT_POLICY_UNCOPYABLE",
+        403,
+      );
+    }
+  }
+  /** Fixed alpha15 routes: only server-derived category overwrites; no ambiguous write retry. */
+  async automationWrite(
+    input: AutomationDiscordWrite,
+    beforeDispatch: () => Promise<void>,
+  ) {
+    const reference = z.string().regex(/^\d{17,20}$/);
+    reference.parse(input.guildId);
+    let legacy:CompiledLegacyMessage|undefined;
+    if (input.kind === "message"||input.kind==='editMessage') {
+      z.object({kind:z.enum(['message','editMessage']),guildId:reference,channelId:reference,content:z.string().min(1).max(2000).optional(),messageSpec:z.unknown().optional(),nonce:z.string().min(1).max(128).optional(),messageId:reference.optional()}).strict().parse(input);
+      assert((input.content!==undefined)!==(input.messageSpec!==undefined),'AUTOMATION_MESSAGE_MODE');
+      if(input.messageSpec!==undefined)legacy=validateCompiledLegacyMessage(input.messageSpec);
+      if(input.kind==='message'){z.string().min(1).max(128).parse(input.nonce);assert(!Object.hasOwn(input,'messageId'),'AUTOMATION_MESSAGE_INVALID');}
+      else {reference.parse(input.messageId);assert(!Object.hasOwn(input,'nonce'),'AUTOMATION_MESSAGE_INVALID');}
+    } else if (input.kind === "role") {
+      reference.parse(input.memberId);
+      reference.parse(input.roleId);
+      z.boolean().parse(input.add);
+        z.object({kind:z.literal('role'),guildId:reference,memberId:reference,roleId:reference,add:z.boolean()}).strict().parse(input);
+    } else {
+      z.enum(["channel", "thread"]).parse(input.kind);
+      reference.parse(
+        input.kind === "channel" ? input.parentId : input.channelId,
+      );
+      z.string().trim().min(1).max(100).parse(input.name);
+      if (input.kind === "channel")
+        z.object({
+          kind: z.literal("channel"),
+          guildId: reference,
+          parentId: reference,
+          name: z.string().trim().min(1).max(100),
+        })
+          .strict()
+          .parse(input);
+    }
+    const once = async <T>(
+      path: string,
+      method: string,
+      body?: unknown,
+      guard = beforeDispatch,
+    ) => this.request<T>(path, method, body, undefined, undefined, true, guard);
+    if (input.kind === "message") {
+      const result = await once<{ id: string }>(
+        `/channels/${input.channelId}/messages`,
+        "POST",
+        {
+            ...(legacy??{content:input.content,allowed_mentions:{parse:[],replied_user:false}}),
+          nonce: input.nonce.slice(0, 25),
+          enforce_nonce: true,
+        },
+      );
+      assert(/^\d{17,20}$/.test(result.id), "AUTOMATION_RESULT_INVALID");
+      return result.id;
+    }
+    if(input.kind==='editMessage'){
+      const body=legacy??{content:input.content,allowed_mentions:{parse:[],replied_user:false}};
+      const result=await once<{id:string}>(`/channels/${input.channelId}/messages/${input.messageId}`,'PATCH',{...body,content:body.content??'',embeds:legacy?.embeds??[]});
+      assert(result.id===input.messageId,'AUTOMATION_RESULT_INVALID');return result.id;
+    }
+    if (input.kind === "role") {
+      await once(
+        `/guilds/${input.guildId}/members/${input.memberId}/roles/${input.roleId}`,
+        input.add ? "PUT" : "DELETE",
+      );
+      return null;
+    }
+    let result: { id: string };
+    if (input.kind === "channel") {
+      const policy = await this.automationCategoryPolicy(
+        input.guildId,
+        input.parentId,
+      );
+      const guard = async () => {
+        // The caller verifies the actual actor, Bot, current flow and cancellation.
+        await beforeDispatch();
+        try {
+          const [latest] = await Promise.all([
+            this.automationCategoryPolicy(input.guildId, input.parentId),
+            this.automationCategoryCopyPermission(
+              input.guildId,
+              policy.permission_overwrites,
+            ),
+          ]);
+          assert(
+            latest.fingerprint === policy.fingerprint,
+            "AUTOMATION_PARENT_POLICY_CHANGED",
+            409,
+          );
+        } catch (error) {
+          // This brand must never wrap the POST, its response parsing or result checks.
+          throw new DiscordWriteNotStartedError(
+            isDomainError(error)
+              ? error.code
+              : "AUTOMATION_PARENT_POLICY_UNVERIFIED",
+          );
+        }
+      };
+      result = await once<{ id: string }>(
+        `/guilds/${input.guildId}/channels`,
+        "POST",
+        {
+          name: input.name,
+          type: 0,
+          parent_id: input.parentId,
+          permission_overwrites: policy.permission_overwrites,
+          ...(policy.nsfw === undefined ? {} : { nsfw: policy.nsfw }),
+        },
+        guard,
+      );
+    } else
+      result = await once<{ id: string }>(
+        `/channels/${input.channelId}/threads`,
+        "POST",
+        { name: input.name, type: 11, auto_archive_duration: 1440 },
+      );
+    assert(/^\d{17,20}$/.test(result.id), "AUTOMATION_RESULT_INVALID");
+    return result.id;
+  }
+  async automationPreflight(
+    guildId: string,
+    actorId: string,
+    kind: "message" | "thread" | "channel",
+    channelId: string,
+  ) {
+    const reference = z.string().regex(/^\d{17,20}$/);
+    reference.parse(guildId);
+    reference.parse(actorId);
+    reference.parse(channelId);
+    z.enum(["message", "thread", "channel"]).parse(kind);
+    const channel = await this.request<{
+      guild_id: string;
+      type: number;
+      permission_overwrites?: {
+        id: string;
+        type: number;
+        allow: string;
+        deny: string;
+      }[];
+    }>(`/channels/${channelId}`);
+    assert(channel.guild_id === guildId, "AUTOMATION_TARGET_GUILD", 403);
+    assert(
+      kind === "channel"
+        ? channel.type === 4
+        : kind === "thread"
+          ? channel.type === 0
+          : [0, 5].includes(channel.type),
+      "AUTOMATION_CHANNEL_TYPE",
+    );
+    assert(
+      Array.isArray(channel.permission_overwrites),
+      "AUTOMATION_PERMISSIONS_UNVERIFIED",
+      503,
+    );
+    const [bot, actor] = await Promise.all([
+      this.member(guildId, this.botId),
+      this.member(guildId, actorId),
+    ]);
+    const effective = (member: Member, userId: string) => {
+      let bits = BigInt(member.permissions);
+      if ((bits & PermissionFlagsBits.Administrator) !== 0n)
+        return (
+          bits |
+          PermissionFlagsBits.ViewChannel |
+          PermissionFlagsBits.SendMessages |
+          PermissionFlagsBits.ManageChannels |
+          PermissionFlagsBits.CreatePublicThreads
+        );
+      const overwrites = channel.permission_overwrites ?? [];
+      const everyone = overwrites.find(
+        (item) => item.id === guildId && item.type === 0,
+      );
+      if (everyone)
+        bits = (bits & ~BigInt(everyone.deny)) | BigInt(everyone.allow);
+      let deny = 0n,
+        allow = 0n;
+      for (const item of overwrites)
+        if (item.type === 0 && member.roles.includes(item.id)) {
+          deny |= BigInt(item.deny);
+          allow |= BigInt(item.allow);
+        }
+      bits = (bits & ~deny) | allow;
+      const personal = overwrites.find(
+        (item) => item.type === 1 && item.id === userId,
+      );
+      return personal
+        ? (bits & ~BigInt(personal.deny)) | BigInt(personal.allow)
+        : bits;
+    };
+    const botBits = effective(bot, this.botId),
+      actorBits = effective(actor, actorId);
+    assert(
+      !actor.bot && (actorBits & PermissionFlagsBits.ViewChannel) !== 0n,
+      "AUTOMATION_TARGET_PERMISSION",
+      403,
+    );
+    const required =
+      PermissionFlagsBits.ViewChannel |
+      (kind === "message"
+        ? PermissionFlagsBits.SendMessages
+        : kind === "thread"
+          ? PermissionFlagsBits.CreatePublicThreads |
+            PermissionFlagsBits.SendMessages
+          : PermissionFlagsBits.ManageChannels);
+    assert((botBits & required) === required, "AUTOMATION_BOT_PERMISSION", 403);
+    // Channel creation is a native administrative operation; delegated data access alone does not grant it.
+    if (kind === "channel")
+      assert(
+        (actorBits & PermissionFlagsBits.ManageChannels) !== 0n,
+        "AUTOMATION_TARGET_PERMISSION",
+        403,
+      );
+  }
+  async automationRolePreflight(input:AutomationRolePolicyInput):Promise<AutomationRolePolicy> {
+    const reference=z.string().regex(/^\d{17,20}$/);
+    const parsed=z.object({guildId:reference,memberId:reference,roleId:reference,add:z.boolean(),requesterId:reference,approverId:reference,protectedRoleIds:z.array(reference).max(100)}).strict().parse(input);
+    const coverage=roleCoverage(parsed.guildId);
+    const [rawRoles,requester,approver,target,bot,rawChannels]=await Promise.all([
+      this.roles(parsed.guildId),this.member(parsed.guildId,parsed.requesterId),this.member(parsed.guildId,parsed.approverId),this.member(parsed.guildId,parsed.memberId),this.member(parsed.guildId,this.botId),this.request<unknown>(`/guilds/${parsed.guildId}/channels`),
+    ]);
+    const permission=z.string().regex(/^\d+$/);
+    const parsedRoles=z.array(z.object({id:reference,position:z.number().int().nonnegative(),managed:z.boolean(),permissions:permission,tags:z.record(z.string(),z.unknown()).optional()})).safeParse(rawRoles);
+    assert(parsedRoles.success&&new Set(parsedRoles.data.map(role=>role.id)).size===parsedRoles.data.length,'AUTOMATION_PERMISSIONS_UNVERIFIED',503);
+    const roles=parsedRoles.data;
+    const channels=z.array(z.object({id:reference,guild_id:reference.optional(),type:z.number().int().min(0),flags:z.number().int().nonnegative().optional(),permission_overwrites:z.array(z.object({id:reference,type:z.union([z.literal(0),z.literal(1)]),allow:permission,deny:permission})).max(1000)})).max(1000).safeParse(rawChannels);
+    assert(channels.success,'AUTOMATION_PERMISSIONS_UNVERIFIED',503);
+    assert(channels.data.every(channel=>(channel.guild_id===undefined||channel.guild_id===parsed.guildId)&&[0,2,4,5,13,15,16].includes(channel.type)&&(BigInt(channel.flags??0)&(1n<<17n))===0n&&new Set(channel.permission_overwrites.map(overwrite=>overwrite.type+':'+overwrite.id)).size===channel.permission_overwrites.length&&channel.permission_overwrites.every(overwrite=>(BigInt(overwrite.allow)&BigInt(overwrite.deny))===0n)),'AUTOMATION_PERMISSIONS_UNVERIFIED',503);
+    assertRoleCoverage(parsed.guildId,coverage,channels.data.map(channel=>channel.id));
+    const result=evaluateAutomationRolePolicy(parsed,this.botId,roles,{requester,approver,target,bot},channels.data as RolePolicyChannel[]);
+    assertRoleCoverage(parsed.guildId,coverage,channels.data.map(channel=>channel.id));
+    return result;
+  }
   async addRole(guildId: string, userId: string, roleId: string) {
     await this.request(
       `/guilds/${guildId}/members/${userId}/roles/${roleId}`,
@@ -960,6 +1374,62 @@ export class DiscordRest implements DiscordPort {
       `/guilds/${guildId}/members/${userId}/roles/${roleId}`,
       "DELETE",
     );
+  }
+  async installationSystemChannel(guildId: string) {
+    assert(/^\d{17,20}$/.test(guildId), "INVALID_INSTALL_NOTICE_GUILD");
+    const guild = await this.request<{ id?: unknown; system_channel_id?: unknown }>(
+      `/guilds/${guildId}`,
+    );
+    assert(
+      guild?.id === guildId &&
+        (guild.system_channel_id === null ||
+          (typeof guild.system_channel_id === "string" &&
+            /^\d{17,20}$/.test(guild.system_channel_id))),
+      "INSTALL_NOTICE_SYSTEM_CHANNEL_UNVERIFIED",
+    );
+    return guild.system_channel_id as string | null;
+  }
+  async sendInstallNotice(
+    channelId: string,
+    body: RESTPostAPIChannelMessageJSONBody,
+    nonce: string,
+    beforeDispatch?: () => Promise<void>,
+  ) {
+    assert(/^\d{17,20}$/.test(channelId), "INVALID_INSTALL_NOTICE_TARGET");
+    assert(
+      typeof nonce === "string" && nonce.length > 0 && nonce.length <= 128,
+      "INVALID_INSTALL_NOTICE_NONCE",
+    );
+    const result = await this.request<{ id?: unknown }>(
+      `/channels/${channelId}/messages`,
+      "POST",
+      {
+        ...body,
+        allowed_mentions: { parse: [], replied_user: false },
+        nonce: nonce.replaceAll("-", "").slice(0, 25),
+        enforce_nonce: true,
+      },
+      undefined,
+      undefined,
+      true,
+      async () => {
+        try {
+          await beforeDispatch?.();
+        } catch (error) {
+          throw isDiscordWriteNotStartedError(error)
+            ? error
+            : new DiscordWriteNotStartedError(
+                isDomainError(error) ? error.code : "INSTALL_NOTICE_UNVERIFIED",
+              );
+        }
+      },
+      false,
+    );
+    // A successful HTTP status without a valid message reference cannot prove
+    // whether Discord created the notice. The caller must keep it unknown.
+    if (typeof result?.id !== "string" || !/^\d{17,20}$/.test(result.id))
+      throw new DiscordFailure(200, 0, { routeCategory: "channel_messages" });
+    return result.id;
   }
   async sendPanel(
     channelId: string,

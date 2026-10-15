@@ -84,6 +84,13 @@ export async function migrate(
       "050_location_population_coverage",
       "051_hosted_beta",
       "052_official_publications",
+      "053_web_setup",
+      "054_alpha15_automation",
+      "055_alpha15_install_notices",
+      "056_alpha15_role_policy",
+      "057_alpha15_events",
+      "058_alpha15_waits",
+      "059_alpha15_schedule_reviews",
     ].entries()) {
       const version = index + 1;
       if (

@@ -10,6 +10,8 @@ import {
 import { certifyBetaReply } from "../../../packages/security/src/beta-outbox";
 import { hostedBetaEnabled } from "../../../packages/config/src/hosted-beta";
 import { setupInteraction } from "./setup-interactions";
+import {alpha15AutomationInteraction} from './alpha15-interactions';
+import { legacySetupAction } from "../../../packages/discord/src/setup-handoff";
 import { analysisInteraction } from "./analysis-interactions";
 import {analysisUsage} from "../../../packages/analysis/src/index";
 import { AttentionOperations } from "../../../packages/operations/src/attention.js";
@@ -443,6 +445,7 @@ export class InteractionWorker {
         );
       if (invitation) input.betaGeneration = invitation.generation;
     }
+    if(action==='automationMenu'||action==='automationTrigger')return alpha15AutomationInteraction(this.db,s,input,intent,authorization,this.tokens,this.vault,locale);
     if (action === "intakeSubmit") {
       const result = await new OperationsIntake(
         this.db,
@@ -658,7 +661,7 @@ export class InteractionWorker {
     if(action==='setup'||action==='controlReviewSetup'||action.startsWith('setupWizard')||action.startsWith('analysis')) {
       assert(!member.bot && Date.now()-authorization.checkedAt<=10000,"GUILD_MEMBER_REQUIRED",403);
     }
-    if(action==='setup'||action==='controlReviewSetup')return setupInteraction(this.db,this.discord,s,actor,issue,locale,{action:'setupWizard'});
+    if(legacySetupAction(action,intent.value))return setupInteraction(this.db,this.discord,s,actor,issue,locale,intent,input.values);
     if (['analysisMenu','analysisPreview','analysisStart','analysisRerun','analysisHistory','analysisResult','analysisEvidence','analysisCompare','analysisAttention','analysisAttentionConfirm','analysisCancel','analysisAttentionList','analysisAttentionItem','analysisAttentionUpdate'].includes(action)) {
       return analysisInteraction(this.db,s,actor,issue,locale,intent,input.values,input.customId??input.id);
     }

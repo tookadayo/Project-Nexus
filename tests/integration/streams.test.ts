@@ -16,6 +16,7 @@ import {
 import { IdentityVault } from "../../packages/identity/src/index.js";
 import { SettingsService } from "../../packages/settings/src/index.js";
 import { OnboardingService } from "../../packages/onboarding/src/index.js";
+import { templateFlow } from "../../packages/onboarding/src/flow.js";
 import { LifecycleService } from "../../packages/lifecycle/src/index.js";
 import { AnalyticsService } from "../../packages/analytics/src/index.js";
 import {
@@ -215,37 +216,46 @@ it("runs the entire signed-HTTP → BullMQ → outbox → Streams → overview �
     await deliver(admin, { name: "nexus", options: [{ name: "settings" }] }, 2);
     adminMessageId = "reply";
     await deliver(admin, { custom_id: control("Advanced") });
+    const beforeLegacySetup = await settings.get(s);
     await deliver(admin, {
       custom_id: control("Choose community template"),
       values: ["Gaming"],
     });
-    await deliver(admin, {
-      custom_id: control("Choose a start channel"),
-      values: [channel],
-    });
-    await deliver(admin, { custom_id: control("Enable onboarding") });
-    await deliver(admin, { custom_id: control("Role mappings") });
-    await deliver(admin, {
-      custom_id: control("Choose an answer to map a role"),
-      values: ["purpose:community"],
-    });
-    const roleSelect = controls(discord.panels.get(adminMessageId!)).find(
-      (c) => c.type === 6,
-    )!;
-    await deliver(admin, { custom_id: roleSelect.custom_id, values: [role] });
-    // This slice exercises the legacy start-channel success rule.
+    expect(JSON.stringify(discord.panels.get("reply"))).toContain(
+      "Set up NEXUS on the web",
+    );
+    expect((await settings.get(s)).revision).toBe(beforeLegacySetup.revision);
+    // Keep an existing, configured questionnaire as this transport slice's input.
+    // The retired Discord setup control above must not create or change it.
+    const fixtureActor = {
+      key: vault.hash(s, admin),
+      encryptedUserId: vault.seal(s, admin),
+      permissions: "8",
+      roles: [],
+      source: "WEB_DASHBOARD" as const,
+      requestId: "existing-questionnaire-fixture",
+    };
+    const existingFlow = templateFlow("Gaming");
+    existingFlow.nodes.find((node) => node.id === "purpose")!
+      .options.find((option) => option.id === "community")!.roleId = role;
+    await onboarding.publish(
+      s,
+      fixtureActor,
+      beforeLegacySetup.revision,
+      existingFlow,
+      "Gaming",
+    );
     const configured = await settings.get(s);
     await settings.update(
       s,
-      {
-        key: "admin",
-        permissions: "8",
-        roles: [],
-        source: "DISCORD_PANEL",
-        requestId: "legacy-slice",
-      },
+      fixtureActor,
       configured.revision,
-      { flags: { ...configured.flags, activation_dsl_v2: false } },
+      {
+        enabled: true,
+        onboardingEnabled: true,
+        startChannelId: channel,
+        flags: { ...configured.flags, activation_dsl_v2: false },
+      },
     );
     const publisher = new GatewayPublisher(redis),
       consumer = new StreamConsumer(redis, lifecycle, "slice-consumer", 0);

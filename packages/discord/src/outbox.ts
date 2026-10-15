@@ -4,6 +4,7 @@ import type { Scope } from "../../shared/src/index.js";
 import { hostedBetaEnabled } from "../../config/src/hosted-beta";
 import { betaInvitation, betaLock } from "../../security/src/hosted-beta";
 export type ActionKind =
+  | "INSTALL_NOTICE"
   | "ROLE_RECONCILE"
   | "ROLE_ADD"
   | "ROLE_REMOVE"

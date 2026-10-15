@@ -15,6 +15,7 @@ import { assert, type Scope } from "../../shared/src/index.js";
 import { productGuildHash } from "../../shared/src/product-telemetry.js";
 import { deleteBillingCommunity, deleteBillingActor } from "./billing-privacy";
 import { EntitlementService } from "../../settings/src/billing";
+import {purgeAutomationActor,purgeAutomationGuild} from '../../automation/src/retention';
 export class PrivacyService {
   constructor(
     private readonly db: Database,
@@ -62,6 +63,9 @@ export class PrivacyService {
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${s.organizationId + s.guildId + hash},0))`.execute(
         tx,
       );
+      await purgeAutomationActor(tx,s,hash,userId);
+      for(const table of ['web_setup_drafts','web_setup_requests','web_setup_install_requests'])
+        await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)} AND actor_hash=${hash}`.execute(tx);
       const ids = (
         await sql<{
           id: string;
@@ -238,6 +242,9 @@ export class PrivacyService {
       await betaLock(tx, s, true);
       await requestBetaDeletion(tx, s, "DELETE_REQUEST");
     }
+    await purgeAutomationGuild(tx,s);
+    for(const table of ['web_setup_drafts','web_setup_requests','web_setup_install_requests','install_notices'])
+      await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)}`.execute(tx);
     await sql`DELETE FROM server_verification_challenges WHERE ${tenant(s)}`.execute(
       tx,
     );

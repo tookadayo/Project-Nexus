@@ -7,6 +7,7 @@ import { requestBetaDeletion } from "./hosted-beta";
 import { PublicTokenCipher } from "./public-sessions";
 import { operatorAudit } from "./operator-auth";
 import { assert } from "../../shared/src/index";
+import {fenceRestoredAutomations} from '../../automation/src/retention';
 const scope = z
   .object({
     organizationId: z.uuid(),
@@ -73,7 +74,10 @@ export async function applyDeletionTombstones(
   input: unknown,
 ) {
   const snapshot = snapshotSchema.parse(input);
+  assert((await sql`SELECT version FROM schema_migrations WHERE version IN (53,54,55,56,57,58,59)`.execute(db)).rows.length===7,
+    'TOMBSTONE_MIGRATIONS_REQUIRED',503);
   await db.transaction().execute(async (tx) => {
+    await fenceRestoredAutomations(tx);
     await sql`UPDATE public_oauth_sessions SET revoked_at=COALESCE(revoked_at,clock_timestamp()),token_ciphertext=NULL,user_ciphertext='',refresh_owner=NULL,refresh_until=NULL,generation=generation+1`.execute(
       tx,
     );

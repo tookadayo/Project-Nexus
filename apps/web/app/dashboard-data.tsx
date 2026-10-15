@@ -1,3 +1,4 @@
+import { publicApiHeaders } from "./auth/api-proof";
 import { dashboardView, dashboardFilters } from "./navigation-model";
 import { hostedBetaEnabled } from "../../../packages/config/src/hosted-beta";
 import Console, { type ProductData } from "./console";
@@ -80,13 +81,12 @@ export default async function Page({
     developmentAuth: authMode() === "development",
   };
   {
-    const headers = { Authorization: `Bearer ${context.token}` },
-      base = `${context.base}/v3/organizations/${context.organizationId}/guilds/${context.guildId}`;
+    const base = `${context.base}/v3/organizations/${context.organizationId}/guilds/${context.guildId}`;
     const read = async <T,>(path: string): Promise<T | null> => {
       const section = new URL(path).pathname.split("/").at(-1)!;
       try {
         const response = await fetch(path, {
-          headers,
+          headers: publicApiHeaders(context, sessionCookie, "GET", path),
           cache: "no-store",
           signal: AbortSignal.timeout(15000),
         });
@@ -177,7 +177,7 @@ export default async function Page({
   };
   const eventUrl = `${context.base}/v3/organizations/${context.organizationId}/guilds/${context.guildId}/product-event`,
     eventHeaders = {
-      Authorization: `Bearer ${context.token}`,
+      ...publicApiHeaders(context, sessionCookie, "POST", eventUrl),
       "Content-Type": "application/json",
     };
   await Promise.allSettled(

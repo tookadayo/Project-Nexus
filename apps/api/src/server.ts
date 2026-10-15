@@ -18,6 +18,12 @@ import { runtimeInfo } from "../../../packages/shared/src/runtime-info.js";
 import { EntitlementService } from "../../../packages/settings/src/billing/index.js";
 import { visibleMetrics } from "../../../packages/settings/src/metric-visibility.js";
 import { registerOperationsApi } from "./commerce-operations";
+import { registerAlpha15Setup } from "./alpha15-setup";
+import { registerAlpha15Automation } from "./alpha15-automation";
+import {
+  ALPHA15_BETA_ADMISSION,
+  ALPHA15_ADOPTED_ACTIONS,
+} from "../../../packages/automation/src/admission";
 export function createApi(
   analytics: AnalyticsService,
   key: string,
@@ -60,6 +66,17 @@ export function createApi(
   });
   if (db)
     app.addHook("preHandler", async (req) => {
+      const setupBase =
+        "/v3/organizations/:organizationId/guilds/:guildId/web-setup";
+      // These two limited routes perform their own invitation/identity checks
+      // before Guild Install; every other route retains the normal work gate.
+      if (
+        (req.method === "GET" &&
+          req.routeOptions.url === setupBase + "/status") ||
+        (req.method === "POST" &&
+          req.routeOptions.url === setupBase + "/requests")
+      )
+        return;
       const s = scopeSchema.safeParse({
         organizationId: (req.params as Record<string, unknown>)?.organizationId,
         guildId: (req.params as Record<string, unknown>)?.guildId,
@@ -237,8 +254,13 @@ export function createApi(
   );
   if (db) {
     if (vault) registerOperationsApi(app, db, vault);
-    registerV02(app, db, key, discord);
+    registerV02(app, db, key, discord, vault);
     registerV03(app, db, key, discord, vault);
+    registerAlpha15Setup(app, db, key, discord, vault);
+    registerAlpha15Automation(app, db, key, discord, vault, {
+      admission: ALPHA15_BETA_ADMISSION,
+      adoptedActions: ALPHA15_ADOPTED_ACTIONS,
+    });
   }
   return app;
 }

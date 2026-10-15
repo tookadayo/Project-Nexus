@@ -18,6 +18,7 @@ import {
 } from "./navigation-model";
 import { AccessNotice, type AccessState } from "./access-notice";
 import { HomeSummary } from "./home-summary";
+import { Alpha15Dashboard } from "./alpha15-dashboard";
 import { Measurements, AnalysisSummary } from "./measurements";
 import { ServerConnection } from "./link/connection";
 import { FailureNotice } from "./failure-ui";
@@ -2772,11 +2773,14 @@ export default function Console({
         {(
           [
             [0, "home", "ホーム", "Home"],
-            [5, "analysis", "分析", "Analysis"],
-            [8, "attention", "要確認", "Needs attention"],
+            [-1, "automation", "自動化", "Automation"],
+            [5, "analysis", "分析", "Analytics"],
+            [8, "attention", "対応", "Tasks"],
             [3, "history", "履歴", "History"],
           ] as const
-        ).map(([view, kind, ja, en]) => (
+        ).map(([view, kind, ja, en]) => view === -1 ? (
+          <a key="automation" href="/automation"><NavIcon kind="automation" />{locale === "ja" ? ja : en}</a>
+        ) : (
           <button
             key={view}
             aria-current={page === view ? "page" : undefined}
@@ -2786,6 +2790,7 @@ export default function Console({
             {locale === "ja" ? ja : en}
           </button>
         ))}
+        <a href={data.selectedGuildId ? `/setup?guild=${encodeURIComponent(data.selectedGuildId)}&edit=1` : "/servers"}><NavIcon kind="settings" />{locale === "ja" ? "設定" : "Settings"}</a>
       </nav>
       <details className="nav-group">
         <summary>{locale === "ja" ? "分析の詳細" : "Analysis details"}</summary>
@@ -2937,6 +2942,9 @@ export default function Console({
             locale={locale}
             onSettings={() => setPage(4)}
           />
+        )}
+        {page === 0 && (
+          <Alpha15Dashboard guildId={data.selectedGuildId ?? ""} locale={locale} />
         )}
         {page === 0 && (
           <HomeSummary

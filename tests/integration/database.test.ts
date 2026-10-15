@@ -768,7 +768,7 @@ it("reconciles a crashed panel send by nonce without activating a second panel",
   ).toBe(sent);
   expect(discord.panels.size).toBe(1);
 });
-it("completes setup with optional choices and confirms manager role grants", async () => {
+it("hands optional setup and manager controls to Web without changing saved settings", async () => {
   const s = scopeForGuild("655555555555555555");
   await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);
   await ensureGuild(db, s);
@@ -786,9 +786,6 @@ it("completes setup with optional choices and confirms manager role grants", asy
     joinedAt: "2026-09-01T00:00:00Z",
     bot: false,
   });
-  discord.roles = async () => [
-    { id: roleId, managed: false, permissions: "0", position: 1 },
-  ];
   const worker = new InteractionWorker(
       db,
       vault,
@@ -798,233 +795,60 @@ it("completes setup with optional choices and confirms manager role grants", asy
       onboarding,
       async () => {},
     ),
-    actions = new ActionWorker(db, vault, discord, onboarding);
-  const base = {
-    applicationId: "655555555555555559",
-    token: "test",
-    userId,
-    channelId,
-  };
-  await worker.dispatch(s, {
-    ...base,
-    id: "655555555555555560",
-    command: "panel",
-  });
-  while (await actions.tick(s)) {
-    /* drain outbox */
-  }
-  const messageId = (
-    await sql<{
-      message_id: string;
-    }>`SELECT message_id FROM settings_panels WHERE guild_id=${s.guildId}`.execute(
-      db,
-    )
-  ).rows[0]!.message_id;
-  let serial = 561;
-  const dispatchAction = async (action: string, values?: string[]) => {
-    const current = await settings.get(s),
-      customId = await tokens.issue(
-        db,
-        s,
-        { action, revision: current.revision },
-        null,
-        900,
-      );
-    return worker.dispatch(s, {
-      ...base,
-      id: `655555555555555${serial++}`,
+    base = {
+      applicationId: "655555555555555559",
+      token: "test",
+      userId,
+      channelId,
       command: "",
-      customId,
-      messageId,
-      values,
-    });
-  };
+    },
+    before = await settings.get(s);
   for (const action of [
     "controlScopeDefault",
     "controlSkipTeam",
     "controlSkipNotifications",
     "controlSkipGoals",
-  ])
-    await dispatchAction(action);
-  const done = await settings.get(s);
-  expect(done.setupSteps).toEqual({
-    scope: true,
-    team: true,
-    notifications: true,
-    goals: true,
-  });
-  expect(done.managerRoleIds).toEqual([]);
-  expect(done.helperEnabled).toBe(false);
-  expect(done.newMemberGoals).toEqual([]);
-  const preview = await dispatchAction("controlManagers", [roleId]);
-  expect(JSON.stringify(preview)).toContain("Confirm roles");
-  expect((await settings.get(s)).managerRoleIds).toEqual([]);
-  const find = (node: unknown): string | undefined => {
-    if (!node || typeof node !== "object") return;
-    const item = node as {
-      label?: string;
-      custom_id?: string;
-      components?: unknown[];
-    };
-    if (item.label === "Confirm roles") return item.custom_id;
-    for (const child of item.components ?? []) {
-      const found = find(child);
-      if (found) return found;
-    }
-  };
-  const findCancel = (node: unknown): string | undefined => {
-    if (!node || typeof node !== "object") return;
-    const item = node as {
-      label?: string;
-      custom_id?: string;
-      components?: unknown[];
-    };
-    if (item.label === "Cancel") return item.custom_id;
-    for (const child of item.components ?? []) {
-      const found = findCancel(child);
-      if (found) return found;
-    }
-  };
-  expect(findCancel(preview)).toBeDefined();
-  const cancelled = await worker.dispatch(s, {
-    ...base,
-    id: "655555555555555574",
-    command: "",
-    customId: findCancel(preview),
-  });
-  expect(JSON.stringify(cancelled)).toContain("Roles that can manage NEXUS");
-  expect(JSON.stringify(cancelled)).not.toContain("Reply Rescue");
-  const confirm = find(preview);
-  expect(confirm).toBeDefined();
-  await worker.dispatch(s, {
-    ...base,
-    id: "655555555555555570",
-    command: "",
-    customId: confirm,
-  });
-  expect((await settings.get(s)).managerRoleIds).toEqual([roleId]);
-  const revision = (await settings.get(s)).revision,
-    clear = await tokens.issue(
-      db,
-      s,
-      { action: "controlClearManagers", revision },
-      null,
-      900,
-    ),
-    clearPreview = await worker.dispatch(s, {
+    "controlManagers",
+    "controlManagersConfirm",
+    "controlCancelManagers",
+    "controlClearManagers",
+    "controlClearHelpers",
+    "controlReviewSetup",
+    "controlKeepSettings",
+  ]) {
+    const guide = await worker.dispatch(s, {
       ...base,
-      id: "655555555555555571",
-      command: "",
-      customId: clear,
-      messageId,
+      id: randomUUID(),
+      customId: await tokens.issue(
+        db,
+        s,
+        {
+          action,
+          revision: before.revision,
+          roleIds: [roleId],
+        },
+        vault.hash(s, userId),
+        900,
+      ),
+      values: [roleId],
     });
-  expect((await settings.get(s)).managerRoleIds).toEqual([roleId]);
-  await worker.dispatch(s, {
-    ...base,
-    id: "655555555555555572",
-    command: "",
-    customId: find(clearPreview),
-  });
-  expect((await settings.get(s)).managerRoleIds).toEqual([]);
-  const withHelper = await settings.update(
-    s,
-    {
-      key: vault.hash(s, userId),
-      permissions: "8",
-      roles: [],
-      source: "DISCORD_PANEL",
-      requestId: randomUUID(),
-    },
-    (await settings.get(s)).revision,
-    { helperRoleIds: [roleId] },
-  );
-  const clearHelpers = await tokens.issue(
-    db,
-    s,
-    { action: "controlClearHelpers", revision: withHelper.revision },
-    null,
-    900,
-  );
-  await worker.dispatch(s, {
-    ...base,
-    id: "655555555555555573",
-    command: "",
-    customId: clearHelpers,
-    messageId,
-  });
-  expect((await settings.get(s)).helperRoleIds).toEqual([]);
-  const old = await settings.update(
-    s,
-    {
-      key: vault.hash(s, userId),
-      permissions: "8",
-      roles: [],
-      source: "DISCORD_PANEL",
-      requestId: randomUUID(),
-    },
-    (await settings.get(s)).revision,
-    { setupVersion: 1 },
-  );
-  const review = await tokens.issue(
-    db,
-    s,
-    { action: "controlReviewSetup" },
-    null,
-    900,
-  );
-  const setupPreview = await worker.dispatch(s, {
-    ...base,
-    id: "655555555555555575",
-    command: "",
-    customId: review,
-    messageId,
-  });
-  expect(JSON.stringify(setupPreview)).toContain("1 / 4");
-  expect((await settings.get(s)).revision).toBe(old.revision);
-  const wizard = new SetupWizard(db),
-    reviewActor = {
-      key: vault.hash(s, userId),
-      permissions: "8",
-      roles: [],
-      source: "DISCORD_PANEL" as const,
-      requestId: randomUUID(),
-    };
-  let draft = (
-    await sql<SetupDraft>`SELECT * FROM setup_drafts WHERE ${tenant(s)} AND actor_hash=${reviewActor.key} ORDER BY created_at DESC LIMIT 1`.execute(
-      db,
-    )
-  ).rows[0]!;
-  for (let index = 0; index < 4; index++)
-    draft = await wizard.move(s, reviewActor, draft.id, draft.version, "next");
-  expect((await settings.get(s)).revision).toBe(old.revision);
-  await worker.dispatch(s, {
-    ...base,
-    id: "655555555555555579",
-    command: "",
-    customId: await tokens.issue(
-      db,
-      s,
-      {
-        action: "setupWizardConfirm",
-        draftId: draft.id,
-        version: draft.version,
-      },
-      reviewActor.key,
-      900,
-    ),
-  });
-  const upgraded = await settings.get(s);
-  expect(upgraded.setupVersion).toBe(2);
-  expect(upgraded.managerRoleIds).toEqual(old.managerRoleIds);
+    expect(JSON.stringify(guide)).toContain("/setup?guild=" + s.guildId);
+    expect(JSON.stringify(guide)).toContain("Existing settings are preserved.");
+    expect(await settings.get(s)).toEqual(before);
+  }
+  expect(
+    (await sql`SELECT id FROM setup_drafts WHERE ${tenant(s)}`.execute(db))
+      .rows,
+  ).toHaveLength(0);
   const status = await worker.dispatch(s, {
     ...base,
-    id: "655555555555555580",
+    id: randomUUID(),
     command: "status",
   });
   expect(JSON.stringify(status)).toContain(VERSION);
   expect(JSON.stringify(status)).not.toContain("PID");
 });
-it("distinguishes setup approval from safe skip during a legacy guild review", async () => {
+it("keeps pre-alpha15 drafts and settings unchanged when stale wizard buttons hand off to Web", async () => {
   const s = scopeForGuild("656666666666666666");
   await sql`DELETE FROM guilds WHERE guild_id=${s.guildId}`.execute(db);
   await ensureGuild(db, s);
@@ -1039,7 +863,9 @@ it("distinguishes setup approval from safe skip during a legacy guild review", a
   const userId = "656666666666666667",
     channelId = "656666666666666668",
     roleId = "656666666666666669";
-  await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,observed_at,visibility_state) VALUES(${s.organizationId}::uuid,${s.guildId},${channelId},0,now(),'VISIBLE')`.execute(db);
+  await sql`INSERT INTO discord_surface_state(organization_id,guild_id,channel_id,channel_type,observed_at,visibility_state) VALUES(${s.organizationId}::uuid,${s.guildId},${channelId},0,now(),'VISIBLE')`.execute(
+    db,
+  );
   discord.members.set(userId, {
     roles: [],
     permissions: "8",
@@ -1080,87 +906,74 @@ it("distinguishes setup approval from safe skip during a legacy guild review", a
       channelId,
       command: "",
     };
-  await worker.dispatch(s, {
-    ...base,
-    id: "656666666666666676",
-    customId: await tokens.issue(
-      db,
-      s,
-      { action: "controlReviewSetup" },
-      null,
-      900,
-    ),
-  });
-  expect((await settings.get(s)).setupVersion).toBe(1);
+  // Model a draft and signed buttons that already existed before alpha15.
+  const wizard = new SetupWizard(db);
+  let draft = await wizard.open(s, actor);
+  const oldVersion = draft.version;
+  for (let index = 0; index < 4; index++)
+    draft = await wizard.move(s, actor, draft.id, draft.version, "next");
   const before = await settings.get(s),
-    wizard = new SetupWizard(db);
-  let draft = (
-    await sql<SetupDraft>`SELECT * FROM setup_drafts WHERE ${tenant(s)} AND actor_hash=${actor.key} ORDER BY created_at DESC LIMIT 1`.execute(
-      db,
-    )
-  ).rows[0]!;
-  const oldToken = await tokens.issue(
-    db,
-    s,
-    { action: "setupWizardNext", draftId: draft.id, version: draft.version },
-    actor.key,
-    900,
-  );
-  for (const [index, skip] of [false, false, true, true].entries()) {
-    await worker.dispatch(s, {
+    savedDraft = await wizard.get(s, actor, draft.id);
+  for (const action of [
+    "controlReviewSetup",
+    "setupWizardNext",
+    "setupWizardBack",
+    "setupWizardChange",
+    "setupWizardConfirm",
+    "setupWizardCancel",
+  ]) {
+    const guide = await worker.dispatch(s, {
       ...base,
-      id: `656666666666666${671 + index}`,
+      id: randomUUID(),
       customId: await tokens.issue(
         db,
         s,
         {
-          action: "setupWizardNext",
+          action,
           draftId: draft.id,
-          version: draft.version,
-          skip,
+          version: oldVersion,
+          skip: true,
+          field: "team",
         },
         actor.key,
         900,
       ),
+      values: [],
     });
-    draft = await wizard.get(s, actor, draft.id);
+    expect(JSON.stringify(guide)).toContain("/setup?guild=" + s.guildId);
+    expect(await settings.get(s)).toEqual(before);
+    expect(await wizard.get(s, actor, draft.id)).toEqual(savedDraft);
   }
-  expect(draft.step).toBe(4);
-  expect(draft.draft.skipped).toEqual(["team", "goals"]);
-  expect(await settings.get(s)).toEqual(before);
-  await worker.dispatch(s, {
-    ...base,
-    id: "656666666666666677",
-    customId: await tokens.issue(
-      db,
-      s,
-      {
-        action: "setupWizardConfirm",
-        draftId: draft.id,
-        version: draft.version,
-      },
-      actor.key,
-      900,
-    ),
+  expect(before).toMatchObject({
+    setupVersion: 1,
+    analysisScope: { mode: "include", channelIds: [channelId] },
+    managerRoleIds: [roleId],
+    helperRoleIds: [roleId],
+    helperEnabled: true,
+    goalPreset: "multiplayer",
+    newMemberGoals: ["reply"],
   });
-  const done = await settings.get(s);
-  expect(done.setupVersion).toBe(2);
-  expect(done.analysisScope).toEqual({
-    mode: "include",
-    channelIds: [channelId],
-  });
-  expect(done.managerRoleIds).toEqual([roleId]);
-  expect(done.helperRoleIds).toEqual([roleId]);
-  expect(done.helperEnabled).toBe(true);
-  expect(done.goalPreset).toBe("multiplayer");
-  expect(done.newMemberGoals).toEqual(["reply"]);
+  expect(
+    (
+      await sql<SetupDraft>`SELECT * FROM setup_drafts WHERE ${tenant(s)}`.execute(
+        db,
+      )
+    ).rows,
+  ).toHaveLength(1);
+  const boundToken = await tokens.issue(
+    db,
+    s,
+    {
+      action: "setupWizardConfirm",
+      draftId: draft.id,
+      version: oldVersion,
+    },
+    actor.key,
+    900,
+  );
   await expect(
-    worker.dispatch(s, {
-      ...base,
-      id: "656666666666666675",
-      customId: oldToken,
-    }),
-  ).rejects.toThrow("REVISION_CONFLICT");
+    tokens.read(db, s, boundToken, "different-actor"),
+  ).rejects.toThrow("COMPONENT_OWNER");
 });
 it("previews an improvement without saving, cancels cleanly, and applies on confirmation", async () => {
   const s = scopeForGuild("666666666666666661");

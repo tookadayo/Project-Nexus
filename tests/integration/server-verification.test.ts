@@ -137,7 +137,7 @@ it('delivers link codes privately without writing plaintext to outbox or diagnos
  const input:InteractionJob={id:'771111111111111111',applicationId:'781111111111111111',token:'private-interaction',userId:f.user,command:'link',locale:'en'};
  try{
   await sql`INSERT INTO interaction_jobs(organization_id,guild_id,id,encrypted_payload) VALUES(${f.s.organizationId}::uuid,${f.s.guildId},${input.id},${vault.seal(f.s,JSON.stringify(input))})`.execute(db);
-  expect(await worker.tick(f.s)).toBe(true);const reply=JSON.stringify(f.discord.panels.get('reply')),code=reply.match(/NX-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{4}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{4}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{4}/)?.[0];expect(code).toBeDefined();expect(reply).toContain('https://nexus.example/link');
+  expect(await worker.tick(f.s)).toBe(true);const reply=JSON.stringify(f.discord.panels.get('reply')),code=reply.match(/NX-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{4}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{4}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{4}/)?.[0];expect(code).toBeDefined();expect(reply).toContain(`https://nexus.example/setup?guild=${f.s.guildId}`);
   expect((await sql`SELECT * FROM action_outbox WHERE ${tenant(f.s)}`.execute(db)).rows).toHaveLength(0);
   for(const table of ['interaction_jobs','interaction_diagnostics','audit_logs','server_verification_challenges'])expect(JSON.stringify((await sql`SELECT * FROM ${sql.table(table)} WHERE ${tenant(f.s)}`.execute(db)).rows)).not.toContain(code!);
   expect((await sql<{state:string}>`SELECT state FROM interaction_jobs WHERE ${tenant(f.s)}`.execute(db)).rows[0]!.state).toBe('SUCCEEDED');

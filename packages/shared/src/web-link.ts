@@ -7,6 +7,8 @@ export function discordDashboardLink(configured:string|undefined,guildId:string,
   if(url.username||url.password||url.search||url.hash||(!development&&url.protocol!=='https:'))return undefined;
   if(local&&!development)return undefined;
   if(!['https:','http:'].includes(url.protocol))return undefined;
-  return new URL(verified?`/dashboard/${guildId}`:'/link',url).toString();
+  const destination=new URL(verified?`/dashboard/${guildId}`:'/setup',url);
+  if(!verified)destination.searchParams.set('guild',guildId);
+  return destination.toString();
  }catch{return undefined;}
 }

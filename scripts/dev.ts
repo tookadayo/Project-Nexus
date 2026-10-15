@@ -53,6 +53,13 @@ import {
   requestCapabilityRefresh,
 } from "../packages/lifecycle/src/discovery.js";
 import { tickVoice } from "../packages/lifecycle/src/adaptive-projector.js";
+import { processAlpha15AutomationSchedules,processAlpha15AutomationRuns } from "../apps/worker/src/alpha15-automation";
+import {processAlpha15AutomationEvents} from '../apps/worker/src/alpha15-events';
+import {sweepAutomationRetention} from '../packages/automation/src/retention';
+import { createAlpha15DiscordAdapter } from "../apps/worker/src/alpha15-discord";
+import { ALPHA15_BETA_ADMISSION, ALPHA15_ADOPTED_ACTIONS } from "../packages/automation/src/admission";
+import { WebSetupService } from "../packages/operations/src/web-setup";
+import { InstallNotices } from "../apps/gateway/src/install-notices";
 try {
   loadEnvFile();
 } catch {
@@ -76,6 +83,9 @@ await redis.connect();
 const vault = new IdentityVault(cfg.IDENTITY_KEY, cfg.LOOKUP_KEY);
 const tokens = new Components(cfg.COMPONENT_KEY);
 const discord = new DiscordRest(cfg.DISCORD_TOKEN, cfg.DISCORD_APPLICATION_ID);
+const alpha15Adapter = createAlpha15DiscordAdapter(db, discord, vault);
+const webSetup = new WebSetupService(db, discord);
+const installNotices = new InstallNotices(db, discord);
 const settings = new SettingsService(db);
 const onboarding = new OnboardingService(db, settings, vault);
 const privacy = new PrivacyService(db, vault, settings, (s, hash) =>
@@ -257,6 +267,9 @@ const loop = async () => {
         await billingWorker.project();
         await betaLifecycle.tick();
         for(const s of await scopes())await privacy.purge(s);
+        await webSetup.purge();
+        await installNotices.purge();
+        await sweepAutomationRetention(db);
         await discovery.batch(new Date(),hostedBetaEnabled()?1:4);
         if (Date.now() - lastCapabilities > 1800000) {
           for (const s of await scopes()) {
@@ -363,9 +376,27 @@ process.stdout.write(
   `NEXUS ${releaseInfo().version} build ${releaseInfo().buildSha} (${releaseInfo().releaseChannel}); Interaction ${cfg.NEXUS_INTERACTION_TRANSPORT}; API :${cfg.API_PORT}\n`,
 );
 const running = loop();
+// Scheduling has its own single-flight 250ms cadence. Discord latency and the
+// existing ten-second maintenance pass cannot turn normal polling into backlog.
+const alpha15Options={admission:ALPHA15_BETA_ADMISSION,adoptedActions:ALPHA15_ADOPTED_ACTIONS};
+let alpha15ScheduleWork:Promise<unknown>|undefined,alpha15RunWork:Promise<unknown>|undefined,alpha15EventWork:Promise<unknown>|undefined;
+const alpha15Timer=setInterval(()=>{
+  if(stopped)return;
+  alpha15EventWork??=processAlpha15AutomationEvents(db,discord,vault,alpha15Options)
+    .catch(error=>logFailure({action:'alpha15_automation',stage:'event_poll',error}))
+    .finally(()=>{alpha15EventWork=undefined;});
+  alpha15ScheduleWork??=processAlpha15AutomationSchedules(db,alpha15Options)
+    .catch(error=>logFailure({action:'alpha15_automation',stage:'schedule_poll',error}))
+    .finally(()=>{alpha15ScheduleWork=undefined;});
+  alpha15RunWork??=processAlpha15AutomationRuns(db,alpha15Adapter,alpha15Options)
+    .catch(error=>logFailure({action:'alpha15_automation',stage:'run_poll',error}))
+    .finally(()=>{alpha15RunWork=undefined;});
+},250);
 async function stop() {
   if (stopped) return;
   stopped = true;
+  clearInterval(alpha15Timer);
+  await Promise.allSettled([alpha15ScheduleWork,alpha15RunWork,alpha15EventWork].filter((work):work is Promise<unknown>=>Boolean(work)));
   await running;
   await gateway.stop();
   await analysis.close();

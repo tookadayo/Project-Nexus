@@ -110,6 +110,7 @@ export async function workflowHome(
     ],
     rows: [
       await actionRow(issue, [
+        {label:locale==='ja'?'オートメーション':'Automations',action:'automationMenu',publicEntry:true},
         ...(!data.sharedEntry
           ? [
               {

@@ -213,7 +213,7 @@ export class SetupWizard {
         return {
           ...current,
           ...patch,
-          setupVersion: 2,
+          setupVersion: Math.max(current.setupVersion, 2),
           setupSteps: {
             scope: true,
             notifications: true,

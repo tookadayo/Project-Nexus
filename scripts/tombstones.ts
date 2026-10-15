@@ -100,7 +100,9 @@ try {
       "Deletion tombstones applied and restored sessions revoked. Keep recovery offline until remaining gates pass.\n",
     );
   }
-} catch {
+} catch(error) {
+  if(error instanceof Error&&error.message==='TOMBSTONE_MIGRATIONS_REQUIRED')
+    process.stderr.write('Apply additive migrations through 059 while recovery remains offline, then reapply the newest deletion tombstones.\n');
   process.stderr.write(
     "Tombstone operation failed. Keep restore offline and check the protected configuration and scoped deletion state.\n",
   );

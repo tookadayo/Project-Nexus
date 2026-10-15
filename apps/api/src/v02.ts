@@ -1,3 +1,5 @@
+import { publicApiContext } from '../../../packages/security/src/public-api';
+import type { IdentityVault } from '../../../packages/identity/src/index';
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { sql, tenant, type Database } from "../../../packages/db/src/index.js";
@@ -28,6 +30,7 @@ export function registerV02(
   db: Database,
   key: string,
   discord?: DiscordPort,
+  vault?: IdentityVault,
 ) {
   const base = "/v2/organizations/:organizationId/guilds/:guildId";
   const auth = (params: unknown, header: unknown) => {
@@ -41,6 +44,7 @@ export function registerV02(
   };
   const schemas = domainRevisions(db);
   app.get(base + "/dashboard", async (req, reply) => {
+    if(req.headers["x-nexus-user-proof"])await publicApiContext(req,db,key,discord,vault,"READ");
     const s = auth(req.params, req.headers.authorization);
     reply.header("Cache-Control", "no-store");
     const analytics = new AnalyticsService(db, new SettingsService(db)),
@@ -139,13 +143,7 @@ export function registerV02(
         .strict()
         .parse(req.body);
       // The scoped bearer token is a server-held administration credential; never sent to browsers.
-      const actor: Actor = {
-        key: "web-admin",
-        permissions: "32",
-        roles: [],
-        source: "WEB_DASHBOARD",
-        requestId: req.id,
-      };
+      const actor: Actor = (await publicApiContext(req,db,key,discord,vault,"CONFIGURE")).actor;
       const feature: Partial<Record<ConfigDomain, Feature>> = {
         activation: "custom_activation",
         intervention: "interventions",

@@ -1,0 +1,32 @@
+import {test,expect} from '@playwright/test';
+import {createRequire} from 'node:module';
+import {dirname,resolve} from 'node:path';
+import {mkdir} from 'node:fs/promises';
+const requireHere=createRequire(import.meta.url),esbuild=createRequire(requireHere.resolve('tsx'))('esbuild');
+let html='';
+test.beforeAll(async()=>{
+  const requireWeb=createRequire(resolve('apps/web/package.json'));
+  const result=await esbuild.build({entryPoints:[resolve('tests/fixtures/alpha15-elapsed-schedule.tsx')],bundle:true,platform:'browser',format:'iife',write:false,outfile:'elapsed.js',jsx:'automatic',alias:{react:dirname(requireWeb.resolve('react/package.json')),'react-dom':dirname(requireWeb.resolve('react-dom/package.json'))}});
+  const js=result.outputFiles.find((file:{path:string})=>file.path.endsWith('.js')).text,css=result.outputFiles.find((file:{path:string})=>file.path.endsWith('.css')).text;
+  html=`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0}${css}output{display:block;overflow-wrap:anywhere}</style></head><body><div id="root"></div><script>${js.replaceAll('</script','<\\/script')}</script></body></html>`;
+  await mkdir('.local/alpha15-elapsed-ui',{recursive:true});
+});
+for(const locale of ['ja','en'])for(const width of [320,1280])test(`elapsed schedule is explicit, finite and keyboard editable (${locale}, ${width})`,async({page})=>{
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.setViewportSize({width,height:900});await page.route('**/elapsed-fixture*',route=>route.fulfill({contentType:'text/html',body:html}));
+  await page.goto(`/elapsed-fixture?locale=${locale}`);
+  const trigger=page.locator('.automation-trigger');await trigger.locator('select').first().selectOption('elapsed');
+  const number=trigger.locator('input[type=number]'),dates=trigger.locator('input[type=datetime-local]');
+  await expect(number).toHaveValue('');await expect(dates.nth(0)).toHaveValue('');await expect(dates.nth(1)).toHaveValue('');
+  await expect(trigger.getByRole('status')).toBeVisible();
+  await dates.nth(0).fill('2090-01-01T00:00');await dates.nth(1).fill('2090-01-01T00:10');
+  await number.fill('0');await expect(number).toHaveValue('0');await expect(trigger.getByRole('status')).toBeVisible();
+  await number.fill('60');await number.focus();await page.keyboard.press('ArrowUp');await expect(number).toHaveValue('61');
+  await expect(trigger.locator('.automation-schedule-preview li')).toHaveCount(5);
+  const state=JSON.parse((await page.getByTestId('trigger-state').textContent())!);
+  expect(state.schedule).toMatchObject({kind:'elapsed',anchor:'2090-01-01T00:00:00.000Z',intervalSeconds:61,end:'2090-01-01T00:10:00.000Z',pastOccurrences:'skip'});
+  await expect(trigger).toContainText(locale==='ja'?'終了日時以降や過ぎた回は実行しません':'missed occurrences are excluded');
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+  await page.screenshot({path:`.local/alpha15-elapsed-ui/${locale}-${width}.png`,fullPage:true});
+  await number.fill('');await expect(trigger.getByRole('status')).toBeVisible();expect(errors).toEqual([]);
+});

@@ -5,6 +5,7 @@ import {
   betaLock,
 } from "../../../packages/security/src/hosted-beta";
 import { hostedBetaEnabled } from "../../../packages/config/src/hosted-beta";
+import { InstallNotices } from "../../gateway/src/install-notices";
 import {
   betaActionPolicy,
   type BetaActionPolicy,
@@ -155,6 +156,10 @@ export class ActionWorker {
     return action;
   }
   private async execute(s: Scope, action: Action): Promise<boolean> {
+    if(action.kind==='INSTALL_NOTICE'){
+      await new InstallNotices(this.db,this.discord).deliver(s,action);
+      return true;
+    }
     if (action.kind === "PANEL_REFRESH") return this.refresh(s, action);
     if (action.kind === "INTERVENTION_DELIVER") {
       const runId = z.uuid().parse(action.payload.runId);
