@@ -1,9 +1,9 @@
 import {z} from 'zod';
-import {activationSchema} from '../../lifecycle/src/activation.js';
-import {interventionSchema} from '../../lifecycle/src/interventions.js';
-import {experimentSchema} from '../../lifecycle/src/experiments.js';
-import {RevisionService,type ConfigDomain} from './revisions.js';
-import {settingsSchema} from './index.js';
+import {activationSchema} from '../../lifecycle/src/activation';
+import {interventionSchema} from '../../lifecycle/src/interventions';
+import {experimentSchema} from '../../lifecycle/src/experiments';
+import {RevisionService,type ConfigDomain} from './revisions';
+import {settingsSchema} from './index';
 import type {Database} from '../../db/src/index.js';
 export const onboardingConfigSchema=settingsSchema.pick({onboardingMode:true,hybrid:true});
 export const privacyConfigSchema=settingsSchema.pick({detailedRetentionDays:true,aggregateRetentionMonths:true,dmEnabled:true});

@@ -1,0 +1,29 @@
+"use client";
+import {signalRegistry} from "../../../../packages/events/src/registry";
+export const lifecycleSignals = Object.keys(signalRegistry);
+const labels: Record<string, [string, string]> = {all: ["All conditions", "すべての条件"], any: ["Any condition", "いずれかの条件"], not: ["Condition is not met", "条件を満たさない"], event: ["Event occurred", "イベントの発生"], count: ["Event count", "イベントの件数"], duration: ["Voice duration", "音声参加の時間"], role_present: ["Has allowed role", "ロールを持つ"], join_age: ["Time since joining", "参加からの時間"], activation_state: ["Activation state", "初期参加の状態"], connection_state: ["Connection state", "つながりの状態"], channel_activity: ["Activity in channel", "チャンネル内の活動"], reply_received: ["Reply received", "返信を受けた"], scheduled_event_subscribed: ["Event subscription", "イベントへの参加登録"], flow_answer: ["Onboarding answer", "初期案内への回答"]};
+type Node = Record<string, unknown> & {op: string};
+const blank = (op: string): Node => op === "all" || op === "any" ? {op, rules: []} : op === "not" ? {op, rule: blank("event")} : op === "role_present" ? {op, roleId: ""} : op === "join_age" ? {op, minSeconds: "", maxSeconds: ""} : op === "activation_state" ? {op, activated: true} : op === "connection_state" ? {op, connected: true} : op === "duration" ? {op, event: "voice.duration", gteSeconds: "", withinSeconds: ""} : op === "channel_activity" ? {op, channelId: "", gte: "", withinSeconds: ""} : op === "flow_answer" ? {op, nodeId: "", optionId: "", withinSeconds: ""} : op === "event" || op === "count" ? {op, event: "message.sent", withinSeconds: "", ...(op === "count" ? {gte: ""} : {})} : {op, withinSeconds: ""};
+export function LifecycleConditions({value, onChange, locale, disabled = false, depth = 0}: {value: unknown[]; onChange: (value: unknown[]) => void; locale: "en" | "ja"; disabled?: boolean; depth?: number}) {
+  const ja = locale === "ja", t = (en: string, jp: string) => ja ? jp : en;
+  const replace = (index: number, node: unknown) => onChange(value.map((prior, i) => i === index ? node : prior));
+  return <fieldset disabled={disabled} className="lifecycle-conditions"><legend>{t("Conditions", "対象条件")}</legend>{!value.length && <p>{t("No extra conditions. The configured trigger and safety checks still apply.", "追加の条件はありません。開始の合図と安全確認は適用されます。")}</p>}
+    {value.map((raw, index) => {const node = raw as Node, update = (key: string, next: unknown) => replace(index, {...node, [key]: next});
+      const input = (key: string, en: string, jp: string, number = false, min = 1, max = 2592000) => <label key={key}>{t(en, jp)}<input type={number ? "number" : "text"} {...(number ? {min, max, step: 1} : {})} required value={typeof node[key] === "number" || typeof node[key] === "string" ? String(node[key]) : ""} onChange={(event) => update(key, number && event.target.value !== "" ? Number(event.target.value) : event.target.value)} /></label>;
+      if (!node || typeof node.op !== "string" || !labels[node.op] || depth > 8) return <p key={index} role="status">{t("This saved condition is outside the Web editor limit; it remains preserved. Remove it only in the original editor.", "この保存済み条件はWeb編集の上限外のため保持しています。削除は原本の編集画面で行ってください。")}</p>;
+      return <div key={index} className="lifecycle-condition"><label>{t("Condition type", "条件の種類")}<select value={node.op} onChange={(event) => replace(index, blank(event.target.value))}>{Object.entries(labels).map(([op, label]) => <option key={op} value={op}>{label[ja ? 1 : 0]}</option>)}</select></label>
+        {node.op === "all" || node.op === "any" ? <LifecycleConditions value={Array.isArray(node.rules) ? node.rules : []} onChange={(children) => update("rules", children)} locale={locale} depth={depth + 1} disabled={disabled || depth >= 8} /> : node.op === "not" ? <LifecycleConditions value={[node.rule]} onChange={(children) => update("rule", children[0] ?? blank("event"))} locale={locale} depth={depth + 1} disabled={disabled || depth >= 8} /> : null}
+        {["event", "count"].includes(node.op) && <label>{t("Event", "イベント")}<select value={String(node.event)} onChange={(event) => update("event", event.target.value)}>{lifecycleSignals.map((signal) => <option key={signal} value={signal}>{signal}</option>)}</select></label>}
+        {"withinSeconds" in node && input("withinSeconds", "Observation window (seconds)", "観測期間（秒）", true)}
+        {(node.op === "count" || node.op === "channel_activity" || node.op === "event" && "gte" in node) && input("gte", "Minimum count", "最小件数", true, 1, 2147483647)}
+        {node.op === "duration" && input("gteSeconds", "Minimum voice duration (seconds)", "音声参加の最短時間（秒）", true, 1, 2147483647)}
+        {node.op === "role_present" && input("roleId", "Role ID", "ロールID")}
+        {node.op === "channel_activity" && input("channelId", "Channel ID", "チャンネルID")}
+        {node.op === "join_age" && <>{input("minSeconds", "Earliest after joining (seconds)", "参加後の最短時間（秒）", true, 0)}{input("maxSeconds", "Latest after joining (seconds)", "参加後の最長時間（秒）", true)}</>}
+        {node.op === "flow_answer" && <>{input("nodeId", "Question ID", "設問ID")}{input("optionId", "Answer option ID", "回答選択肢ID")}</>}
+        {["activation_state", "connection_state"].includes(node.op) && <label>{t("Required state", "必要な状態")}<select value={String(node[node.op === "activation_state" ? "activated" : "connected"])} onChange={(event) => update(node.op === "activation_state" ? "activated" : "connected", event.target.value === "true")}><option value="true">{t("Reached", "到達済み")}</option><option value="false">{t("Not reached", "未到達")}</option></select></label>}
+        <button type="button" onClick={() => onChange(value.filter((_, i) => i !== index))}>{t("Remove condition", "条件を削除")}</button>
+      </div>;
+    })}<button type="button" disabled={disabled || value.length >= 20 || depth > 8} onClick={() => onChange([...value, blank("event")])}>{t("Add condition", "条件を追加")}</button>
+  </fieldset>;
+}

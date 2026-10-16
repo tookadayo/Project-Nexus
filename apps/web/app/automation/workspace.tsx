@@ -76,6 +76,7 @@ import {
 } from "./result-branch-editor";
 import { RepeatResultsEditor } from "./repeat-results-editor";
 import { DefinitionManager } from "./definition-manager";
+import {RollbackPanel,ManagedRolePanel} from './rollback-panel';
 import { runBuiltinDeclarations } from "../../../../packages/automation/src/builtins";
 import { AutomationRunPanel, IterationResultsSummary } from "./run-panel";
 import {
@@ -2271,6 +2272,8 @@ export function AutomationWorkspace({
                     revision={revision}
                     locale={locale}
                   />
+                  <RollbackPanel client={client} flowId={definition.id} revision={revision} locale={locale} disabled={locked||dirty} reviewed={checked} onAdopt={adopt} onUncertain={setUncertain}/>
+                  <ManagedRolePanel client={client} locale={locale}/>
                   <SimulationInputPanel
                     definition={definition}
                     locale={locale}

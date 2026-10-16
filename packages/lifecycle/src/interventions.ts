@@ -1,13 +1,14 @@
 import {randomUUID} from 'node:crypto';
 import {z} from 'zod';
-import {sql,tenant,type Database,type Tx} from '../../db/src/index.js';
-import {assert,type Scope} from '../../shared/src/index.js';
-import {SettingsService,audit,type Actor} from '../../settings/src/index.js';
-import {canAdmin,canOperatePanel} from '../../security/src/index.js';
-import {conditionSchema,evaluateCondition,unavailableSignals,type Evidence} from './activation.js';
-import {EntitlementService} from '../../settings/src/billing/index.js';
-import {signalSchema} from '../../events/src/registry.js';
-import {enqueue} from '../../discord/src/outbox.js';
+import {sql,tenant,type Database,type Tx} from '../../db/src/index';
+import {assert,type Scope} from '../../shared/src/index';
+import {SettingsService,audit,type Actor} from '../../settings/src/index';
+import {canAdmin,canOperatePanel} from '../../security/src/index';
+import {conditionSchema,evaluateCondition,unavailableSignals,type Evidence} from './activation';
+import {EntitlementService} from '../../settings/src/billing/index';
+import {signalSchema} from '../../events/src/registry';
+import {enqueue} from '../../discord/src/outbox';
+import {acquireRuleScopeLocks,ruleScopeLockSet} from '../../rules/src/locks';
 const id=z.string().regex(/^\d{17,20}$/);
 const safeText=z.string().min(1).max(1500).refine(t=>!/@everyone|@here/.test(t),'Mass mentions prohibited');
 export const interventionActionSchema=z.discriminatedUnion('type',[
@@ -56,13 +57,16 @@ export class InterventionService {
    return added.rows.length?{id,state,reason}:null;
   });
  }
- async approve(s:Scope,actor:Actor,id:string){
+ async approve(s:Scope,actor:Actor,id:string,expectedState?:'suggested'|'approval',beforeWrite?:(tx:Tx)=>Promise<void>){
   return this.db.transaction().execute(async tx=>{
+   if(beforeWrite)await acquireRuleScopeLocks(tx,ruleScopeLockSet(s));
    const cfg=await new SettingsService(this.db).get(s,tx);assert((actor.source==='DISCORD_PANEL'?canOperatePanel:canAdmin)(actor.permissions,actor.roles,[cfg.adminRoleId,...cfg.managerRoleIds]),'ADMIN_REQUIRED',403);
    assert(cfg.flags.interventions_v2&&await new EntitlementService(tx).can(s,'interventions'),'ENTITLEMENT_REQUIRED',403);
-   const updated=await sql`UPDATE intervention_runs SET state='queued',available_at=now(),approved_by=${actor.key} WHERE ${tenant(s)} AND id=${id}::uuid AND state IN ('suggested','approval') RETURNING id`.execute(tx);assert(updated.rows.length,'RUN_NOT_APPROVABLE');
+   await beforeWrite?.(tx);
+   const updated=await sql`UPDATE intervention_runs SET state='queued',available_at=now(),approved_by=${actor.key} WHERE ${tenant(s)} AND id=${id}::uuid AND state IN ('suggested','approval') ${expectedState ? sql`AND state=${expectedState}` : sql``} RETURNING id`.execute(tx);assert(updated.rows.length,'RUN_NOT_APPROVABLE');
+   await beforeWrite?.(tx);
    await enqueue(tx,s,`intervention:${id}`,'INTERVENTION_DELIVER',{runId:id});
-   await audit(tx,s,actor,'intervention.approved',null,{id});
+   await beforeWrite?.(tx);await audit(tx,s,actor,'intervention.approved',null,{id});await beforeWrite?.(tx);
   });
  }
 }

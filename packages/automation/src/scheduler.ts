@@ -33,7 +33,7 @@ export class AutomationScheduler {
       // FOR SHARE fence while holding the host admission lock.
       const flow=(await sql<{id:string;name:string;draft_revision:number;active_revision:number|null;state:'DRAFT'|'ACTIVE'|'DISABLED'|'DELETED';generation:number;activator_hash:string|null;activator_ciphertext:string|null;beta_generation:number|null;updated_at:Date}>`SELECT * FROM automation_flows WHERE ${tenant(s)} AND id=${schedule.flow_id}`.execute(tx)).rows[0];
       if(!flow||flow.state!=='ACTIVE'||flow.active_revision!==schedule.revision||flow.generation!==schedule.generation)return {state:'STALE'};
-      const revision=(await sql<{revision:number;definition:FlowDefinition;semantic_hash:string;complete:boolean}>`SELECT * FROM automation_revisions WHERE ${tenant(s)} AND flow_id=${flow.id} AND revision=${schedule.revision}`.execute(tx)).rows[0]!;
+      const revision=(await sql<{revision:number;definition:FlowDefinition;semantic_hash:string;complete:boolean;restoration_requires_commit:boolean}>`SELECT * FROM automation_revisions WHERE ${tenant(s)} AND flow_id=${flow.id} AND revision=${schedule.revision}`.execute(tx)).rows[0]!;
       const planned=schedule.next_at!;
       const plannedMeaning={instant:planned,local:schedule.planned_local,offset:schedule.planned_offset};
       if(planned>now){const review=await checkScheduleMeaning(tx,s,flow.id,schedule.revision,revision.definition,now,this.service.options.scheduleMeaningReader,false,this.service.storage,plannedMeaning);return review.required?{state:'REVIEW_REQUIRED',reason:review.reason}:{state:'NOT_DUE'};}

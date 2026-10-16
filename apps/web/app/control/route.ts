@@ -167,7 +167,7 @@ export async function POST(req: NextRequest) {
     const response = await fetch(url, {
       method: "POST",
       headers: {
-        ...publicApiHeaders(context, req.cookies.get("nexus_session")?.value, "POST", url),
+        ...publicApiHeaders(context, req.cookies.get("nexus_session")?.value, "POST", url, payload),
         "Content-Type": "application/json",
       },
       body: payload,

@@ -1,0 +1,392 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 01:53 UTC
+Normal ChatGPT reasoning: 極高 (not Pro). Design only; no implementation or testing. Proposed/unverified values are not approved.
+
+
+
+
+付録I-A：全機能対応表
+A-0. 適用範囲
+
+本付録は、alpha16の全機能をA配置へ対応させるための追跡表である。
+
+A配置は承認済みの配置方針であるが、実装承認ではない。
+
+お名前.com：静的公式Web
+
+Windows PC：Next.js Dashboard / BFF / 全動的サーバー処理 / Worker / Scheduler / DB等
+
+app サブドメイン → Cloudflare Tunnel → Windows PC
+
+Browser → same-origin Next.js BFF
+
+Browser → PC API / DB の直接接続は禁止
+
+BFF → 内部PC APIは署名付き
+
+guild・権限は必ずserver側で再検査
+
+Discord Gateway / RESTはPCからDiscordへの外向き通信であり、Tunnelを経由しない
+
+Operatorはloopback限定で、Tunnel・公開Webへ絶対に公開しない
+
+A配置だけを理由として、Next.jsのserver-side DB readを全面的にAPI bridge化しない
+
+RESULT_UNKNOWN の外部副作用は自動再送しない
+
+Run終了後の最小状態は7日以内に削除
+
+backup保持は7日
+
+30日、24か月等の延長保持値は採用しない
+
+PC停止、Tunnel断、Worker停止、PC外向き通信断、Discord応答喪失は別状態として扱う
+
+alpha16実装完了後に全体動作確認・修正・受入をまとめて実施する
+
+本付録作成時点では実装・設定変更・試験・修正を行わない
+
+A-1. 共通契約
+A-1-1. 状態表記
+
+全Dashboard系画面は原則として以下の共通状態を使用する。
+
+コード	状態	UI契約
+S	Success	現在取得できた値を表示
+E	Empty	正常な「対象なし」。エラーとは表示しない
+L	Loading	初回取得中。未取得値を推測表示しない
+T	Stale	取得済みだが鮮度契約を満たさない。最終更新時刻を表示
+C	Conflict	version不一致等。黙って上書きせず再取得を促す
+U-PC	PC停止/不可到達	Dashboard/BFF自体が到達不能になり得るA案固有状態
+U-TUNNEL	Tunnel断	PCは稼働していてもappへ到達不能
+U-WORKER	Worker停止	Web/BFFは使用可能だが処理実行不可
+U-OUT	PC外向き通信断	DB等は使用可能でもDiscord/Stripe等外部処理不可
+U-EXT	外部応答喪失	外部副作用の結果が確認できない場合を含む
+F	Failure	既知の処理失敗。安全な再試行可否を明示
+
+Tは「正常」と同じ表示にしない。特にStatusについてはvalidUntilを過ぎたsnapshotを正常状態として表示しない。
+
+A-1-2. 認可共通契約
+
+すべての認証済み操作は概ね、
+
+session → guild選択 → guild所属/対象確認 → permission → 対象version/状態 → 操作
+
+の順にserver側で再検査する。
+
+Browserから送信されたguild ID・role・permission・対象versionを信用しない。
+
+A-1-3. Web境界
+境界	契約
+公開Web	お名前.com静的配信物のみ
+Dashboard	PC上Next.js
+Browser→BFF	same-origin HTTPS
+Browser→PC API	禁止
+Browser→DB	禁止
+BFF→PC API	内部署名付き。秘密はBrowserへ返さない
+Next server→DB	A配置では既存server-side read/writeを維持可能
+Operator	loopbackのみ
+Discord	PC→Discord outbound。Tunnel非経由
+Stripe	PC上Next/BFFから外部接続
+
+session cookieはhost-onlyとし、提案として__Host-系cookieを利用できる。Domainは設定しない。Secure、HttpOnlyを必須とし、SameSiteは実際のサイト構成に合わせてLax等を採用する。same-originであっても状態変更BFFではCSRF対策を行う。
+
+A-2. 全機能対応表
+機能ID	利用者の画面操作	route / 内部操作・API契約ID	DB正本 / transaction境界	permission gate	UI状態	失敗時の回復	現状との差分	移行Task	後日受入ID / 合格条件
+AUTH-01	login/session確認、logout、期限切れ後再認証	既存auth/BFF経路・route名未確認。C-A16-AUTH-01	既存DB session機構。発行/更新/失効を1 transactionで確定	authenticated user	S/E/L/C/U-PC/U-TUNNEL	再認証。期限切れsessionを復活させない	監査確認：DB sessionを使用。cookie/route実名は未確認	M-A16-AUTH-01	A16-AUTH-01：有効sessionのみ認証済み、失効sessionは拒否
+AUTH-02	guild一覧取得、guild切替	既存BFF経路・route名未確認。C-A16-AUTH-02	session＋guild関連DB/Discord情報。選択変更をtransaction化	authenticated + guild membership	S/E/L/C/U	再取得。未所属guildは拒否	監査確認：auth/server-accessがDiscord/DB参照。具体schema未確認	M-A16-AUTH-02	A16-AUTH-02：所属guildのみ選択可能
+AUTH-03	guild内権限確認、管理操作	既存server-side authorization＋C-A16-AUTH-03	原則readはread transaction、変更は対象更新transaction	guild permissionをserver再検査	S/C/U	権限不足表示。client権限を信用しない	既存境界を維持。permission mapping詳細未確認	M-A16-AUTH-03	A16-AUTH-03：権限不足操作がserver側で拒否
+ANL-01	Basic Analytics閲覧、期間/対象変更	既存分析経路。C-A16-ANL-01（route名未確認）	PC側Analytics保存値。snapshot/read transaction	guild analytics permission	S/E/L/T/U-WORKER/U-PC	safe read retry、stale表示	監査確認：Basic Analytics v3	M-A16-ANL-01	A16-ANL-01：同条件で保存済み分析を正しく表示
+ANL-02	Detailed Analysis閲覧、生成/保存	既存詳細分析処理＋必要bridge整理。C-A16-ANL-02	Detailed Analysis正本。保存は1 transaction	analytics permission	S/E/L/T/C/U	保存済み結果を再取得。処理中は重複開始しない	監査確認：保存処理あり。ただしHTTP bridge不足	M-A16-ANL-02	A16-ANL-02：生成要求と保存結果が一貫
+EXP-01	Explore graph一覧、期間変更、graph閲覧	既存Next server-side DB read。route名未確認。C-A16-EXP-01	graph関連DB。read transaction	guild + Explore permission	S/E/L/T/U	DB/API再取得。staleなら時刻表示	監査確認：graphsをNextから直接DB参照	M-A16-EXP-01	A16-EXP-01：A配置でもserver-side readが維持され表示可能
+EXP-02	view segment作成/変更/削除、適用	既存Next server-side DB処理・route名未確認。C-A16-EXP-02	viewsegment正本。変更単位transaction	guild + segment permission	S/E/L/C/U	conflict時再取得→明示再編集	監査確認。domain invariantの保持が必要	M-A16-EXP-02	A16-EXP-02：不正guild/古いversionの変更を拒否
+OPS-01	attention一覧/詳細、状態変更	既存Next DB処理・route名未確認。C-A16-OPS-01	attention正本。状態変更transaction	guild + Operations permission	S/E/L/T/C/U	再取得。競合は上書きしない	監査確認：attention	M-A16-OPS-01	A16-OPS-01：一覧・詳細・変更がguild境界内で完結
+OPS-02	intake一覧/受付/状態変更/削除	既存Next DB処理・route名未確認。C-A16-OPS-02	intake正本。受付/状態変更transaction	guild + intake permission	S/E/L/T/C/U	conflict再取得、入力再送時は重複防止	監査確認：intake	M-A16-OPS-02	A16-OPS-02：構造化受付状態を正しく扱う
+OPS-03	events一覧/作成/変更/削除/閲覧	既存Next DB処理・route名未確認。C-A16-OPS-03	event正本。各変更transaction	guild + event management	S/E/L/T/C/U	version再取得、削除済み対象は復活させない	監査確認：events	M-A16-OPS-03	A16-OPS-03：CRUDとguild認可が一貫
+OPS-04	playbook一覧/作成/編集/削除/実行設定	既存Next DB処理・route名未確認。C-A16-OPS-04	playbook正本。revision変更transaction	guild + playbook permission	S/E/L/T/C/U	revision conflictを明示	監査確認：playbook	M-A16-OPS-04	A16-OPS-04：古いrevisionからの変更を拒否
+OPS-05	experiments一覧/作成/変更/終了/閲覧	既存Next DB処理・route名未確認。C-A16-OPS-05	experiment正本。状態遷移transaction	guild + experiment permission	S/E/L/T/C/U	状態競合は再取得	監査確認：experiments	M-A16-OPS-05	A16-OPS-05：不正状態遷移を拒否
+OPS-06	reports一覧/生成/閲覧/削除	既存Next DB処理・route名未確認。C-A16-OPS-06	report正本。生成結果commit transaction	guild + report permission	S/E/L/T/U	保存済み結果を再取得。生成失敗は再実行可否を明示	監査確認：reports	M-A16-OPS-06	A16-OPS-06：guild越境なし、保存結果と表示一致
+OPS-07	orgteams一覧/作成/変更/削除	既存Next DB処理・route名未確認。C-A16-OPS-07	org/team正本。変更transaction	guild/org管理permission	S/E/L/C/U	conflict再取得	監査確認：orgteams	M-A16-OPS-07	A16-OPS-07：権限境界と参照整合性を保持
+OPS-08	webhook credential作成/ローテーション/失効/一覧	既存Next DB処理・route名未確認。C-A16-OPS-08	credential正本。発行/失効transaction	guild + credential管理permission	S/E/L/C/U	再発行後旧credentialを使用不可。secret再表示不可	監査確認：webhookcredentials。secret返却仕様未照合	M-A16-OPS-08	A16-OPS-08：credential secretがBrowser/通常一覧へ露出しない
+AUTO-01	automation一覧/作成/編集/削除、draft編集	既存Automation editor＋C-A16-AUTO-01	automation draft正本。save transaction	guild + automation edit	S/E/L/C/U-WORKER	conflict時version再取得	監査確認：Automation Runtime存在	M-A16-AUTO-01	A16-AUTO-01：draft変更が正しいguild/versionに保存
+AUTO-02	revision作成/閲覧/比較/有効revision選択	既存revision機構＋C-A16-AUTO-02	immutable revision正本。作成transaction	guild + automation edit	S/E/L/C/U	immutable revisionを変更せず新revision化	既存設計をalpha16契約へ固定	M-A16-AUTO-02	A16-AUTO-02：同revisionは後から書換不可
+AUTO-03	Run開始/状態閲覧/cancel	Automation Runtime＋C-A16-AUTO-03	Run/step/attempt正本。開始・cancel意図をtransaction	guild + automation execute	S/L/T/C/U-WORKER/U-OUT/U-EXT	安全な状態再取得。副作用結果不明はUNKNOWN	監査確認：Runtime/PG永続化	M-A16-AUTO-03	A16-AUTO-03：Run状態とDB永続状態が一致
+AUTO-04	wait状態閲覧、再開要求、resume	Runtime内部操作＋C-A16-AUTO-04	wait/resume stateをtransaction	guild + automation execute	S/L/T/C/U-WORKER	restart後PGから再構成。期限切れは再開不可	既存Runtimeをクラッシュ安全契約へ詳細化	M-A16-AUTO-04	A16-AUTO-04：再起動後に不正な二重resumeなし
+AUTO-05	schedule作成/変更/停止/再開、予定Run確認	Scheduler＋C-A16-AUTO-05	schedule正本。変更transaction	guild + schedule permission	S/E/L/C/U-WORKER	scheduler停止中はmissed policyに従う。過去予定を無断追送しない	監査確認：Scheduler/PG	M-A16-AUTO-05	A16-AUTO-05：停止復旧時に過去Runを勝手に大量実行しない
+PLAN-01	現在Plan閲覧、利用状況確認	既存Plan/BFF経路・route名未確認。C-A16-PLAN-01	Plan catalog/account state。変更がある場合transaction	authenticated / guild admin where applicable	S/E/L/T/U	再取得。billing外部状態は同期状態を明示	監査確認：Plan処理	M-A16-PLAN-01	A16-PLAN-01：表示Planとserver側権限判定が一致
+BETA-01	Beta申請/受付状況/管理者承認・拒否	既存Beta admission＋C-A16-BETA-01	admission正本。申請/判断transaction	applicant / operator/admin	S/E/L/C/U	重複申請を抑止、状態を再取得	監査確認：Beta admission	M-A16-BETA-01	A16-BETA-01：申請状態とアクセス権が矛盾しない
+BILL-01	Plan/price catalog閲覧	既存DB catalog＋C-A16-BILL-01	NEXUS DB catalog正本	public/auth appropriate	S/E/L/T/U	外部決済障害とcatalog障害を分離	監査確認：catalogはDB	M-A16-BILL-01	A16-BILL-01：DB catalogと表示値一致
+BILL-02	Checkout開始、購入操作	既存Next/Stripe checkout＋C-A16-BILL-02	checkout intentをtransaction、決済結果はStripe側を正本とする	authenticated + billing permission	S/L/C/U-OUT/U-EXT	checkout再生成を無条件反復しない。状態再取得	監査確認：Stripe CheckoutはNext側	M-A16-BILL-02	A16-BILL-02：権限なしcheckout不可、外部結果を捏造しない
+BILL-03	billing状態/支払状態反映	Stripe webhook＋C-A16-BILL-03	Stripe event処理＋local projection transaction	machine callback only	S/T/U-OUT/U-EXT	webhook再送を安全に処理。未確認eventは保留	監査確認：Stripe webhookはNext	M-A16-BILL-03	A16-BILL-03：正当なcallbackのみ状態更新
+FACT-01	Fact snapshot/分析根拠の閲覧、freshness確認	PC内部Fact生成/取得＋C-A16-FACT-01	Fact snapshot正本。snapshot確定transaction	guild-scoped analytics/rule permission	S/E/L/T/U-WORKER	欠測を推測で補完せず、再評価を要求	新規alpha16契約	M-A16-FACT-01	A16-FACT-01：同一snapshotを再利用でき、鮮度/欠測表示が正しい
+RULE-01	Rule設定閲覧/変更、threshold等の版管理	PC Rule Engine内部＋C-A16-RULE-01	rule config/version正本。新version作成transaction	system/operator or designated admin	S/E/L/C/U-WORKER	immutable versionを維持し新version化	既存Ruleは固定閾値診断。alpha16で拡張	M-A16-RULE-01	A16-RULE-01：ruleId/ruleVersion/engineVersionが結果に固定
+RULE-02	評価要求/評価状況/再評価	PC evaluation queue＋C-A16-RULE-02	evaluation job＋Fact snapshot参照。enqueue transaction	guild rule permission	S/L/T/U-WORKER	queue再構成、古いjobは再評価条件を再検証	新規alpha16契約	M-A16-RULE-02	A16-RULE-02：同入力＋同版で結果が決定的
+SUG-01	Suggestion一覧/詳細/未読表示	BFF→PC内部API＋C-A16-SUG-01	Suggestion正本。read transaction	guild suggestion view	S/E/L/T/U-WORKER	stale表示、再取得	新規alpha16	M-A16-SUG-01	A16-SUG-01：根拠Factと対象版を表示可能
+SUG-02	個別閲覧済/未読、却下	BFF→PC API＋C-A16-SUG-02	shared suggestion stateとper-user stateを別transaction/recordで管理	guild suggestion view/reject	S/E/L/C/U	user stateだけ失敗してもshared stateを変更しない	新規alpha16	M-A16-SUG-02	A16-SUG-02：閲覧者状態と提案有効状態が混同されない
+SUG-03	Suggestionからdraftへ反映、反映前確認	BFF→PC API＋C-A16-SUG-03	draft link＋対象revision変更をtransaction	guild + target-specific edit permission	S/L/C/U	現在権限/guild/version/期限/tombstone/変更可能項目を再検証	新規alpha16	M-A16-SUG-03	A16-SUG-03：古い提案から無断変更不可
+SUG-04	Suggestionの適用、適用結果/履歴閲覧	BFF→PC API＋C-A16-SUG-04	operation intent/result/history transaction	target-specific execute permission	S/L/C/U-WORKER/U-OUT/U-EXT	外部結果UNKNOWNを自動再送しない。read-only照合不能ならUNKNOWN維持	新規alpha16	M-A16-SUG-04	A16-SUG-04：AI自身は自動適用せず、明示操作だけが適用
+HIST-01	Rule/Suggestion/設定変更履歴閲覧	BFF→PC内部API＋C-A16-HIST-01	append-only history/audit正本	guild/admin/operator相当	S/E/L/T/U	履歴欠落を現在値から推測生成しない	新規alpha16	M-A16-HIST-01	A16-HIST-01：生成→閲覧→却下→draft→適用結果を追跡可能
+ANN-01	Announcement一覧/作成/編集/公開/更新/撤回、公開閲覧	PC Next/Operator→静的publication＋C-A16-ANN-01	PC DBが正本。publication version/hashを確定して静的artifact化	public read / authorized publisher	S/E/L/T/U-PC/U-TUNNEL	公開失敗は旧公開版を維持。撤回は公開版を明示的に無効化	監査確認：Next→DB、Operator公開。静的同期は新規	M-A16-ANN-01	A16-ANN-01：非公開情報を含まず、publish/update/withdrawが版単位で追跡可能
+LEGAL-01	Terms/Privacy/Legal閲覧	お名前.com静的Web＋C-A16-LEGAL-01	公開文書artifact正本。具体的source path未確認	public	S/L/T/U	旧版表示時は版/更新日を明示	未完了：現状未公開告知部分あり	M-A16-LEGAL-01	A16-LEGAL-01：公開対象が意図した版で表示され、未公開状態を完成扱いしない
+CONTACT-01	Contactページ閲覧、問い合わせ送信（機能有効化後）	静的Contact＋BFF submission（route名未確認）。C-A16-CONTACT-01	送信記録を保存する場合のDB正本/transactionは設計対象。外部mail delivery先未確認	public submission / rate-limit	S/E/L/U-PC/U-TUNNEL	送信失敗を成功扱いしない。再送時重複を抑止	未完了：現在Contact form無効	M-A16-CONTACT-01	A16-CONTACT-01：有効化前は送信UIを成功可能状態にしない
+STATUS-01	公開Status閲覧、最終更新確認	PC生成snapshot→静的artifact＋C-A16-STATUS-01	PC status snapshot正本＋公開artifact。generatedAt/validUntil確定	public read	S/T/U	validUntil超過時は「正常」と表示せず期限切れ表示	新規設計。現在独立last-result cacheなし	M-A16-STATUS-01	A16-STATUS-01：期限切れsnapshotを正常表示しない
+PRIV-01	データ削除要求、削除状態確認	BFF→PC DB/privacy operation＋C-A16-PRIV-01	deletion request/tombstone。削除transactionで対象を確定	authenticated + account/guild ownership	S/L/C/U	既にtombstone済みなら再削除せず状態表示	監査確認：privacy/tombstone処理	M-A16-PRIV-01	A16-PRIV-01：削除対象がtombstoneを越えて復活しない
+PRIV-02	保持状態/削除済み状態の内部確認	PC retention job＋C-A16-PRIV-02	retention/tombstone正本。Run終了後最小状態は7日以内削除	operator/system	S/T/U-WORKER	job再開時tombstoneを最優先	既存制約をalpha16へ固定。延長保持は採用しない	M-A16-PRIV-02	A16-PRIV-02：7日以内削除契約を超えてRun最小状態を保持しない
+PRIV-03	backup作成/一覧/restore（管理操作）	Operator内部操作＋C-A16-PRIV-03	backup artifact＋DB metadata。backup retention 7日	operator only	S/E/L/U-PC	restore前後にtombstone再適用。古い削除状態を復活させない	監査確認：retention/tombstone。実配備先未確認	M-A16-PRIV-03	A16-PRIV-03：restore後も削除済み対象が復活しない
+OP-01	Operator login/maintenance画面、状態確認	loopback Fastify内部操作。route実名未確認。C-A16-OP-01	Operator session/maintenance state。transactionは各操作単位	local operator only	S/E/L/U-PC	loopback外から拒否。Tunnel経由を拒否	監査確認：別loopback Fastify	M-A16-OP-01	A16-OP-01：外部interface/Tunnelから到達不能
+OP-02	publish、retention、reconcile、maintenance等の管理操作	loopback Operator＋PC内部job。C-A16-OP-02	各domain正本をdomain transactionで更新	operator-specific	S/L/C/U-WORKER/U-OUT	操作単位で再取得。危険操作を暗黙再実行しない	既存Operator＋新publication/reconcile設計	M-A16-OP-02	A16-OP-02：Operator操作が公開境界を越えず、結果が履歴化される
+A-3. 対応表から明示的に除外しない操作
+
+alpha16では、上表の各機能について単なる「一覧表示」だけを実装対象と解釈しない。
+
+少なくとも以下を当該機能の操作集合として追跡する。
+
+一覧
+
+詳細閲覧
+
+作成
+
+変更
+
+削除
+
+有効化/無効化
+
+実行
+
+キャンセル
+
+再開
+
+revision/version変更
+
+公開
+
+更新
+
+撤回
+
+閲覧済み/未読
+
+却下
+
+draft反映
+
+適用結果閲覧
+
+状態確認
+
+管理操作
+
+ただし、現在のコードでその操作が存在することまで確認できていない場合は、実装担当者が推測で追加してはならない。
+その場合は対応するM-A16-*照合Taskで既存画面・既存処理を確認し、alpha16設計上必要な操作との差分を確定する。
+
+A-4. alpha16で特に固定する全機能横断境界
+1. Suggestionの責務境界
+
+SuggestionはAutomation専用ではない。
+
+対象は、
+
+Automation
+
+Analytics
+
+Explore
+
+Operations
+
+Events
+
+Playbook
+
+Reports
+
+Organization/Teams
+
+その他alpha16で変更可能なNEXUS機能
+
+を含む。
+
+対象識別はautomationIdだけに依存せず、次回のAPI/DB付録で定義するtargetType / targetId / targetVersion体系へ統一する。
+
+Suggestionは、
+
+自動適用しない
+
+自動有効化しない
+
+自動課金しない
+
+自動投稿しない
+
+自動権限変更しない
+
+外部操作を勝手に実行しない
+
+を固定する。
+
+2. RESULT_UNKNOWN
+
+外部副作用を実行した後に結果確認ができなかった場合、
+
+UNKNOWN → 自動再送
+
+は禁止。
+
+照合は副作用を発生させないread-only確認だけを使用する。
+
+照合不能ならUNKNOWNを維持する。
+
+人間が明示的に新しい操作を行う場合も、元のUNKNOWNを成功/失敗へ書き換えず、別operationとして記録する。
+
+3. A配置におけるDBアクセス
+
+A配置ではNext.jsそのものがWindows PC上にある。
+
+したがって、
+
+Browser → Tunnel → Next.js BFF → server-side DB
+
+という経路は許容する。
+
+Explore/Operations等の既存server-side DB readについて、Tunnel対応だけを理由に、
+
+Next.js → PC API → DB
+
+へ全面的に書き換えることはalpha16の必須条件ではない。
+
+一方、Browserへ直接DB情報を出す設計変更は不可。
+
+4. 障害状態
+状態	Dashboard/BFF	Worker	外部処理	UI契約
+PC停止	不可	不可	不可	A案ではDashboard自体が表示不能になり得る
+Tunnel断	PC内では稼働	稼働可能	稼働可能	appへ到達不能
+Worker停止	BFFは稼働可能	不可	原則処理不可	Dashboardは表示可能、実行系をUnavailable
+PC outbound断	BFF/DBは稼働可能	稼働可能	Discord等不可	外部処理のみUnavailable
+Discord応答喪失	BFF/DBは稼働可能	稼働可能	Discord結果不明の可能性	UNKNOWN/外部Unavailable
+DB停止	Next/BFF到達可能な場合あり	状態により不可	外部状態とは分離	DB依存機能Unavailable
+Static public更新失敗	app側は別	稼働可能	公開artifactのみ旧版	旧公開版維持、更新失敗表示
+A-5. 現時点での実装着手境界
+
+実装担当者は、上表を根拠として以下を勝手に変更してはならない。
+
+A配置をB配置へ変更しない。
+
+Browser直結APIを追加しない。
+
+DBをBrowserへ公開しない。
+
+OperatorをTunnelへ公開しない。
+
+Discord Gateway/RESTをTunnel経由へ変更しない。
+
+server-side DB readをTunnel対応だけを理由に全面bridge化しない。
+
+RESULT_UNKNOWNを自動retry可能へ緩和しない。
+
+Suggestionから自動適用を実装しない。
+
+未承認の保持期間を追加しない。
+
+minN、信頼度、統計的独立性等を勝手に保証値として扱わない。
+
+現在存在するroute/table名を推測で新規契約名として確定しない。
+
+未公開のLegal/Statusや無効なContactを完成済みとして扱わない。
+
+A-6. 状態区分
+確認済み事項
+
+Browser→same-origin Next.js BFF→署名付きPC APIという基本経路
+
+Next.js auth/sessionがDB sessionを使用
+
+auth/server-accessがDiscord/DBを参照
+
+Next layoutがcookies/headers依存
+
+Basic Analytics v3
+
+Detailed Analysis保存処理
+
+Automation Runtime / Scheduler / PostgreSQL永続化
+
+Discord GatewayのPCからの外向き接続
+
+Plan/Beta admission
+
+Privacy retention/tombstone
+
+Explore/OperationsのNext server-side DBアクセス
+
+Billing catalog DB、Stripe Checkout/WebhookのNext側処理
+
+AnnouncementのNext→DB＋local Operator公開
+
+現Ruleが固定閾値方式
+
+現Webに独立last-result cacheがない
+
+Operatorが別loopback Fastify
+
+A配置、same-origin、PC側全動的処理、Operator非公開
+
+RESULT_UNKNOWN自動再送禁止
+
+Run最小状態7日以内削除、backup 7日
+
+いずれも読み取り専用コード監査・既存資料による構造確認であり、動作確認済み・本番稼働済みを意味しない。
+
+提案契約
+
+本付録のC-A16-* API契約ID
+
+M-A16-*移行Task ID
+
+A16-*後日受入ID
+
+共通UI状態コード
+
+全機能共通のserver-side permission再検査
+
+Suggestionの全機能横断target model
+
+Fact/Rule/Suggestion/Historyのalpha16設計上の責務分離
+
+StatusのgeneratedAt / validUntil
+
+AnnouncementのPC正本＋静的公開版
+
+A配置で既存server-side DB readを維持する方針
+
+これらはalpha16の実装契約として提案・設計するもので、現時点の実装済み仕様ではない。
+
+まだ埋まらない情報
+
+実際の既存route名/API schema
+
+実際のtable名・column・index
+
+既存domain invariantの具体的な実装箇所
+
+DB/Redisの実配備先
+
+お名前.com契約で必要な静的配信・DNS構成の実環境条件
+
+DNSのfull/partial構成やCNAME設定状況
+
+実際のCloudflare Tunnel設定
+
+Operatorの実route・認証方式
+
+Contactの実際の送信先/サポート運用
+
+現在未公開のLegal/Status公開物
+
+公開artifactの実配置・cache構成
+
+既存APIと本付録の契約IDとの正確な対応関係
+
+これらは実装担当者が推測で埋める事項ではなく、後続の照合TaskまたはAPI/DB付録で確定する事項とする。

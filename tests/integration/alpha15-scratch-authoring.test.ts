@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import {
   connect,
@@ -35,7 +35,7 @@ let db: Database,
   infra: Awaited<ReturnType<typeof isolatedPostgres>>,
   serial = 0;
 const actor: Actor = {
-  key: "synthetic-authoring-admin",
+  key: createHash("sha256").update("synthetic-authoring-admin").digest("hex"),
   encryptedUserId: "synthetic-encrypted-identity",
   permissions: "8",
   roles: [],

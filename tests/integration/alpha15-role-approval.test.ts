@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import Fastify from "fastify";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import {
@@ -51,16 +50,9 @@ beforeAll(async () => {
   vi.stubEnv("NEXUS_WEB_URL", "https://nexus.example");
   infra = await isolatedPostgres();
   db = connect(infra.databaseUrl);
-  await migrate(db, { throughVersion: 52 });
-  for (const name of ["054_alpha15_automation", "056_alpha15_role_policy", "059_alpha15_schedule_reviews"])
-    await sql
-      .raw(
-        await readFile(
-          new URL(`../../migrations/${name}.sql`, import.meta.url),
-          "utf8",
-        ),
-      )
-      .execute(db);
+  // Exercise the current public-session schema, including v2 proof replay
+  // state. A partial alpha15 schema fails before the live policy checks.
+  await migrate(db);
 });
 afterAll(async () => {
   await db?.destroy();
@@ -378,6 +370,7 @@ async function apiFixture() {
           sessionReference: session,
           method,
           path,
+          body,
           ...(method === "POST" ? { origin: "https://nexus.example" } : {}),
         }),
         ...(method === "POST"
@@ -397,7 +390,7 @@ it("wires the API to live requester and approver checks and requires the exact p
   const f = await apiFixture();
   try {
     const result = await f.call("GET", "/approvals");
-    expect(result.statusCode).toBe(200);
+    expect(result.statusCode, result.body).toBe(200);
     const item = result.json().items[0] as {
       policyFingerprint: string;
       changedChannelCount: number;
@@ -441,8 +434,9 @@ it("wires the API to live requester and approver checks and requires the exact p
 it("refuses a current requester revocation without hiding the pending item", async () => {
   const f = await apiFixture();
   try {
-    const first = await f.call("GET", "/approvals"),
-      hash = first.json().items[0].policyFingerprint;
+    const first = await f.call("GET", "/approvals");
+    expect(first.statusCode, first.body).toBe(200);
+    const hash = first.json().items[0].policyFingerprint;
     f.discord.members.get(requester)!.permissions = "0";
     const unavailable = await f.call("GET", "/approvals");
     expect(unavailable.statusCode).toBe(200);

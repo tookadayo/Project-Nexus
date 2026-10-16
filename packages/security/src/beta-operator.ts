@@ -28,13 +28,14 @@ import {
 } from "../../settings/src/plan-registry";
 import { operatorAudit } from "./operator-auth";
 import { cancelAnalysisRuns as cancelBetaRuns } from "../../analysis/src/usage";
+import { acquireRuleScopeLocks, ruleScopeLockSet } from "../../rules/src/locks";
 export { cancelAnalysisRuns as cancelBetaRuns } from "../../analysis/src/usage";
 
 export const betaFeatures = canonicalFeatures.filter(
   (feature) =>
     featureAvailability[feature] === "available" && feature !== "multi_guild",
 );
-const changeSchema = z
+export const betaChangeSchema = z
   .object({
     guildId: z.string().regex(/^\d{17,20}$/),
     action: z.enum([
@@ -56,7 +57,7 @@ const changeSchema = z
     limits: betaLimitsSchema.optional(),
   })
   .strict();
-export type BetaChange = z.infer<typeof changeSchema>;
+export type BetaChange = z.infer<typeof betaChangeSchema>;
 type Probe = {
   name: string;
   present: boolean;
@@ -142,33 +143,24 @@ export class BetaOperator {
     return { invitation, grants, history, deletion };
   }
   async change(input: unknown) {
-    const data = changeSchema.parse(input),
-      s = scopeForGuild(data.guildId);
-    const fingerprint = createHash("sha256")
-      .update(JSON.stringify(data))
-      .digest("hex");
-    const prior = (
-      await sql<{
-        fingerprint: string;
-        result: Invitation;
-      }>`SELECT fingerprint,result FROM operator_requests WHERE id=${data.requestId}::uuid`.execute(
-        this.db,
-      )
-    ).rows[0];
-    if (prior) {
-      assert(prior.fingerprint === fingerprint, "IDEMPOTENCY_CONFLICT", 409);
-      return prior.result;
-    }
+    const prepared = await this.prepareChange(input);
+    return this.db.transaction().execute((tx) => this.changeInTransaction(tx, prepared));
+  }
+  /** Read-only provider verification happens before any DB transaction. The
+   * prepared proof is short-lived and is checked again by the domain writer. */
+  async prepareChange(input: unknown) {
+    const data = betaChangeSchema.parse(input);
+    const fingerprint = createHash("sha256").update(JSON.stringify(data)).digest("hex");
     const proof = ["register", "activate", "resume"].includes(data.action)
-      ? await this.probe(data.guildId)
-      : null;
-    if (proof)
-      assert(
-        proof.present && proof.canObserve && proof.name.length <= 100,
-        "BETA_BOT_UNAVAILABLE",
-        409,
-      );
-    return this.db.transaction().execute(async (tx) => {
+      ? await this.probe(data.guildId) : null;
+    if (proof) assert(proof.present && proof.canObserve && proof.name.length <= 100, "BETA_BOT_UNAVAILABLE", 409);
+    return { data, fingerprint, proof };
+  }
+  async changeInTransaction(tx: Tx, prepared: Awaited<ReturnType<BetaOperator["prepareChange"]>>) {
+    assert(tx.isTransaction, "OPERATOR_TRANSACTION_REQUIRED", 500);
+    const { data, fingerprint, proof } = prepared,
+      s = scopeForGuild(data.guildId);
+      await acquireRuleScopeLocks(tx, ruleScopeLockSet(s));
       await privacyReadLock(tx, s);
       await betaLock(tx, s, true);
       // Serializes capacity AND request-key races across guilds.
@@ -354,6 +346,5 @@ export class BetaOperator {
         tx,
       );
       return row;
-    });
   }
 }

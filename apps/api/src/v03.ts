@@ -31,8 +31,8 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
  const webActor=(req:object)=>{const actor=actors.get(req);assert(actor,'SESSION_REQUIRED',401);return actor;};
  app.addHook('preHandler',async req=>{
    if(!legacyPaths.has(req.routeOptions.url??''))return;
-   if(req.method==='GET'&&!req.headers['x-nexus-user-proof'])return;
-   const permission=req.method==='GET'||req.routeOptions.url===base+'/product-event'?'READ':req.routeOptions.url===base+'/attention/action'?'OPERATE':'CONFIGURE';
+   if(['GET','HEAD'].includes(req.method)&&!req.headers['x-nexus-user-proof'])return;
+   const permission=['GET','HEAD'].includes(req.method)||req.routeOptions.url===base+'/product-event'?'READ':req.routeOptions.url===base+'/attention/action'?'OPERATE':'CONFIGURE';
    const current=await publicApiContext(req,db,key,discord,vault,permission);actors.set(req,current.actor);
  });
  const optionsCache=new Map<string,{at:number;value:Awaited<ReturnType<NonNullable<DiscordPort['options']>>>}>();

@@ -1,0 +1,140 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 03:06 UTC
+Reasoning: 極高. Design only; no code/configuration/tests. Numeric retention and receipt values are unapproved candidates. Existing table and backup mapping is unverified.
+
+付録I-C4：保持・削除・復元の整合契約
+1. evaluation_result と Suggestion の期限矛盾
+
+採用案：Suggestionを最小履歴へ切り離し、evaluation_resultは期限どおり削除する。
+
+suggestion.evaluation_result_id：FKを維持しつつnullable。生成直後は必須、evaluation purge時にNULL化。
+
+suggestion.evaluation_ref_hash: CHAR(64)!を追加。評価内容自体は保存しない。
+
+evaluation_as_of / rule_version / engine_version / config_version / live_target_version / target_type / target_idは生成時immutable。
+
+suggestion_evidence.evaluation_result_idもnullable化し、Fact/evaluation payloadを複製しない。
+
+suggestion_historyはevaluation/operationへの必須FKを持たず、event_type + reference_digestによる最小履歴とする。
+
+purge順は
+未解決Apply guardをnon-actionable化 → evidence FK切離し → Suggestion FK切離し → evaluation_result/job削除
+とし、同一transactionで処理する。期限切れのlive根拠・評価を使うApplyは拒否する。INVALIDATED化だけで評価結果を残さない。
+
+I-C2のFact/evaluation 48hは未承認候補、Suggestion 14dも未承認候補である。14日はactionable期間ではなく、履歴上限として検討された候補であり、evaluationの保持を14日に延長する根拠にはしない。14日を採用する場合もFact/evaluationをコピーして保持を延長しない。旧30日/24か月・一律7日は採用しない。
+
+2. reject / dismiss 継承
+
+Suggestion/user_state削除後の版変更だけによる復活を防ぐため、lineage_suppressionを最小抑止recordとして採用候補にする。
+
+保存するのは guild + user + suppression_kind + target lineage + action_class + expires_at のみ。Suggestion本文、Fact/evidence、自由文reason、raw投稿、DMは保存しない。
+
+lineage_keyは同一改善対象・操作種別を識別するSHA-256 digest。Suggestion/rule/config/engine versionだけをキーにしないため、版変更だけではdismiss/rejectを解除しない。expires_at到達後はrecordを削除し、UIも旧抑止なしとして扱い再生成を許可する。期限は未承認であり、永続抑止は保証しない。
+
+3. source-health / Fact比較
+
+evaluationにはsource_health_set_hashに加えて、immutable source-health observation ID＋observation revision集合を固定する。これはjob/input hash/dedupeにも含め、retry/resumeで変更しない。
+
+fact_value uniqueは：
+
+guild + snapshot_id + metric_id + dimension_key + period_role + window_start + window_end
+
+とする。period_roleは登録enum（CURRENT/PREVIOUS等）、windowはUTC範囲。
+
+valueは自由JSON禁止。value_type=COUNT|DECIMAL|BOOLEAN|TIMESTAMPと対応typed valueを使用し、対応型以外はNULLとするCHECKを置く。quality=FRESH|STALE|MISSING|SUPPRESSED|UNKNOWN、source_revisionはimmutable。metricは許可registryのみ。raw投稿、DM、自由文、secret、不要な個人IDは禁止。
+
+source-healthは業務Factと分離する。DATA-001は確認済みのsource health / coverage / last successful observationからのみ生成し、観測自体が欠ければUNKNOWN。
+
+4. Suggestion state / Apply guard
+
+shared stateは：
+
+ACTIVE / REJECTED / EXPIRED / INVALIDATED / CONSUMED
+
+の5値とする。SUPERSEDEDはINVALIDATED + reason/history、APPLIEDはoperation成功履歴で表現する。
+
+draft作成・Apply受付ではCONSUMEDにしない。外部効果の成功確定だけがCONSUMED条件。UNKNOWNはRuntime側で保持し、成功へ変換しない。
+
+Suggestion版、live_target_version、immutable draft revision/hash、rule/engine/config versionは分離する。Apply直前にSuggestion/live/draft版、guild、権限、tombstone、変更可能fieldを再検証する。
+
+未解決operation guard中は同一Suggestionだけでなく、同一target/action lineageへの別draft迂回Applyも拒否する。人の明示的新操作は別intentとして元UNKNOWNを残す。guard削除前に旧Suggestion/tokenを不可逆にnon-actionable化する。外部操作成功が必ずlive versionを進めるとは一般保証しない。
+
+5. Privacy logical tables
+
+以下は提案logical table名。実table名、既存guild_id/user_id/subject_idの型は未照合。Discord IDを根拠なくUUIDへ変換しない。
+
+table	必須schema / constraint	index / scope	期限
+privacy_tombstone	tombstone_id:ID PK; subject_type:enum!; subject_id:existing-id-type!; guild_id:existing-type?; created_at:TIMESTAMPTZ!; reason_code:enum!; state:ACTIVE/REVOKED!	UNIQUE(subject_type,subject_id,guild_id)	ACTIVE中は全処理遮断
+privacy_deletion_job	job_id:ID PK; tombstone_id:ID FK!; subject_type!; subject_id!; guild_id?; state:REQUESTED/RUNNING/PURGED/BLOCKED!; state_version:BIGINT!=1; requested_at!; started_at?; completed_at?; failure_code?	subject+state / tombstone	完了後に承認済み最小保持で削除
+deletion_receipt	receipt_id:ID PK; tombstone_id:ID FK!; scope_hash:CHAR(64)!; secret_hash:CHAR(64)!; issued_at!; expires_at!; last_used_at?; use_count:INT!=0; state:ACTIVE/EXPIRED/PURGED!	tombstone+state	TTL後削除、secret原文なし
+lineage_suppression	suppression_id:ID PK; guild_id:existing-type!; subject_user_id:existing-type!; suppression_kind:DISMISS/REJECT!; target_type!; target_id!; lineage_key:CHAR(64)!; action_class!; created_at!; expires_at!; state:ACTIVE/EXPIRED!	UNIQUE(guild,user,kind,target,lineage,action)	承認期限後purge
+
+tombstoneは通常データより常に優先し、restoreでも解除しない。
+
+6. Privacy deletion / receipt
+
+削除要求transactionは、
+
+scope検証 → tombstone ACTIVE作成 → session失効 → deletion job作成 → receipt情報保存
+
+を一括commitする。以後、通常API、Automation、Suggestion Apply、restoreはtombstoneを最優先して拒否する。
+
+receipt secretはCSPRNG 256bitで生成し、DBにはSHA-256(secret)のみ保存。利用者へ返すのはreceipt_idとsecretを一度だけ。status確認はreceipt＋scope proofを要求し、state / requestedAt / startedAt / completedAt / expiresAtだけを返す。通常session権限、復活権限、他データ閲覧権限は付与しない。
+
+receipt TTLは未検証候補7〜30日、rate limitは候補として1分5回・1日100回以下。いずれも承認済み値ではない。紛失時に既存認証で安全な再発行ができなければ再発行不可。未定のサポート本人確認を完成機能としない。purge後は必要最小期間だけPURGEDを返し、その後receiptも削除する。削除済み情報をresponse/error/logへ再露出しない。
+
+7. Backup / restore
+
+backup保持7日は固定。
+
+backup中の削除対象を即時物理消去したとは表示しない。削除要求commit後、backupとは独立した正本から最新tombstoneを取得し、restore前に対象scopeを除外、restore後にもtombstoneを再適用する。公開・Dashboard・Automation・Suggestion生成より先に遮断する。
+
+古いbackupをそのまま本番化せず、backup取得時点より新しいtombstoneを照合する。session、権限、Run、draft、Suggestion、Factを復活させない。
+
+PC全停止中はpurgeを物理実行できないため、「7日以内に物理削除済み」と偽装しない。再起動時はpurge/tombstone再適用を通常処理より先行する。backup自体は7日で失効する。
+
+8. 保持・purge整合
+
+確定事項はRun終了後最小状態7日以内削除、backup 7日。Run由来のFact/evidence/Suggestion/audit/intent/result/idempotencyを別tableへ複製してRun保持を延長しない。
+
+Fact/evaluation、Suggestion/history/evidence、audit、lineage_suppression、receiptの具体保持期間は未承認。目的別の最小期間を後日決定し、未承認期間を前提に長期履歴を保証しない。
+
+一律7日、旧30日、24か月は採用しない。evaluation purgeとprivacy deletionが競合すればtombstoneを優先する。evidence削除で根拠を維持できないSuggestionはINVALIDATEDだけで終わらせず、該当purge単位から削除する。共有Fact削除時も参照Suggestionを同一transactionでnon-actionable化する。
+
+9. purge / crash / 後日受入
+
+lock順は：
+
+tombstone → deletion_job → apply reservation / operation guard → suggestion/evidence/history → evaluation → Fact
+
+state_version CASとFK順を併用する。途中crashで未commitならrollback。tombstone/非actionable化commit後にpurgeが中断した場合はjobを再開し、ACTIVE tombstoneを維持する。
+
+受入はalpha16実装完了後に全体をまとめて実施する。
+
+RET-01：evaluation期限purgeでFK違反なく切離し・削除できる。
+
+RET-02：Fact/evaluation複製による保持延長がない。
+
+RET-03：dismiss/rejectが版変更だけで復活せず、抑止期限後のみ再生成できる。
+
+RET-04：source-health observation ID/版、period_role/windowが評価入力へ固定される。
+
+RET-05：CONSUMED/UNKNOWN guard中の別draft迂回Applyを拒否する。
+
+RET-06：tombstone後のsession/API/restore利用を遮断する。
+
+RET-07：receiptが通常権限を持たず、secret・削除対象情報を再露出しない。
+
+RET-08：restore前後で最新tombstoneが再適用される。
+
+RET-09：PC停止中のpurge未実行を正常完了と偽装せず、再起動時にpurge/遮断を先行する。
+
+10. 利用者判断の束
+
+保持期間：Fact/evaluation、Suggestion/history/evidence、audit、lineage_suppression、receipt。目的別最小保持を推奨。具体値は未検証・承認待ち。
+
+削除statusの公開範囲：推奨はreceipt保有者へ自身の削除進捗のみ。
+
+receipt紛失時の本人確認/再発行：既存の安全な認証経路がなければ再発行不可。
+
+schema、FK切離し順、tombstone優先順位、receipt secret/hash方式は本付録の設計案として固定する。実table・実session・実backup運用との対応は未照合であり、実装済み・検証済み・完全確定とは扱わない。

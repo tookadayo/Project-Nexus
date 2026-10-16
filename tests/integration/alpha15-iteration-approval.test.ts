@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {afterAll,beforeAll,expect,it,vi} from 'vitest';
 import {connect,migrate,ensureGuild,sql,tenant,type Database} from '../../packages/db/src/index';
 import {scopeForGuild} from '../../packages/security/src/scoping';
@@ -14,9 +14,11 @@ import {mockSuccessfulActionOutcomes} from '../fixtures/alpha15-simulation';
 
 let db:Database,infra:Awaited<ReturnType<typeof isolatedPostgres>>,serial=0;
 const channel='875222222222222222',member='875333333333333333',role='875444444444444444';
-const actor={key:'synthetic-iteration',encryptedUserId:'synthetic-encrypted',permissions:'8',roles:[],source:'WEB_DASHBOARD' as const,requestId:'synthetic'};
+const actor={key:createHash('sha256').update('synthetic-iteration').digest('hex'),encryptedUserId:'synthetic-encrypted',permissions:'8',roles:[],source:'WEB_DASHBOARD' as const,requestId:'synthetic'};
 const limits={activeFlows:20,monthlyRuns:100,guildConcurrent:2,globalConcurrent:5,guildPending:20,globalPending:100,measurementId:'synthetic-A-remaining'};
 const literal=(type:ValueInput['type'],value:unknown):ValueInput=>({kind:'literal',type,value:value as never});
+// Only new definition literals use whole seconds; runtime clocks retain their precision.
+const inputInstantAfter=(seconds:number)=>new Date(Math.ceil(Date.now()/1000)*1000+seconds*1000).toISOString();
 const variable=(id:string,type:ValueInput['type']='Number'):ValueInput=>({kind:'variable',type,variableId:id});
 const send=(id='send'):Statement=>({kind:'action',id,operation:'discord.sendMessage',inputs:{channel:literal('ChannelRef',{id:channel,guildId:'placeholder'}),content:literal('PlainText','Synthetic template')}});
 beforeAll(async()=>{vi.stubEnv('NEXUS_HOSTED_BETA','off');infra=await isolatedPostgres();db=connect(infra.databaseUrl);await migrate(db);});
@@ -64,7 +66,7 @@ it('a successful procedure return records the skipped current result and leaves 
   expect(simulateAutomationPlan(compileFlowDefinition(f.definition)).iterations?.[0]!.states).toEqual(['SKIPPED','NOT_STARTED']);
 });
 
-function approvalFlow(until=new Date(Date.now()+60000).toISOString()):Statement[]{return [
+function approvalFlow(until=inputInstantAfter(60)):Statement[]{return [
   {kind:'approval',id:'approval',actionId:'role',until:literal('Instant',until),approved:[],rejected:[{kind:'end',id:'rejected-end'}],expired:[{kind:'end',id:'expired-end'}]},
   {kind:'action',id:'role',operation:'discord.addRole',approvalRequired:true,inputs:{member:literal('MemberRef',{id:member,guildId:'placeholder'}),role:literal('RoleRef',{id:role,guildId:'placeholder'})}},send('after-role'),
 ];}

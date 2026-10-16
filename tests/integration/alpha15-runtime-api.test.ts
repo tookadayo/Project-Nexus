@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {createHmac,randomUUID} from 'node:crypto';
 import Fastify from 'fastify';
 import {afterAll,beforeAll,expect,it,vi} from 'vitest';
 import {connect,migrate,ensureGuild,sql,tenant,json,type Database} from '../../packages/db/src/index';
@@ -26,10 +26,29 @@ async function fixture(){
   const base=`/v3/organizations/${s.organizationId}/guilds/${s.guildId}/automation`;
   const definition={schemaVersion:1,id:'test',guildId:s.guildId,name:'Synthetic',trigger:{kind:'manual',inputs:[]},variables:[],body:[{kind:'end',id:'end'}]};
   async function call(method:'GET'|'PUT'|'POST',suffix:string,body?:unknown,headers:Record<string,string>={}){
-    const path=base+suffix;return app.inject({method,url:path,headers:{authorization:`Bearer ${apiToken(key,s)}`,'x-nexus-user-proof':createPublicApiProof({scope:s,userId:user,sessionReference:reference,method,path:path.split('?')[0]!,...(method!=='GET'?{origin:'https://nexus.example'}:{})}),...(method!=='GET'?{origin:'https://nexus.example','content-type':'application/json'}:{}),...headers},...(body===undefined?{}:{payload:JSON.stringify(body)})});
+    const path=base+suffix;return app.inject({method,url:path,headers:{authorization:`Bearer ${apiToken(key,s)}`,'x-nexus-user-proof':createPublicApiProof({scope:s,userId:user,sessionReference:reference,method,path,body,...(method!=='GET'?{origin:'https://nexus.example'}:{})}),...(method!=='GET'?{origin:'https://nexus.example','content-type':'application/json'}:{}),...headers},...(body===undefined?{}:{payload:JSON.stringify(body)})});
   }
   return {s,app,discord,reference,call,definition,service};
 }
+it('requires v2 exact query/body and one-time proof even when the scoped bearer is valid',async()=>{
+  const f=await fixture();try{
+    const path=`/v3/organizations/${f.s.organizationId}/guilds/${f.s.guildId}/automation/overview?view=all&limit=1`;
+    const proof=createPublicApiProof({scope:f.s,userId:user,sessionReference:f.reference,method:'GET',path});
+    const headers={authorization:`Bearer ${apiToken(key,f.s)}`,'x-nexus-user-proof':proof};
+    expect((await f.app.inject({method:'GET',url:path.replace('limit=1','limit=2'),headers})).statusCode).toBe(401);
+    expect((await f.app.inject({method:'GET',url:path,headers})).statusCode).toBe(200);
+    expect((await f.app.inject({method:'GET',url:path,headers})).statusCode).toBe(401);
+    const draftPath=`/v3/organizations/${f.s.organizationId}/guilds/${f.s.guildId}/automation/flows/test/draft`;
+    const body={definition:f.definition,expectedRevision:0,requestId:randomUUID()};
+    const signed=createPublicApiProof({scope:f.s,userId:user,sessionReference:f.reference,method:'PUT',path:draftPath,body,origin:'https://nexus.example'});
+    const mutationHeaders={authorization:`Bearer ${apiToken(key,f.s)}`,'x-nexus-user-proof':signed,origin:'https://nexus.example','content-type':'application/json'};
+    expect((await f.app.inject({method:'PUT',url:draftPath,headers:mutationHeaders,payload:{...body,expectedRevision:1}})).statusCode).toBe(401);
+    expect((await f.app.inject({method:'PUT',url:draftPath,headers:mutationHeaders,payload:body})).statusCode).toBe(200);
+    const now=Date.now(),legacy=Buffer.from(JSON.stringify({scope:f.s,userId:user,sessionDigest:publicSessionDigest(f.reference),method:'GET',path:path.split('?')[0],issuedAt:now,expiresAt:now+30000})).toString('base64url');
+    const mac=createHmac('sha256',secret).update('public-api:v1:'+legacy).digest('base64url');
+    expect((await f.app.inject({method:'GET',url:path,headers:{...headers,'x-nexus-user-proof':legacy+'.'+mac}})).statusCode).toBe(401);
+  }finally{await f.app.close();}
+});
 it('returns only explicitly selected simulation values to the currently authorized configuring user',async()=>{
   const f=await fixture();try{
     const definition={...f.definition,semanticProfile:'scratch.v1',body:[

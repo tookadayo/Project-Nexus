@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 import { connect, ensureGuild, json, migrate, sql, tenant, type Database } from "../../packages/db/src/index";
@@ -18,7 +18,7 @@ import { isolatedPostgres } from "../fixtures/postgres";
 let db: Database, infra: Awaited<ReturnType<typeof isolatedPostgres>>, serial = 0;
 const channel = "881222222222222222";
 const admission: AutomationAdmissionLimits = { activeFlows: 20, monthlyRuns: 100, guildConcurrent: 2, globalConcurrent: 4, guildPending: 20, globalPending: 200, measurementId: "isolated-scratch-random-tests" };
-const actor: Actor = { key: "synthetic-random-admin", encryptedUserId: "synthetic-encrypted-identity", permissions: "8", roles: [], source: "WEB_DASHBOARD", requestId: "scratch-random-fixture" };
+const actor: Actor = { key: createHash("sha256").update("synthetic-random-admin").digest("hex"), encryptedUserId: "synthetic-encrypted-identity", permissions: "8", roles: [], source: "WEB_DASHBOARD", requestId: "scratch-random-fixture" };
 const literal = (type: ValueType, value: JsonValue): ValueInput => ({ kind: "literal", type, value });
 const integer = (lower = -Number.MAX_SAFE_INTEGER, upper = Number.MAX_SAFE_INTEGER): Statement => ({ kind: "random", id: "draw", mode: "integer", min: literal("Number", lower), max: literal("Number", upper), output: { id: "picked", name: "Picked", type: "Number" } });
 function send(): Statement { return { kind: "action", id: "after", operation: "discord.sendMessage", inputs: { channel: literal("ChannelRef", { id: channel, guildId: "placeholder" }), content: literal("PlainText", "Synthetic fixture only") } }; }

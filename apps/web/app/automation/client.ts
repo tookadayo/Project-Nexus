@@ -14,6 +14,10 @@ export interface FlowSummary {
   updatedAt: string;
 }
 export interface FlowDetail extends FlowSummary {
+  generation?: number;
+  restoredFromRevision?: number|null;
+  restorationRequiresCommit?:boolean;
+  rollbackReadiness?:{preparationAvailable:boolean;activationAvailable:boolean;reasonCode:string|null};
   scheduleReview?: { required: boolean; reason: string | null };
   definition: FlowDefinition;
   validation: {
@@ -29,6 +33,7 @@ export interface FlowRevision {
   revision: number;
   definition: FlowDefinition;
 }
+export interface RollbackHistoryItem {rollbackId:string;sourceRevision:number;preparedRevision:number;baseActiveRevision:number|null;baseGeneration:number;state:'PREPARED'|'APPLIED';createdAt:string;appliedAt:string|null;expiresAt:string}
 export interface CheckResult {
   revision: number;
   semanticHash: string;
@@ -176,6 +181,11 @@ export function automationClient(base = "/api/automation", guildId = "") {
       request<FlowRevision>(
         `/flows/${encodeURIComponent(id)}/revisions/${revision}`,
       ),
+    rollbackHistory:(id:string)=>request<{items:RollbackHistoryItem[]}>(`/flows/${encodeURIComponent(id)}/rollback-history`),
+    prepareRollback:(id:string,input:{sourceRevision:number;expectedRevision:number;expectedActiveRevision:number|null;expectedGeneration:number;requestId:string})=>request<FlowDetail&{rollbackId:string;restoredFromRevision:number;requiresFreshReview:true}>(`/flows/${encodeURIComponent(id)}/rollback-draft`,'POST',input),
+    commitRollback:(id:string,input:{rollbackId:string;revision:number;semanticHash:string;expectedActiveRevision:number|null;expectedGeneration:number;requestId:string})=>request<{id:string;state:string;activeRevision:number}>(`/flows/${encodeURIComponent(id)}/rollback`,'POST',input),
+    managedRoles:()=>request<{mode:string;directMutationAvailable:false;reasonCode:string;items:{flowId:string;name:string;draftRevision:number;activeRevision:number|null;state:string;roleIds:string[];policyVersion:number}[]}>('/managed-roles'),
+    managedRoleHistory:()=>request<{items:{flowId:string;runId:string;revision:number;operation:string;state:string;startedAt:string;finishedAt:string|null}[];retention:string}>('/managed-roles/history'),
     targets: (kind: "ChannelRef" | "RoleRef") =>
       request<{ state: "AVAILABLE" | "UNAVAILABLE"; items: TargetChoice[] }>(
         `/targets?kind=${kind}`,

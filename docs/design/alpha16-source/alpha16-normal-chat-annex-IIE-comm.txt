@@ -1,0 +1,83 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 03:49 UTC
+Reasoning: 極高. Design only. Contains issues identified for later correction; not a final validated contract.
+
+付録II-E：COMM-001
+COMM-001 — Community Issue Prioritization
+項目	契約
+ID / version	COMM-001 / v1.0。Rule/engine/config/schemaの版は共通契約に従い固定する。
+目的	複数の構造化されたコミュニティ課題を横断して集約し、運営者が優先確認すべき改善候補を提示する。改善効果・因果関係・個人の意図を推定しない。
+入力Rule allowlist	ONB-001, HELP-001, RET-001, ENG-001, EVENT-001, REPORT-001, AUTO-001, AUTO-002, PERM-001 の9個のみ。EXP-001、PLAY-001、COMM-001自身は入力不可。
+issueCode → domain	ONB_LOW_COMPLETION→ONBOARDING / HELP_BACKLOG→SUPPORT / RET_CONTINUATION_DROP→RETENTION / ENG_CHANNEL_UNDERUSE→CHANNEL_USAGE / EVENT_CONVERSION_DROP→EVENT / REPORT_DELIVERY_FAILURE→REPORTING / AUTO_FAILURE_RATE→AUTOMATION / AUTO_STALE_EXECUTION→AUTOMATION / PERM_GAP→PERMISSION。
+source adapter	提案名 COMM-RULE-RESULT-v1。上記Ruleの評価結果と、そのevaluation/evidence参照だけを入力する。現コードに当該adapterが存在することは未照合。
+成立条件	Rule結果がallowlist内、result=FIRE、対象guildが一致、windowが一致、target/liveVersionが取得可能、evidenceが期限内であること。必要sourceが無ければ MISSING/INELIGIBLE とする。
+対象集合	同一 guild_id、同一 targetType/targetId/liveVersion、同一CURRENT windowに属する構造化issue。個人単位のscore・心理・属性・関係推定は対象外。
+除外	NO_FIRE、DISABLED、INELIGIBLE、MISSING、STALE、SUPPRESSED、UNKNOWN のRule結果は成立課題として数えない。期限切れevidenceも除外する。
+dedupe key	guild_id + issueCode + targetType + targetId + liveVersion + windowStart + windowEnd + evidenceFingerprint。同一issue/target/window/evidenceは1件として扱う。Rule版変更だけでは同一issueを重複計数しない。
+独立性	複数metric・Rule・domainの一致を「独立した証拠」と表現しない。統計的confidenceも生成しない。同一domainの複数issueはdomain数を増加させない。
+式	U = dedupe後の成立FIRE issue集合。`issueCount =	U	。domainCount =	distinct(domain(U))	。coverage = eligibleBaseSlots / enabledRequestedBaseSlots。eligibleBaseSlotsは対象windowについて確定的にFIREまたはNO_FIRE`まで評価できたRule slot。
+required domain count	未検証候補 2 domains。domainCount >= 2 をFIRE候補条件とする。設定範囲候補 2〜9 domains。
+minN	適用外。COMMは個人母数から直接判定せず、各基礎Ruleが適用した母数条件を引き継ぐため。domain件数を人のminNとして誤用しない。
+window	COMMの評価対象windowは、入力Rule結果のCURRENT windowをそのまま固定して使用する。同一評価内でwindowの異なるRule結果を混在させない。長期比較が必要な場合は認可済みaggregate sourceが別途必要で、Run保持延長や本文収集では補完しない。
+freshness	未検証候補 evaluationAsOfから24時間以内。設定範囲候補 1〜48時間。ただし承認済みevidence retentionより古い根拠は常に失効扱い。
+coverage	未検証候補 2/3以上。2/3以上かつ成立課題が2domain以上なら、欠測Ruleを明示した部分summaryを許可する。2/3未満では安全側として全体をINELIGIBLEとし、成立課題をSuggestion化しない。
+threshold	未検証・承認待ち。domainCount >= 2。これは統計的有意性・信頼確率・匿名性保証ではない。
+priority	P1: domainCount >= 3。P2: domainCount=2かつissueCount>=3。P3: domainCount=2かつissueCount=2。coverage=PARTIALの場合は最大P2。順位が同じ場合はissueCount降順→固定domain順位→windowEnd降順→issueCode昇順で決定。
+固定domain順位	SUPPORT(1) > PERMISSION(2) > ONBOARDING(3) > RETENTION(4) > CHANNEL_USAGE(5) > EVENT(6) > REPORTING(7) > AUTOMATION(8)。順位は重要度の統計評価ではなく、同順位解消用の固定順。
+null / 欠測	必須issue fieldがnull、source不存在、対象版不明は成立課題にしない。MISSINGまたはINELIGIBLE。欠測を0件・NO_FIREへ変換しない。
+PARTIAL	一部RuleがINELIGIBLE/MISSING等でも、coverageが候補下限以上かつ2domain以上の成立課題が残れば部分summaryを生成。coverageと未評価domainを明示し、actionはREVIEW_ONLYに限定。
+STALE	stale issueはdomainCountへ算入しない。残りのfresh issueだけで条件を満たせばPARTIAL summary、満たさなければINELIGIBLE。
+privacy suppression	PRIVACY_SUPPRESSEDはNO_FIREに変換しない。算入せず、coverageへ反映。条件を満たせばPARTIAL/REVIEW_ONLY、満たさなければINELIGIBLE。
+evidence期限	根拠の最短許容期限を超えたissueはactionable summaryから除外。既存Suggestionを無効化する場合もevidence/historyを書き換えない。新しいsnapshotによる新評価が必要。
+cooldown	未検証候補 24時間。起点は同一lineageのSuggestion生成時。解消条件は次回評価でdomainCount < 2または同一lineageの成立issueが消失したこと。解消後に同じ課題が新しい観測として再発した場合は新Suggestion候補とする。
+版変更	rule/config/engine版の変更だけでは、利用者のreject/dismiss状態を復活させない。新評価・新evidenceが成立した場合のみ新しいSuggestion候補を作れる。
+target	targetType=guild、targetId=guild_id、liveVersion=対象guildのtarget registryが返す現在live版。liveVersionを取得できない場合、適用可能Suggestionは生成しない。
+action	REVIEW_ONLYまたはCREATE_DRAFT。自動適用・投稿・activation・課金・権限変更は禁止。
+CREATE_DRAFT条件	全ての採用evidenceがSUFFICIENT、coverageが完全、target liveVersionが一致し、対象domainに登録済みの安全なtyped editor fieldが存在する場合のみ。現コードに当該fieldが存在することは未照合。
+許可draft field候補	提案typed registry：priorityBand: enum(P1,P2,P3)、issueRefs: enum-array(issueCode)、reviewDueAt: timestamp。実際のtarget editorに存在しない場合はCREATE_DRAFTせずREVIEW_ONLY。実際の運用設定・権限・投稿内容を直接変更するfieldは許可しない。
+説明	「複数の構造化された運営上の課題が同一期間に確認されています。以下は確認優先度を整理するための候補です。改善効果や原因を示すものではありません。」
+evidence	issueCode/ruleId/ruleVersion/evaluationId/target/window/snapshotId等の参照IDのみ。raw投稿、DM、自由文、secret、個人の推測値は含めない。
+result	FIRE: 条件成立。NO_FIRE: 十分なcoverageでdomainCountが1以下。INELIGIBLE: coverage不足、必須target/evidence欠落等で安全なsummary不可。DISABLED: config未承認またはRule allowlist未使用可能。
+reasonCode例	DOMAIN_COUNT_MET / DOMAIN_COUNT_BELOW_THRESHOLD / PARTIAL_INPUT / BASE_INELIGIBLE / BASE_STALE / PRIVACY_SUPPRESSED / INSUFFICIENT_COVERAGE / EVIDENCE_EXPIRED / SOURCE_MISSING / TARGET_VERSION_UNAVAILABLE / CONFIG_DISABLED。
+合成fixture
+
+以下はすべて未承認候補configによる合成設計例であり、実測値でも実行済みテスト結果でもない。
+
+共通仮定：
+
+evaluationAsOf = 2026-10-15T09:00:00Z
+
+CURRENT = [2026-10-08T00:00:00Z, 2026-10-15T00:00:00Z)
+
+requiredDomainCount = 2（候補）
+
+coverageMin = 2/3（候補）
+
+freshnessMax = 24h（候補）
+
+cooldown 24h（候補）
+
+evidence retentionは未承認。承認済み最短期限を超えた根拠は常に使用不可。
+
+ID	合成入力	期待結果	action
+COMM-F01 FIRE	coverage=9/9、unique issues=4、domains=SUPPORT, RETENTION, EVENT、全evidence=SUFFICIENT、domainCount=3	FIRE / DOMAIN_COUNT_MET / P1	CREATE_DRAFT（安全なtyped fieldが存在する場合）
+COMM-F02 NO_FIRE	coverage=9/9、unique issues=1、domain=SUPPORT、SUFFICIENT、domainCount=1	NO_FIRE / DOMAIN_COUNT_BELOW_THRESHOLD	なし
+COMM-F03 境界	coverage=6/9=2/3、unique issues=2、domains=SUPPORT, ENGAGEMENT、全採用evidence=SUFFICIENT、domainCount=2	FIRE / DOMAIN_COUNT_MET / P3	CREATE_DRAFT条件を満たせば可
+COMM-F04 重複	入力3件：HELP_BACKLOG/SUPPORTを同一evidenceで2件、ENG_CHANNEL_UNDERUSE/CHANNEL_USAGEを1件。dedupe後2件・2domain、coverage=9/9	FIRE / DOMAIN_COUNT_MET / P3	CREATE_DRAFT条件を満たせば可。重複分は1件
+COMM-F05 部分入力	coverage=7/9、SUPPORTとRETENTIONがFIRE/SUFFICIENT、2 RuleがINELIGIBLE、残りはNO_FIRE、domainCount=2	FIRE / PARTIAL_INPUT / P3相当（PARTIALのため最大P2）	REVIEW_ONLY
+COMM-F06 privacy抑止	coverage=8/9、SUPPORT=FIRE/SUFFICIENT、EVENT=FIRE/SUFFICIENT、RETENTION=INELIGIBLE/PRIVACY_SUPPRESSED、domainCount=2	FIRE / PRIVACY_SUPPRESSED / PARTIAL	REVIEW_ONLY。抑止されたRuleをNO_FIREとして扱わない
+依存DAG
+
+ONB-001 / HELP-001 / RET-001 / ENG-001 / EVENT-001 / REPORT-001 / AUTO-001 / AUTO-002 / PERM-001 → COMM-001
+
+EXP-001 ↛ COMM-001、PLAY-001 ↛ COMM-001、COMM-001 ↛ COMM-001 とし、自己参照・循環参照は禁止する。
+
+Adapter / UI / Action / Fixture対応
+要素	対応
+Adapter	COMM-RULE-RESULT-v1（提案名・現コード未照合）
+UI	DashboardのCommunity Improvement/Suggestion表示領域（具体route・画面名は未照合）
+Action	完全な根拠＋typed fieldあり=CREATE_DRAFT、それ以外=REVIEW_ONLY
+Fixture	COMM-F01〜COMM-F06
+長期window	認可済みaggregate sourceが存在しない場合はMISSING/INELIGIBLE。Run保持延長・本文収集・新規個人ID長期保存では補完しない。
+
+未確認事項：9個のRule結果を取得する実adapter、各Ruleの実issueCode、guild-level liveVersionを供給するtarget registry、CREATE_DRAFT対象typed field、実画面/routeはいずれも現コードとの照合が必要。これらが不足する場合の安全側動作はMISSING/DISABLEDまたはREVIEW_ONLYとし、存在を仮定して実装済みとは扱わない。

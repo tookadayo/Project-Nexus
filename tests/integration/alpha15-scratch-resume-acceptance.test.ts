@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 import { connect, ensureGuild, migrate, sql, tenant, type Database } from "../../packages/db/src/index";
 import { scopeForGuild } from "../../packages/security/src/scoping";
@@ -12,10 +12,12 @@ import { isolatedPostgres } from "../fixtures/postgres";
 
 let db: Database, infra: Awaited<ReturnType<typeof isolatedPostgres>>, serial = 0;
 const day = 86400, channel = "886222222222222222", member = "886333333333333333", role = "886444444444444444";
-const actor: Actor = { key: "synthetic-resume-admin", encryptedUserId: "synthetic-encrypted-identity", permissions: "8", roles: [], source: "WEB_DASHBOARD", requestId: "synthetic-resume-acceptance" };
+const actor: Actor = { key: createHash("sha256").update("synthetic-resume-admin").digest("hex"), encryptedUserId: "synthetic-encrypted-identity", permissions: "8", roles: [], source: "WEB_DASHBOARD", requestId: "synthetic-resume-acceptance" };
 // Isolated fixture capacity; this is neither a measured host limit nor pricing.
 const admission: AutomationAdmissionLimits = { activeFlows: 20, monthlyRuns: 100, guildConcurrent: 2, globalConcurrent: 4, guildPending: 20, globalPending: 100, measurementId: "isolated-resume-acceptance" };
 const literal = (type: ValueType, value: JsonValue): ValueInput => ({ kind: "literal", type, value });
+// Only new definition literals use whole seconds; runtime clocks retain their precision.
+const inputInstantAfter=(seconds:number)=>new Date(Math.ceil(Date.now()/1000)*1000+seconds*1000).toISOString();
 const variable = (variableId: string, type: ValueType = "Number"): ValueInput => ({ kind: "variable", type, variableId });
 const wait = (id: string, seconds: number): Statement => ({ id, kind: "wait", duration: literal("Duration", seconds) });
 const send = (id: string): Statement => ({ id, kind: "action", operation: "discord.sendMessage", inputs: { channel: literal("ChannelRef", { id: channel, guildId: "placeholder" }), content: literal("PlainText", `Synthetic ${id}; no Discord connection`) } });
@@ -149,7 +151,7 @@ it("T116 shares the remaining evaluation budget across parent, child and both pa
 });
 
 it.each([false, true])("T118 applies the parent loop deadline during child approval wait; in-flight=%s keeps UNKNOWN precedence", async inFlight => {
-  const deadline = new Date(Date.now() + 60000).toISOString();
+  const deadline = inputInstantAfter(60);
   const f = await fixture([{ id: "loop", kind: "boundedLoop", semanticVersion: 1, mode: "until", maxBody: literal("Number", 1), condition: literal("Boolean", false), until: literal("Instant", deadline), body: [{ id: "call", kind: "call", procedureId: "child", revision: 1, args: {}, outputs: {} }], handlers: { localDeadline: [{ id: "deadline-end", kind: "end" }] } }, send("after")], { procedures: [{ id: "child", revision: 1, name: "Approval child", inputs: [], outputs: [], body: [{ id: "approval", kind: "approval", actionId: "role", until: literal("Instant", deadline), approved: [], rejected: [], expired: [] }, { id: "role", kind: "action", operation: "discord.addRole", approvalRequired: true, inputs: { member: literal("MemberRef", { id: member, guildId: "placeholder" }), role: literal("RoleRef", { id: role, guildId: "placeholder" }) } }, { id: "return", kind: "return", values: {} }] }] });
   expect(await f.runtime.tick(f.scope, f.run.id)).toMatchObject({ state: "WAITING_APPROVAL" });
   const pending = (await f.service.approvals(f.scope, actor)).items; expect(pending).toHaveLength(1); expect(pending[0]!.expiresAt).toBe(deadline);

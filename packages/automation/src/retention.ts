@@ -8,6 +8,8 @@ import {dynamicExecutionIdentity} from './runtime';
 import {fingerprint,type ResumeState,type RunRecord} from './store';
 import {runtimeContexts} from './parallel';
 import {noteIterationOperation,boundedTerminalCheckpoint} from './iteration-results';
+import {acquireRuleScopeLocks,ruleScopeLockSet} from '../../rules/src/locks';
+import {purgeRuleRuntimeRuns} from '../../rules/src/runtime-store';
 
 type MaintenanceRun=Pick<RunRecord,'id'|'revision'|'semantic_hash'|'resume'>;
 /** Maintenance has no continuation authority. Match durable dispatch identities
@@ -56,7 +58,7 @@ export async function purgeAutomationActor(tx:Tx,s:Scope,actorHash:string,userId
   const draws=(await sql<{run_id:string;input:unknown;result:unknown}>`SELECT run_id,input,result FROM automation_random_results WHERE ${tenant(s)}`.execute(tx)).rows;
   for(const draw of draws)if(userId&&(mentionsDeletedMember(draw.input,s.guildId,userId)||mentionsDeletedMember(draw.result,s.guildId,userId)))affected.add(draw.run_id);
   for(const id of affected){await releaseAutomationQuota(tx,s,id);await sql`DELETE FROM automation_occurrences WHERE ${tenant(s)} AND run_id=${id}::uuid`.execute(tx);await sql`DELETE FROM automation_runs WHERE ${tenant(s)} AND id=${id}::uuid`.execute(tx);}
-  for(const id of flows){await sql`DELETE FROM automation_schedules WHERE ${tenant(s)} AND flow_id=${id}`.execute(tx);await sql`DELETE FROM automation_flows WHERE ${tenant(s)} AND id=${id}`.execute(tx);}
+  for(const id of flows){await sql`DELETE FROM automation_rollbacks WHERE ${tenant(s)} AND flow_id=${id}`.execute(tx);await sql`DELETE FROM automation_schedules WHERE ${tenant(s)} AND flow_id=${id}`.execute(tx);await sql`DELETE FROM automation_flows WHERE ${tenant(s)} AND id=${id}`.execute(tx);}
   // Request IDs are metadata, but the deleted actor's digest is still erased.
   await sql`DELETE FROM automation_requests WHERE ${tenant(s)} AND actor_hash=${actorHash}`.execute(tx);
   return {deletedFlows:flows.size,deletedRuns:affected.size};
@@ -104,35 +106,72 @@ export async function purgeAutomationGuild(tx:Tx,s:Scope) {
  * tests. Execution state, draws, action evidence, and diagnostic events are
  * physically deleted no later than seven days after the run ends. */
 export async function sweepAutomationRetention(db:Database,now=new Date()) {
-  return db.transaction().execute(async tx=>{
-    await sql`SELECT pg_advisory_xact_lock(763215)`.execute(tx);
-    const expired=(await sql<MaintenanceRun&{organization_id:string;guild_id:string;usage_state:string;usage_month:Date;definition:FlowDefinition|null}>`SELECT r.organization_id,r.guild_id,r.id,r.revision,r.semantic_hash,r.resume,r.usage_state,r.usage_month,(SELECT definition FROM automation_revisions v WHERE v.organization_id=r.organization_id AND v.guild_id=r.guild_id AND v.flow_id=r.flow_id AND v.revision=r.revision) AS definition FROM automation_runs r WHERE r.ended_at IS NULL AND r.deadline_at<=${now} ORDER BY r.deadline_at LIMIT 100 FOR UPDATE OF r`.execute(tx)).rows;
+  assert(Number.isFinite(now.getTime()),'AUTOMATION_RETENTION_TIME_INVALID');
+  const cutoff=new Date(now.getTime()-7*86400000);
+  // Scope discovery has no locks or payload reads. Each bounded scope then
+  // gets its COMPLETE canonical set in one transaction, before the legacy
+  // global fence. Never take GLOBAL alone then append hashed guild locks.
+  const scopes=(await sql<{organization_id:string;guild_id:string}>`SELECT organization_id,guild_id FROM (
+    SELECT organization_id,guild_id,deadline_at AS due FROM automation_runs WHERE ended_at IS NULL AND deadline_at<=${now}
+    UNION ALL SELECT organization_id,guild_id,ended_at+interval '7 days' FROM automation_runs WHERE ended_at<=${cutoff}
+    UNION ALL SELECT organization_id,guild_id,deleted_at+interval '7 days' FROM automation_flows WHERE state='DELETED' AND deleted_at<=${cutoff}
+    UNION ALL SELECT organization_id,guild_id,retention_expires_at FROM automation_execution_observations WHERE retention_expires_at<=${now}
+    UNION ALL SELECT organization_id,guild_id,created_at+interval '7 days' FROM automation_requests WHERE created_at<=${cutoff}
+    UNION ALL SELECT organization_id,guild_id,created_at+interval '7 days' FROM automation_occurrences WHERE created_at<=${cutoff}
+    UNION ALL SELECT organization_id,guild_id,month+interval '1 month'+interval '7 days' FROM automation_usage_months WHERE month+interval '1 month'+interval '7 days'<=${now} AND reserved=0
+   ) candidates GROUP BY organization_id,guild_id ORDER BY min(due),organization_id,guild_id LIMIT 100`.execute(db)).rows;
+  let expiredCount=0,deletedRuns=0,deletedFlows=0,deletedObservations=0;
+  for(const candidate of scopes){
+   const s={organizationId:candidate.organization_id,guildId:candidate.guild_id};
+   const counts=await db.transaction().execute(async tx=>{
+    await acquireRuleScopeLocks(tx,ruleScopeLockSet(s));
+    await automationLock(tx,s);
+    const flows=deletedFlows<100?(await sql<{id:string}>`SELECT id FROM automation_flows WHERE ${tenant(s)} AND state='DELETED' AND deleted_at<=${cutoff} ORDER BY id LIMIT ${100-deletedFlows}`.execute(tx)).rows:[];
+    const oldRuns=deletedRuns<200?(await sql<{id:string}>`SELECT id FROM automation_runs WHERE ${tenant(s)} AND ended_at<=${cutoff} ORDER BY ended_at,id LIMIT ${200-deletedRuns}`.execute(tx)).rows:[];
+    const flowRuns=flows.length?(await sql<{id:string}>`SELECT id FROM automation_runs WHERE ${tenant(s)} AND flow_id=ANY(${flows.map(flow=>flow.id)}::text[]) ORDER BY id`.execute(tx)).rows:[];
+    const purgeIds=[...new Set([...oldRuns,...flowRuns].map(run=>run.id))].sort();
+    const expiring=expiredCount<100?(await sql<{id:string}>`SELECT id FROM automation_runs WHERE ${tenant(s)} AND ended_at IS NULL AND deadline_at<=${now} AND NOT(id=ANY(${purgeIds}::uuid[])) ORDER BY deadline_at,id LIMIT ${100-expiredCount}`.execute(tx)).rows:[];
+    const observationIds=deletedObservations<200?(await sql<{run_id:string}>`SELECT run_id FROM automation_execution_observations WHERE ${tenant(s)} AND retention_expires_at<=${now} ORDER BY retention_expires_at,run_id LIMIT ${200-deletedObservations}`.execute(tx)).rows:[];
+    const lockRunIds=[...new Set([...purgeIds,...expiring.map(run=>run.id),...observationIds.map(row=>row.run_id)])].sort();
+    const observationPurgeRunIds=[...new Set([...observationIds.map(row=>row.run_id),...expiring.map(run=>run.id)])].sort();
+    // This normal lifecycle purge writes UNKNOWN root blockades BEFORE Run or
+    // lower-ranked rows are locked/deleted. It invalidates dependent proposals
+    // and removes all runtime children, satisfying the parent delete guard.
+    if(lockRunIds.length)await purgeRuleRuntimeRuns(tx,s,purgeIds,now,lockRunIds);
+    const expired=expiring.length?(await sql<MaintenanceRun&{usage_state:string;usage_month:Date;definition:FlowDefinition|null}>`SELECT r.id,r.revision,r.semantic_hash,r.resume,r.usage_state,r.usage_month,(SELECT definition FROM automation_revisions v WHERE v.organization_id=r.organization_id AND v.guild_id=r.guild_id AND v.flow_id=r.flow_id AND v.revision=r.revision) AS definition FROM automation_runs r WHERE r.organization_id=${s.organizationId}::uuid AND r.guild_id=${s.guildId} AND r.id=ANY(${expiring.map(run=>run.id)}::uuid[]) AND r.ended_at IS NULL AND r.deadline_at<=${now} ORDER BY r.id FOR UPDATE OF r`.execute(tx)).rows:[];
     for(const run of expired){
-      const s={organizationId:run.organization_id,guildId:run.guild_id};
-      const interrupted=(await sql<{identity:string}>`SELECT identity FROM automation_operations WHERE ${tenant(s)} AND run_id=${run.id}::uuid AND state IN ('STARTED','UNKNOWN') FOR UPDATE`.execute(tx)).rows,unknown=interrupted.length>0;
+      const interrupted=(await sql<{identity:string}>`SELECT identity FROM automation_operations WHERE ${tenant(s)} AND run_id=${run.id}::uuid AND state IN ('STARTED','UNKNOWN') FOR UPDATE`.execute(tx)).rows;
+      const ruleUnresolved=(await sql`SELECT 1 FROM rule_runtime_intents WHERE ${tenant(s)} AND run_id=${run.id}::uuid AND (state='RESULT_UNKNOWN' OR send_admitted_at IS NOT NULL AND state IN ('EXECUTING','CANCEL_REQUESTED')) LIMIT 1`.execute(tx)).rows.length>0;
+      const unknown=interrupted.length>0||ruleUnresolved;
       const resume=fenceIterationResults(run,run.definition,interrupted.map(operation=>operation.identity),unknown?'UNKNOWN':'EXPIRED');
       if(run.usage_state==='RESERVED')await sql`UPDATE automation_usage_months SET reserved=reserved-1 WHERE ${tenant(s)} AND month=${run.usage_month}::date AND reserved>0`.execute(tx);
       await sql`UPDATE automation_runs SET resume=${JSON.stringify(resume)}::jsonb,status=${unknown?'UNKNOWN':'EXPIRED'},usage_state=${run.usage_state==='RESERVED'?'RELEASED':run.usage_state},ended_at=${now},wake_at=NULL,reason='RUN_DEADLINE',updated_at=${now} WHERE ${tenant(s)} AND id=${run.id}::uuid`.execute(tx);
     }
-    // Cascading deletes include frozen random input/result and approval inputs.
-    const cutoff=new Date(now.getTime()-7*86400000);
-    const runs=await sql`DELETE FROM automation_runs WHERE (organization_id,guild_id,id) IN (SELECT organization_id,guild_id,id FROM automation_runs WHERE ended_at<=${cutoff} ORDER BY ended_at LIMIT 200) RETURNING id`.execute(tx);
-    await sql`DELETE FROM automation_requests WHERE created_at<=${cutoff}`.execute(tx);
+    // Every mutation remains inside the captured scope. A guild appearing
+    // after discovery is left for the next bounded pass, never added as a late
+    // lock acquisition under the old global automation fence.
+    const runs=oldRuns.length?await sql`DELETE FROM automation_runs WHERE ${tenant(s)} AND id=ANY(${oldRuns.map(run=>run.id)}::uuid[]) AND ended_at<=${cutoff} RETURNING id`.execute(tx):{rows:[]};
+    await sql`DELETE FROM automation_requests WHERE ${tenant(s)} AND created_at<=${cutoff}`.execute(tx);
     // Occurrence deduplication is only needed while it could start; no backlog
     // replay is allowed, so consumed metadata can be erased within seven days.
-    await sql`DELETE FROM automation_occurrences WHERE created_at<=${cutoff}`.execute(tx);
-    const flows=(await sql<{organization_id:string;guild_id:string;id:string}>`SELECT organization_id,guild_id,id FROM automation_flows WHERE state='DELETED' AND deleted_at<=${cutoff} LIMIT 100`.execute(tx)).rows;
+    await sql`DELETE FROM automation_occurrences WHERE ${tenant(s)} AND created_at<=${cutoff}`.execute(tx);
     for(const flow of flows){
-      const s={organizationId:flow.organization_id,guildId:flow.guild_id};
       // A user deleting a definition requests cancellation. A stalled worker
       // cannot keep its data indefinitely or revive it after retention cleanup.
       await sql`DELETE FROM automation_schedules WHERE ${tenant(s)} AND flow_id=${flow.id}`.execute(tx);
-      await sql`DELETE FROM automation_runs WHERE ${tenant(s)} AND flow_id=${flow.id}`.execute(tx);
+      await sql`DELETE FROM automation_runs WHERE ${tenant(s)} AND flow_id=${flow.id} AND id=ANY(${purgeIds}::uuid[])`.execute(tx);
       await sql`DELETE FROM automation_flows WHERE ${tenant(s)} AND id=${flow.id}`.execute(tx);
     }
     // Aggregate counters contain no identities or payload. Keep the closed
     // calendar month only through its accounting reconciliation grace period.
-    await sql`DELETE FROM automation_usage_months WHERE month+interval '1 month'+interval '7 days'<=${now} AND reserved=0`.execute(tx);
-    return {expired:expired.length,deletedRuns:runs.rows.length,deletedFlows:flows.length};
-  });
+    await sql`DELETE FROM automation_usage_months WHERE ${tenant(s)} AND month+interval '1 month'+interval '7 days'<=${now} AND reserved=0`.execute(tx);
+    // Own expiry can precede parent ended_at+7d (for example a late terminal).
+    // FK cascade alone is therefore insufficient. Delete after terminal writes
+    // as well, so an already elapsed observation cannot survive this pass.
+    const observations=observationPurgeRunIds.length?await sql`DELETE FROM automation_execution_observations WHERE ${tenant(s)} AND run_id=ANY(${observationPurgeRunIds}::uuid[]) AND retention_expires_at<=${now} RETURNING run_id`.execute(tx):{rows:[]};
+    return {expired:expired.length,deletedRuns:runs.rows.length,deletedFlows:flows.length,deletedObservations:observations.rows.length};
+   });
+   expiredCount+=counts.expired;deletedRuns+=counts.deletedRuns;deletedFlows+=counts.deletedFlows;deletedObservations+=counts.deletedObservations;
+  }
+  return {expired:expiredCount,deletedRuns,deletedFlows};
 }

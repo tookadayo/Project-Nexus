@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 import {
   connect,
@@ -59,7 +59,7 @@ const admission: AutomationAdmissionLimits = {
   measurementId: "isolated-random-acceptance-fixtures",
 };
 const actor: Actor = {
-  key: "synthetic-random-acceptance-admin",
+  key: createHash("sha256").update("synthetic-random-acceptance-admin").digest("hex"),
   encryptedUserId: "synthetic-encrypted-identity",
   permissions: "8",
   roles: [],

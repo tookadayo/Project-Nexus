@@ -1,0 +1,345 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 03:12 UTC
+Reasoning: 極高. Design only. No implementation/testing/configuration. Domains, paths, tables, and publication capabilities are proposed/unverified as marked.
+
+付録I-D：公開境界・静的配信・移行工程
+0. 直近2点の整合修正
+0-1. lineage_suppression のscope
+
+lineage_suppression は scope_kind で意味を明確に分離する。
+
+scope_kind	意味	guild scope	user_id
+SHARED_REJECT	guild全体で同一改善系統をReject済みとして抑止	必須	NULL
+PER_USER_DISMISS	特定利用者だけDismiss済みとして抑止	必須	必須
+
+したがって、shared REJECTを「誰か一人がdismissした状態」として扱わない。版変更だけでは抑止を解除せず、I-C4で定める抑止期限到達後にのみ再評価可能とする。
+
+0-2. CONSUMED の意味
+
+CONSUMED は「外部サービスで成功した場合」に限定せず、承認された適用処理が成功確定した状態とする。
+
+外部副作用あり：外部結果が成功確認された場合。
+
+DB-only apply：対象domain transactionがcommitし、適用結果を成功確定できた場合。
+
+RESULT_UNKNOWN は絶対に CONSUMED にしない。
+
+draft作成、Apply受付、reservation取得だけではCONSUMEDにしない。
+
+1. 公開境界allowlist
+
+以下のdomain/pathは提案名であり、実際のドメイン・routeは未照合である。
+
+1-1. Domain分離
+境界	提案domain	配置	公開範囲
+公式Web	www.nexus.example	お名前.com静的配信	公開GET/HEADのみ
+Dashboard/BFF	app.nexus.example	Windows PC上Next.js、Tunnel経由	Browser向け認証済みWeb/BFF
+Machine callback	app.nexus.example	同上	署名済みPOSTのみ
+PC内部API	127.0.0.1:<internal-api-port> 等	Windows PC	公開禁止
+Operator	127.0.0.1:<operator-port>	別loopback Fastify	絶対に公開禁止
+
+nexus.exampleからwwwへのredirect等は追加の配備仕様として扱い、現時点では実ドメイン未確認。
+
+Cloudflare Tunnelは到達経路であって認証・認可そのものではない。Tunnel接続元の制御と、app側のsession/authenticationを別責務として扱う。
+
+Discord Gateway/RESTはWindows PCからDiscordへの直接outboundであり、Tunnelを経由しない。
+
+1-2. 公開route allowlist
+www.nexus.example
+
+提案：
+
+GET /
+
+GET /announcements/
+
+GET /announcements/<public-version>/
+
+GET /status/
+
+GET /status/status.json
+
+GET /legal/<document>
+
+GET /assets/<immutable-file>
+
+HEADは対応するGETと同じ公開範囲に限定。
+
+POST/PUT/PATCH/DELETEは原則公開禁止。未登録route、管理用path、DB/Redis path、debug/metrics pathは404または接続レベルで拒否する。
+
+Legalは現状未公開部分があるため、承認済み公開版が存在するまでallowlistへ実体を追加しない。Contactも現在無効であり、実際に受信・処理できる運用が整うまで「問い合わせ可能」と表示しない。
+
+app.nexus.example
+
+Browser向けの提案BFF namespace：
+
+GET /api/v1/session
+
+GET /api/v1/guilds
+
+POST /api/v1/guild-selection
+
+GET /api/v1/...
+
+POST /api/v1/...
+
+PATCH /api/v1/...
+
+DELETE /api/v1/...
+
+実際の各domain routeはI-Bの契約IDに対応させるが、既存route実名は未照合。未知routeは拒否する。
+
+OAuth callback：
+
+GET /api/auth/oauth/<provider>/callback
+
+Machine callback：
+
+POST /api/machine/webhooks/<provider>
+
+Machine callbackはBrowser BFFとは別認証経路とし、session cookieを認証材料にしない。
+
+内部PC API：
+
+POST /internal/pc/...
+
+GET /internal/pc/...
+
+等を提案内部namespaceとするが、外部allowlistには登録しない。BFF→内部APIのみが到達可能で、Browserからこのpathを直接利用できない構成とする。
+
+1-3. 認証・CSRF・Host境界
+
+Browserは常に
+
+Browser → app.nexus.example → Next.js BFF → PC内部処理
+
+のみを使用する。
+
+PC API URLや署名鍵をBrowserへ返さない。
+
+session cookieは設計案として：
+
+Secure
+
+HttpOnly
+
+Path=/
+
+Domain属性なし（host-only）
+
+SameSite=Lax
+
+とする。
+
+SameSite=Laxは、実際のOAuth callback方式とsame-site/cross-site関係を照合したうえで使用する。callbackをPOST化する等の変更が必要になった場合は別途CSRF設計を再確認する。
+
+状態変更BFF requestはsessionに紐付くCSRF tokenを要求し、GETで状態変更を行わない。OAuth callbackはCSRF tokenではなくOAuth stateをsession/認証開始状態と照合する。
+
+BFFは次の順で検証する。
+
+session → CSRF/OAuth state → guild scope → permission → target existence/scope → target version/state → domain invariant
+
+targetが別guildに属する、または利用者に存在確認を許すべきでない対象は、対象存在を漏らさない安定したNot Found系応答へ統一する。
+
+Host/Forwarded/X-Forwarded-*は任意のInternet clientから送られた値を信用しない。canonical hostは設定値と照合し、forwarded headerを信用するのは明示的に信頼したproxy/ingressから受けた場合だけとする。
+
+Tunnel到達性の確認は「そのrequestが許可されたingressから到達したか」の判定であり、app session認証・guild認可の代替にはしない。
+
+BFF→PC内部API署名は設計案としてHMAC-SHA-256を使用し、
+
+method + canonical path + timestamp + nonce + body hash + key id
+
+を署名対象とする。鍵はPC側のみへ配置し、Browserへ公開しない。nonce再利用と期限外requestを拒否する。実際の内部API署名方式・key storageは既存実装との照合が必要。
+
+外部callbackはproviderごとに個別の署名検証を行い、cookie/session認証を併用しない。重複callbackはdomain側のidempotency契約で処理する。
+
+2. Announcement / Publication / Status logical schema
+
+以下は提案logical table名。既存tableとの対応は未照合。
+
+logical table	必須field / 型 / 制約	index・version	公開分類 / retention
+announcement	announcement_id:ID PK; scope:PUBLIC/INTERNAL!; title:TEXT!; body:TEXT!; content_version:BIGINT!; state:DRAFT/PUBLISHED/RETRACTED!; updated_at:TIME!	announcement_id+content_version UNIQUE	PUBLICのみartifact化。履歴保持は未承認候補
+publication_manifest	manifest_id:ID PK; publication_type:ANNOUNCEMENT/LEGAL/STATUS!; source_id:ID?; source_version:BIGINT!; artifact_generation:BIGINT!; artifact_hash:SHA256!; state:STAGED/ACTIVE/RETIRED/RETRACTED!; created_at:TIME!; published_at:TIME?	publication_type+artifact_generation UNIQUE、ACTIVE一意	public fieldのみ。保持期間未承認候補
+status_snapshot	snapshot_id:ID PK; generated_at:TIME!; valid_until:TIME!; schema_version:INT!; overall_state:OK/DEGRADED/UNKNOWN!; pc_state:OK/STOPPED/UNKNOWN!; tunnel_state:OK/STOPPED/UNKNOWN!; worker_state:OK/STOPPED/UNKNOWN!; discord_outbound_state:OK/DEGRADED/UNKNOWN!; observation_source:VARCHAR!; quality:FRESH/STALE/UNKNOWN!	generation/version UNIQUE	最新public snapshot中心。履歴保持は未承認候補
+
+publication_manifestのartifact実体は静的公開物として管理し、DBへ本文全体を複製することを必須にしない。
+
+Announcement正本はPC側。公開artifactへ出すfieldはscope=PUBLICかつ公開allowlistを通過したものだけとする。guild内部情報、管理者情報、Fact/evidence、credential、内部URL等をartifactへ含めない。
+
+3. 公開publish/update/withdraw
+3-1. Publish
+
+PC上のAnnouncement正本を取得。
+
+PUBLIC許可fieldだけを抽出。
+
+immutable artifactを生成。
+
+artifact hashを計算。
+
+publication_manifest(STAGED)を作成。
+
+hash・source version・schema versionを検証。
+
+公開世代をatomicに切替。
+
+ACTIVE manifestと確認記録を同一domain transactionで確定。
+
+公開先がatomic rename、conditional update、または同等の安全な世代切替を提供できるかは未確認。利用可能性が確認できない場合、atomic publicationを保証する設計として扱わず、配備条件を満たすまで公開処理を有効化しない。
+
+3-2. Update
+
+Updateは既存artifactを上書きせず、新しいartifact_generationを作成する。
+
+source version → artifact hash → manifest generation → atomic active switch
+
+の順序を守る。
+
+古いartifactはRETIREDとするが、物理削除時期は別保持契約に従う。
+
+3-3. Withdraw
+
+Withdrawでは新しい公開世代をRETRACTEDとして確定し、public manifestから旧contentを参照しない状態へatomic切替する。
+
+撤回は、
+
+新規ページ参照停止
+
+manifest上の公開状態変更
+
+canonical public indexからの除外
+
+を保証する。
+
+一方、外部cacheに既に残った旧artifactを即時かつ全て消去できるとは保証しない。利用可能なcache purge機能は実環境確認が必要。
+
+旧manifestの再有効化は、generationの単調性とwithdraw世代によって拒否する。古いpublish jobが後から到着しても、現在generationより古ければcommitしない。
+
+4. Status契約
+
+Statusは静的snapshotを正本とする。
+
+generatedAtが生成時刻、validUntilがそのsnapshotを正常状態として表示できる期限。
+
+now > validUntilの場合：
+
+「現在状態不明」
+
+として表示し、OKとして扱わない。
+
+また、状態を混同しない。
+
+状態	UI上の意味
+PC停止	Dashboard/BFFも利用不能になり得る。公式static siteは独立して表示可能
+Tunnel停止	PCが動作していてもBrowser→app到達不能。PC停止とは断定しない
+Worker停止	Dashboard/BFFは利用可能な場合がある。Runtimeのみ停止/unknownとして扱う
+Discord outbound断	Tunnelとは無関係。外部操作の送信可否・応答状態として別表示
+Discord応答喪失	該当operationの結果に応じてUNKNOWN。Tunnel停止とは同一視しない
+観測期限切れ	現在状態UNKNOWN。正常稼働とは表示しない
+
+DashboardのRuntime statusはBFF pollingを基本とする。
+
+提案：
+
+GET /api/v1/status
+
+を一定間隔で取得し、SSEを補助的に採用する場合も、
+
+SSE = notification / acceleration
+
+に限定する。SSE切断時はpollingへ戻し、SSE自体を状態の正本にしない。
+
+5. 移行Task依存DAG
+
+以下のTask IDは本付録で整理する提案ID。既存コードの実ファイルpathや既存route名を意味しない。
+
+Task	対象既存箇所	必要差分	着手依存	完了条件	flag / rollback	受入
+D16-01	auth/public-session-store、auth/server-access、Next layout	A配置のhost/session/CSRF/BFF境界。server-side DB参照は維持	I-C契約	BrowserがPC API/DBへ直接到達せず、guild権限をserver再検査	security boundaryはdefault-deny。新機能routeはflag off	PUB-01
+D16-02	Basic Analytics v3、Detailed Analysis保存	Fact入力契約・snapshot・quality・source health接続	D16-01 + I-C2	既存分析domain invariantを維持し新Fact系へ接続	A16_FACT_ENABLED提案	PUB-02
+D16-03	Explore graphs/viewsegment	server-side DB readを維持。公開境界のみ整理	D16-01	graph/viewsegmentのscope/permissionがguild単位で維持	route単位rollback	PUB-03
+D16-04	Operations attention/intake/events/playbook/experiments/reports/orgteams/webhookcredentials	各domainの既存DB処理を維持し、公開BFF境界・invariantを明示	D16-01	既存操作を失わず権限/競合を維持	domain別flag	PUB-04
+D16-05	Automation Runtime/Scheduler/PG persistence	I-C3のintent/attempt/lease/fence/outbox/UNKNOWNを統合	I-C1〜C3	crash/cancel/UNKNOWN/旧Workerを扱える	A16_RUNTIME_V2 offから開始	RT-*
+D16-06	Plan/Beta admission、Billing catalog、Stripe checkout/webhook	PC上Next/BFFを維持。machine callbackのみ個別署名	D16-01	Checkout/webhookとguild/user scopeを維持	webhook変更は旧経路rollback可能にする	PUB-05
+D16-07	現在の固定閾値Rule診断	Fact→Rule→Evaluation→Suggestionを新設	D16-02 + I-C2	同一input/versionで同一評価、auto-applyなし	A16_RULE_ENGINE off	SUG-01〜
+D16-08	AnnouncementのNext→DB、local Operator	PC正本→immutable artifact→manifest→static配信へ	D16-01 + I-C4	publish/update/withdrawの世代競合を防止	A16_PUBLIC_PUBLISH off	PUB-06
+D16-09	Privacy retention/tombstone	I-C4 deletion/receipt/restore遮断を統合	D16-05	tombstoneがruntime/apply/restoreより優先	deletion pathはdefault-deny	RET-*
+D16-10	別loopback Fastify Operator	Tunnel/public ingressから完全分離	D16-01	外部requestからOperatorへ到達不能	flagによる公開解除を設けない	PUB-07
+D16-11	全domain	compatibility組立、feature flag、rollback準備	D16-01〜10	新処理disabledでも既存domainが壊れない	全A16機能offで旧経路復帰可能	INT-01
+D16-12	全体	alpha16実装完了後の受入準備	D16-11	試験対象・観測項目・期待結果が揃う	実装中は試験実施しない	ACC-ALL
+
+依存関係は概ね：
+
+D16-01 → D16-02/03/04/06 → D16-05 → D16-07 → D16-08/09 → D16-10 → D16-11 → alpha16実装完了 → 全体受入
+
+とする。
+
+ただし、D16-10のOperator境界は他domainより先にsecurity boundaryとして固定し、後工程から公開経路へ戻す変更を許さない。
+
+6. 実装段階の順序とrollback
+
+実装時の工程は次の順序に固定する。
+
+schema拡張
+
+既存互換層の追加
+
+新Runtime/Rule/Public処理をdisabled状態で組み立て
+
+既存domainとの接続
+
+feature flag単位でalpha16機能を統合
+
+alpha16実装完了
+
+この時点で初めて全体動作確認を実施
+
+問題をまとめて修正
+
+全体再確認
+
+schema拡張は既存データを直ちに破壊しないexpand-firstを基本とする。旧domain invariantを新設層に合わせて無条件に書き換える全面rewriteは行わない。
+
+rollbackでは、実行中Runを別revisionへ黙って差し替えない。Flow Rollbackは新revisionとして扱い、既存Runのimmutable revisionを維持する。
+
+新Rule/Suggestionはfeature flagをOFFにすれば新規生成を停止できる設計とし、既存Suggestion・operation・UNKNOWNを勝手に消去してrollbackしない。
+
+Public publisherもOFF時は新規publicationを停止し、既存ACTIVE artifactを勝手に別世代へ戻さない。withdraw済み世代の復活は禁止する。
+
+7. 実環境照合が必要な事項
+
+実装前に、設計上の未照合事項を次へ限定する。
+
+実際のOnamae.com契約で静的配信、ファイル更新方式、必要なatomic/conditional publication相当が利用可能か。
+
+実際のDNS設定がwww/app等の構成を採れるか。DNS full/partialやCNAME等を未確認のまま前提化しない。
+
+Cloudflare Tunnelの実設定とPC側listenerの到達範囲。
+
+NEXUS_API_URL / NEXUS_WEB_URLの実値と、実際のNext/API listener。
+
+auth/public-session-store等の確認済みコード領域と実routeの対応。
+
+実guild_id、user_id等の型。Discord IDをuuid等へ変換すると仮定しない。
+
+DB/Redisの実配備先。
+
+Stripe/Discord等の既存callback routeと現在の署名検証実装。
+
+static artifact更新時のcache制御能力。
+
+これらは「設計が未完成」という意味ではなく、実環境・実コードとの照合前には確定値として書けない項目である。
+
+8. 利用者が選択する事項
+
+利用者判断は次の少数の束に限定する。
+
+公開履歴の保持範囲
+Announcement artifact/history、Status snapshot履歴等をどこまで残すか。推奨は必要最小限で、具体保持期間は未承認。
+
+公開Statusの粒度
+推奨は「PC / Tunnel / Worker / 外部通信」の状態を内部詳細ではなく利用者が障害を理解できる最小粒度で公開し、観測不能はUNKNOWNとする。
+
+Legal / Contactの公開開始条件
+推奨は承認済み文面と実際に機能する問い合わせ運用が揃うまで、未完成ページ・無効フォームを完成機能として公開しない。
+
+本付録はA配置に基づく公開境界・静的配信・移行工程の設計であり、Onamae/Cloudflareの実契約能力、実route、実table、実配備との互換性を検証済みとは扱わない。実装承認・本番稼働可能・完全確定を意味しない。受入はalpha16の実装が全て完了した後に全体をまとめて実施する。

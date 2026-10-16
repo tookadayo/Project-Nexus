@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { fork, type ChildProcess } from "node:child_process";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -32,7 +32,7 @@ let db: Database,
   infra: Awaited<ReturnType<typeof isolatedPostgres>>,
   serial = 0;
 const actor: Actor = {
-  key: "synthetic-compatibility-admin",
+  key: createHash("sha256").update("synthetic-compatibility-admin").digest("hex"),
   encryptedUserId: "synthetic-encrypted-identity",
   permissions: "8",
   roles: [],

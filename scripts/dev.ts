@@ -4,6 +4,7 @@ import {hostedBetaEnabled} from '../packages/config/src/hosted-beta';
 import { analysisRuntime } from "../apps/worker/src/analysis";
 import { AttentionOperations } from "../packages/operations/src/attention.js";
 import { CommunityOperationsWorker } from "../apps/worker/src/community-operations";
+import {runCommunityMaintenance} from '../apps/worker/src/community-work';
 import { loadEnvFile } from "node:process";
 import { hostname } from "node:os";
 import { Queue, Worker } from "bullmq";
@@ -56,6 +57,7 @@ import { tickVoice } from "../packages/lifecycle/src/adaptive-projector.js";
 import { processAlpha15AutomationSchedules,processAlpha15AutomationRuns } from "../apps/worker/src/alpha15-automation";
 import {processAlpha15AutomationEvents} from '../apps/worker/src/alpha15-events';
 import {sweepAutomationRetention} from '../packages/automation/src/retention';
+import {Alpha16PcRuntime} from '../apps/worker/src/alpha16-pc-runtime';
 import { createAlpha15DiscordAdapter } from "../apps/worker/src/alpha15-discord";
 import { ALPHA15_BETA_ADMISSION, ALPHA15_ADOPTED_ACTIONS } from "../packages/automation/src/admission";
 import { WebSetupService } from "../packages/operations/src/web-setup";
@@ -67,6 +69,9 @@ try {
 }
 const cfg = readConfig();
 const db = connect(cfg.DATABASE_URL);
+// New Rule work remains disabled until the host explicitly supplies measured
+// profiles, live authorization, retention and startup-deletion dependencies.
+const alpha16Runtime = new Alpha16PcRuntime(db);
 await migrate(db);
 const interactionHealth = new InteractionHealth(
   cfg.NEXUS_INTERACTION_TRANSPORT,
@@ -226,7 +231,7 @@ const worker = new Worker<Scope>(
         for (let i = 0; i < 5 && (await betaWork(db,s,()=>nativeSnapshots.tick(s))); i++) {
           /* bounded REST snapshots */
         }
-        await betaWork(db,s,async()=>{await optimization.tick(s);await new AttentionOperations(db).observe(s,await settings.get(s));await communityOperations.tick(s);});
+        await runCommunityMaintenance(db,s,async()=>{await optimization.tick(s);await new AttentionOperations(db).observe(s,await settings.get(s));},()=>communityOperations.tick(s));
       } finally {
         span.end();
       }
@@ -258,8 +263,18 @@ async function retryCommands(s: Scope) {
     });
   }
 }
+let lastAlpha16Maintenance = 0;
 const loop = async () => {
   while (!stopped) {
+    // Independent purpose maintenance must still run when legacy work fails,
+    // outside every legacy session privacy/beta read fence.
+    if (Date.now() - lastAlpha16Maintenance > 10000) {
+      try {
+        await alpha16Runtime.tickGlobal();
+        if (alpha16Runtime.configured) for (const scope of await scopes()) await alpha16Runtime.tick(scope);
+      } catch { process.stderr.write("Alpha16 maintenance unavailable\n"); }
+      finally { lastAlpha16Maintenance = Date.now(); }
+    }
     try {
       await consumer.tick();
       await gateway.publisher.recover();

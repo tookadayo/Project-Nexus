@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { connect, migrate, ensureGuild, sql, tenant, type Database } from "../../packages/db/src/index";
 import { scopeForGuild } from "../../packages/security/src/scoping";
@@ -13,7 +13,7 @@ const channel = "885333333333333333", role = "885444444444444444", member = "885
 const recordType: ValueType = { kind: "Record", schemaId: "nexus.ticket.status.v1" };
 const states: ValueType = { kind: "Enum", values: ["OPEN", "ACKNOWLEDGED", "IN_PROGRESS", "SNOOZED", "RESOLVED", "DISMISSED"] };
 const admission = { activeFlows: 20, monthlyRuns: 100, guildConcurrent: 2, globalConcurrent: 20, guildPending: 20, globalPending: 100, measurementId: "isolated-bounded-read-tests" };
-const actor: Actor = { key: "synthetic", encryptedUserId: "synthetic-encrypted-identity", permissions: "8", roles: [], source: "WEB_DASHBOARD", requestId: "synthetic" };
+const actor: Actor = { key: createHash("sha256").update("synthetic").digest("hex"), encryptedUserId: "synthetic-encrypted-identity", permissions: "8", roles: [], source: "WEB_DASHBOARD", requestId: "synthetic" };
 beforeAll(async () => { vi.stubEnv("NEXUS_HOSTED_BETA", "off"); infra = await isolatedPostgres(); db = connect(infra.databaseUrl); await migrate(db); });
 afterAll(async () => { await db?.destroy(); await infra?.stop(); vi.unstubAllEnvs(); });
 
@@ -27,9 +27,9 @@ function awaiting(id = "await"): Extract<Statement, { kind: "awaitEvent" }> { re
 async function fixture(body: Statement[] = [polling()]) {
   const scope = scopeForGuild(String(888000000000000000n + BigInt(++serial))), ticket = "intake:" + randomUUID(), panel = randomUUID(), clock = { now: new Date() }; await ensureGuild(db, scope);
   await db.transaction().execute(async tx => {
-    await sql`INSERT INTO operations_intake_panels(organization_id,guild_id,id,title,category,state,actor_hash) VALUES(${scope.organizationId}::uuid,${scope.guildId},${panel}::uuid,'Synthetic','support','PUBLISHED','synthetic')`.execute(tx);
+    await sql`INSERT INTO operations_intake_panels(organization_id,guild_id,id,title,category,state,actor_hash) VALUES(${scope.organizationId}::uuid,${scope.guildId},${panel}::uuid,'Synthetic','support','PUBLISHED',${actor.key})`.execute(tx);
     await sql`INSERT INTO attention_items(organization_id,guild_id,channel_id,message_id,detected_at,status,item_type,evidence) VALUES(${scope.organizationId}::uuid,${scope.guildId},${channel},${ticket},now(),'OPEN','OPERATIONS_REQUEST','{}'::jsonb)`.execute(tx);
-    await sql`INSERT INTO operations_requests(organization_id,guild_id,id,panel_id,interaction_digest,actor_hash,category,fields_ciphertext,attention_key) VALUES(${scope.organizationId}::uuid,${scope.guildId},${ticket.slice(7)}::uuid,${panel}::uuid,${randomUUID()},'synthetic','support','synthetic-encrypted-fields',${ticket})`.execute(tx);
+    await sql`INSERT INTO operations_requests(organization_id,guild_id,id,panel_id,interaction_digest,actor_hash,category,fields_ciphertext,attention_key) VALUES(${scope.organizationId}::uuid,${scope.guildId},${ticket.slice(7)}::uuid,${panel}::uuid,${randomUUID()},${actor.key},'support','synthetic-encrypted-fields',${ticket})`.execute(tx);
   });
   const fix = (value: unknown): unknown => value === "GUILD" ? scope.guildId : value === "TICKET" ? ticket : Array.isArray(value) ? value.map(fix) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, fix(item)])) : value;
   const definition: FlowDefinition = { schemaVersion: 1, id: "bounded-" + serial, name: "Synthetic bounded waits", guildId: scope.guildId, trigger: { kind: "manual", inputs: [] }, variables: [], targets: { channelIds: [channel], roleIds: [role], parentCategoryIds: [] }, body: fix(body) as Statement[] };

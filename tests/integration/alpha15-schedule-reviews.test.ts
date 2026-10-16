@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {afterAll,beforeAll,expect,it,vi} from 'vitest';
 import {connect,migrate,ensureGuild,sql,tenant,type Database} from '../../packages/db/src/index';
@@ -12,7 +12,7 @@ import type {FlowDefinition,TriggerDefinition} from '../../packages/automation/s
 import {isolatedPostgres} from '../fixtures/postgres';
 
 let db:Database,infra:Awaited<ReturnType<typeof isolatedPostgres>>,serial=0;
-const actor:Actor={key:'synthetic-scheduler-actor',encryptedUserId:'synthetic-encrypted',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic'};
+const actor:Actor={key:createHash('sha256').update('synthetic-scheduler-actor').digest('hex'),encryptedUserId:'synthetic-encrypted',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic'};
 const admission={activeFlows:20,monthlyRuns:100,guildConcurrent:1,globalConcurrent:2,guildPending:20,globalPending:200,measurementId:'isolated-schedule'};
 beforeAll(async()=>{
   vi.stubEnv('NEXUS_HOSTED_BETA','off');infra=await isolatedPostgres();db=connect(infra.databaseUrl);

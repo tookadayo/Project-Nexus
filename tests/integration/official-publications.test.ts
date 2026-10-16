@@ -67,6 +67,18 @@ const publish = (
     target: "public-site",
     ...extra,
   });
+// Historical, synthetic LEGACY data is seeded only inside this isolated test
+// database. This does not invoke or enable the unconfigured static publisher.
+const seedLegacyPublished = async (draft: { id: string; revision: number }) => {
+  const result = await sql`UPDATE official_publications SET
+    revision=revision+1,published_revision=edit_revision,status='PUBLISHED',
+    first_published_at=COALESCE(first_published_at,clock_timestamp()),
+    published_updated_at=clock_timestamp(),updated_at=clock_timestamp()
+    WHERE id=${draft.id}::uuid AND revision=${draft.revision}
+      AND edit_revision IS NOT NULL AND delivery_mode='LEGACY' RETURNING id`.execute(db);
+  expect(result.rows).toHaveLength(1);
+  return service.detail(draft.id);
+};
 beforeAll(async () => {
   infra = await isolatedPostgres();
   db = connect(infra.databaseUrl);
@@ -92,9 +104,9 @@ it("keeps drafts and private translations absent from all public projections", a
     expect(list.items.some((x) => x.id === draft.id)).toBe(false);
   }
 });
-it("leaves published A stable while B is edited and publishes only the confirmed current revision", async () => {
+it("leaves retained legacy A stable while B is edited and unconfigured publication stays closed", async () => {
   const a = await create(content("SYNTHETIC-PUBLISHED-A", true));
-  const first = await publish(a.id, a.revision);
+  const first = await seedLegacyPublished(a);
   const b = await change(a.id, first.revision, "save", {
     content: content("SYNTHETIC-PRIVATE-B", true),
     englishReviewed: true,
@@ -109,13 +121,16 @@ it("leaves published A stable while B is edited and publishes only the confirmed
     "SYNTHETIC-PRIVATE-B",
   );
   await expect(publish(a.id, first.revision)).rejects.toThrow(
-    "REVISION_CONFLICT",
+    "PUBLIC_PUBLISH_UNAVAILABLE",
   );
   await expect(service.preview(a.id, first.revision)).rejects.toThrow(
     "REVISION_CONFLICT",
   );
-  await publish(a.id, b.revision);
-  expect((await service.publicDetail(a.id))!.title).toBe("SYNTHETIC-PRIVATE-B");
+  await expect(publish(a.id, b.revision)).rejects.toThrow(
+    "PUBLIC_PUBLISH_UNAVAILABLE",
+  );
+  expect((await service.publicDetail(a.id))!.title).toBe("SYNTHETIC-PUBLISHED-A");
+  expect((await service.detail(a.id)).revision).toBe(b.revision);
   expect((await service.publicDetail(a.id))!.publishedAt).toBe(
     first.publishedAt,
   );
@@ -135,16 +150,15 @@ it("rejects concurrent editor writes and keeps the losing draft from becoming vi
   ).toEqual(["REVISION_CONFLICT"]);
   expect(await service.publicDetail(a.id)).toBeNull();
 });
-it("deduplicates concurrent publish requests and metadata-only audit in one transaction", async () => {
-  const a = await create(content("SYNTHETIC-NOT-IN-AUDIT", true));
+it("deduplicates concurrent draft saves and metadata-only audit in one transaction", async () => {
+  const a = await create();
   const request = {
     id: a.id,
     expectedRevision: a.revision,
     requestId: randomUUID(),
-    action: "publish" as const,
-    confirmed: true,
-    translationsReviewed: true,
-    target: "public-site" as const,
+    action: "save" as const,
+    content: content("SYNTHETIC-NOT-IN-AUDIT", true),
+    englishReviewed: true,
   };
   const [one, two] = await Promise.all([
     service.change(request),
@@ -173,7 +187,7 @@ it("deduplicates concurrent publish requests and metadata-only audit in one tran
   await change(a.id, one.revision, "save", { content: content("LATER-DRAFT") });
   expect(await service.change(request)).toEqual(one);
 });
-it("rolls back both publication pointer and request when audit storage fails", async () => {
+it("rolls back both draft pointer and request when audit storage fails", async () => {
   const a = await create(),
     requestId = randomUUID();
   await sql
@@ -187,7 +201,10 @@ it("rolls back both publication pointer and request when audit storage fails", a
     )
     .execute(db);
   try {
-    await expect(publish(a.id, a.revision, { requestId })).rejects.toThrow(
+    await expect(change(a.id, a.revision, "save", {
+      requestId,
+      content: content("SYNTHETIC-ROLLED-BACK"),
+    })).rejects.toThrow(
       "synthetic audit failure",
     );
   } finally {
@@ -210,10 +227,16 @@ it("rolls back both publication pointer and request when audit storage fails", a
     ).rows,
   ).toHaveLength(0);
 });
-it("withdraws all locales, detail and category reads immediately; republishing is manual", async () => {
+it("keeps unconfigured withdrawal closed and never reopens a retained withdrawn legacy row", async () => {
   const a = await create(content("WITHDRAW-SYNTHETIC", true));
-  const live = await publish(a.id, a.revision);
-  await change(a.id, live.revision, "withdraw");
+  const live = await seedLegacyPublished(a);
+  await expect(change(a.id, live.revision, "withdraw")).rejects.toThrow(
+    "PUBLIC_PUBLISH_UNAVAILABLE",
+  );
+  expect(await service.detail(a.id)).toEqual(live);
+  // Model a previously withdrawn LEGACY record, not a successful current
+  // remote withdrawal. New publisher work requires its independent authority.
+  await sql`UPDATE official_publications SET revision=revision+1,status='WITHDRAWN',updated_at=clock_timestamp() WHERE id=${a.id}::uuid`.execute(db);
   expect(await service.publicDetail(a.id, "ja")).toBeNull();
   expect(await service.publicDetail(a.id, "en")).toBeNull();
   expect(
@@ -223,12 +246,14 @@ it("withdraws all locales, detail and category reads immediately; republishing i
   ).not.toContain("WITHDRAW-SYNTHETIC");
   const edit = await service.detail(a.id);
   expect(edit.status).toBe("WITHDRAWN");
-  await publish(a.id, edit.revision);
-  expect((await service.publicDetail(a.id))!.title).toBe("WITHDRAW-SYNTHETIC");
+  await expect(publish(a.id, edit.revision)).rejects.toThrow(
+    "PUBLIC_PUBLISH_UNAVAILABLE",
+  );
+  expect(await service.publicDetail(a.id)).toBeNull();
 });
 it("discards an edit without altering its published content or deleting publication history", async () => {
   const a = await create(),
-    live = await publish(a.id, a.revision);
+    live = await seedLegacyPublished(a);
   const b = await change(a.id, live.revision, "save", {
     content: content("DISCARD-SYNTHETIC"),
   });
@@ -245,17 +270,20 @@ it("discards an edit without altering its published content or deleting publicat
   const unpublished = await create();
   const empty = await change(unpublished.id, unpublished.revision, "discard");
   expect(empty.content).toBeNull();
-  await expect(publish(empty.id, empty.revision)).rejects.toThrow(
+  await expect(service.preview(empty.id, empty.revision)).rejects.toThrow(
     "PUBLICATION_DRAFT_EMPTY",
   );
+  await expect(publish(empty.id, empty.revision)).rejects.toThrow(
+    "PUBLIC_PUBLISH_UNAVAILABLE",
+  );
 });
-it("never reuses old English when a new published revision has no translation", async () => {
+it("never reuses old English when a retained current legacy revision has no translation", async () => {
   const a = await create(content("OLD-EN-SYNTHETIC", true)),
-    live = await publish(a.id, a.revision);
+    live = await seedLegacyPublished(a);
   const b = await change(a.id, live.revision, "save", {
     content: content("CURRENT-JA-SYNTHETIC"),
   });
-  await publish(a.id, b.revision);
+  await seedLegacyPublished(b);
   const result = await service.publicDetail(a.id, "en");
   expect(result).toMatchObject({
     fallback: true,
@@ -278,7 +306,7 @@ it("uses the same safe Markdown for operator preview and public rendering", asyn
     "## Safety\n\n<script>alert(1)</script>\n\n[bad](javascript:alert(1))\n\n![tracker](https://example.invalid/tracker.png)\n\n[link](https://example.invalid/help)";
   const draft = await create(malicious),
     preview = await service.preview(draft.id, draft.revision);
-  await publish(draft.id, draft.revision);
+  await seedLegacyPublished(draft);
   const published = await service.publicDetail(draft.id);
   expect(published!.html).toBe(preview.html);
   expect(preview.html).not.toMatch(/<script|<img|href="javascript:/i);
@@ -293,7 +321,7 @@ it("keeps incident state separate and paginates category-filtered published rows
       ...content("SYNTHETIC-MAINTENANCE-" + i),
       category: "MAINTENANCE",
     });
-    await publish(a.id, a.revision);
+    await seedLegacyPublished(a);
   }
   const one = await service.publicList({ category: "MAINTENANCE", page: 1 }),
     two = await service.publicList({ category: "MAINTENANCE", page: 2 });
@@ -510,7 +538,10 @@ it("enforces actual operator authentication, CSRF, Host/Origin, expiry and no-st
       headers,
       payload: input,
     });
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(428);
+    expect(response.json()).toEqual({ error: "PRECONDITION_REQUIRED" });
+    expect(await service.detail(draft.id)).toEqual(draft);
+    expect(await service.publicDetail(draft.id)).toBeNull();
     await sql`UPDATE operator_sessions SET expires_at=clock_timestamp()-interval '1 second'`.execute(
       db,
     );

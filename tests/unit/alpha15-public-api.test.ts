@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createHmac } from "node:crypto";
 import {
   createPublicApiProof,
   readPublicApiProof,
@@ -83,5 +84,18 @@ describe("alpha15 request-local public identity proof", () => {
       newMemberGoals: [],
       goalPreset: null,
     });
+  });
+  it("requires v2 body/query binding, preserves repeated query order and does not downgrade to v1", () => {
+    const target = path + "?filter=a&filter=b&range=7", body = { patch: { timezone: "UTC", enabled: false }, revision: 3 };
+    const proof = createPublicApiProof({ scope, userId, sessionReference: "private-session-reference", method: "POST", path: target, body, origin: "https://nexus.example" }, secret, 100000);
+    const parsed = readPublicApiProof(proof, "POST", path + "?range=7&filter=a&filter=b", scope, secret, 100001, { revision: 3, patch: { enabled: false, timezone: "UTC" } });
+    expect(parsed).toMatchObject({ version: 2, keyId: "public-session:v2", query: "filter=a&filter=b&range=7" });
+    expect(parsed.nonce).toMatch(/^[a-f0-9-]{36}$/);
+    expect(() => readPublicApiProof(proof, "POST", target, scope, secret, 100001)).toThrow();
+    expect(() => readPublicApiProof(proof, "POST", target, scope, secret, 100001, { ...body, revision: 4 })).toThrow();
+    expect(() => readPublicApiProof(proof, "POST", path + "?filter=b&filter=a&range=7", scope, secret, 100001, body)).toThrow();
+    const legacy = Buffer.from(JSON.stringify({ scope, userId, sessionDigest: parsed.sessionDigest, method: "POST", path, origin: "https://nexus.example", issuedAt: 100000, expiresAt: 130000 })).toString("base64url");
+    const mac = createHmac("sha256", secret).update("public-api:v1:" + legacy).digest("base64url");
+    expect(() => readPublicApiProof(`${legacy}.${mac}`, "POST", path, scope, secret, 100001)).toThrow();
   });
 });

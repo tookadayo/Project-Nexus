@@ -13,7 +13,7 @@ import { infrastructure } from "../fixtures/infrastructure";
 import { FakeDiscord } from "../fixtures/discord";
 import { IdentityVault } from "../../packages/identity/src/index";
 import { SettingsService } from "../../packages/settings/src/index";
-import { PublicSessions } from "../../packages/security/src/public-sessions";
+import { PublicSessions, publicSessionDigest } from "../../packages/security/src/public-sessions";
 import { apiToken, scopeForGuild } from "../../packages/security/src/scoping";
 import { createPublicApiProof } from "../../packages/security/src/public-api";
 import { registerAlpha15Setup } from "../../apps/api/src/alpha15-setup";
@@ -99,6 +99,7 @@ async function fixture(combined = false) {
           sessionReference: reference,
           method,
           path,
+          body,
           ...(method === "POST" ? { origin: "https://nexus.example" } : {}),
         }),
         ...(method === "POST" ? { origin: "https://nexus.example" } : {}),
@@ -193,6 +194,32 @@ it("finishes Web setup without a Discord code and preserves optional/legacy sema
   } finally {
     await f.app.close();
   }
+});
+it("uses one request-local v2 identity for pre-install status and never shares it with replay, another guild or lost permission", async () => {
+  const f = await fixture(), other = await fixture();
+  vi.stubEnv("DISCORD_TOKEN", "synthetic-preinstall-bot");
+  vi.stubEnv("DISCORD_APPLICATION_ID", "777777777777777777");
+  let permitted = true;
+  f.discord.members.delete(user); other.discord.members.delete(user);
+  const fetcher = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => new Response(JSON.stringify(
+    new Headers(init?.headers).get("Authorization")?.startsWith("Bot ") ? [] : [{ id: f.s.guildId, name: "Managed fixture", owner: permitted, permissions: permitted ? "32" : "0" }]), { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  try {
+    const path = `/v3/organizations/${f.s.organizationId}/guilds/${f.s.guildId}/web-setup/status`;
+    const proof = createPublicApiProof({ scope: f.s, userId: user, sessionReference: f.reference, method: "GET", path });
+    const response = await f.call("GET", "/status", undefined, { "x-nexus-user-proof": proof });
+    expect(response.statusCode).toBe(200); expect(response.json()).toMatchObject({ state: "BOT_REQUIRED", guild: { id: f.s.guildId } });
+    const row = (await sql<{ proof_nonces: Record<string, number> }>`SELECT proof_nonces FROM public_oauth_sessions WHERE digest=${publicSessionDigest(f.reference)}`.execute(db)).rows[0]!;
+    expect(Object.keys(row.proof_nonces)).toHaveLength(1);
+    const reads = fetcher.mock.calls.length;
+    expect((await f.call("GET", "/status", undefined, { "x-nexus-user-proof": proof })).statusCode).toBe(401);
+    expect((await other.call("GET", "/status", undefined, { "x-nexus-user-proof": proof })).statusCode).toBe(401);
+    expect(fetcher.mock.calls).toHaveLength(reads);
+    permitted = false;
+    expect((await f.call("GET", "/status")).statusCode).toBe(403);
+    await f.sessions.revoke(f.reference);
+    expect((await f.call("GET", "/status")).statusCode).toBe(401);
+  } finally { vi.unstubAllGlobals(); await f.app.close(); await other.app.close(); }
 });
 it("rejects static service token alone, cross-origin, actor spoofing and revoked sessions", async () => {
   const f = await fixture();

@@ -12,14 +12,17 @@ import type {AutomationSimulationInput} from '../../../packages/automation/src/s
 import {previewAlpha15RolePolicy} from '../../worker/src/alpha15-discord';
 import {parallelRunStatus} from '../../../packages/automation/src/parallel';
 import {iterationRunStatus} from '../../../packages/automation/src/iteration-results';
+import {registerManagedRolePolicies} from './alpha16-managed-roles';
+import type {ManagedRoleAdmissionAdapter} from '../../../packages/automation/src/managed-role-admission';
 
-export function registerAlpha15Automation(app:FastifyInstance,db:Database,key:string,discord?:DiscordPort,vault?:IdentityVault,options:AutomationServiceOptions={}) {
+export function registerAlpha15Automation(app:FastifyInstance,db:Database,key:string,discord?:DiscordPort,vault?:IdentityVault,options:AutomationServiceOptions={},managedRoleAdmission?:ManagedRoleAdmissionAdapter) {
   const service=new AutomationService(db,{...options,approvalPolicy:discord&&vault?(tx,s,run,approval,actor)=>previewAlpha15RolePolicy(db,discord,vault,s,run,approval,actor,tx):options.approvalPolicy}),base='/v3/organizations/:organizationId/guilds/:guildId/automation';
   const auth=async(req:Parameters<typeof publicApiContext>[0],permission:'READ'|'CONFIGURE'|'GOVERN'='READ')=>{
     const params=req.params as {organizationId:string;guildId:string};
-    return publicApiContext({method:req.method,url:req.url,id:req.id,headers:req.headers,params:{organizationId:params.organizationId,guildId:params.guildId}},db,key,discord,vault,permission);
+    return publicApiContext({method:req.method,url:req.url,id:req.id,headers:req.headers,body:req.body,params:{organizationId:params.organizationId,guildId:params.guildId}},db,key,discord,vault,permission);
   };
   const flowId=(params:unknown)=>z.object({flowId:z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/)}).parse(params).flowId;
+  registerManagedRolePolicies(app,service,auth,managedRoleAdmission);
   const revision=z.object({revision:z.number().int().positive()}).strict();
   const mockValue=z.object({type:z.unknown(),value:z.unknown()}).strict();
   const mockOutcome=z.enum(['SUCCEEDED','FAILED','NOT_STARTED','UNKNOWN']);
@@ -29,8 +32,13 @@ export function registerAlpha15Automation(app:FastifyInstance,db:Database,key:st
   app.get(base+'/overview',async(req,reply)=>{reply.header('Cache-Control','no-store');const context=await auth(req);return service.overview(context.scope,context.actor);});
   app.get(base+'/event-receipts',async(req,reply)=>{reply.header('Cache-Control','no-store');const context=await auth(req),query=z.object({flowId:z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).optional()}).strict().parse(req.query);return service.eventReceipts(context.scope,context.actor,query.flowId);});
   app.get(base+'/flows',async(req,reply)=>{reply.header('Cache-Control','no-store');const context=await auth(req);return service.list(context.scope,context.actor);});
+  app.get(base+'/managed-roles',async(req,reply)=>{reply.header('Cache-Control','no-store');const context=await auth(req,'CONFIGURE');return service.managedRoles(context.scope,context.actor);});
+  app.get(base+'/managed-roles/history',async(req,reply)=>{reply.header('Cache-Control','no-store');const context=await auth(req,'CONFIGURE');return service.managedRoleHistory(context.scope,context.actor);});
   app.get(base+'/flows/:flowId',async(req,reply)=>{reply.header('Cache-Control','no-store');const context=await auth(req);return service.get(context.scope,context.actor,flowId(req.params));});
   app.get(base+'/flows/:flowId/revisions/:revision',async(req,reply)=>{reply.header('Cache-Control','no-store');const context=await auth(req);const input=z.object({revision:z.coerce.number().int().positive().max(2147483647)}).parse(req.params);return service.getRevision(context.scope,context.actor,flowId(req.params),input.revision);});
+  app.get(base+'/flows/:flowId/rollback-history',async(req,reply)=>{reply.header('Cache-Control','no-store');const context=await auth(req);return service.rollbackHistory(context.scope,context.actor,flowId(req.params));});
+  app.post(base+'/flows/:flowId/rollback-draft',async(req,reply)=>{reply.header('Cache-Control','no-store');const context=await auth(req,'CONFIGURE');return service.prepareRollback(context.scope,context.actor,flowId(req.params),z.object({sourceRevision:z.number().int().positive().max(2147483647),expectedRevision:z.number().int().positive().max(2147483647),expectedActiveRevision:z.number().int().positive().max(2147483647).nullable(),expectedGeneration:z.number().int().nonnegative().max(2147483647),requestId:z.uuid()}).strict().parse(req.body));});
+  app.post(base+'/flows/:flowId/rollback',async(req,reply)=>{reply.header('Cache-Control','no-store');const context=await auth(req,'CONFIGURE');return service.commitRollback(context.scope,context.actor,flowId(req.params),z.object({rollbackId:z.uuid(),revision:z.number().int().positive().max(2147483647),semanticHash:z.string().regex(/^[a-f0-9]{64}$/),expectedActiveRevision:z.number().int().positive().max(2147483647).nullable(),expectedGeneration:z.number().int().nonnegative().max(2147483647),requestId:z.uuid()}).strict().parse(req.body));});
   app.put(base+'/flows/:flowId/draft',async(req,reply)=>{
     reply.header('Cache-Control','no-store');const context=await auth(req,'CONFIGURE');
     const input=z.object({definition:z.unknown(),expectedRevision:z.number().int().nonnegative(),requestId:z.uuid()}).strict().parse(req.body);

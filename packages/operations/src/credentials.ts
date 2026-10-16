@@ -14,6 +14,8 @@ import { EntitlementService } from "../../settings/src/billing/entitlements";
 import type { IdentityVault } from "../../identity/src/index";
 import { hostedBetaEnabled } from "../../config/src/hosted-beta";
 import { betaAccess, betaLock } from "../../security/src/hosted-beta";
+import type { MaintenanceAuthorizationProof } from "./maintenance-authorization";
+import { integrationMaintenanceAccess, integrationMaintenanceCurrent, integrationRevision } from "./integration-maintenance";
 import {
   operationsAccess,
   operationsLock,
@@ -45,7 +47,47 @@ export class ApiCredentials {
   constructor(
     private readonly db: Database,
     private readonly vault: IdentityVault,
+    private readonly maintenanceProof?: MaintenanceAuthorizationProof,
   ) {}
+  async update(s: Scope, actor: Actor, id: string, expectedRevision: number, input: unknown) {
+    z.uuid().parse(id); integrationRevision(expectedRevision);
+    const data = credentialInput.pick({ name: true, scopes: true }).parse(input);
+    return this.db.transaction().execute(async tx => {
+      await integrationMaintenanceAccess(tx, s, actor, this.maintenanceProof, "api");
+      const previous = (await sql<{ kind: string; actor_hash: string; revision: number; state: string }>`SELECT kind,actor_hash,revision,state FROM api_credentials WHERE ${tenant(s)} AND id=${id}::uuid FOR UPDATE`.execute(tx)).rows[0];
+      assert(previous, "CREDENTIAL_NOT_FOUND", 404);
+      assert(previous.revision === expectedRevision, "REVISION_CONFLICT", 409);
+      assert(previous.state !== "REVOKED" && !(await revokedCredentialActor(tx, this.vault, s, previous.actor_hash)), "CREDENTIAL_REVOKED", 409);
+      if (previous.kind === "SERVICE_ACCOUNT" || data.scopes.some(scope => scope.endsWith(":write") || scope.startsWith("organization:")))
+        await new EntitlementService(tx).require(s, "advanced_api");
+      await integrationMaintenanceCurrent(tx, s, actor, this.maintenanceProof, "api");
+      const row = (await sql`UPDATE api_credentials SET name=${data.name},scopes=${data.scopes}::text[],revision=revision+1 WHERE ${tenant(s)} AND id=${id}::uuid AND revision=${expectedRevision} RETURNING id,name,prefix,scopes,kind,state,revision,created_at,updated_at,last_used_at,revoked_at`.execute(tx)).rows[0];
+      assert(row, "REVISION_CONFLICT", 409);
+      await operationsAudit(tx, s, actor.key, "API_CREDENTIAL_UPDATED", id, expectedRevision + 1);
+      return row;
+    });
+  }
+  async rotate(s: Scope, actor: Actor, id: string, expectedRevision: number) {
+    z.uuid().parse(id); integrationRevision(expectedRevision);
+    return this.db.transaction().execute(async tx => {
+      await integrationMaintenanceAccess(tx, s, actor, this.maintenanceProof, "api");
+      const previous = (await sql<{ name: string; scopes: ApiScope[]; kind: string; actor_hash: string; revision: number; state: string }>`SELECT name,scopes,kind,actor_hash,revision,state FROM api_credentials WHERE ${tenant(s)} AND id=${id}::uuid FOR UPDATE`.execute(tx)).rows[0];
+      assert(previous, "CREDENTIAL_NOT_FOUND", 404);
+      assert(previous.revision === expectedRevision, "REVISION_CONFLICT", 409);
+      assert(previous.state === "ENABLED" && !(await revokedCredentialActor(tx, this.vault, s, previous.actor_hash)), "CREDENTIAL_NOT_ENABLED", 409);
+      if (previous.kind === "SERVICE_ACCOUNT" || previous.scopes.some(scope => scope.endsWith(":write") || scope.startsWith("organization:")))
+        await new EntitlementService(tx).require(s, "advanced_api");
+      await integrationMaintenanceCurrent(tx, s, actor, this.maintenanceProof, "api");
+      // A new ID invalidates even requests authenticated just before rotation:
+      // the existing effect fence rechecks the old row, now REVOKED.
+      const prefix = "nxs_" + randomBytes(10).toString("hex"), token = prefix + "." + randomBytes(32).toString("hex");
+      await sql`UPDATE api_credentials SET state='REVOKED',revoked_at=now(),revision=revision+1 WHERE ${tenant(s)} AND id=${id}::uuid AND revision=${expectedRevision}`.execute(tx);
+      const replacement = (await sql<{ id: string }>`INSERT INTO api_credentials(organization_id,guild_id,prefix,token_hash,name,scopes,kind,actor_hash) VALUES(${s.organizationId}::uuid,${s.guildId},${prefix},${this.vault.digest("operations-api-token", token)},${previous.name},${previous.scopes}::text[],${previous.kind},${previous.actor_hash}) RETURNING id`.execute(tx)).rows[0]!;
+      await operationsAudit(tx, s, actor.key, "API_CREDENTIAL_ROTATED", id, expectedRevision + 1);
+      await operationsAudit(tx, s, actor.key, "API_CREDENTIAL_CREATED", replacement.id, 1);
+      return { id: replacement.id, replacedId: id, prefix, token, revision: 1 };
+    });
+  }
   async fence(tx: Tx, scope: Scope, id: string, required?: ApiScope) {
     await privacyReadLock(tx, scope);
     await betaAccess(tx, scope, required?.endsWith(":write") ? "work" : "read");
@@ -95,6 +137,7 @@ export class ApiCredentials {
       prefix = "nxs_" + randomBytes(10).toString("hex"),
       token = prefix + "." + randomBytes(32).toString("hex");
     return this.db.transaction().execute(async (tx) => {
+      if (this.maintenanceProof) await integrationMaintenanceAccess(tx, s, actor, this.maintenanceProof, "api");
       await operationsAccess(tx, s, actor, "CONFIGURE", "api");
       if (
         data.kind === "SERVICE_ACCOUNT" ||
@@ -118,6 +161,7 @@ export class ApiCredentials {
         "CREDENTIAL_LIMIT",
         409,
       );
+      if (this.maintenanceProof) await integrationMaintenanceCurrent(tx, s, actor, this.maintenanceProof, "api");
       const row = (
         await sql<{
           id: string;
@@ -136,12 +180,18 @@ export class ApiCredentials {
       return { id: row.id, prefix, token };
     });
   }
-  async revoke(s: Scope, actor: Actor, id: string) {
+  async revoke(s: Scope, actor: Actor, id: string, expectedRevision?: number) {
     z.uuid().parse(id);
+    if (expectedRevision !== undefined) integrationRevision(expectedRevision);
+    assert(!this.maintenanceProof || expectedRevision !== undefined, "REVISION_REQUIRED");
     return this.db.transaction().execute(async (tx) => {
+      if (this.maintenanceProof) await integrationMaintenanceAccess(tx, s, actor, this.maintenanceProof);
       await operationsAccess(tx, s, actor, "CONFIGURE");
+      await operationsLock(tx, s);
+      if (expectedRevision !== undefined) assert((await sql`SELECT id FROM api_credentials WHERE ${tenant(s)} AND id=${id}::uuid AND revision=${expectedRevision} FOR UPDATE`.execute(tx)).rows.length, "REVISION_CONFLICT", 409);
+      if (this.maintenanceProof) await integrationMaintenanceCurrent(tx, s, actor, this.maintenanceProof);
       const row = (
-        await sql`UPDATE api_credentials SET state='REVOKED',revoked_at=now() WHERE ${tenant(s)} AND id=${id}::uuid RETURNING id`.execute(
+        await sql`UPDATE api_credentials SET state='REVOKED',revoked_at=now(),revision=revision+1 WHERE ${tenant(s)} AND id=${id}::uuid RETURNING id`.execute(
           tx,
         )
       ).rows[0];
@@ -156,10 +206,15 @@ export class ApiCredentials {
       );
     });
   }
-  async resume(s: Scope, actor: Actor, id: string) {
+  async resume(s: Scope, actor: Actor, id: string, expectedRevision?: number) {
     z.uuid().parse(id);
+    if (expectedRevision !== undefined) integrationRevision(expectedRevision);
+    assert(!this.maintenanceProof || expectedRevision !== undefined, "REVISION_REQUIRED");
     return this.db.transaction().execute(async (tx) => {
+      if (this.maintenanceProof) await integrationMaintenanceAccess(tx, s, actor, this.maintenanceProof, "api");
       await operationsAccess(tx, s, actor, "CONFIGURE", "api");
+      await operationsLock(tx, s);
+      if (expectedRevision !== undefined) assert((await sql`SELECT id FROM api_credentials WHERE ${tenant(s)} AND id=${id}::uuid AND revision=${expectedRevision} FOR UPDATE`.execute(tx)).rows.length, "REVISION_CONFLICT", 409);
       const row = (
         await sql<{
           kind: string;
@@ -177,7 +232,8 @@ export class ApiCredentials {
         )
       )
         await new EntitlementService(tx).require(s, "advanced_api");
-      await sql`UPDATE api_credentials SET state='ENABLED' WHERE ${tenant(s)} AND id=${id}::uuid`.execute(
+      if (this.maintenanceProof) await integrationMaintenanceCurrent(tx, s, actor, this.maintenanceProof, "api");
+      await sql`UPDATE api_credentials SET state='ENABLED',revision=revision+1 WHERE ${tenant(s)} AND id=${id}::uuid`.execute(
         tx,
       );
       await operationsAudit(
@@ -194,7 +250,7 @@ export class ApiCredentials {
     return this.db.transaction().execute(async (tx) => {
       await operationsAccess(tx, s, actor, "CONFIGURE");
       return (
-        await sql`SELECT id,name,prefix,scopes,kind,state,created_at,last_used_at,revoked_at FROM api_credentials WHERE ${tenant(s)} ORDER BY created_at DESC LIMIT 100`.execute(
+        await sql`SELECT id,name,prefix,scopes,kind,state,revision,created_at,updated_at,last_used_at,revoked_at FROM api_credentials WHERE ${tenant(s)} ORDER BY created_at DESC LIMIT 100`.execute(
           tx,
         )
       ).rows;

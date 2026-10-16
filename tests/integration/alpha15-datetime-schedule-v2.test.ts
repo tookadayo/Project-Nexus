@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { connect, ensureGuild, migrate, sql, tenant, type Database } from "../../packages/db/src/index";
 import { scopeForGuild } from "../../packages/security/src/scoping";
@@ -13,7 +13,7 @@ import type { FlowDefinition, Statement, TriggerDefinition } from "../../package
 import { isolatedPostgres } from "../fixtures/postgres";
 
 let db: Database, infra: Awaited<ReturnType<typeof isolatedPostgres>>, serial = 0;
-const actor: Actor = { key: "synthetic-datetime-admin", encryptedUserId: "synthetic-encrypted", permissions: "8", roles: [], source: "WEB_DASHBOARD", requestId: "synthetic" };
+const actor: Actor = { key: createHash("sha256").update("synthetic-datetime-admin").digest("hex"), encryptedUserId: "synthetic-encrypted", permissions: "8", roles: [], source: "WEB_DASHBOARD", requestId: "synthetic" };
 const admission = { activeFlows: 20, monthlyRuns: 100, guildConcurrent: 2, globalConcurrent: 20, guildPending: 20, globalPending: 200, measurementId: "isolated-datetime-v2" };
 beforeAll(async () => {
   vi.stubEnv("NEXUS_HOSTED_BETA", "off"); infra = await isolatedPostgres(); db = connect(infra.databaseUrl); await migrate(db);

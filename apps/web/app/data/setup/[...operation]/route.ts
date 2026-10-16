@@ -13,7 +13,7 @@ async function proxy(request: NextRequest, context: Context) {
   try {
     const {operation} = await context.params;
     const route = operation.join("/");
-    const reading = request.method === "GET";
+    const reading = ["GET", "HEAD"].includes(request.method);
     const allowed = reading
       ? ["status", "candidates"].includes(route) || /^requests\/[0-9a-f-]{36}$/i.test(route)
       : ["requests", "verify", "draft", "apply", "complete"].includes(route);
@@ -25,11 +25,11 @@ async function proxy(request: NextRequest, context: Context) {
     if (!identity || identity.guildId !== guild) throw new DomainError("SESSION_REQUIRED", 401);
     const path = `/v3/organizations/${identity.organizationId}/guilds/${identity.guildId}/web-setup/${route}`;
     const origin = reading ? undefined : webOrigin(request);
-    const proof = createPublicApiProof({scope: {organizationId: identity.organizationId, guildId: identity.guildId}, userId: identity.userId,
-      sessionReference: identity.sessionReference, method: request.method, path, ...(origin ? {origin} : {})});
     // No actor, session secret, API key or authority flag comes from the browser.
     const body = reading ? undefined : await request.text();
     if (body && new TextEncoder().encode(body).length > 256 * 1024) throw new DomainError("INVALID_INPUT", 400);
+    const proof = createPublicApiProof({scope: {organizationId: identity.organizationId, guildId: identity.guildId}, userId: identity.userId,
+      sessionReference: identity.sessionReference, method: request.method, path, body, ...(origin ? {origin} : {})});
     const response = await fetch(identity.base + path, {
       method: request.method, headers: {Authorization: `Bearer ${identity.token}`, "x-nexus-user-proof": proof,
         ...(reading ? {} : {"Content-Type": "application/json", Origin: origin!})},

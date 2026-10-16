@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 import {
@@ -270,7 +270,7 @@ it("turns stale Discord wizard confirmation into a Web link without changing dra
     f.discord,
     f.s,
     {
-      key: "synthetic",
+      key: createHash("sha256").update("synthetic").digest("hex"),
       permissions: "8",
       roles: [],
       source: "DISCORD_PANEL",

@@ -1,0 +1,102 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 03:34 UTC
+Reasoning: 極高. Proposed rules and synthetic fixtures only; no tests executed. Thresholds are unvalidated and require approval. Source adapters are unverified.
+
+付録II-B：ENG-001 / EVENT-001 / REPORT-001
+
+※以下のsource adapter、metric registry、target editor fieldは設計上の提案。現コードに同名adapter/metric/fieldが存在することは未確認。必要な認可済みaggregate sourceが成立しない場合、個人識別子の新規長期保存やraw本文収集で補完せず、MISSING/DISABLEDまたはblockedとする。
+
+合成fixture共通評価条件
+evaluationAsOf = 2026-10-15T12:00:00Z。
+数値は設計例のみで、検証済みbenchmark・統計的信頼度ではない。
+
+ENG-001 v1
+項目	契約
+目的	channelごとの構造化参加状況を比較し、利用が低い／明確に低下したchannelの改善機会を示す。個人の意欲・心理・人間関係・投稿内容は推定しない。
+metricId / source	COMM.CHANNEL_PARTICIPATION_RATE。提案adapter=ChannelParticipationAggregateAdapter。許可されたchannel別参加aggregateとguild全体参加aggregate、source revision、coverage、observation時刻を取得できること。現codeでのadapter存在は未確認。
+対象集合	対象guild内の通常channel。bot/system-only channel、削除済みchannel、テスト用channelは除外。adapter内部で同一participantの同一window内重複を1回に集約するが、Factには個人IDを保存しない。
+式	participationRate = uniqueEligibleParticipantsInChannel / uniqueEligibleGuildParticipants。CURRENT/PREVIOUSとも同一集合定義。
+window	CURRENT=[2026-10-08T12:00:00Z, 2026-10-15T12:00:00Z)、PREVIOUS=[2026-10-01T12:00:00Z, 2026-10-08T12:00:00Z)。7日間の経過時間window。
+minN / freshness / coverage	各windowのguild参加母数>=20、source observation freshness<=26h、coverage>=0.90を初期候補。いずれも未検証。
+判定	FIRE iff CURRENT < 0.10 or CURRENT <= PREVIOUS × 0.75。NO_FIREは両windowが判定可能で条件を満たさない場合。候補threshold=10% / 25%相対低下。
+bounds	low-rate=5%〜25%、relative-decline=10%〜50%、minN=10〜100、freshness=12〜48h、coverage=0.80〜1.00。全て未検証・承認待ち。
+欠測等	null/sourceなし=INELIGIBLE/MISSING、STALE=INELIGIBLE/STALE、coverage不足=INELIGIBLE/PARTIAL_COVERAGE、母数不足=INELIGIBLE/INSUFFICIENT_N、privacy抑止=INELIGIBLE/PRIVACY_SUPPRESSED、0分母=INELIGIBLE/ZERO_DENOMINATOR。PARTIALをFIRE/NO_FIREに使わない。
+cooldown / 解消 / 再発	cooldown開始=ACTIVE Suggestion生成時。候補14日。1完全CURRENT windowで条件非該当かつ品質十分なら解消。解消後に再度条件成立した場合のみ再発候補。同一active問題は重複生成しない。
+priority	P2候補。
+target / action	targetType=CHANNEL、targetId=channelId、liveVersion=対象channelの現在immutable revision。基本action=REVIEW_ONLY。安全なtyped editor registryが確認された場合のみCREATE_DRAFT、許可field候補=channel_topic_template_id（承認済みtemplate参照値のみ）。
+evidence / 説明	CURRENT/PREVIOUS rate、window、snapshot/source-health observation ID、quality、threshold、ruleVersionを記録。説明例：「直近7日間の構造化参加集計で、このchannelの参加率はX%、前期間はY%でした。設定した判定基準に該当しています。」因果や個人意図を断定しない。
+ENG-001 合成fixture
+ID	入力	期待
+ENG-F01	C=6/100=6%、P=10/100=10%、quality=SUFFICIENT	FIRE / LOW_OR_DECLINE / REVIEW_ONLY
+ENG-F02	C=12/100=12%、P=10/100=10%	NO_FIRE / NONE
+ENG-F03	C=10/100=10%、P=10/100=10%	NO_FIRE / THRESHOLD_NOT_CROSSED
+ENG-F04	C=7.5/100=7.5%、P=10/100=10%、target editor verified	FIRE / RELATIVE_DECLINE_25PCT / CREATE_DRAFT候補
+ENG-F05	C=8/100、P=10/100、source observation age=30h	INELIGIBLE / STALE / NONE
+ENG-F06	C=2/4、P=1/4	INELIGIBLE / INSUFFICIENT_N / NONE
+ENG-F07	C=0/0、P=0/0	INELIGIBLE / ZERO_DENOMINATOR / NONE
+ENG-F08	C=5/100、P=8/100、quality=SUPPRESSED	INELIGIBLE / PRIVACY_SUPPRESSED / NONE
+EVENT-001 v1
+項目	契約
+目的	構造化されたRSVPとattendanceを同じ母集団で対応させ、event参加conversionの低下・低水準を改善機会として示す。欠席理由、意欲、個人の意思は推定しない。
+metricId / source	EVENT.RSVP_TO_ATTENDANCE_CONVERSION。提案adapter=EventParticipationAggregateAdapter。許可されたRSVP/attendance aggregate、event status、source revision、coverageを取得できること。現codeでのadapter存在は未確認。
+対象集合	cancelled/test eventを除くeligible event。denominatorはCONFIRMED_RSVP、numeratorは同じevent＋同じconfirmed RSVP母集団のうち構造化attendanceが成功した件数。adapter内部でevent × participant重複を除外し、Factへ個人IDを保存しない。
+式	conversion = ΣmatchedAttended / ΣconfirmedRSVP。attendanceだけ存在する記録、waitlist/unconfirmed RSVPはnumerator/denominator双方から除外。
+window	CURRENT=[2026-09-17T12:00:00Z, 2026-10-15T12:00:00Z)、PREVIOUS=[2026-08-20T12:00:00Z, 2026-09-17T12:00:00Z)。各28日の経過時間window。
+minN / freshness / coverage	各windowでeligible event>=5、confirmed RSVP>=20、freshness<=26h、coverage>=0.90を初期候補。未検証。
+判定	FIRE iff CURRENT < 0.60 or CURRENT <= PREVIOUS - 0.20。候補threshold=60%、低下=20 percentage points。percentとpercentage pointを混同しない。
+bounds	conversion threshold=40%〜80%、decline=10〜40pp、event minN=3〜20、RSVP minN=10〜100、freshness=12〜48h、coverage=0.80〜1.00。未検証・承認待ち。
+欠測等	required RSVP/attendance sourceなし=INELIGIBLE/MISSING、STALE=INELIGIBLE/STALE、PARTIAL coverage不足=INELIGIBLE/PARTIAL_COVERAGE、event/RSVP母数不足=INELIGIBLE/INSUFFICIENT_N、privacy抑止=INELIGIBLE/PRIVACY_SUPPRESSED、denominator=0=INELIGIBLE/ZERO_DENOMINATOR。
+cooldown / 解消 / 再発	cooldown開始=ACTIVE Suggestion生成時。候補14日。1完全CURRENT windowで条件非該当なら解消。再発は解消後に再度成立した場合のみ。
+priority	P2候補。
+target / action	targetType=EVENT_PROGRAM（提案上の集約target）、targetId=guildのevent program ID、liveVersion=現在immutable revision。基本=REVIEW_ONLY。typed editor registry確認時のみCREATE_DRAFT、許可field候補=event_reminder_policy_id。未確認fieldならdraftを生成しない。
+evidence / 説明	matched RSVP、attendance、conversion、CURRENT/PREVIOUS、対象event数、quality、snapshot ID等。説明例：「対象期間のconfirmed RSVPに対する構造化attendanceはX%で、前期間はY%でした。設定したconversion基準に該当しています。」欠席理由・意欲を推定しない。
+EVENT-001 合成fixture
+ID	入力	期待
+EVENT-F01	C=50/100=50%、P=70/100=70%	FIRE / LOW_CONVERSION / REVIEW_ONLY
+EVENT-F02	C=70/100=70%、P=72/100=72%	NO_FIRE / NONE
+EVENT-F03	C=60/100=60%、P=80/100=80%	FIRE / DECLINE_20PP / REVIEW_ONLY
+EVENT-F04	C=60/100、P=60/100、source age=30h	INELIGIBLE / STALE / NONE
+EVENT-F05	C=4/10、P=8/20、eligible events=2	INELIGIBLE / INSUFFICIENT_N / NONE
+EVENT-F06	C=55/100、P=75/100、quality=SUPPRESSED	INELIGIBLE / PRIVACY_SUPPRESSED / NONE
+EVENT-F07	C=0/0、P=0/0	INELIGIBLE / ZERO_DENOMINATOR / NONE
+EVENT-F08	C source missing、P=70/100	INELIGIBLE / MISSING / NONE
+
+保持条件: 28日比較をRun由来の7日以内保持だけで成立させてはならない。認可済み長期aggregate sourceが存在しない場合、このruleはblockedとし、新規個人ID保存で補完しない。
+
+REPORT-001 v1
+項目	契約
+目的	reportの生成遅延と配信結果を運用状態として検出する。利用頻度・閲覧数などの利用指標は入力しない。生成状態と配信失敗はreasonを分離する。
+metricId / source	REPORT.GENERATION_DUE_STATE、REPORT.DELIVERY_RESULT_COUNTS。提案adapter=ReportOperationalStatusAdapter。report schedulerのdueAt、last successful generation、配信の明示的SUCCESS/FAILURE/UNKNOWN、source observationを取得できること。現codeでのadapter存在は未確認。
+生成計算	generationDue = (lastSuccessAt is null OR lastSuccessAt < dueAt)。overdueHours=max(0, evaluationAsOf-dueAt)。候補条件=generationDue=true AND overdueHours>2h。dueAtはreport側の構造化scheduleから取得し、report頻度を推測しない。
+配信計算	deliverySuccessRate = SUCCESS / (SUCCESS + FAILURE)。UNKNOWNはFAILUREに数えない。UNKNOWNが存在する場合はqualityを十分とせず、原因を推定しない。
+window	配信CURRENT=[2026-10-08T12:00:00Z, 2026-10-15T12:00:00Z)、PREVIOUS=[2026-10-01T12:00:00Z, 2026-10-08T12:00:00Z)。生成状態はevaluationAsOf時点のpoint observation。
+minN / freshness / coverage	配信terminal結果SUCCESS+FAILURE >=5、source freshness<=26h、coverage>=0.90を候補。生成状態はdueAt/lastSuccessAtが完全観測可能であること。未検証。
+判定	生成branch=overdueHours > 2hでFIRE/GENERATION_OVERDUE。配信branch=CURRENT < 0.90またはCURRENT <= PREVIOUS - 0.10でFIRE/DELIVERY_FAILURE。両branchは独立評価。どちらも問題なしならNO_FIRE。delivery branchが不十分でgenerationも正常ならINELIGIBLEであり、NO_FIREとはしない。
+bounds	generation grace=0.5〜24h、delivery threshold=50〜100%、decline=5〜30pp、minN=3〜50、freshness=12〜48h、coverage=0.80〜1.00。全て未検証・承認待ち。
+欠測等	dueAt/lastSuccessAt不足=INELIGIBLE/MISSING、source STALE=INELIGIBLE/STALE、coverage不足=INELIGIBLE/PARTIAL_COVERAGE、delivery terminal N不足=INELIGIBLE/INSUFFICIENT_N、privacy=INELIGIBLE/PRIVACY_SUPPRESSED、SUCCESS+FAILURE=0=INELIGIBLE/ZERO_DENOMINATOR。UNKNOWNはFAILUREへ変換しない。
+障害区別	PC_STOPPED、TUNNEL_UNAVAILABLE、EXTERNAL_DELIVERY_FAILED等はsourceが明示的に記録した場合だけevidence/reasonとして使用。観測不能をPC停止・Tunnel断・外部失敗のいずれかに推定しない。Tunnel断だけでPC→Discord等の外向きoperationをUNKNOWNにはしない。
+cooldown / 解消 / 再発	cooldown開始=ACTIVE Suggestion生成時。候補14日。生成branchは1完全window相当の正常観測、delivery branchは1完全CURRENT windowで基準非該当を解消条件とする。再発は解消後の新たな成立のみ。
+priority	P1候補。
+target / action	targetType=REPORT_DEFINITION、targetId=report definition ID、liveVersion=現在immutable revision。基本=REVIEW_ONLY。typed editor registryが確認された場合のみCREATE_DRAFT、許可field候補=report_delivery_policy_id。宛先secretやcredential値はdraft/evidenceに含めない。
+evidence / 説明	generationではdueAt/lastSuccessAt/overdueHours、deliveryではSUCCESS/FAILURE数・rate・windowを記録。failure classは明示観測時のみ。説明例：「report生成の最終成功観測はX、次回予定時刻はYで、現在Z時間の遅延が観測されています。」または「配信成功率はX%、前期間はY%でした。」利用頻度や原因を推定しない。
+REPORT-001 合成fixture
+ID	入力	期待
+REPORT-F01	dueAt=2026-10-15T09:00Z、lastSuccess=2026-10-14T09:00Z、asOfとの差=3h overdue、delivery=10/10	FIRE / GENERATION_OVERDUE / REVIEW_ONLY
+REPORT-F02	generation正常、delivery C=8/10=80%、P=10/10=100%、editor verified	FIRE / DELIVERY_FAILURE / CREATE_DRAFT候補
+REPORT-F03	generation正常、C=9/10=90%、P=10/10=100%	FIRE / DELIVERY_DECLINE_10PP / REVIEW_ONLY
+REPORT-F04	generation正常、C=10/10=100%、P=9/10=90%	NO_FIRE / NONE
+REPORT-F05	dueAt=10:00Z、asOf=12:00Z、overdue=2h、delivery=10/10	NO_FIRE / GENERATION_THRESHOLD_NOT_CROSSED
+REPORT-F06	source observation age=30h、delivery C=5/10	INELIGIBLE / STALE / NONE
+REPORT-F07	generation正常、delivery C=1/1、P=1/1	INELIGIBLE / INSUFFICIENT_N / NONE
+REPORT-F08	generation正常、delivery C=0/0、P=0/0	INELIGIBLE / ZERO_DENOMINATOR / NONE
+REPORT-F09	generation正常、delivery source=SUPPRESSED	INELIGIBLE / PRIVACY_SUPPRESSED / NONE
+REPORT-F10	dueAt=null、lastSuccessAt=null、delivery dataなし	INELIGIBLE / MISSING / NONE
+3ルール → adapter → UI → action → fixture対応
+Rule	Fact adapter（提案）	UI配置（提案）	draft action	受入fixture
+ENG-001	ChannelParticipationAggregateAdapter	Explore/コミュニティ利用状況	REVIEW_ONLY、typed field確認時のみCREATE_DRAFT[channel_topic_template_id]	ENG-F01〜F08
+EVENT-001	EventParticipationAggregateAdapter	Operations / Events	REVIEW_ONLY、typed field確認時のみCREATE_DRAFT[event_reminder_policy_id]	EVENT-F01〜F08
+REPORT-001	ReportOperationalStatusAdapter	Operations / Reports	REVIEW_ONLY、typed field確認時のみCREATE_DRAFT[report_delivery_policy_id]	REPORT-F01〜F10
+
+共通境界: CREATE_DRAFTは提案を下書きへ反映するだけで、publish、activation、自動投稿、課金、権限変更、外部操作を実行しない。draft生成・適用時には対象liveVersionと現在権限を再検証する。safe typed fieldが実際のeditorに存在しない場合はREVIEW_ONLYへ留める。
+
+未確認事項: 3 adapterが現コードで利用可能か、各targetにimmutable liveVersionと上記typed editor fieldが存在するか、28日等の比較を提供できる認可済みaggregate sourceが存在するかは未確認。存在しない場合に保持延長・raw本文収集・新規個人ID長期保存で補わない。

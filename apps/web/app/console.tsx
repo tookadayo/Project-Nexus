@@ -2800,6 +2800,7 @@ export default function Console({
           <a href="/explore">
             {locale === "ja" ? "分析と保存ビュー" : "Explore & saved views"}
           </a>
+          <a href="/analysis">{locale === "ja" ? "詳細分析" : "Detailed analysis"}</a>
         </nav>
       </details>
       <details className="nav-group">
@@ -2813,6 +2814,11 @@ export default function Console({
               ? "対応・自動化・レポート"
               : "Attention, automation & reports"}
           </a>
+          <a href="/rules">{locale === "ja" ? "ルールからの提案" : "Rule suggestions"}</a>
+          <a href="/onboarding-flows">{locale === "ja" ? "参加案内のフロー" : "Onboarding flows"}</a>
+          <a href="/lifecycle-interventions">{locale === "ja" ? "参加の支援" : "Lifecycle interventions"}</a>
+          <a href="/experiments">{locale === "ja" ? "改善の実験" : "Experiments"}</a>
+          <a href="/reports/definitions">{locale === "ja" ? "レポートの定義" : "Report definitions"}</a>
         </nav>
       </details>
       <details className="nav-group">
@@ -2822,6 +2828,16 @@ export default function Console({
         </summary>
         <nav>
           {group([4, 9, 11, 12, 13, 14])}
+          <a href="/health">{locale === "ja" ? "準備状況とデータの状態" : "Readiness and data health"}</a>
+          <a href="/rules/issues">{locale === "ja" ? "課題と施策の対応表" : "Issue mappings"}</a>
+          <a href="/rules/sources">{locale === "ja" ? "ルールの計測対象設定" : "Rule source settings"}</a>
+          <a href="/rules/config">{locale === "ja" ? "ルールの評価設定" : "Rule evaluation settings"}</a>
+          <a href="/rules/context">{locale === "ja" ? "運営状況の設定" : "Operating context"}</a>
+          <a href="/rules/evaluations">{locale === "ja" ? "ルール評価とsource確認" : "Rule evaluation and source health"}</a>
+          <a href="/templates">{locale === "ja" ? "テンプレート" : "Templates"}</a>
+          <a href="/preferences">{locale === "ja" ? "自分の設定" : "My preferences"}</a>
+          <a href="/automation/managed-roles">{locale === "ja" ? "ロール操作の設定" : "Managed role policies"}</a>
+          <a href="/operations/maintenance">{locale === "ja" ? "保存済みの運用を管理" : "Manage saved operations"}</a>
           <a href="/operations?view=organization">
             {locale === "ja" ? "組織とチーム" : "Organization & teams"}
           </a>

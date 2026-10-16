@@ -15,7 +15,9 @@ import {
   WebhookWorker,
   Webhooks,
   webhookSignature,
+  type WebhookDispatchOptions,
 } from "../../packages/operations/src/webhooks";
+import { operatorControlKey } from "../../packages/security/src/alpha16-operator";
 import { operationsEvent } from "../../packages/operations/src/policy";
 import { createApi } from "../../apps/api/src/server";
 import { AnalyticsService } from "../../packages/analytics/src/index";
@@ -49,6 +51,19 @@ async function fixture(plan = "GROWTH") {
     db,
   );
   return s;
+}
+async function fixtureDispatch(s: { organizationId: string; guildId: string }, endpointId: string): Promise<WebhookDispatchOptions> {
+  const expiresAt = new Date(Date.now() + 120_000);
+  await sql`UPDATE webhook_endpoints SET delivery_gate='OPEN',safety_expires_at=${expiresAt},safety_policy_revision='fixture-only-target' WHERE ${tenant(s)} AND id=${endpointId}::uuid`.execute(db);
+  for (const kind of ["GLOBAL", "GUILD"] as const) {
+    const key = kind === "GLOBAL" ? "GLOBAL" : operatorControlKey({ scopeKind: kind, scope: s, targetId: null });
+    await sql`INSERT INTO alpha16_operator_controls(scope_key,scope_kind,organization_id,guild_id,target_id,state,revision,reason_code,updated_at,expires_at)
+      VALUES(${key},${kind},${kind === "GLOBAL" ? null : s.organizationId}::uuid,${kind === "GLOBAL" ? null : s.guildId},NULL,'RUNNING',1,'CONFIG_REVIEW',now(),${expiresAt})
+      ON CONFLICT(scope_key) DO UPDATE SET state='RUNNING',expires_at=EXCLUDED.expires_at`.execute(db);
+  }
+  return { runtime: { purpose: "APPROVED_RUNTIME", approvalRevision: "fixture-only-runtime", heartbeatMs: 100, leaseMs: 5000, requestDeadlineMs: 3000, unknownResolutionMs: 10_000, operationTokenTtlMs: 10_000 },
+    dispatchPolicy: { approved: true, policyRevision: "fixture-only-target", activationStartedAt: new Date(0), targetLiveSafetyMs: 180_000, independentRetentionEnforcementReady: true, targetWritersCompatible: true },
+    verifyCurrentSafety: async () => true };
 }
 it("issues only hashed scoped credentials, serves real aggregate endpoints and revokes", async () => {
   const s = await fixture(),
@@ -178,7 +193,7 @@ it("enforces an atomic rate limit and disables paid tokens on downgrade without 
     }),
   ).rejects.toThrow("PLAN_REQUIRED");
 });
-it("signs stable deliveries, retries timeouts, rotates keys and never repeats a successful event", async () => {
+it("signs committed deliveries, rotates keys for new events and never repeats successful events", async () => {
   const s = await fixture(),
     webhooks = new Webhooks(db, vault),
     endpoint = await webhooks.create(s, actor, {
@@ -186,6 +201,7 @@ it("signs stable deliveries, retries timeouts, rotates keys and never repeats a 
       url: "https://example.com/nexus",
       events: ["coverage.changed"],
     });
+  const dispatch = await fixtureDispatch(s, endpoint.id);
   const event = await operationsEvent(
       db,
       s,
@@ -196,9 +212,8 @@ it("signs stable deliveries, retries timeouts, rotates keys and never repeats a 
     sent: { body: string; headers: Record<string, string> }[] = [],
     worker = new WebhookWorker(db, vault, async (_url, body, headers) => {
       sent.push({ body, headers });
-      if (sent.length === 1) throw new Error("WEBHOOK_TIMEOUT");
       return 204;
-    });
+    }, dispatch);
   expect(await worker.tick(s)).toBe(true);
   let delivery = (
     await sql<{
@@ -210,10 +225,15 @@ it("signs stable deliveries, retries timeouts, rotates keys and never repeats a 
       db,
     )
   ).rows[0]!;
-  expect(delivery).toMatchObject({ state: "PENDING", last_error: "TIMEOUT" });
+  expect(delivery).toMatchObject({ state: "SUCCEEDED", last_error: null });
+  expect(sent[0]!.headers["Nexus-Delivery-Id"]).toBe(delivery.id);
+  expect(sent[0]!.headers["Nexus-Signature"]).toBe(webhookSignature(endpoint.secret, sent[0]!.headers["Nexus-Timestamp"]!, delivery.id, sent[0]!.body));
+  expect(sent[0]!.headers["Nexus-Key-Version"]).toBe("1");
+  expect(await worker.tick(s)).toBe(false);
   const rotated = await webhooks.rotate(s, actor, endpoint.id);
   expect(rotated.version).toBe(2);
-  await worker.tick(s, new Date(delivery.available_at.getTime() + 1));
+  await operationsEvent(db, s, "coverage.changed", "coverage-after-rotation", { coverage: "COMPLETE" });
+  await worker.tick(s);
   delivery = (
     await sql<{
       id: string;
@@ -225,17 +245,16 @@ it("signs stable deliveries, retries timeouts, rotates keys and never repeats a 
     )
   ).rows[0]!;
   expect(delivery.state).toBe("SUCCEEDED");
-  expect(sent[0]!.body).toBe(sent[1]!.body);
-  expect(sent[1]!.headers["Nexus-Delivery-Id"]).toBe(delivery.id);
+  expect(sent[1]!.body).not.toBe(sent[0]!.body);
   expect(sent[1]!.headers["Nexus-Signature"]).toBe(
     webhookSignature(
-      endpoint.secret,
+      rotated.secret,
       sent[1]!.headers["Nexus-Timestamp"]!,
-      delivery.id,
+      sent[1]!.headers["Nexus-Delivery-Id"]!,
       sent[1]!.body,
     ),
   );
-  expect(sent[1]!.headers["Nexus-Key-Version"]).toBe("1");
+  expect(sent[1]!.headers["Nexus-Key-Version"]).toBe("2");
   expect(await worker.tick(s)).toBe(false);
   expect(sent).toHaveLength(2);
   expect(
@@ -281,7 +300,7 @@ it("isolates endpoints and deletion fences queued work", async () => {
       .rows,
   ).toEqual([]);
 });
-it("expired rotated secrets never send and eight failed deliveries disable the endpoint", async () => {
+it("expired rotated secrets stay unsent and post-admission failures become UNKNOWN without retry", async () => {
   const s = await fixture(),
     webhooks = new Webhooks(db, vault),
     endpoint = await webhooks.create(s, actor, {
@@ -289,13 +308,14 @@ it("expired rotated secrets never send and eight failed deliveries disable the e
       url: "https://example.com",
       events: ["coverage.changed"],
     });
-  await operationsEvent(db, s, "coverage.changed", "old-key", {});
+  const dispatch = await fixtureDispatch(s, endpoint.id);
+  const oldEvent = await operationsEvent(db, s, "coverage.changed", "old-key", {});
+  await sql`INSERT INTO webhook_deliveries(organization_id,guild_id,endpoint_id,event_id,secret_version,endpoint_revision,endpoint_safety_epoch) VALUES(${s.organizationId}::uuid,${s.guildId},${endpoint.id}::uuid,${oldEvent}::uuid,1,1,1)`.execute(db);
   let calls = 0;
   const failed = new WebhookWorker(db, vault, async () => {
     calls++;
     return 503;
-  });
-  await failed.tick(s);
+  }, dispatch);
   await webhooks.rotate(s, actor, endpoint.id);
   await sql`UPDATE webhook_secrets SET valid_until=now()-interval '1 second' WHERE ${tenant(s)} AND version=1`.execute(
     db,
@@ -304,11 +324,11 @@ it("expired rotated secrets never send and eight failed deliveries disable the e
     db,
   );
   await failed.tick(s);
-  expect(calls).toBe(1);
+  expect(calls).toBe(0);
   expect((await webhooks.list(s, actor)).deliveries).toContainEqual(
     expect.objectContaining({
-      state: "FAILED",
-      last_error: "WEBHOOK_SECRET_EXPIRED",
+      state: "PENDING",
+      attempts: 0,
     }),
   );
   const bad = await fixture(),
@@ -317,17 +337,16 @@ it("expired rotated secrets never send and eight failed deliveries disable the e
       url: "https://example.com",
       events: ["coverage.changed"],
     });
+  const badDispatch = await fixtureDispatch(bad, e.id);
+  const badWorker = new WebhookWorker(db, vault, async () => { ++calls; return 503; }, badDispatch);
   await operationsEvent(db, bad, "coverage.changed", "fails", {});
-  for (let i = 0; i < 8; i++) {
-    await sql`UPDATE webhook_deliveries SET available_at=now()-interval '1 second' WHERE ${tenant(bad)}`.execute(
-      db,
-    );
-    await failed.tick(bad);
-  }
+  expect(await badWorker.tick(bad)).toBe(true);
+  for (let i = 0; i < 3; i++) expect(await badWorker.tick(bad)).toBe(false);
+  expect(calls).toBe(1);
   expect((await webhooks.list(bad, actor)).endpoints).toContainEqual(
-    expect.objectContaining({ id: e.id, state: "DISABLED", failures: 8 }),
+    expect.objectContaining({ id: e.id, state: "ENABLED", delivery_gate: "UNKNOWN_BLOCKED" }),
   );
   expect((await webhooks.list(bad, actor)).deliveries).toContainEqual(
-    expect.objectContaining({ state: "FAILED", attempts: 8 }),
+    expect.objectContaining({ state: "UNKNOWN", attempts: 1, last_error: "HTTP_503" }),
   );
 });

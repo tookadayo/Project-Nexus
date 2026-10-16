@@ -13,12 +13,14 @@ import {
 } from "../../../packages/security/src/operator-auth";
 import { BetaOperator } from "../../../packages/security/src/beta-operator";
 import { sql, type Database } from "../../../packages/db/src/index";
-import { isDomainError } from "../../../packages/shared/src/index";
+import { assert, isDomainError } from "../../../packages/shared/src/index";
 import { BETA_ACTIVE_MAX } from "../../../packages/config/src/hosted-beta";
 import {
   OfficialPublications,
   type LegalCandidateLoader,
 } from "../../../packages/operations/src/publication";
+import { Alpha16Operator, type Alpha16OperatorOptions } from "../../../packages/security/src/alpha16-operator";
+import { operatorDigest } from "../../../packages/security/src/operator-auth";
 
 export function operatorBoundary(
   headers: Record<string, string | string[] | undefined>,
@@ -59,6 +61,7 @@ export function createOperatorServer(
   options: {
     readLegalCandidate?: LegalCandidateLoader;
     readConfirmedLegalContacts?: LegalContactsLoader;
+    alpha16?: Alpha16OperatorOptions;
   } = {},
 ) {
   const url = new URL(origin);
@@ -119,6 +122,58 @@ export function createOperatorServer(
         : undefined,
       write,
     );
+  const publications = new OfficialPublications(db, options.readLegalCandidate ?? readLegalCandidate);
+  const alpha16 = new Alpha16Operator(db, auth, { ...options.alpha16, beta, publications });
+  const operationKey = (req: { headers: Record<string, unknown> }) => {
+    const value = req.headers["idempotency-key"];
+    assert(typeof value === "string", "PRECONDITION_REQUIRED", 428);
+    return value;
+  };
+  const localSession = async (req: { headers: { cookie?: string; "x-csrf-token"?: string | string[] } }, write = false) => {
+    await authorize(req, write);
+    return operatorDigest(sid(req)!);
+  };
+  // The old API remains readable for compatibility. Dangerous commands cannot
+  // bypass the new preview/step-up contract through their historical route.
+  const requireReviewedCommand = () => {
+    assert(false, "PRECONDITION_REQUIRED", 428);
+  };
+  app.get("/operator/alpha16", async (_req, reply) => reply.type("text/html").send(await readFile(new URL("../public/alpha16.html", import.meta.url), "utf8")));
+  app.get("/operator/alpha16.js", async (_req, reply) => reply.type("text/javascript").send(await readFile(new URL("../public/alpha16.js", import.meta.url), "utf8")));
+  app.get("/operator/alpha16.css", async (_req, reply) => reply.type("text/css").send(await readFile(new URL("../public/alpha16.css", import.meta.url), "utf8")));
+  app.get("/operator/v1/capabilities", async (req) => alpha16.capabilities(await localSession(req)));
+  app.get("/operator/v1/status", async (req) => alpha16.status(await localSession(req)));
+  app.get("/operator/v1/admissions", async (req) => alpha16.admissions(await localSession(req)));
+  app.post("/operator/v1/admissions/preview", async (req) => alpha16.previewAdmission(await localSession(req, true), req.body));
+  app.post<{ Params: { id: string } }>("/operator/v1/admissions/:id/state", async (req) => alpha16.confirm(await localSession(req, true), req.body, operationKey(req), "ADMISSION", req.params.id));
+  app.post("/operator/v1/beta-lifecycle/preview", async (req) => alpha16.previewBetaLifecycle(await localSession(req, true), req.body));
+  app.post<{ Params: { id: string } }>("/operator/v1/beta-lifecycle/:id/change", async (req) => alpha16.confirm(await localSession(req, true), req.body, operationKey(req), "BETA_LIFECYCLE", req.params.id));
+  app.get("/operator/v1/controls", async (req) => alpha16.controls(await localSession(req)));
+  app.post("/operator/v1/controls/preview", async (req) => alpha16.previewControl(await localSession(req, true), req.body));
+  app.post("/operator/v1/controls/automation", async (req) => alpha16.confirm(await localSession(req, true), req.body, operationKey(req), "CONTROL"));
+  app.get("/operator/v1/recovery/readiness", async (req) => alpha16.recovery(await localSession(req)));
+  app.get("/operator/v1/audit", async (req) => alpha16.audit(await localSession(req)));
+  app.get("/operator/v1/config/health", async (req) => alpha16.configHealth(await localSession(req)));
+  app.get("/operator/v1/announcements", async (req) => alpha16.announcements(await localSession(req)));
+  app.get("/operator/v1/legal", async (req) => alpha16.legal(await localSession(req)));
+  app.post("/operator/v1/legal/preview", { bodyLimit: 262144 }, async (req) => alpha16.previewLegal(await localSession(req, true), req.body));
+  app.post("/operator/v1/legal/change", async (req) => alpha16.confirm(await localSession(req, true), req.body, operationKey(req), "LEGAL_SETTINGS"));
+  app.get<{ Params: { id: string } }>("/operator/v1/announcements/:id", async (req) => alpha16.announcementDetail(await localSession(req), req.params.id));
+  app.post("/operator/v1/announcements/preview", { bodyLimit: 262144 }, async (req) => alpha16.previewAnnouncement(await localSession(req, true), req.body));
+  app.post<{ Params: { id: string } }>("/operator/v1/announcements/:id/change", async (req) => alpha16.confirm(await localSession(req, true), req.body, operationKey(req), "ANNOUNCEMENT", req.params.id));
+  app.post("/operator/v1/privacy/deletions/preview", async (req) => alpha16.previewDeletion(await localSession(req, true), req.body));
+  app.post("/operator/v1/privacy/deletions/confirm", async (req) => alpha16.confirm(await localSession(req, true), req.body, operationKey(req), "PRIVACY_DELETE"));
+  app.post("/operator/v1/step-up/challenge", async (req) => alpha16.challenge(await localSession(req, true), z.object({ previewId: z.uuid() }).strict().parse(req.body).previewId));
+  app.post("/operator/v1/step-up/verify", async (req) => {
+    await localSession(req, true);
+    return alpha16.reauthenticate(sid(req)!, z.string().parse(req.headers["x-csrf-token"]), req.body);
+  });
+  app.get<{ Params: { receiptId: string } }>("/operator/v1/privacy/deletions/:receiptId", async (req) => {
+    const secret = req.headers["x-deletion-receipt"], proof = req.headers["x-deletion-scope"];
+    if (typeof secret === "string" && typeof proof === "string")
+      return alpha16.deletionStatus(null, req.params.receiptId, { secret, scopeProof: proof });
+    return alpha16.deletionStatus(await localSession(req), req.params.receiptId);
+  });
   app.get("/", async (_req, reply) =>
     reply
       .type("text/html")
@@ -214,7 +269,7 @@ export function createOperatorServer(
   );
   app.post("/operator/guilds", async (req) => {
     await authorize(req, true);
-    return { invitation: await beta.change(req.body) };
+    return requireReviewedCommand();
   });
   app.get("/operator/overview", async (req) => {
     await authorize(req);
@@ -256,11 +311,6 @@ export function createOperatorServer(
       ).rows,
     };
   });
-  const publications = new OfficialPublications(
-    db,
-    options.readLegalCandidate ?? readLegalCandidate,
-  );
-
   app.get("/publication-document.css", async (_req, reply) =>
     reply
       .type("text/css")
@@ -301,7 +351,7 @@ export function createOperatorServer(
   });
   app.post("/operator/publications", { bodyLimit: 262144 }, async (req) => {
     await authorize(req, true);
-    return publications.change(req.body);
+    return requireReviewedCommand();
   });
   app.get("/operator/legal", async (req) => {
     await authorize(req);
@@ -314,7 +364,7 @@ export function createOperatorServer(
   });
   app.post("/operator/legal", { bodyLimit: 262144 }, async (req) => {
     await authorize(req, true);
-    return publications.saveLegal(req.body);
+    return requireReviewedCommand();
   });
   app.get<{
     Params: { document: string; locale: string };

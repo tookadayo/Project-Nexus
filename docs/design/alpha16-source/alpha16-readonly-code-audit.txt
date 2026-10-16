@@ -1,0 +1,42 @@
+【参照時の注意】これはA配置確定前を含む過去の読取監査です。現在のコード・配備を再検証した資料ではありません。承認済みA配置ではPC内Next/BFFのserver-side DB処理を維持できるため、本文の全面API橋渡しという初期結論は失効しています。実ファイル所在と既存機能の根拠として使用し、移行方針はNEXUS_alpha16_migration_plan.mdとNEXUS_alpha16_contract_decisions.mdを優先してください。
+
+--- 以下は監査原文 ---
+
+**NEXUS全体は、現状のままAPI URLをTunnelへ変更するだけでは、この構成に対応できません。** PC側のAPI・分析・worker・オートメーションは土台がありますが、Web側にもDB操作・Discord認可・課金処理が残っています。
+
+読み取りだけで確認しました。今回は変更・テスト・ビルド・設定操作を行っていません。表の「PC」は想定配置先で、実際のDB／Redisの所在地や稼働状況は未確認です。PG＝PostgreSQL、R＝Redisです。
+
+| 機能 | 配信場所 | 現コードの実行場所 | 保存場所 | 通信経路 | 適合状況・根拠 |
+|---|---|---|---|---|---|
+| 公式トップ・製品紹介・デモ | 公開Web | Next＋ブラウザー | ソース・画像 | ブラウザー→Web | **静的化は可能な範囲あり。ただし現状は静的exportではない**。言語選択もcookies／headers依存。[layout](<D:/Project Nexus/apps/web/app/layout.tsx:21>) |
+| OAuth・セッション | 公開Web | 現Nextサーバー | PGのOAuth session、Cookie | Web↔Discord・DB | **既存／PC集約にはコード変更**。[session保存](<D:/Project Nexus/apps/web/app/auth/public-session-store.ts:10>) |
+| guild・現在権限の確認 | Web／API | Next＋API | 接続・役割・設定のPG表 | Web→Discord・DB、API→Discord・DB | **既存／Webの直接接続を整理要**。[Web依存](<D:/Project Nexus/apps/web/app/auth/server-access.ts:34>) |
+| 招待・Bot導入・初期設定 | Web／Discord案内 | Next BFF＋PC API | `web_setup_*`、`guild_settings`等 | Web→API→Discord・PG | **処理は既存**。共通認証の移設が必要。`/nexus link`は必須ではない。[接続処理](<D:/Project Nexus/packages/operations/src/web-setup.ts:216>) |
+| Home・Community・Journey・基本分析 | Web／Discord | PC API・worker | 観測・集計PG、R | Web→既存v3 API | **既存／接続設定対応可**。[API](<D:/Project Nexus/apps/api/src/v03.ts:62>) |
+| 詳細分析・履歴・保存結果 | 主にDiscord、Web表示 | PC分析worker | `analysis_runs/results`、R queue | Discord→PC→PG | **処理・保存は既存。Web向けHTTP橋渡しは追加要**。[結果取得](<D:/Project Nexus/packages/analysis/src/index.ts:765>) |
+| Explore・保存グラフ・CSV／PNG | Web | 現Nextサーバー | PGのview・segment | Next→DB直接 | **コード変更要**。PC側への集計・描画・保存API移管対象。[route](<D:/Project Nexus/apps/web/app/explore/data/route.ts:34>) |
+| 既存の診断・改善機会・非表示理由 | Web／Discord | PC API／domain | 指標PG、`suggestion_feedback` | Web→v3 API | **限定ルール処理は既存**。提案は固定しきい値等から生成。[診断規則](<D:/Project Nexus/packages/analytics/src/diagnoses.ts:3>) |
+| alpha16のルールベースAI・提案履歴 | 想定Web | 想定PC | 新契約は未確定 | 想定Web→PC API | **追加設計・実装要**。既存診断をalpha16完成とは扱えない。[留保記録](<D:/Project Nexus/docs/alpha15-implementation.md:58>) |
+| Onboarding・参加者の設定 | Discord中心、Webに一部設定 | PC worker | flow版本・session・eventsのPG表 | Discord↔PC、設定はWeb→API | **既存**。全操作のWeb化を求める場合は追加API要。[service](<D:/Project Nexus/packages/onboarding/src/index.ts:18>) |
+| 要確認・受付・イベント管理 | Web／Discord | PC worker＋現Next管理処理 | attention・intake・event等のPG表 | 一部API、その他Next→DB | **全機能対応には橋渡し追加要**。[表示・管理](<D:/Project Nexus/apps/web/app/operations/data/route.ts:156>) |
+| Action・Playbook・承認 | Web／Discord | PC worker＋現Next管理処理 | revision・実行・outboxのPG表 | API／Next→DB→worker→Discord | **Action APIは既存、Playbook管理はコード変更要**。[管理処理](<D:/Project Nexus/apps/web/app/operations/data/route.ts:264>) |
+| 実験結果・改善追跡 | Web／Discord | PC評価＋現Next管理処理 | experiment・intervention等のPG表 | 結果API／Next→DB | **結果APIは既存、追跡CRUDは橋渡し追加要**。[結果API](<D:/Project Nexus/apps/api/src/v03.ts:87>) |
+| 定期レポート・週次・Helper | Web管理／Discord投稿 | PC worker、管理の一部はNext | report・delivery・alertのPG表 | PC→Discord、Web→API／DB | **送信は既存、レポート管理はコード変更要**。[worker](<D:/Project Nexus/apps/worker/src/reports.ts:72>) |
+| ブロック編集・模擬実行・本実行 | Web | 編集はブラウザー、評価・実行はPC API／worker | 定義・Revision・RunのPG表 | 同一origin BFF→PC API | **構成に合う既存経路あり**。認証／BFF配置の整理は共通課題。[BFF](<D:/Project Nexus/apps/web/app/api/automation/[...path]/route.ts:12>) |
+| Scheduler・待機・内部イベント | Web管理／PC | PC Scheduler・Runtime | 予定・発生回・再開状態のPG表 | PC内処理→Discord | **既存**。ブラウザー常駐不要。[worker](<D:/Project Nexus/apps/worker/src/alpha15-automation.ts:9>) |
+| Discordパネル・コマンド・ボタン | Discord | PC Gateway／interaction worker | 暗号化job・receipt等のPG表、R | PC↔Discord直接、または署名HTTP受信 | **既存・妥当な例外**。Gateway通信をWeb／Tunnelへ迂回させる必要はない。[受信](<D:/Project Nexus/apps/interaction/src/server.ts:160>) |
+| 組織・チーム・権限・宛先・API資格情報・既存Webhook | Web管理 | 現Next domain処理＋PC worker | 各operations PG表 | Next→DB、worker→外部 | **コード変更要**。既存operations機能であり、alpha15ブロックの外部HTTP機能とは別。[管理route](<D:/Project Nexus/apps/web/app/operations/data/route.ts:185>) |
+| プラン・Beta・回数／同時実行／保存量制限 | Web／Discord／ローカル管理 | API・Gateway・worker | 招待・付与権・予約・使用量のPG表 | 各サーバー処理→PG | **既存**。新AI機能の利用権は追加設計要。[Beta](<D:/Project Nexus/packages/security/src/hosted-beta.ts:55>)、[Automation制限](<D:/Project Nexus/packages/automation/src/admission.ts:7>) |
+| 公開料金・プラン比較 | 公開Web | 現Nextサーバー | `billing_offerings` | Web→DB | **静的説明と動的価格の分離・API化が必要**。[catalog](<D:/Project Nexus/apps/web/app/billing/catalog.ts:39>) |
+| Stripe購入・契約変更・支払管理・プロモーション | Web／Stripe | 現Next＋PC課金worker | 共通課金PG表 | Web→Stripe・DB、Stripe→Web webhook | **コード変更要**。課金処理と署名付きwebhook受付のPC集約対象。[webhook](<D:/Project Nexus/apps/web/app/billing/webhooks/stripe/route.ts:13>) |
+| Discord native課金 | Discord／Web導線 | PC worker | 共通課金PG表 | PC↔Discord API | **実装あり／有効設定・提供条件は未確認**。[provider](<D:/Project Nexus/packages/settings/src/billing/providers/discord.ts:80>) |
+| 公式お知らせ | 公開Web、公開操作はローカル | 現Next読み取り＋PC Operator | publication・revisionのPG表 | 公開Web→DB | **公開API化または配信同期が必要**。取り下げ追従も必要。[公開データ](<D:/Project Nexus/apps/web/app/publication-data.ts:14>) |
+| 規約・Privacy・運営者情報・サポート | 公開Web | Next、候補レビューはOperator | ソース／私有候補 | 案内表示、候補はローカル | **現状は本文未公開案内・受付未実装を含む**。案内の静的化と正式公開・受付は別。[法務状態](<D:/Project Nexus/apps/web/app/legal/status-view.tsx:5>)、[無効フォーム](<D:/Project Nexus/apps/web/app/support/contact-form.tsx:3>) |
+| 削除・保持期限・監査・復元時削除反映 | Discord／ローカル管理 | PC worker・ローカル復元処理 | PG・R・削除tombstone | PC内処理、必要時Discord | **既存・Tunnel不要な処理を含む**。実backup運用は未確認。[Privacy](<D:/Project Nexus/packages/security/src/privacy.ts:29>) |
+| ホスト運営者管理 | PCローカル限定 | 別Fastify listener | operator session・監査・OS資格情報 | loopback HTTPのみ | **既存の分離を維持**。公開Webの`/operations`とは別で、Tunnel対象外。[境界](<D:/Project Nexus/apps/operator/src/server.ts:23>) |
+
+通信設定の入口はあります。`NEXUS_API_URL`でAPI接続先、`NEXUS_WEB_URL`で正式origin・OAuth callbackを指定できます。ただし、現在の基本経路は **ブラウザー→同一originのNext BFF→署名付きPC API** です。変更操作はOrigin／Host／Fetch-Siteを検証し、API本人証明もサーバー側で生成します。ブラウザーから別originのPC APIへ直接接続するCORS・Cookie構成は、現契約のままでは対応しません。[URL設定](<D:/Project Nexus/apps/web/app/auth/session.ts:193>)、[CSRF境界](<D:/Project Nexus/apps/web/app/auth/origin.ts:2>)
+
+追加設計の中心は、**静的配信とNext実行の分担、Web直接DB処理のAPI化、認証・公開route境界、停止中の表示方針**です。PC停止時はAPI・分析・Discord処理・予定実行が止まります。Webにはタイムアウト／失敗表示がありますが、認証もDBに依存し、停止中に全画面や最終提案を閲覧できる独立キャッシュはありません。[失敗処理](<D:/Project Nexus/apps/web/app/dashboard-data.tsx:43>)
+
+お名前.com契約のNode常駐・reverse proxy対応、Cloudflare Tunnel設定、OAuth実登録、HTTPS／Cookie、Windows常駐・停止復帰は**未確認**です。alpha16実装は開始していません。

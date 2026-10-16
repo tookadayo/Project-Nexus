@@ -22,8 +22,9 @@ for (const [name, index, state] of scenarios)
   it(`Discord Components V2 alpha.5 ${name}`, async () => {
     const { community, model } = alpha5Visual(index, state);
     let counter = 0;
+    const issuedActions: string[] = [];
     const panel = await controlPanel(
-      async () => `nxs:fixture:${++counter}`,
+      async intent => {if (typeof intent.action !== "string") throw new Error("PANEL_ACTION_REQUIRED"); issuedActions.push(intent.action); return `nxs:fixture:${++counter}`;},
       ["text", "support", "lfg"].includes(name) ? "attention" : "overview",
       {
         community,
@@ -56,6 +57,8 @@ for (const [name, index, state] of scenarios)
     walk(panel);
     expect(count).toBeLessThanOrEqual(40);
     expect(texts.join("").length).toBeLessThanOrEqual(4000);
+    if (!["text", "support", "lfg"].includes(name))
+      expect(issuedActions).toEqual(["controlNavigate", "controlNavigate", "analysisMenu", "automationMenu", "analysisHistory", "controlNavigate", "controlNavigate"]);
     expect(panel).toMatchSnapshot();
     if (state === "INTENT_UNAVAILABLE")
       expect(texts.join("\n")).toContain("現在の状態を確認できません。時間をおいて更新してください。");

@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {afterAll,beforeAll,expect,it,vi} from 'vitest';
 import {connect,migrate,ensureGuild,sql,tenant,type Database} from '../../packages/db/src/index';
 import {scopeForGuild} from '../../packages/security/src/scoping';
@@ -13,7 +13,7 @@ import {isolatedPostgres} from '../fixtures/postgres';
 let db:Database,infra:Awaited<ReturnType<typeof isolatedPostgres>>,serial=0;
 const guild='GUILD',channel='882222222222222222',message='882333333333333333';
 const admission={activeFlows:20,monthlyRuns:100,guildConcurrent:2,globalConcurrent:20,guildPending:20,globalPending:100,measurementId:'isolated-result-tests'};
-const actor:Actor={key:'synthetic-result-admin',encryptedUserId:'synthetic-encrypted-identity',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic'};
+const actor:Actor={key:createHash('sha256').update('synthetic-result-admin').digest('hex'),encryptedUserId:'synthetic-encrypted-identity',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic'};
 beforeAll(async()=>{vi.stubEnv('NEXUS_HOSTED_BETA','off');infra=await isolatedPostgres();db=connect(infra.databaseUrl);await migrate(db);});
 afterAll(async()=>{await db?.destroy();await infra?.stop();vi.unstubAllEnvs();});
 const text=(value:string):ValueInput=>({kind:'literal',type:'PlainText',value});

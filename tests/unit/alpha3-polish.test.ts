@@ -40,13 +40,15 @@ it.each(['ja','en'] as const)('keeps activity, review and detailed analysis in s
  expect(sections[2]!.accessory).toMatchObject({style:ButtonStyle.Primary,custom_id:expect.any(String)});
  expect(home.intents.find(item=>item.page==='attention')).toMatchObject({action:'controlNavigate'});
 });
-it('offers exactly six Home actions and three Section destinations',async()=>{
+it('offers seven Home actions with three Section destinations and an Automation entry',async()=>{
  const home=await render('overview',{community:community(),dashboardUrl:'https://nexus.example/dashboard/111111111111111111'},'en');
  expect(home.intents).toContainEqual({action:'analysisMenu'});
  for(const page of ['attention','analysis'])expect(home.intents).toContainEqual({action:'controlNavigate',page});
  expect(home.intents).toContainEqual({action:'analysisHistory'});
- expect(home.buttons).toHaveLength(3);
+ expect(home.intents).toContainEqual({action:'automationMenu'});
+ expect(home.buttons).toHaveLength(4);
  expect(home.children.filter(item=>item.type===ComponentType.Section)).toHaveLength(3);
+ expect(home.buttons.length+home.children.filter(item=>item.type===ComponentType.Section).length).toBe(7);
  expect(home.rows.flatMap(row=>row.components).filter(item=>item.type===ComponentType.StringSelect)).toHaveLength(0);
  expect(home.json).toContain('More');
  expect(home.buttons.every(button=>button.style===ButtonStyle.Secondary)).toBe(true);

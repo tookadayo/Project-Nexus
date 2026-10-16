@@ -71,7 +71,7 @@ export function createApi(
       // These two limited routes perform their own invitation/identity checks
       // before Guild Install; every other route retains the normal work gate.
       if (
-        (req.method === "GET" &&
+        (["GET", "HEAD"].includes(req.method) &&
           req.routeOptions.url === setupBase + "/status") ||
         (req.method === "POST" &&
           req.routeOptions.url === setupBase + "/requests")
@@ -85,7 +85,7 @@ export function createApi(
         await db
           .transaction()
           .execute((tx) =>
-            betaAccess(tx, s.data, req.method === "GET" ? "read" : "work"),
+            betaAccess(tx, s.data, ["GET", "HEAD"].includes(req.method) ? "read" : "work"),
           );
     });
   app.get("/health", async () => {

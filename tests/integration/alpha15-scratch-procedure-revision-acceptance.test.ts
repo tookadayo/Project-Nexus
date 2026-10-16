@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {afterAll,beforeAll,expect,it,vi} from 'vitest';
 import {connect,ensureGuild,migrate,type Database} from '../../packages/db/src/index';
 import {scopeForGuild} from '../../packages/security/src/scoping';
@@ -11,7 +11,7 @@ import type {FlowDefinition,Statement,ValueInput,ValueType} from '../../packages
 import {isolatedPostgres} from '../fixtures/postgres';
 
 let db:Database,infra:Awaited<ReturnType<typeof isolatedPostgres>>,serial=0;
-const actor:Actor={key:'synthetic-procedure-revision-admin',encryptedUserId:'encrypted-synthetic-identity',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic-procedure-revision'};
+const actor:Actor={key:createHash('sha256').update('synthetic-procedure-revision-admin').digest('hex'),encryptedUserId:'encrypted-synthetic-identity',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic-procedure-revision'};
 const admission:AutomationAdmissionLimits={activeFlows:10,monthlyRuns:20,guildConcurrent:3,globalConcurrent:12,guildPending:10,globalPending:20,measurementId:'isolated-procedure-revision-acceptance'};
 const literal=(type:ValueType,value:number|string):ValueInput=>({kind:'literal',type,value});
 const variable=(variableId:string,type:ValueType):ValueInput=>({kind:'variable',variableId,type});

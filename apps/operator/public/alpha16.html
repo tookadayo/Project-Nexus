@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>NEXUS Local Operator</title>
+    <link rel="stylesheet" href="/operator/alpha16.css" />
+    <script defer src="/operator/alpha16.js"></script>
+  </head>
+  <body>
+    <header><a href="/">NEXUS <small>LOCAL</small></a><div><label><span data-copy="language"></span><select id="language"><option value="ja">日本語</option><option value="en">English</option></select></label><button id="logout" hidden data-copy="logout"></button></div></header>
+    <main>
+      <p class="eyebrow" data-copy="local"></p>
+      <h1 data-copy="title"></h1>
+      <p id="notice" role="status" aria-live="polite"></p>
+      <section id="login"><form id="login-form"><label><span data-copy="password"></span><input name="password" type="password" autocomplete="current-password" required maxlength="1024" /></label><button data-copy="login"></button></form></section>
+      <section id="receipt-lookup"><h2 data-copy="receipt"></h2><p data-copy="receiptOnce"></p><form id="receipt-lookup-form"><label><span data-copy="receiptId"></span><input name="receiptId" required maxlength="36" autocomplete="off" /></label><label><span data-copy="receiptSecret"></span><input name="receiptSecret" type="password" required maxlength="64" autocomplete="off" /></label><label><span data-copy="scopeProof"></span><input name="scopeProof" required maxlength="64" autocomplete="off" /></label><button data-copy="refreshReceipt"></button></form><div id="receipt-lookup-output" role="status"></div></section>
+      <div id="workspace" hidden>
+        <nav id="tabs" aria-label="Operator"><button data-tab="status" data-copy="status"></button><button data-tab="admissions" data-copy="admissions"></button><button data-tab="controls" data-copy="controls"></button><button data-tab="privacy" data-copy="privacy"></button><button data-tab="announcements" data-copy="announcements"></button><button data-tab="legal" data-copy="legal"></button><button data-tab="recovery/readiness" data-copy="recovery"></button><button data-tab="audit" data-copy="audit"></button><button data-tab="config/health" data-copy="config"></button></nav>
+        <div class="toolbar"><button id="reload" data-copy="reload"></button><span id="observed"></span></div>
+        <section id="panel" aria-live="polite"></section>
+        <section id="receipt-panel" hidden><h2 data-copy="receipt"></h2><p data-copy="receiptOnce"></p><pre id="receipt-values"></pre><button id="receipt-status" data-copy="refreshReceipt"></button><div id="receipt-status-output"></div></section>
+      </div>
+    </main>
+    <dialog id="review"><form id="review-form"><h2 data-copy="review"></h2><p data-copy="irreversible"></p><dl id="review-details"></dl><label><span data-copy="passwordAgain"></span><input name="password" type="password" autocomplete="current-password" required maxlength="1024" /></label><label class="check"><input name="confirmed" type="checkbox" required /><span data-copy="confirmChecked"></span></label><p id="review-notice" role="status"></p><div class="actions"><button type="button" id="cancel-review" data-copy="cancel"></button><button type="submit" id="confirm-review" data-copy="confirm"></button></div></form></dialog>
+  </body>
+</html>

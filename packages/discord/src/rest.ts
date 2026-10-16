@@ -24,6 +24,7 @@ import {
   type RawChannel,
 } from "./discovery";
 import type { CapabilityStatus } from "../../shared/src/community-model";
+import {roleChannelMetadata,type RoleChannelMetadata} from "./role-access";
 export type Member = {
   roles: string[];
   permissions: string;
@@ -210,6 +211,7 @@ export interface DiscordPort {
   member(guildId: string, userId: string): Promise<Member>;
   canReadAttentionChannel?(guildId:string,channelId:string,userId:string,member:Member):Promise<boolean>;
   roles(guildId: string): Promise<Role[]>;
+  roleChannelMetadata?(guildId:string,channelId:string):Promise<RoleChannelMetadata>;
   checkChannel(guildId: string, channelId: string): Promise<void>;
   validateRole(guildId: string, roleId: string): Promise<void>;
   addRole(guildId: string, userId: string, roleId: string): Promise<void>;
@@ -789,6 +791,13 @@ export class DiscordRest implements DiscordPort {
   }
   async roles(guildId: string) {
     return this.request<Role[]>(`/guilds/${guildId}/roles`);
+  }
+  /** Existing role/channel metadata endpoints only. No member request or
+   * message read, and no member overwrite identifier leaves this boundary. */
+  async roleChannelMetadata(guildId:string,channelId:string):Promise<RoleChannelMetadata>{
+    assert(/^\d{17,20}$/.test(guildId)&&/^\d{17,20}$/.test(channelId),"ROLE_ACCESS_TARGET_INVALID",400);
+    const [channel,roles]=await Promise.all([this.request<unknown>(`/channels/${channelId}`),this.roles(guildId)]);
+    return roleChannelMetadata(guildId,channelId,channel,roles,new Date());
   }
   async options(guildId: string): Promise<DiscordEntityOptions> {
     const [channels, roles, events] = await Promise.all([

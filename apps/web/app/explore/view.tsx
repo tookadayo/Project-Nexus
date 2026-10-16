@@ -7,6 +7,7 @@ import { metricLabels, surfaceLabels } from "../analysis-labels";
 import { useDraft, useUnsavedChanges } from "../navigation-safety";
 import { exploreLocation, exploreQuery } from "./navigation";
 import { safeError } from "../safe-error";
+import { csrfHeaders } from "../auth/csrf-client";
 import { useEffect, useState, useRef, type SetStateAction } from "react";
 import {
   chartQuerySchema,
@@ -19,10 +20,11 @@ type View = ChartQuery & {
   revision: number;
   shortcut: string | null;
 };
+type Segment = { id: string; name: string; filters: ChartQuery["filter"]; revision: number };
 type Data = {
   spec: ChartSpec;
   views: View[];
-  segments: { id: string; name: string; filters: ChartQuery["filter"] }[];
+  segments: Segment[];
   capabilities: {
     advanced: boolean;
     compare: boolean;
@@ -56,6 +58,8 @@ export function ExploreControls({
     [name, setName] = useState(""),
     [shortcut, setShortcut] = useState<string>(""),
     [selected, setSelected] = useState<View | null>(null),
+    [selectedSegment, setSelectedSegment] = useState<Segment | null>(null),
+    [pendingDelete, setPendingDelete] = useState<{ kind: "view" | "segment"; id: string; revision: number; name: string } | null>(null),
     [filtersOpen, setFiltersOpen] = useState(
       initialQuery.filter.surface !== "ALL" ||
         initialQuery.filter.channelIds.length > 0 ||
@@ -171,19 +175,20 @@ export function ExploreControls({
                   : {}),
               },
             }
-          : { action, segment: { name, filters: query.filter } };
+          : { action, segment: { name, filters: query.filter, ...(selectedSegment ? { id: selectedSegment.id, revision: selectedSegment.revision } : {}) } };
       const response = await fetch("/explore/data", {
           method: "POST",
-          headers: {
+          headers: csrfHeaders({
             "Content-Type": "application/json",
             "X-Nexus-Guild": scope,
-          },
+          }),
           body: JSON.stringify(payload),
         }),
         result = await response.json();
       if (!response.ok) throw new Error(result.error);
       draft.saved();
       setSelected(null);
+      setSelectedSegment(null);
       setReload((current) => current + 1);
     } catch (error) {
       setError(error instanceof Error ? error.message : "UNAVAILABLE");
@@ -192,6 +197,19 @@ export function ExploreControls({
       setSaving(false);
       setBusy(false);
     }
+  }
+  async function remove() {
+    if (!pendingDelete || savingRef.current || !data?.capabilities.canSave) return;
+    savingRef.current = true; setSaving(true); setBusy(true); setError("");
+    try {
+      const response = await fetch("/explore/data", { method: "POST", headers: csrfHeaders({ "Content-Type": "application/json", "X-Nexus-Guild": scope }),
+        body: JSON.stringify({ action: pendingDelete.kind === "view" ? "deleteView" : "deleteSegment", id: pendingDelete.id, revision: pendingDelete.revision }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : "UNAVAILABLE");
+      if (selected?.id === pendingDelete.id || selectedSegment?.id === pendingDelete.id) { setSelected(null); setSelectedSegment(null); setName(""); setShortcut(""); draft.saved(); }
+      setPendingDelete(null); setReload(current => current + 1);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "UNAVAILABLE"); }
+    finally { savingRef.current = false; setSaving(false); setBusy(false); }
   }
   function patchFilter(patch: Partial<ChartQuery["filter"]>) {
     setQuery((current) => ({
@@ -438,10 +456,15 @@ export function ExploreControls({
                 <select
                   defaultValue=""
                   onChange={(e) => {
+                    if (!canLeave()) return;
                     const segment = data.segments.find(
                       (s) => s.id === e.target.value,
                     );
-                    if (segment) patchFilter(segment.filters);
+                    if (segment) {
+                      const next = { ...query, filter: segment.filters };
+                      draft.saved({ name: segment.name, shortcut: "", query: next });
+                      setSelected(null); setSelectedSegment(segment); setName(segment.name); setShortcut(""); setQuery(next);
+                    }
                   }}
                 >
                   <option value="">—</option>
@@ -457,6 +480,12 @@ export function ExploreControls({
         )}
       </section>
       {error && <p role="alert">{safeError(error, locale)}</p>}
+      {["SAVED_VIEW_IN_USE", "SEGMENT_IN_USE"].includes(error) && <p role="alert">{ja ? "レポートまたはビューで参照されています。参照元を変更してから削除してください。" : "A report or view references this item. Update its references before deleting it."}</p>}
+      {pendingDelete && <section className="surface" role="dialog" aria-modal="true" aria-label={ja ? "削除確認" : "Confirm deletion"}>
+        <h2>{ja ? "保存した項目を削除" : "Delete saved item"}</h2><p>{pendingDelete.name} · revision {pendingDelete.revision}</p>
+        <p>{ja ? "保存した設定を削除します。集計元のデータは削除しません。参照中の項目は削除できません。" : "This removes the saved configuration. Observation data is kept. Referenced items cannot be deleted."}</p>
+        <button disabled={busy || saving} onClick={() => void remove()}>{ja ? "削除を確定" : "Confirm deletion"}</button><button disabled={busy || saving} onClick={() => setPendingDelete(null)}>{ja ? "取消" : "Cancel"}</button>
+      </section>}
       {busy && <p role="status">{ja ? "確認中…" : "Loading…"}</p>}
       {spec && (
         <>
@@ -532,11 +561,12 @@ export function ExploreControls({
             disabled={busy || !name || !data.capabilities.canSave}
             onClick={() => void save("saveSegment")}
           >
-            {ja ? "絞り込み条件を保存" : "Save filters"}
+            {selectedSegment ? (ja ? "絞り込み条件を更新" : "Update filters") : (ja ? "絞り込み条件を保存" : "Save filters")}
           </button>
           {data.views.map((view) => (
+            <div key={view.id}>
             <button
-              key={view.id}
+              disabled={busy || saving}
               onClick={() => {
                 if (!canLeave()) return;
                 draft.saved({
@@ -551,6 +581,7 @@ export function ExploreControls({
                   },
                 });
                 setSelected(view);
+                setSelectedSegment(null);
                 setName(view.name);
                 setShortcut(view.shortcut ?? "");
                 setQuery({
@@ -564,7 +595,16 @@ export function ExploreControls({
             >
               {view.name} · {view.days}d
             </button>
+            {data.capabilities.canSave && <button disabled={busy || saving} onClick={() => { if (canLeave()) setPendingDelete({ kind: "view", id: view.id, revision: view.revision, name: view.name }); }}>{ja ? "削除" : "Delete"}</button>}
+            </div>
           ))}
+          <h3>{ja ? "保存した絞り込み条件" : "Saved filters"}</h3>
+          {data.segments.length === 0 && <p>{ja ? "保存した絞り込み条件はありません。" : "No saved filters."}</p>}
+          {data.segments.map(segment => <div key={segment.id}><button disabled={busy || saving} onClick={() => {
+            if (!canLeave()) return; const next = { ...query, filter: segment.filters }; draft.saved({ name: segment.name, shortcut: "", query: next });
+            setSelected(null); setSelectedSegment(segment); setName(segment.name); setShortcut(""); setQuery(next);
+          }}>{segment.name}</button>{data.capabilities.canSave && <button disabled={busy || saving} onClick={() => { if (canLeave()) setPendingDelete({ kind: "segment", id: segment.id, revision: segment.revision, name: segment.name }); }}>{ja ? "削除" : "Delete"}</button>}</div>)}
+          {(selected || selectedSegment) && <button disabled={busy || saving} onClick={() => { if (canLeave()) { setSelected(null); setSelectedSegment(null); setName(""); setShortcut(""); draft.saved(); } }}>{ja ? "新しく保存" : "Save a new item"}</button>}
         </section>
       )}
     </div>

@@ -1,4 +1,5 @@
 import type { AutomationAdmissionLimits } from "./quota";
+export { assertRuleExternalEffectActivation as assertAlpha16ExternalEffectActivation } from "../../rules/src/runtime-safety";
 
 /** Initial invitation Beta guardrails, not commercial plan entitlements.
  * The local synthetic probe is recorded in docs/alpha15-implementation.md.

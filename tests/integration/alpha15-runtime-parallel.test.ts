@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {afterAll,beforeAll,expect,it,vi} from 'vitest';
 import {connect,migrate,ensureGuild,sql,tenant,json,type Database} from '../../packages/db/src/index';
 import {scopeForGuild} from '../../packages/security/src/scoping';
@@ -15,7 +15,7 @@ import {mockSuccessfulActionOutcomes} from '../fixtures/alpha15-simulation';
 
 let db:Database,infra:Awaited<ReturnType<typeof isolatedPostgres>>,serial=0;
 const channel='889222222222222222',member='889333333333333333',role='889444444444444444';
-const actor:Actor={key:'parallel-admin',encryptedUserId:'encrypted-synthetic',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic'};
+const actor:Actor={key:createHash('sha256').update('parallel-admin').digest('hex'),encryptedUserId:'encrypted-synthetic',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic'};
 const number=(value:number):ValueInput=>({kind:'literal',type:'Number',value});
 const text=(value:string):ValueInput=>({kind:'literal',type:'PlainText',value});
 const variable=(variableId:string):ValueInput=>({kind:'variable',type:'PlainText',variableId});

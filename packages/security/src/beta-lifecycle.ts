@@ -9,12 +9,14 @@ import { betaLock, requestBetaDeletion } from "./hosted-beta";
 import { cancelAnalysisRuns as cancelBetaRuns } from "../../analysis/src/usage";
 import type { PrivacyService } from "./privacy";
 import { operatorAudit } from "./operator-auth";
+import { prunePublicApiNonces } from "./public-sessions";
 export class BetaLifecycle {
   constructor(
     private readonly db: Database,
     private readonly privacy: PrivacyService,
   ) {}
   async tick() {
+    await prunePublicApiNonces(this.db);
     if (!hostedBetaEnabled()) return;
     const expired = (
       await sql<{

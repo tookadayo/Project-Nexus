@@ -1,10 +1,10 @@
 import {z} from 'zod';
 import {randomUUID} from 'node:crypto';
-import {signalSchema,signalRegistry,canonicalSignal,type NexusSignal} from '../../events/src/registry.js';
-import {sql,tenant,json,type Tx} from '../../db/src/index.js';
+import {signalSchema,signalRegistry,canonicalSignal,type NexusSignal} from '../../events/src/registry';
+import {sql,tenant,json,type Tx} from '../../db/src/index';
 import type {Scope} from '../../shared/src/index.js';
 import type {Revision} from '../../settings/src/revisions.js';
-import {SettingsService} from '../../settings/src/index.js';
+import {SettingsService} from '../../settings/src/index';
 export type Condition=
  |{op:'all'|'any',rules:Condition[]}|{op:'not',rule:Condition}
  |{op:'event'|'count',event:NexusSignal,gte?:number,withinSeconds:number}

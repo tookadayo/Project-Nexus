@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {afterAll,beforeAll,expect,it,vi} from 'vitest';
 import {connect,migrate,ensureGuild,sql,tenant,type Database} from '../../packages/db/src/index';
 import {scopeForGuild} from '../../packages/security/src/scoping';
@@ -13,9 +13,11 @@ import {isolatedPostgres} from '../fixtures/postgres';
 let db:Database,infra:Awaited<ReturnType<typeof isolatedPostgres>>,serial=0;
 const channel='884222222222222222';
 const admission:AutomationAdmissionLimits={activeFlows:20,monthlyRuns:100,guildConcurrent:2,globalConcurrent:4,guildPending:20,globalPending:200,measurementId:'isolated-synthetic-tests'};
-const actor:Actor={key:'synthetic-loop-admin',encryptedUserId:'encrypted-synthetic-identity',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic-loop'};
+const actor:Actor={key:createHash('sha256').update('synthetic-loop-admin').digest('hex'),encryptedUserId:'encrypted-synthetic-identity',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic-loop'};
 const literal=(type:'Number'|'Boolean'|'ConditionResult'|'Duration'|'Instant',value:number|boolean|string):ValueInput=>({kind:'literal',type,value});
-const loop=(overrides:Partial<Extract<Statement,{kind:'boundedLoop'}>>={}):Extract<Statement,{kind:'boundedLoop'}>=>({id:'loop',kind:'boundedLoop',semanticVersion:1,mode:'until',maxBody:literal('Number',3),condition:literal('Boolean',false),until:literal('Instant',new Date(Date.now()+86400000).toISOString()),body:[],handlers:{},...overrides});
+// Only new definition literals use whole seconds; runtime clocks retain their precision.
+const inputInstantAfter=(seconds:number)=>new Date(Math.ceil(Date.now()/1000)*1000+seconds*1000).toISOString();
+const loop=(overrides:Partial<Extract<Statement,{kind:'boundedLoop'}>>={}):Extract<Statement,{kind:'boundedLoop'}>=>({id:'loop',kind:'boundedLoop',semanticVersion:1,mode:'until',maxBody:literal('Number',3),condition:literal('Boolean',false),until:literal('Instant',inputInstantAfter(86400)),body:[],handlers:{},...overrides});
 function send(id:string):Statement{return {id,kind:'action',operation:'discord.sendMessage',inputs:{channel:{kind:'literal',type:'ChannelRef',value:{id:channel,guildId:'placeholder'}},content:{kind:'literal',type:'PlainText',value:'Synthetic fixture; adapter sends nothing'}}};}
 beforeAll(async()=>{vi.stubEnv('NEXUS_HOSTED_BETA','off');infra=await isolatedPostgres();db=connect(infra.databaseUrl);await migrate(db);});
 afterAll(async()=>{await db?.destroy();await infra?.stop();vi.unstubAllEnvs();});
@@ -89,7 +91,7 @@ it('S020 persists the selected handler PC across a wait and worker restart',asyn
   expect(await restarted.tick(f.scope,f.run.id)).toMatchObject({state:'FAILED'});expect(f.calls).toHaveLength(1);
 });
 it('S015 gives a Run expiry precedence over a simultaneous local deadline and wake',async()=>{
-  const f=await fixture([loop({until:literal('Instant',new Date(Date.now()+3600000).toISOString()),body:[{id:'wait',kind:'wait',duration:literal('Duration',1)}],handlers:{localDeadline:[{id:'deadline',kind:'end'}]}})]);
+  const f=await fixture([loop({until:literal('Instant',inputInstantAfter(3600)),body:[{id:'wait',kind:'wait',duration:literal('Duration',1)}],handlers:{localDeadline:[{id:'deadline',kind:'end'}]}})]);
   expect(await f.runtime.tick(f.scope,f.run.id,2)).toMatchObject({state:'RUNNING'});
   const saved=(await f.service.store.run(f.scope,f.run.id))!;
   const local=saved.resume.frames.find(frame=>frame.boundedLoop)!.boundedLoop!.deadline!;
@@ -120,7 +122,7 @@ it('S007 selects evaluationError for a dynamic guard failure without converting 
   expect((await f.service.store.run(f.scope,f.run.id))!.reason).toBe('LOOP_EVALUATION_FAILED');
 });
 it('S014 selects only the outer deadline owner and unwinds an inner waiting body',async()=>{
-  const deadline=new Date(Date.now()+10000).toISOString();
+  const deadline=inputInstantAfter(10);
   const f=await fixture([loop({id:'outer',until:literal('Instant',deadline),body:[loop({id:'inner',until:literal('Instant',deadline),body:[{id:'wait',kind:'wait',duration:literal('Duration',1)}],handlers:{localDeadline:[{id:'inner-end',kind:'end'}]}})],handlers:{localDeadline:[{id:'outer-end',kind:'end'}]}}),send('after')]);
   expect(await f.runtime.tick(f.scope,f.run.id)).toMatchObject({state:'WAITING'});f.clock.now=new Date(deadline);
   expect(await f.runtime.tick(f.scope,f.run.id)).toMatchObject({state:'FAILED'});expect(f.calls).toHaveLength(0);
@@ -187,13 +189,13 @@ it('T120 selects found/notFound and never fabricates an index for absent results
   }
 });
 it('T117 rejects a wait past the fixed local deadline while still within seven days',async()=>{
-  const f=await fixture([loop({until:literal('Instant',new Date(Date.now()+3600000).toISOString()),body:[{id:'too-long',kind:'wait',duration:literal('Duration',7200)}],handlers:{evaluationError:[send('error')]}}),send('after')]);
+  const f=await fixture([loop({until:literal('Instant',inputInstantAfter(3600)),body:[{id:'too-long',kind:'wait',duration:literal('Duration',7200)}],handlers:{evaluationError:[send('error')]}}),send('after')]);
   expect(await f.runtime.tick(f.scope,f.run.id)).toMatchObject({state:'RUNNING'});
   expect(await f.runtime.tick(f.scope,f.run.id)).toMatchObject({state:'FAILED'});expect(f.calls).toHaveLength(1);
   const saved=(await f.service.store.run(f.scope,f.run.id))!;expect(saved.wake_at).toBeNull();expect(saved.reason).toBe('LOOP_EVALUATION_FAILED');
 });
 it('T118 inherits a loop deadline through a child procedure and unwinds its waiting frame',async()=>{
-  const deadline=new Date(Date.now()+10000).toISOString();
+  const deadline=inputInstantAfter(10);
   const f=await fixture([loop({until:literal('Instant',deadline),body:[{id:'call',kind:'call',procedureId:'child',revision:1,args:{},outputs:{}}],handlers:{localDeadline:[{id:'handler',kind:'end'}]}}),send('after')],{procedures:[{id:'child',revision:1,name:'Child',inputs:[],outputs:[],body:[{id:'wait',kind:'wait',duration:literal('Duration',1)},{id:'return',kind:'return',values:{}}]}]});
   expect(await f.runtime.tick(f.scope,f.run.id)).toMatchObject({state:'WAITING'});f.clock.now=new Date(deadline);
   expect(await f.runtime.tick(f.scope,f.run.id)).toMatchObject({state:'FAILED'});expect(f.calls).toHaveLength(0);
@@ -258,7 +260,7 @@ it('T111 cannot use explicit EndRun to escape a non-success terminal handler',as
   expect((await f.service.store.run(f.scope,f.run.id))!.reason).toBe('LOOP_LIMIT_REACHED');
 });
 it.each(['guard','break','return','endRun'] as const)('S014 commits local expiry ahead of a %s frame pop',async mode=>{
-  const deadline=new Date(Date.now()+10000).toISOString();
+  const deadline=inputInstantAfter(10);
   const body:Statement[]=mode==='break'?[{id:'break',kind:'break'}]:mode==='return'?[{id:'return',kind:'return',values:{}}]:mode==='endRun'?[{id:'end-run',kind:'endRun',semanticVersion:1}]:[];
   const node=loop({until:literal('Instant',deadline),condition:literal('Boolean',mode==='guard'),body,handlers:{localDeadline:[{id:'deadline-end',kind:'end'}]}});
   const f=mode==='return'?await fixture([{id:'call',kind:'call',procedureId:'child',revision:1,args:{},outputs:{}},send('after')],{procedures:[{id:'child',revision:1,name:'Child',inputs:[],outputs:[],body:[node,{id:'fallback',kind:'return',values:{}}]}]}):await fixture([node,send('after')]);
@@ -278,7 +280,7 @@ it('S007 routes a dynamic integer constraint failure in the body to evaluationEr
   expect(await f.runtime.tick(f.scope,f.run.id)).toMatchObject({state:'FAILED'});expect(f.calls).toHaveLength(1);
 });
 it('S014 checks a surviving ancestor after discharging an inner local deadline at commit',async()=>{
-  const innerAt=new Date(Date.now()+10000).toISOString(),outerAt=new Date(Date.now()+20000).toISOString();
+  const innerAt=inputInstantAfter(10),outerAt=inputInstantAfter(20);
   const f=await fixture([loop({id:'outer',until:literal('Instant',outerAt),body:[loop({id:'inner',until:literal('Instant',innerAt),body:[{id:'wait',kind:'wait',duration:literal('Duration',1)}],handlers:{localDeadline:[{id:'inner-end',kind:'end'}]}})],handlers:{localDeadline:[{id:'outer-end',kind:'end'}]}}),send('after')]);
   expect(await f.runtime.tick(f.scope,f.run.id)).toMatchObject({state:'WAITING'});f.clock.now=new Date(innerAt);
   let injected=false;const save=f.runtime.store.save.bind(f.runtime.store);
@@ -315,7 +317,7 @@ it('T097 resumes the same conditional-loop body PC after a worker restart withou
   expect(await restarted.tick(f.scope,f.run.id)).toMatchObject({state:'COMPLETED'});expect(f.calls).toHaveLength(1);
 });
 it('S014 discharges multiple expired owners without recurring forever in the first handler',async()=>{
-  const times=[10,20,30].map(seconds=>new Date(Date.now()+seconds*1000).toISOString());
+  const times=[10,20,30].map(inputInstantAfter);
   const inner=loop({id:'inner',until:literal('Instant',times[0]!),body:[{id:'wait',kind:'wait',duration:literal('Duration',1)}],handlers:{localDeadline:[{id:'inner-end',kind:'end'}]}});
   const middle=loop({id:'middle',until:literal('Instant',times[1]!),body:[inner],handlers:{localDeadline:[{id:'middle-end',kind:'end'}]}});
   const f=await fixture([loop({id:'outer',until:literal('Instant',times[2]!),body:[middle],handlers:{localDeadline:[{id:'outer-end',kind:'end'}]}}),send('after')]);

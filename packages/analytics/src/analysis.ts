@@ -77,14 +77,15 @@ export async function analysisMetrics(
     legacy: boolean;
     legacy_population: boolean;
     unknown_roles: boolean;
+    erased_reply: boolean;
     announcement_posts:number;
     bot_posts:number;
     comments:number;
     showcase_posts:number;
   }>`WITH observed AS (
-   SELECT p.organization_id,p.guild_id,p.message_id,p.channel_id,p.sent_at,CASE WHEN p.sent_at+p.first_reply_seconds*interval '1 second'<${to} THEN p.first_reply_seconds END AS first_reply_seconds,CASE WHEN o.definition_version IS NOT NULL AND o.definition_version<>'observation-v3' THEN o.definition_version ELSE p.definition_version END AS definition_version,p.author_kind,p.message_type,p.reference_id,o.episode_id,p.population_source<>'LOCATION_STREAM_V1' AS legacy_population FROM location_post_observations p LEFT JOIN message_observations o ON o.organization_id=p.organization_id AND o.guild_id=p.guild_id AND o.message_id=p.message_id WHERE p.organization_id=${s.organizationId}::uuid AND p.guild_id=${s.guildId}
-   UNION ALL SELECT o.organization_id,o.guild_id,o.message_id,o.channel_id,o.sent_at,CASE WHEN o.sent_at+o.first_reply_seconds*interval '1 second'<${to} THEN o.first_reply_seconds END,o.definition_version,'HUMAN',0,NULL,o.episode_id,true FROM message_observations o WHERE o.organization_id=${s.organizationId}::uuid AND o.guild_id=${s.guildId} AND NOT EXISTS(SELECT 1 FROM location_post_observations p WHERE p.organization_id=o.organization_id AND p.guild_id=o.guild_id AND p.message_id=o.message_id)
-  ) SELECT count(*)::int AS posts,count(m.first_reply_seconds)::int AS replies,${previewOnly ? sql`NULL::double precision` : sql`percentile_cont(0.5) WITHIN GROUP(ORDER BY m.first_reply_seconds)`} AS latency,count(*) FILTER(WHERE m.channel_id=ANY(${supportChannels}::text[]) AND m.first_reply_seconds IS NULL AND m.author_kind='HUMAN' AND m.reference_id IS NULL AND (NOT(m.channel_id=ANY(${forumChannels}::text[])) OR m.message_id=m.channel_id) AND m.sent_at<=${to}::timestamptz-interval '1 day')::int AS waiting,count(*) FILTER(WHERE m.channel_id=ANY(${announcementChannels}::text[]))::int AS announcement_posts,count(*) FILTER(WHERE m.author_kind IN ('BOT','WEBHOOK'))::int AS bot_posts,count(*) FILTER(WHERE m.channel_id=ANY(${forumChannels}::text[]) AND m.message_id<>m.channel_id)::int AS comments,count(*) FILTER(WHERE m.channel_id=ANY(${showcaseChannels}::text[]) AND (NOT(m.channel_id=ANY(${forumChannels}::text[])) OR m.message_id=m.channel_id))::int AS showcase_posts,COALESCE(bool_or(m.definition_version<>'observation-v3'),false) AS legacy,COALESCE(bool_or(m.legacy_population),false) AS legacy_population,COALESCE(bool_or(st.roles_observed_at IS NULL),false) AS unknown_roles FROM observed m LEFT JOIN membership_episodes e ON e.organization_id=m.organization_id AND e.guild_id=m.guild_id AND e.id=m.episode_id LEFT JOIN member_observable_state st ON st.organization_id=e.organization_id AND st.guild_id=e.guild_id AND st.episode_id=e.id LEFT JOIN discord_surface_state ch ON ch.organization_id=m.organization_id AND ch.guild_id=m.guild_id AND ch.channel_id=m.channel_id WHERE ${selected} AND m.sent_at>=${from} AND m.sent_at<${to} AND (${type !== "NEW_MEMBERS"} OR (${eligible} AND e.joined_at>=${from} AND e.joined_at<${to}))`.execute(
+   SELECT p.organization_id,p.guild_id,p.message_id,p.channel_id,p.sent_at,CASE WHEN p.sent_at+p.first_reply_seconds*interval '1 second'<${to} THEN p.first_reply_seconds END AS first_reply_seconds,CASE WHEN o.definition_version IS NOT NULL AND o.definition_version<>'observation-v3' THEN o.definition_version ELSE p.definition_version END AS definition_version,p.author_kind,p.message_type,p.reference_id,o.episode_id,p.population_source<>'LOCATION_STREAM_V1' AS legacy_population,p.reply_provenance_erased FROM location_post_observations p LEFT JOIN message_observations o ON o.organization_id=p.organization_id AND o.guild_id=p.guild_id AND o.message_id=p.message_id WHERE p.organization_id=${s.organizationId}::uuid AND p.guild_id=${s.guildId}
+   UNION ALL SELECT o.organization_id,o.guild_id,o.message_id,o.channel_id,o.sent_at,CASE WHEN o.sent_at+o.first_reply_seconds*interval '1 second'<${to} THEN o.first_reply_seconds END,o.definition_version,'HUMAN',0,NULL,o.episode_id,true,false FROM message_observations o WHERE o.organization_id=${s.organizationId}::uuid AND o.guild_id=${s.guildId} AND NOT EXISTS(SELECT 1 FROM location_post_observations p WHERE p.organization_id=o.organization_id AND p.guild_id=o.guild_id AND p.message_id=o.message_id)
+  ) SELECT count(*)::int AS posts,count(m.first_reply_seconds)::int AS replies,${previewOnly ? sql`NULL::double precision` : sql`percentile_cont(0.5) WITHIN GROUP(ORDER BY m.first_reply_seconds)`} AS latency,count(*) FILTER(WHERE m.channel_id=ANY(${supportChannels}::text[]) AND m.first_reply_seconds IS NULL AND NOT m.reply_provenance_erased AND m.author_kind='HUMAN' AND m.reference_id IS NULL AND (NOT(m.channel_id=ANY(${forumChannels}::text[])) OR m.message_id=m.channel_id) AND m.sent_at<=${to}::timestamptz-interval '1 day')::int AS waiting,count(*) FILTER(WHERE m.channel_id=ANY(${announcementChannels}::text[]))::int AS announcement_posts,count(*) FILTER(WHERE m.author_kind IN ('BOT','WEBHOOK'))::int AS bot_posts,count(*) FILTER(WHERE m.channel_id=ANY(${forumChannels}::text[]) AND m.message_id<>m.channel_id)::int AS comments,count(*) FILTER(WHERE m.channel_id=ANY(${showcaseChannels}::text[]) AND (NOT(m.channel_id=ANY(${forumChannels}::text[])) OR m.message_id=m.channel_id))::int AS showcase_posts,COALESCE(bool_or(m.definition_version<>'observation-v3'),false) AS legacy,COALESCE(bool_or(m.legacy_population),false) AS legacy_population,COALESCE(bool_or(m.reply_provenance_erased),false) AS erased_reply,COALESCE(bool_or(st.roles_observed_at IS NULL),false) AS unknown_roles FROM observed m LEFT JOIN membership_episodes e ON e.organization_id=m.organization_id AND e.guild_id=m.guild_id AND e.id=m.episode_id LEFT JOIN member_observable_state st ON st.organization_id=e.organization_id AND st.guild_id=e.guild_id AND st.episode_id=e.id LEFT JOIN discord_surface_state ch ON ch.organization_id=m.organization_id AND ch.guild_id=m.guild_id AND ch.channel_id=m.channel_id WHERE ${selected} AND m.sent_at>=${from} AND m.sent_at<${to} AND (${type !== "NEW_MEMBERS"} OR (${eligible} AND e.joined_at>=${from} AND e.joined_at<${to}))`.execute(
     tx,
   );
   const members = await sql<{
@@ -122,17 +123,19 @@ export async function analysisMetrics(
     const populationMetric = type !== "NEW_MEMBERS" && ["observed_posts", "observed_replies", "first_reply_seconds", "waiting_response", "announcement_posts", "bot_webhook_posts", "showcase_posts", "observed_comments"].includes(key);
     const incompletePopulation = populationMetric && (!populationWindowCovered || r.legacy_population);
     const unconfirmedZero = populationMetric && value === 0 && (incompletePopulation || coverage.state !== "COMPLETE" || mixed || Boolean(staff.length && unknownRoles) || context.safety || epochs.length > 128);
+    const erasedReply = r.erased_reply && ["observed_replies", "first_reply_seconds", "waiting_response"].includes(key);
     const reasons = [
       ...coverage.reasons,
       ...(incompletePopulation ? ["LEGACY_PARTICIPANT_ONLY_COVERAGE"] : []),
       ...(inaccessible ? ["SELECTED_LOCATION_UNAVAILABLE"] : []),
       ...(unknown ? ["LEGACY_REPLY_SEMANTICS_UNKNOWN"] : []),
+      ...(erasedReply ? ["REPLY_PROVENANCE_ERASED"] : []),
       ...(mixed ? ["RECIPE_CHANGED_OR_LEGACY"] : []),
       ...(staff.length && unknownRoles
         ? ["STAFF_CLASSIFICATION_UNOBSERVED"]
         : []),
     ];
-    const state = unknown || inaccessible || coverage.state === "UNKNOWN" || unconfirmedZero
+    const state = erasedReply || unknown || inaccessible || coverage.state === "UNKNOWN" || unconfirmedZero
       ? "UNKNOWN"
       : mixed || (staff.length && unknownRoles) || context.safety
         ? "PARTIAL"

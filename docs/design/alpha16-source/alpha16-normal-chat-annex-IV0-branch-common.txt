@@ -1,0 +1,275 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 04:08 UTC
+Reasoning: 極高. Design only. This common contract precedes the concrete 20-case branch catalog; source references are provided in the research file.
+
+付録IV-0：事例ベース多段分岐・説明組立の共通契約
+1. 適用範囲と処理DAG
+
+本契約は、13個票のRule結果を起点として、構造化された状況Factを追加確認し、事例に対応した多段分岐から具体的な改善候補と説明を生成する非学習・決定論的ルールベース層に適用する。20事例の個別枝は後続付録で定義し、本付録では枝を登録・評価する共通形式だけを定める。
+
+処理DAGは次の一方向に固定する。
+
+RuleResult / 認可済みOperationalContext → ContextGate → DecisionBranch → ActionCandidate → ExplanationPlan
+
+EXP-001 / PLAY-001 / COMM-001 は自分自身の出力を入力にできない。
+
+相互参照による循環も禁止する。
+
+COMM-001 は同一guild・同一evaluation context内で、allowlistされた基礎Rule結果を、各結果固有のtarget/window/versionを保持したまま集約できる。
+
+RuleResultがFIREであっても、source adapter・権限・保持・品質・対象versionが成立しなければ下流Actionを成立扱いにしない。
+
+UNKNOWNはFALSEとして評価しない。
+
+部分評価は、明示的に許可されたsummary以外では正常なSuggestionとして公開しない。
+
+優先分岐順は固定する。
+
+安全/incident → data quality → access/permission → 待ち・未処理task → 運営capacity → channel目的/構造 → 可逆的改善策
+
+同一優先帯では、より具体的なtarget、より多い成立条件、明示priority、branchIdの辞書順で一意に決定する。相反するActionは低優先側をCONFLICT_SUPPRESSEDとして落とし、同一target/windowについて複数の主要Actionを並列提示しない。
+
+2. 共通schema
+2.1 DecisionContext
+contextId: string
+guildId: existing Discord-ID type
+evaluationAsOf: timestamp
+target: { targetType, targetId, liveVersion|null }
+ruleResults: RuleResultRef[]
+operationalFacts: ContextFactRef[]
+sourceHealth: SourceHealthRef[]
+coverage: {
+  requestedDomainIds: enum[],
+  evaluatedDomainIds: enum[],
+  unavailableDomainIds: enum[],
+  status: SUFFICIENT|PARTIAL|MISSING|UNKNOWN
+}
+versions: {
+  ruleCatalogVersion: string,
+  branchRevision: string,
+  actionCatalogVersion: string,
+  explanationVersion: string
+}
+canonicalHash: sha256 string
+
+guildIdは既存コードのID型を照合して使用し、Discord IDをuuid等へ変換する仮定を置かない。
+
+ContextFactはenum / integer / decimal / boolean / timestamp / bounded identifierのみを許可し、自由文を条件入力にしない。manual/operational contextは、sourceKind=OPERATOR|SYSTEM_OBSERVATION、authorityScope、observedAt、expiresAt、sourceRevisionを必須とする。
+
+例として「専門家不足」「support queue open」「maintenance中」「channel purpose=HELP」は、認可された構造化Factとしてのみ入力できる。個人の心理、意図、関係性、人物評価は入力fieldとして定義しない。
+
+2.2 BranchNode
+branchId: string
+branchRevision: string
+nodeType: GATE|BRANCH|JOIN|TERMINAL
+inputRefs: typed reference[]
+predicate: bounded expression
+trueNext: branchId|null
+falseNext: branchId|null
+unknownNext: branchId|null
+priority: integer
+requiredSources: SourceRequirement[]
+expiry: timestamp|null
+
+許可演算子は、AND / OR / NOT / = / != / < / <= / > / >= / IN / BETWEEN / EXISTS / IS_NULL / AGE_WITHIN / RATIOに限定する。任意SQL、任意コード、network call、外部API呼出し、本文意味理解は禁止。
+
+三値論理はTRUE / FALSE / UNKNOWNとし、UNKNOWNの経路をschema上必須にする。unknownNextを持たないBranchは登録不可。
+
+初期budgetは設計候補として、depth=8、branch node=64、predicate operation=256、input reference=128を上限とする。超過時は部分的な正常Suggestionを生成せず、評価全体をINELIGIBLE/BUDGET_EXCEEDEDとする。これらは未検証の初期候補であり、既存Automation evaluatorの予算を変更するものではない。
+
+2.3 ActionCandidate
+actionId: string
+targetType: enum
+targetId: string
+liveVersion: string|null
+mode: REVIEW_ONLY|CREATE_DRAFT
+typedFields: catalog-defined object
+ownerRole: enum
+requiredPermission: enum[]
+impact: LOW|MEDIUM|HIGH
+reversibleFallback: actionId|null
+reviewCriterion: enum[]
+expiresAt: timestamp
+branchPath: string[]
+evidenceRefs: EvidenceRef[]
+
+typedFieldsはAction Catalogに事前登録されたfieldだけを許可する。live版は実在するが安全なtyped editor fieldが存在しない場合、CREATE_DRAFTを禁止し、REVIEW_ONLYに落とす。
+
+Actionは提案層から直接実行しない。自動投稿、DM、activation、role/security変更、課金、BAN、外部side effectは本契約のActionCandidateに含めない。
+
+2.4 ExplanationPlan
+explanationId: string
+explanationVersion: string
+observationRefs: EvidenceRef[]
+branchPath: string[]
+observation: structured sentence slots
+branchReason: structured sentence slots
+hypothesis: { textSlot, isHypothesis=true }|null
+primaryAction: ActionCandidateRef
+ownerRole: enum
+caution: sentence slots
+alternative: sentence slots|null
+reviewCondition: sentence slots
+sourceRefs: EvidenceRef[]
+
+文章は次の順で組み立てる。
+
+観測事実 → なぜこの分岐になったか → 仮説である旨 → 具体策1つ＋担当 → 注意/代替 → 見直し条件
+
+文言variationはrandom synonymではなく、branchPath / factClass / actionId / explanationVersionに対応した条件付きphrase variantから決定する。同じ条件では同じ構造になる一方、事実の違いによって不要な句を削除・追加できるため、単純な定型文置換にはしない。
+
+「原因」「本人の意図」「改善効果」を入力Factから導出して断定しない。可能性がある、確認された状態からは～を優先して確認する等、仮説と観測を明示的に分離する。
+
+2.5 EvidenceRef
+evidenceId: string
+kind: RULE_RESULT|FACT|SOURCE_HEALTH|OPERATIONAL_CONTEXT|CASE_REFERENCE
+refId: string
+sourceRevision: string
+observedAt: timestamp
+windowStart: timestamp
+windowEnd: timestamp
+provenance: CASE_OBSERVATION|OFFICIAL_GUIDANCE|DESIGN_INFERENCE
+claimType: OBSERVED_PATTERN|GUIDANCE|DESIGN_MAPPING
+
+evidenceにはraw投稿、DM、本文全文、secret、不要な個人ID、個人score、心理・属性・関係推測を保存しない。
+
+case referenceは「この事例でこの運営パターンが報告された」という根拠に限定し、成功率・因果効果・普遍的benchmarkとして扱わない。
+
+根拠の期限が切れた場合、該当Actionをそのまま維持せず再評価する。期限切れ根拠を新しいevidenceとしてコピーして保持期限を延長してはならない。
+
+3. 分岐成立条件
+
+各Branchは最低1つの「観測事実」と1つの「成立条件」を持つ。数値RuleのFIREだけでActionを確定させず、次のgateを順に評価する。
+
+Source gate：必要adapterが存在し、認可範囲内で取得できるか。
+
+Quality gate：FactがSUFFICIENTか。PARTIAL/STALE/MISSING/UNKNOWNを正常値として補完しない。
+
+Scope gate：guild・target・liveVersion・windowが一致するか。
+
+Operational gate：構造化された運営contextが存在する場合、それを優先分岐に利用する。
+
+Retention gate：必要な過去データが現在許可されている保持範囲内で取得できるか。
+
+Action gate：Action Catalogのtyped field、permission、versionが成立するか。
+
+特にDATA-001では、業務Factの品質とsource-health観測品質を別物として扱う。
+
+healthObservedAt / healthQuality
+lastSuccessfulIngestAt / neverSucceeded / coverage
+businessFact.value / businessFact.quality
+
+正常に観測されたsource-health Factから「業務取得がneverSucceeded」「stale」「coverage低下」を警告対象にできる。一方、source-health観測自体が不明ならUNKNOWNとし、業務値の欠測を0へ変換しない。
+
+4. COMM-001との接続契約
+
+COMM-001は、同一guild・同一evaluation context内の複数domain結果を集約できる。ただし各入力について、
+
+targetId + targetVersion + windowStart + windowEnd + period_role + evidenceHash
+
+を保持する。
+
+異なるwindow・targetを一つの同一観測として二重計数しない。関連するmetricsが同じ傾向を示していても、それを「独立した証拠」や統計的confidenceとして表現しない。
+
+部分summaryは、成立したdomainを捨てずにevaluatedDomainIds / unavailableDomainIdsを明示する。ただし未評価domainが基準達成の必要条件に含まれる場合はINELIGIBLEとし、「問題がない」「解消した」とは表示しない。
+
+EXP-001 / PLAY-001 / COMM-001の出力は、それぞれの基礎入力として再利用せず、DAG上の下流から上流へ戻らない。
+
+5. 事例知識の利用境界
+
+提示済み資料は、次の3種類を区別してcatalogへ登録する。
+
+CASE_OBSERVATION：実際の運営事例として報告された状況・対応。
+
+OFFICIAL_GUIDANCE：公式資料に記載された運営上の説明・機能文脈。
+
+DESIGN_INFERENCE：NEXUS側で事例から抽象化した分岐・推奨条件。
+
+Python Discordのhelp運用資料は、専門channelとhelp forum、時間帯や専門知識の不足等によって未回答への対応が変わり得る事例として参照する。
+
+MCAT Communityの資料は、定期的なgame night、AMA、study session等の継続的な活動や通知設計を行った事例として扱うが、そこからNEXUSの普遍的成功率を導出しない。
+
+Delta Forceの資料は、専用channel、feedback loop、community cultureに合わせたevent等の事例として扱い、特定施策の因果効果や普遍的benchmarkには変換しない。
+
+Discord Server Insightsの資料は、channel分散、visitor/communicator等の文脈を与える資料として扱う。NEXUSが同じnative閲覧値を取得できるとは仮定しない。
+
+参照資料：
+
+Python Discord Help Channels：提示された資料
+
+MCAT Community：提示された資料
+
+Delta Force：提示された資料
+
+Understanding Server Insights：提示された資料
+
+6. 合成fixture契約
+
+fixtureは実測・実行済み結果ではなく、branch実装前に期待挙動を固定する設計入力とする。
+
+fixtureId
+evaluationAsOf
+guildScope
+inputRuleResults[]
+inputContextFacts[]
+inputSourceHealth[]
+expectedBranchPath[]
+expectedActionMode
+expectedActionId|null
+expectedReasonCode
+expectedExplanationShape
+expectedCoverage
+
+最低限、次のケース型を用意する。
+
+同じ低活動でも「channel目的が明確」な場合と「専門家不足」が確認された場合で異なるActionになる。
+
+同じ未回答率でも、source-healthが不明なら断定せず、追加確認を提示する。
+
+event参加低下とreport配信失敗を同一の「engagement低下」として混ぜない。
+
+合成出力例1：channel目的が明確な低活動
+
+「直近windowでは対象channelの利用が低下していますが、channelの目的自体は確認されています。このため、まず目的を変えるより、現在の用途に合った参加導線が十分かを確認する案を優先します。担当はserver運営者です。変更後は同じwindow条件で再確認します。」
+
+DESIGN_INFERENCEであり、低活動から原因を断定しない。
+
+合成出力例2：同程度の低活動＋専門家不足
+
+「利用量だけを見ると前例1と近い状態ですが、今回は専門知識を提供できる時間帯・担当者の不足が確認されています。そのため、channel構造を変更する前に、対応可能な時間帯や担当範囲を整理する案を優先します。」
+
+数値が似ていても、追加contextによってbranchとActionを変更する。
+
+合成出力例3：情報不足
+
+「利用低下は確認されていますが、source-healthの観測が不足しており、実際の取得欠落なのか利用そのものの低下なのかを区別できません。現時点では改善策を確定せず、取得状態を確認してから再評価することを推奨します。」
+
+UNKNOWN/INELIGIBLEをFALSEや問題解消に変換しない。
+
+7. 不変条件
+
+事実依存性：説明に含める観測・理由・Actionは、必ずimmutable Fact/RuleResult/evidenceへ逆参照できる。
+
+版固定：branch revision、rule version、action catalog version、explanation versionを結果へ固定する。
+
+非循環：Rule → branch → action → explanationのみを許可し、EXP/PLAY/COMMの自己・相互循環を禁止する。
+
+unknown保存：UNKNOWN/MISSING/STALEをFALSE、0、問題解消へ変換しない。
+
+事例非代替：case evidenceはruntimeの実測値や現在のguild状態の代替にならない。
+
+事例非因果：caseで報告された施策と結果を、NEXUSの改善効果保証として使用しない。
+
+認可優先：数値thresholdを満たしても、permission/source/retention gate不成立ならActionを実行可能扱いしない。
+
+Action非自動化：生成された候補はREVIEW_ONLYまたは明示的なCREATE_DRAFTのみで、外部操作を自動実行しない。
+
+根拠非延命：期限切れFact/evidenceを複製して保持期間を延長しない。Run由来データについては既存の「終了後7日以内削除」契約を迂回しない。
+
+自然文の決定論：同一input/versionでは同一branchと同一Actionを選び、randomな言い換えで意味を変えない。
+
+相反抑止：同一target/windowで相反するActionを同時に主要提案しない。
+
+部分評価の安全側処理：成立した課題はcoverage付きで保持できるが、未評価条件が必要な場合はINELIGIBLEとし、NO_FIREや解消とは扱わない。
+
+本付録では、20事例の具体的枝・個別threshold・個別Action mappingは定義しない。後続付録では、この共通schema・DAG・不変条件を変更せず、各事例を4件単位でbranch condition → context gate → action → explanationとして追加する。

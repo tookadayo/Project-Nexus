@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 import { connect, ensureGuild, migrate, sql, tenant, type Database } from "../../packages/db/src/index";
 import { scopeForGuild } from "../../packages/security/src/scoping";
@@ -14,15 +14,17 @@ import { isolatedPostgres } from "../fixtures/postgres";
 
 let db: Database, infra: Awaited<ReturnType<typeof isolatedPostgres>>, serial = 0;
 const channel = "887222222222222222";
-const actor: Actor = { key: "synthetic-handler-admin", encryptedUserId: "synthetic-encrypted-identity", permissions: "8", roles: [], source: "WEB_DASHBOARD", requestId: "synthetic-handler" };
+const actor: Actor = { key: createHash("sha256").update("synthetic-handler-admin").digest("hex"), encryptedUserId: "synthetic-encrypted-identity", permissions: "8", roles: [], source: "WEB_DASHBOARD", requestId: "synthetic-handler" };
 const admission: AutomationAdmissionLimits = { activeFlows: 20, monthlyRuns: 100, guildConcurrent: 2, globalConcurrent: 4, guildPending: 20, globalPending: 200, measurementId: "isolated-handler-acceptance" };
 const literal = (type: "Number" | "Boolean" | "ConditionResult" | "Duration" | "Instant", value: number | boolean | string): ValueInput => ({ kind: "literal", type, value });
+// Only new definition literals use whole seconds; runtime clocks retain their precision.
+const inputInstantAfter=(seconds:number)=>new Date(Math.ceil(Date.now()/1000)*1000+seconds*1000).toISOString();
 const number = (value: number) => literal("Number", value);
 const variable = (variableId: string): ValueInput => ({ kind: "variable", type: "Number", variableId });
 const wait = (id: string, seconds: number): Statement => ({ id, kind: "wait", duration: literal("Duration", seconds) });
 const declare = (id: string, value: ValueInput): Statement => ({ id: `${id}.declare`, kind: "declare", variable: { id, name: id, type: "Number" }, value });
 const send = (id: string): Statement => ({ id, kind: "action", operation: "discord.sendMessage", inputs: { channel: { kind: "literal", type: "ChannelRef", value: { id: channel, guildId: "placeholder" } }, content: { kind: "literal", type: "PlainText", value: id } } });
-const loop = (options: Partial<Extract<Statement, { kind: "boundedLoop" }>> = {}): Statement => ({ id: "loop", kind: "boundedLoop", semanticVersion: 1, mode: "until", maxBody: number(1), condition: literal("Boolean", false), until: literal("Instant", new Date(Date.now() + 86400000).toISOString()), body: [], handlers: {}, ...options });
+const loop = (options: Partial<Extract<Statement, { kind: "boundedLoop" }>> = {}): Statement => ({ id: "loop", kind: "boundedLoop", semanticVersion: 1, mode: "until", maxBody: number(1), condition: literal("Boolean", false), until: literal("Instant", inputInstantAfter(86400)), body: [], handlers: {}, ...options });
 function common(template: Statement[]) {
   let next = 0;
   return compileCommonUnknownChain({ id: "common", clauses: [{ id: "first", condition: literal("ConditionResult", "false"), then: [] }, { id: "second", condition: literal("ConditionResult", "unknown"), then: [] }], otherwise: [], template }, { createId: () => `hygienic.${++next}` });

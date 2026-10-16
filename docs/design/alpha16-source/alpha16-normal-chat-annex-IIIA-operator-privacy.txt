@@ -1,0 +1,367 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 03:54 UTC
+Reasoning: 極高. Design only; no deletion, implementation, setup, or tests executed. Operator scope is currently assumed pending user clarification.
+
+付録III-A：Operatorからの個人情報削除契約
+1. 適用範囲・権限境界
+
+本契約は、NEXUSの運営者用ローカルOperatorから、NEXUSが保存する対象者の個人情報を削除する機能を定義する。Discord上のメッセージ・外部サービス上の情報を削除する機能ではない。
+
+OperatorはPCのloopbackからのみ到達可能とし、Cloudflare Tunnel、公開BFF、一般利用者Webから到達可能にしてはならない。loopback到達性だけを認証・認可とはみなさない。
+
+提案する専用権限：
+
+OPERATOR_PRIVACY_DELETE_GUILD：指定guild内の対象者データを削除
+
+OPERATOR_PRIVACY_DELETE_GLOBAL：NEXUS全体の対象者データを削除
+
+guild管理権限のみではGLOBAL削除を許可しない。
+
+GLOBALは専用権限が存在しない場合、受付自体を拒否する。
+
+対象者はDiscord ID完全一致で照合する。表示名・ユーザー名・類似文字列による選択は不可。現役・退会済みの双方を対象にできる。検索結果に名前を表示する場合も、選択キーはDiscord IDのみとする。
+
+削除対象はNEXUS保存データであり、Discord上の他者メッセージを削除しない。
+
+2. 認証・再認証・CSRF
+
+Operatorの通常認証、専用privacy-delete権限、対象scope認可、step-up再認証を全て要求する。
+
+状態変更APIは次を全て検証する。
+
+接続元が許可されたloopback
+
+HostがOperatorの許可Host
+
+Browserの場合OriginがOperator自身の許可Origin
+
+有効なOperator session
+
+専用削除permission
+
+guild/global scopeの認可
+
+CSRF token
+
+server発行の再認証結果
+
+previewの有効期限・hash・対象・scope・plan revision
+
+対象の現在状態
+
+Host、Origin、Forwarded等を任意のクライアント入力として信用しない。trusted proxyを利用する場合も、事前に限定したproxy接続元からの値だけを信頼し、loopbackだから安全とみなさない。
+
+再認証token・confirmation tokenをBrowserが任意生成して通過できる設計は禁止する。再認証はserver側でchallengeを発行し、Operatorの設定済み認証要素をserver側で検証した結果としてserver発行・一回限り・previewへbindされたtokenを生成する。再認証方式自体が現在Operatorに存在することは未照合であり、step-up要素が利用できない環境では削除操作を有効化しない。
+
+最小UI
+
+対象検索 → scope選択 → preview → 再認証 → 最終確認 → 受付 → 進行/失敗/完了
+
+確認画面には必ず以下を固定表示する。
+
+対象Discord ID
+
+GUILD / GLOBAL
+
+guild ID（guild scopeの場合）
+
+削除されるデータ分類
+
+削除対象外・残存し得るデータ分類
+
+Discord上のデータは削除しない旨
+
+取り消し不能となる境界
+
+preview期限
+
+deletion plan revision
+
+preview hash
+
+tombstone有効化後は取消操作を提供しない。
+
+3. 提案API契約
+
+以下は提案pathであり、現在の実route名との照合が必要である。
+
+III-A-API-01 — Preview
+
+POST /operator/privacy/deletions/preview
+
+Request：
+
+{
+  "targetType": "DISCORD_USER",
+  "targetDiscordId": "123456789012345678",
+  "scopeKind": "GUILD",
+  "guildId": "987654321098765432"
+}
+
+GLOBALの場合：
+
+{
+  "targetType": "DISCORD_USER",
+  "targetDiscordId": "123456789012345678",
+  "scopeKind": "GLOBAL",
+  "guildId": null
+}
+
+必須：targetType, targetDiscordId, scopeKind。
+guildIdはGUILDでは必須、GLOBALではnull。
+
+成功：
+
+{
+  "previewId": "pv_01H...",
+  "previewHash": "sha256:...",
+  "targetDiscordId": "123456789012345678",
+  "scopeKind": "GUILD",
+  "guildId": "987654321098765432",
+  "targetState": "ACTIVE",
+  "includedDataClasses": [
+    "PRIMARY",
+    "SESSION",
+    "CACHE",
+    "QUEUE",
+    "FACT",
+    "SUGGESTION",
+    "DRAFT",
+    "EVIDENCE"
+  ],
+  "excludedDataClasses": [
+    "DISCORD_MESSAGES_NOT_OWNED_BY_NEXUS"
+  ],
+  "deletionPlanRevision": "privacy-delete-v1",
+  "expiresAt": "2026-10-15T10:00:00Z"
+}
+
+previewHashはserverが、対象・scope・現在対象版・plan revision・削除対象集合をcanonical serializationした値から生成する。Preview生成後に対象範囲が変化した場合はhash不一致として再previewを要求する。
+
+III-A-API-02 — Confirm
+
+POST /operator/privacy/deletions/confirm
+
+Header：
+
+Idempotency-Key: <client-generated-unique-key>
+
+Request：
+
+{
+  "previewId": "pv_01H...",
+  "previewHash": "sha256:...",
+  "reauthToken": "server-issued-token",
+  "confirmation": true
+}
+
+serverは以下を再検証してから受付する。
+
+session
+
+permission
+
+target
+
+scope
+
+guild
+
+preview期限
+
+preview hash
+
+deletion plan revision
+
+現在のtombstone
+
+対象状態
+
+preview後に権限を失った、対象guildが変化した、対象範囲が変化した、previewが期限切れ、tombstoneが既に存在する等の場合は実行せず拒否する。
+
+成功：
+
+{
+  "receiptId": "dr_01H...",
+  "status": "QUEUED",
+  "scopeKind": "GUILD",
+  "guildId": "987654321098765432",
+  "targetType": "DISCORD_USER",
+  "targetDiscordId": "123456789012345678",
+  "livePurgeState": "PENDING",
+  "backupState": "PENDING",
+  "acceptedAt": "2026-10-15T09:30:00Z"
+}
+
+同一target＋scopeについて既存jobがある場合は、既存job/receiptを返すか409とする。設計では既存job/receiptを返す方式に固定し、同じ削除を複数jobへ分裂させない。
+
+III-A-API-03 — Status
+
+提案：
+
+GET /operator/privacy/deletions/{receiptId}
+
+通常Operator sessionが有効なら通常認可を使用できる。session失効後はI-C4の限定receipt方式を利用できる。
+
+receipt secretはURL/queryには入れない。server発行の256bit CSPRNG secretを提示し、serverにはhashのみ保存する。
+
+成功responseは進行情報に限定する。
+
+{
+  "receiptId": "dr_01H...",
+  "status": "LIVE_PURGE_COMPLETED",
+  "livePurgeState": "COMPLETED",
+  "backupState": "PENDING_EXPIRY",
+  "progressClass": "COMPLETE_LIVE_PENDING_BACKUP_EXPIRY",
+  "updatedAt": "2026-10-15T10:20:00Z"
+}
+
+対象データ、対象者のプロフィール、削除済み値、evidence本文等は返さない。
+
+4. 削除Job
+
+既存I-C4のprivacy_deletion_job、privacy_tombstone、deletion_receiptを再利用する。別の同義tableを新設しない。
+
+追加・照合対象となる論理field：
+
+field	契約
+job_id	UUID等の内部一意ID。実DB型は未照合
+scope_kind	GUILD / GLOBAL
+guild_id	GUILDでは必須、GLOBALではnull
+target_discord_id	対象Discord ID。既存ID型と照合して採用
+preview_hash	immutable
+deletion_plan_revision	immutable
+state	QUEUED/RUNNING/RETRYING/PARTIAL_FAILURE/LIVE_COMPLETED/FAILED
+lease_id	worker claim用
+lease_expires_at	lease期限
+attempt_count	retry回数
+last_error_code	stable error code
+live_completed_at	live purge完了時刻
+backup_state	PENDING_EXPIRY/EXPIRED/UNKNOWN
+created_at/updated_at	immutable/更新時刻
+
+同一scope_kind + scope_id + target_discord_idについて同時に有効な削除jobを複数作らない。完了jobが存在する場合は新規削除ではなく既存receipt/statusを返す。
+
+5. 削除順序とtombstone
+
+Confirmのtransactionで、まず以下を確定する。
+
+tombstone有効化 → 対象session失効 → deletion job作成 → receipt発行 → commit
+
+tombstone commitより前に削除jobを「受付済み」として公開してはならない。
+
+tombstone有効化後は、対象scopeについて以下を遮断する。
+
+新規個人データwrite
+
+個人由来Fact生成
+
+Suggestion/evidence生成
+
+draft再取得・再生成
+
+対象者由来queueの新規実行
+
+外部副作用の再送
+
+cacheからの再hydrate
+
+backup restoreによる再出現
+
+queue上の未実行jobはtombstone理由で停止・無効化する。既に外部へ送信されたDiscord操作をNEXUSの削除によって取り消したとは扱わない。
+
+削除対象のlive dataを削除した後、cache/queue/derived dataを確認し、再取得不能であることを確認してLIVE_COMPLETEDとする。
+
+部分失敗はPARTIAL_FAILUREまたはFAILEDであり、COMPLETEDへ偽装しない。再開時もtombstoneを解除せず、未完了部分のみ処理する。
+
+6. データ分類別の扱い
+分類	削除契約
+Primary	対象scopeの個人由来rowを削除
+Session	対象者sessionを即時失効
+Cache	purge。tombstoneにより再hydrate禁止
+Queue	対象者由来の未実行処理を無効化
+Fact	個人由来Factを削除。個人由来を除外できないaggregateは再計算または無効化
+Suggestion	対象者由来Suggestion/evidenceを削除またはI-C4の失効契約へ従う。削除値をhistoryへ複写しない
+Draft	対象者由来draftと関連evidenceを削除
+Idempotency replay	対象scopeのresponse replayから個人情報を返さない。保持延長用の複製は禁止
+Audit	最小証跡のみ。削除対象のプロフィール・本文・secret等を保存しない
+Application log	個人情報をログへ出さない。既存ログに含まれる場合は削除契約との整合を要照合
+Backup	live purgeとは別管理。既存のbackup 7日制約を維持
+Discord	NEXUS外のDiscordメッセージは削除しない
+
+Run由来の個人情報をFact/evidence/audit/idempotency等へコピーしてRunの7日制約を迂回してはならない。
+
+確定保持制約は、Run終了後最小状態7日以内削除およびbackup 7日。Fact、Suggestion、audit、receipt等についてこれ以外の保持期間を一律7日とはしない。追加保持期間は未承認候補として別途決定する。
+
+7. live purgeとbackup状態の分離
+
+UIでは「削除完了」を単一booleanで表現しない。
+
+livePurgeState=COMPLETED
+
+backupState=PENDING_EXPIRY
+
+backupState=EXPIRED
+
+backupState=UNKNOWN
+
+を分離する。
+
+したがってlive purge完了直後に「全てのバックアップから完全消去済み」と表示してはならない。
+
+backupが期限内に残っていることは隠さず、backup 7日の期限到来を確認した後にEXPIREDへ遷移する。
+
+restoreを行う場合は、
+
+restore対象backup取得 → 最新tombstoneを独立取得 → tombstone再適用 → 個人データpurge → cache/queue再構築 → 公開/通常処理開始
+
+の順序とする。
+
+tombstoneを適用できないbackupは通常環境へrestoreしてはならない。古いbackupから対象データが再出現しても、公開・再評価・再送より前にtombstoneで遮断する。
+
+PCが7日間停止していた場合、削除処理を物理的にその期間内実行できたとは仮定しない。起動時に削除job/tombstoneを先に復元・確認し、通常処理や公開より前にpurgeを実施する。したがって「PC停止中でも7日以内に物理削除された」とは表示しない。
+
+8. Receipt
+
+I-C4のreceipt方式をそのまま利用する。
+
+secret：256bit CSPRNGでserver生成
+
+DB保存：secretそのものではなくhash
+
+receiptは対象データへのアクセス権を持たない
+
+通常sessionの代替認証にはならない
+
+deletion preview/confirm、通常Dashboard、データ閲覧、アカウント復活には使用不可
+
+status取得だけに用途を限定
+
+有効期限は未検証候補として設定し、承認前に実運用値を固定しない
+
+rate limitも未検証候補として設定し、DoS耐性と正当なstatus確認の両立を確認して決定する
+
+receipt紛失時に、既存認証だけでは本人確認・再発行を安全に実現できない場合、再発行機能を実装済みとは扱わず、status確認不能として扱う。未定のサポート手順を完成済みの運用として記載しない。
+
+9. 受入条件
+
+実行はalpha16の全実装完了後にまとめて行う。本付録では試験を実施しない。
+
+ID	合格条件
+A16-DEL-01	Discord ID完全一致のみで対象を確定し、名前類似だけでは削除対象を決定できない
+A16-DEL-02	GUILD権限ではGLOBAL削除を受付できず、専用global permissionが必要
+A16-DEL-03	preview hash、scope、target、plan revision、期限、現在権限の変更をconfirm直前に再検証し、不一致なら削除しない
+A16-DEL-04	tombstoneがsession失効・削除job確定より先に有効化され、新規write/evaluation/retry/retrieve/restoreによる再出現を防ぐ
+A16-DEL-05	primary/cache/queue/Fact/Suggestion/draft/evidence等の対象者由来データが削除対象から漏れず、個人情報をhistory/auditへ複写して残さない
+A16-DEL-06	部分失敗・PC停止・再開後もFAILED/PARTIALをCOMPLETEDと誤表示せず、tombstoneを維持して安全に再開できる
+A16-DEL-07	live purge完了とbackup expiryを別状態で表示し、restore時に最新tombstoneが通常公開・処理より先に再適用される
+A16-DEL-08	session失効後も限定receiptで削除進行だけを確認でき、receiptから通常認証・データ閲覧・復活ができない
+10. 現時点の確認範囲
+
+コード監査で確認済み：privacy retention/tombstone基盤の存在。
+
+未照合：Operator画面、Operator認証・step-up機構、削除専用permission、preview/confirm/statusの実route、対象者データの全保存先、queue/cache/derived dataの完全な削除対象mapping、backup restore処理。
+
+したがって本付録は削除機能の設計契約であり、実装承認・実装済み・検証済み・本番利用可能を意味しない。実route・実table・実認証機構との照合はalpha16実装時の設計適合確認で行う。
+
+なお、重大アップデートについての実装開始承認は本付録によって与えられない。

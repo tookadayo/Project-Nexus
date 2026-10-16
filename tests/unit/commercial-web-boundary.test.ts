@@ -126,7 +126,7 @@ it("keeps actual and declared body lengths separate and rejects malformed or ove
   ).rejects.toThrow("BILLING_EVENT_TOO_LARGE");
 });
 
-it("production Host and forwarded protocol spoofing cannot change canonical or OAuth origins", () => {
+it("production Host and forwarded protocol spoofing cannot change canonical or OAuth origins", async () => {
   vi.stubEnv("NODE_ENV", "production");
   vi.stubEnv("NEXUS_WEB_AUTH_MODE", "oauth");
   vi.stubEnv("NEXUS_WEB_URL", "https://nexus.example/");
@@ -141,9 +141,12 @@ it("production Host and forwarded protocol spoofing cannot change canonical or O
   expect(webOrigin(request)).toBe("https://nexus.example");
   expect(webOrigin({ headers: request.headers })).toBe("https://nexus.example");
   expect(oauthRedirectUri()).toBe("https://nexus.example/auth/callback");
-  expect(proxy(request).headers.get("location")).toBe(
-    "https://nexus.example/auth/login",
-  );
+  const rejected = await proxy(request);
+  expect(rejected.status).toBe(421);
+  expect(await rejected.json()).toEqual({error: "HOST_REJECTED"});
+  expect(rejected.headers.get("location")).toBeNull();
+  const canonical = await proxy(new NextRequest("https://nexus.example/dashboard", {headers: {host: "nexus.example"}}));
+  expect(canonical.headers.get("location")).toBe("https://nexus.example/auth/login");
   expect(sameOrigin(request)).toBe(false);
 });
 
@@ -169,11 +172,13 @@ it("production rejects missing canonical configuration while development permits
     ).toThrow();
 });
 
-it("anonymous Stripe webhook bypasses session redirects and remains adapter authorized", () => {
+it("anonymous Stripe webhook bypasses session redirects and remains adapter authorized", async () => {
   vi.stubEnv("NEXUS_WEB_AUTH_MODE", "oauth");
-  const response = proxy(
+  vi.stubEnv("NEXUS_WEB_URL", "https://nexus.example");
+  const response = await proxy(
     new NextRequest("https://nexus.example/billing/webhooks/stripe", {
       method: "POST",
+      headers: {host: "nexus.example"},
     }),
   );
   expect(response.headers.get("location")).toBeNull();

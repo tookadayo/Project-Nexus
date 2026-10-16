@@ -218,6 +218,7 @@ export class AutomationEvents {
             definition: FlowDefinition;
             semantic_hash: string;
             complete: boolean;
+            restoration_requires_commit: boolean;
           }>`SELECT * FROM automation_revisions WHERE ${tenant(s)} AND flow_id=${flow.id} AND revision=${current.revision}`.execute(
             tx,
           )

@@ -11,6 +11,8 @@ import {
 } from "../../analytics/src/chart-spec";
 import type { MetricEvidence } from "../../shared/src/metric-evidence";
 import { operationsAccess, operationsAudit, operationsLock } from "./policy";
+import { acquireRuleScopeLocks, ruleScopeLockSet } from "../../rules/src/locks";
+import { configHash } from "../../settings/src/revisions";
 export const attentionTypes = [
   "TEXT_NEWCOMER",
   "FORUM_SUPPORT",
@@ -127,8 +129,50 @@ export type PlaybookHead = {
   revision: number;
   last_evaluated_at: Date | null;
 };
+/** Native state changes from plan enforcement must invalidate the same sealed
+ * target even when that legacy writer does not increment the edit version. */
+export function playbookDraftTargetVersion(current: Pick<PlaybookHead, "version" | "head_id" | "state" | "approval_required">): string {
+  return `${current.version}:${current.head_id}:${current.state}:${current.approval_required ? "approval" : "direct"}`;
+}
 export class Playbooks {
   constructor(private readonly db: Database) {}
+  /** Caller holds the native operations fence and the parent target lock (or
+   * is creating the parent). All revisions, including unheaded draft revisions,
+   * share the existing allocator and immutable table. */
+  private async appendRevision(tx: Tx, s: Scope, actor: Actor, id: string, definition: PlaybookDefinition, beforeWrite?: (tx: Tx) => Promise<void>) {
+    assert(tx.isTransaction, "RULE_TRANSACTION_REQUIRED", 500);
+    const revision = (await sql<{ revision: number }>`SELECT COALESCE(max(revision),0)+1 AS revision FROM playbook_revisions WHERE ${tenant(s)} AND playbook_id=${id}::uuid`.execute(tx)).rows[0]!.revision,
+      revisionId = randomUUID();
+    await beforeWrite?.(tx);
+    await sql`INSERT INTO playbook_revisions(organization_id,guild_id,id,playbook_id,revision,definition,actor_hash) VALUES(${s.organizationId}::uuid,${s.guildId},${revisionId}::uuid,${id}::uuid,${revision},${json(definition)},${actor.key})`.execute(tx);
+    await beforeWrite?.(tx);
+    return { revisionId, revision, contentHash: configHash(definition) };
+  }
+  /** An immutable native draft is an unheaded revision, not a new playbook
+   * state. No active head, approval, execution, or delivery row is changed.
+   * Caller acquires canonical scopes, operationsLock, and target before the
+   * Suggestion row. All following writes remain in that same transaction. */
+  async draftInTransaction(tx: Tx, s: Scope, actor: Actor, id: string, liveVersion: string, input: unknown, beforeWrite?: (tx: Tx) => Promise<void>) {
+    assert(tx.isTransaction, "RULE_TRANSACTION_REQUIRED", 500);
+    z.uuid().parse(id);
+    const definition = playbookDefinition.parse(input);
+    await operationsAccess(tx, s, actor, "CONFIGURE", "playbooks");
+    await operationsLock(tx, s);
+    const current = (await sql<PlaybookHead>`SELECT p.*,r.definition,r.revision FROM playbooks p JOIN playbook_revisions r ON r.organization_id=p.organization_id AND r.guild_id=p.guild_id AND r.id=p.head_id AND r.playbook_id=p.id WHERE p.organization_id=${s.organizationId}::uuid AND p.guild_id=${s.guildId} AND p.id=${id}::uuid FOR UPDATE OF p`.execute(tx)).rows[0];
+    assert(current, "PLAYBOOK_NOT_FOUND", 404);
+    assert(playbookDraftTargetVersion(current) === liveVersion, "REVISION_CONFLICT", 409);
+    if (current.approval_required) await new EntitlementService(tx).require(s, "approval_workflow");
+    await validateRoutes(tx, s, definition);
+    await beforeWrite?.(tx);
+    const revision = await this.appendRevision(tx, s, actor, id, definition, beforeWrite);
+    await operationsAccess(tx, s, actor, "CONFIGURE", "playbooks");
+    if (current.approval_required) await new EntitlementService(tx).require(s, "approval_workflow");
+    await validateRoutes(tx, s, definition);
+    await beforeWrite?.(tx);
+    await operationsAudit(tx, s, actor.key, "PLAYBOOK_REVISION_CREATED", id, revision.revision);
+    await beforeWrite?.(tx);
+    return { id, ...revision };
+  }
   async save(s: Scope, actor: Actor, input: unknown) {
     const data = z
       .object({
@@ -141,6 +185,7 @@ export class Playbooks {
       .strict()
       .parse(input);
     return this.db.transaction().execute(async (tx) => {
+      await acquireRuleScopeLocks(tx, ruleScopeLockSet(s));
       await operationsAccess(tx, s, actor, "CONFIGURE", "playbooks");
       await operationsLock(tx, s);
       if (data.approvalRequired)
@@ -175,22 +220,12 @@ export class Playbooks {
       }
       await validateRoutes(tx, s, data.definition);
       const id = previous?.id ?? randomUUID(),
-        headId = randomUUID(),
-        version = (previous?.version ?? 0) + 1,
-        revision = (
-          await sql<{
-            revision: number;
-          }>`SELECT COALESCE(max(revision),0)+1 AS revision FROM playbook_revisions WHERE ${tenant(s)} AND playbook_id=${id}::uuid`.execute(
-            tx,
-          )
-        ).rows[0]!.revision;
+        version = (previous?.version ?? 0) + 1;
       if (!previous)
         await sql`INSERT INTO playbooks(organization_id,guild_id,id,name,creator_hash,approval_required) VALUES(${s.organizationId}::uuid,${s.guildId},${id}::uuid,${data.name},${actor.key},${data.approvalRequired})`.execute(
           tx,
         );
-      await sql`INSERT INTO playbook_revisions(organization_id,guild_id,id,playbook_id,revision,definition,actor_hash) VALUES(${s.organizationId}::uuid,${s.guildId},${headId}::uuid,${id}::uuid,${revision},${json(data.definition)},${actor.key})`.execute(
-        tx,
-      );
+      const { revisionId: headId, revision } = await this.appendRevision(tx, s, actor, id, data.definition);
       await sql`UPDATE playbooks SET head_id=${headId}::uuid,name=${data.name},state='DRAFT',approved_by=NULL,approval_required=${data.approvalRequired},version=${version},creator_hash=${actor.key},last_evaluated_at=NULL WHERE ${tenant(s)} AND id=${id}::uuid`.execute(
         tx,
       );
@@ -216,6 +251,7 @@ export class Playbooks {
       .strict()
       .parse(input);
     return this.db.transaction().execute(async (tx) => {
+      await acquireRuleScopeLocks(tx, ruleScopeLockSet(s));
       await operationsAccess(
         tx,
         s,

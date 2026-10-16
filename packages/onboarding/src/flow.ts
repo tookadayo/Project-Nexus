@@ -1,5 +1,5 @@
 import {z} from 'zod';
-import {assert} from '../../shared/src/index.js';
+import {assert} from '../../shared/src/index';
 import type {Settings} from '../../settings/src/index.js';
 const optionSchema=z.object({id:z.string().regex(/^[a-z\d_-]{1,50}$/),label:z.string().min(1).max(100),next:z.string().nullable(),roleId:z.string().regex(/^\d{17,20}$/).optional(),channelId:z.string().regex(/^\d{17,20}$/).optional()}).strict();
 export const flowSchema=z.object({start:z.string(),nodes:z.array(z.object({id:z.string().regex(/^[a-z\d_-]{1,50}$/),question:z.string().min(1).max(500),options:z.array(optionSchema).min(1).max(25),
@@ -12,7 +12,7 @@ export function validateFlow(input:unknown):Flow {
  const flow=flowSchema.parse(input);const nodes=new Map(flow.nodes.map(n=>[n.id,n]));
  assert(nodes.size===flow.nodes.length&&nodes.has(flow.start),'INVALID_FLOW_NODES');
  const visited=new Set<string>();const visit=(id:string,path:Set<string>)=>{
-  assert(!path.has(id),'FLOW_CYCLE');const node=nodes.get(id);assert(node,'FLOW_DANGLING_EDGE');
+ assert(!path.has(id),'FLOW_CYCLE');if(visited.has(id))return;const node=nodes.get(id);assert(node,'FLOW_DANGLING_EDGE');
   assert(new Set(node.options.map(o=>o.id)).size===node.options.length,'DUPLICATE_OPTIONS');
   if(node.type==='condition')assert(node.condition&&node.options.length===2,'CONDITION_REQUIRES_TWO_BRANCHES');
   if(node.type==='multi_choice'||node.type==='role_select'||node.type==='channel_select')assert(new Set(node.options.map(o=>o.next)).size===1,'MULTI_SELECTION_REQUIRES_SHARED_NEXT');

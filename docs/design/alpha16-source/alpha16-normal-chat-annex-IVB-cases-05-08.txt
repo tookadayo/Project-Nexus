@@ -1,0 +1,160 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 04:28 UTC
+Reasoning: 極高. Design only. Contains cohort/metric/branch issues identified for the integration review.
+
+付録IV-B：実事例05–08の分岐
+
+適用版：IV-B v1.0
+共通fixture基準： evaluationAsOf=2026-10-15T12:00:00Z。以下の数値はすべて合成入力であり、実測値・実行済みテスト結果ではない。既存13個票/configに存在するwindow・thresholdを参照し、新規の数値thresholdは追加しない。全branchの初期actionは REVIEW_ONLY。source adapter・typed editorは現コード未照合であり、未確認の場合は INELIGIBLE または REVIEW_ONLY とする。
+
+IV-A訂正の反映
+Case	訂正
+CASE01	destinationCount は使用しない。権限状態を ALLOWED / WRITE_DENIED / NO_ACCESS、既存メンバーへの可視性を VISIBLE_TO_EXISTING に統一。mandatoryQuestionMaxは導入せず、必要時は管理者の明示的なfriction確認を使う。
+CASE02	BOT_ONLY をgeneral human-gapより先に評価。general gapは botReplyCount=0 を使用。紹介がoptionalであることだけでは抑止せず、communityのquiet-purposeと本人のno-contact選択を別扱いにする。
+CASE03	first-match順を SOLVED → NEEDS_DETAILS → OUTSIDE_COVERAGE → SPECIALIST/GENERAL に固定。正常な問い合わせ結果UNKNOWNとsource欠落を別状態として扱う。
+CASE04	EXPLICIT_UNCLEAR → KNOWN_MISSING_DETAIL → GUIDE_GAP → OBSERVED_OUTCOME_UNKNOWN の順。正常観測されたUNKNOWNは確認候補、source欠落はINELIGIBLE。schema外field/enumは使用しない。
+CASE05：急成長と参加希薄化
+
+caseId/version: CASE05 / v1.0
+Source: MCAT Community case study（Discord Community / 運営事例）
+https://discord.com/community/case-study-mcat-community
+
+13基礎Rule mapping: ONB-001 → RET-001。COMM-001は後段集約として利用可能だが、その出力を本caseの入力にはしない。
+
+入力定義：
+joinCohortCount: integer>=0、currentRetentionRate: decimal、priorRetentionRate: decimal、existingRetentionRate: decimal、communityPurpose: enum、hostCapacity: enum{SUFFICIENT,INSUFFICIENT,UNKNOWN}、optInInterest: enum{SUFFICIENT,INSUFFICIENT,UNKNOWN}。取得不能時は当該branchのみUNKNOWN。
+
+順序付きbranch
+ID	predicate	action / target / owner / review	UNKNOWN時
+B05-1	currentRetentionRate < priorRetentionRate かつ existingRetentionRate >= priorRetentionRate	REVIEW_ONLY / ONBOARDING_ACCESS_REVIEW / guild / community-operator。新規層だけの低下としてaccess・導線を確認。	必要値UNKNOWNならINELIGIBLE、原因断定なし。
+B05-2	currentRetentionRate < priorRetentionRate かつ existingRetentionRate < priorRetentionRate	REVIEW_ONLY / COMMUNITY_ACTIVITY_REVIEW / guild / community-operator。新旧双方の参加傾向として目的・既存活動を確認。	INELIGIBLE。
+B05-3	optInInterest=SUFFICIENT AND hostCapacity=SUFFICIENT AND communityPurpose≠UNKNOWN	REVIEW_ONLY / SMALL_PILOT_REVIEW / guild / community-operator。目的に適合する小規模pilot候補を1件だけ提示。	INELIGIBLE。
+B05-4	hostCapacity=INSUFFICIENT	REVIEW_ONLY / ACTIVITY_LOAD_REVIEW / guild / community-operator。新規施策追加ではなく既存活動の整理候補を提示。	INELIGIBLE。
+
+見直し条件： 次の同一window評価で対象cohortの状態を再観測。改善効果・因果関係は判定しない。既存13個票のcooldownを使用。
+
+禁止策： 約30%という事例記述をbenchmark化しない。個人の離脱理由・意欲・心理を推測しない。追加個人IDを長期保存しない。一斉revival施策を自動提案・実行しない。
+
+最小合成fixture
+Fixture	合成入力→branch/action
+F05-01	2026-10-15T12:00:00Z / current=0.24, prior=0.31, existing=0.32 → B05-1 / ONBOARDING_ACCESS_REVIEW
+F05-02	2026-10-15T12:00:00Z / current=0.24, prior=0.31, existing=0.25 → B05-2 / COMMUNITY_ACTIVITY_REVIEW
+F05-03	2026-10-15T12:00:00Z / optInInterest=SUFFICIENT, hostCapacity=SUFFICIENT, purpose=STUDY → B05-3 / SMALL_PILOT_REVIEW
+F05-04	2026-10-15T12:00:00Z / hostCapacity=INSUFFICIENT → B05-4 / ACTIVITY_LOAD_REVIEW
+
+自然文例
+
+「新規cohortの継続率だけが前期間を下回っているため、まず参加後のアクセスと最初の導線を確認する候補です。活動追加より先に、既存の入口で詰まっていないかを見直します。」
+
+「新規・既存の双方で参加傾向が低下しているため、新しい施策を増やす前に、現在の目的と定期活動の組み合わせが維持できているかを確認するのが適切です。」
+
+CASE06：イベント成功が運営負荷を超える
+
+caseId/version: CASE06 / v1.0
+Source: 100 gecs case study（Discord Community / 運営事例）
+https://discord.com/community/case-study-100-gecs
+
+13基礎Rule mapping: EVENT-001 → PERM-001 / AUTO-002。これらのRule出力そのものを入力にはしない。
+
+入力定義：
+eventScheduled: boolean、registeredCount: integer>=0、queueAge: duration、unassignedCount: integer>=0、coverageCapacity: enum{SUFFICIENT,INSUFFICIENT,UNKNOWN}、issueCategory: enum{NONE,REPEATED_SPAM,CONTEXT_DEPENDENT,UNKNOWN}。staff確認済みの構造化categoryのみ使用。
+
+ID	predicate	action / target / owner / review	UNKNOWN時
+B06-1	eventScheduled=true AND coverageCapacity=INSUFFICIENT	REVIEW_ONLY / EVENT_LOAD_REVIEW / guild+event / event-operator。受付規模・運営体制の調整を確認。	INELIGIBLE。
+B06-2	issueCategory=REPEATED_SPAM	REVIEW_ONLY / LIMITED_RULE_REVIEW / guild/channel / moderator。限定scopeの既存Rule適合性だけ確認。	category不明なら次枝へ進めずINELIGIBLE。
+B06-3	issueCategory=CONTEXT_DEPENDENT	REVIEW_ONLY / HUMAN_TRIAGE_REVIEW / guild/channel / moderator。自動rule化せず人によるtriageを要求。	INELIGIBLE。
+B06-4	issueCategory=NONE AND coverageCapacity=SUFFICIENT	REVIEW_ONLY / NO_EXPANSION_RECOMMENDATION / guild / community-operator。問題が確認されていないため拡大施策を追加しない。	INELIGIBLE。
+
+見直し条件： event状態・queue状態・coverageを次回観測時に再評価。送信済み処理の取消・強制resumeは本case actionに含めない。
+
+禁止策： 自動処罰、活動量だけによる人選、個人のモデレーター適性推定、イベント規模から普遍的な人数比率を作ること。
+
+最小合成fixture
+Fixture	合成入力→branch/action
+F06-01	2026-10-15T12:00:00Z / eventScheduled=true, coverageCapacity=INSUFFICIENT → B06-1 / EVENT_LOAD_REVIEW
+F06-02	2026-10-15T12:00:00Z / issueCategory=REPEATED_SPAM → B06-2 / LIMITED_RULE_REVIEW
+F06-03	2026-10-15T12:00:00Z / issueCategory=CONTEXT_DEPENDENT → B06-3 / HUMAN_TRIAGE_REVIEW
+F06-04	2026-10-15T12:00:00Z / issueCategory=NONE, coverageCapacity=SUFFICIENT → B06-4 / NO_EXPANSION_RECOMMENDATION
+
+自然文例
+
+「イベント予定がある一方で確認済みの運営coverageが不足しているため、施策を増やすより受付規模と担当体制を先に確認する候補です。」
+
+「反復するspamという構造化された課題が確認されていますが、対象を限定した既存Ruleの適合性を人が確認する段階に留めます。」
+
+CASE07：イベント形式が合わない
+
+caseId/version: CASE07 / v1.0
+Source: Delta Force developer case study（Discord Developer Case Studies / 運営事例）
+https://discord.com/developer-case-studies/delta-force
+
+13基礎Rule mapping: EVENT-001 → EXP-001。EXP-001の生成結果をCASE07の入力には戻さない。
+
+入力定義：
+eventType: enum、submissionCount: integer>=0、comparableConditionConfirmed: boolean、explicitPollPreference: enum{PREFER,NO_PREFERENCE,UNKNOWN}、rsvpCount/attendanceCount: integer>=0、timingAccessIssue: enum{CONFIRMED,NONE,UNKNOWN}、hostEffort: enum{SUFFICIENT,INSUFFICIENT,UNKNOWN}。
+
+ID	predicate	action / target / owner / review	UNKNOWN時
+B07-1	timingAccessIssue=CONFIRMED	REVIEW_ONLY / EVENT_LOGISTICS_REVIEW / event / event-operator。形式変更より先に時間・アクセス条件を確認。	INELIGIBLE。
+B07-2	comparableConditionConfirmed=true AND submissionCountが既存EVENT-001条件を下回る AND explicitPollPreference=PREFER AND hostEffort=SUFFICIENT	REVIEW_ONLY / LOW_BURDEN_FORMAT_PILOT / event / community-operator。小規模pilot候補。	比較条件・poll・capacityのいずれか不明ならINELIGIBLE。
+B07-3	explicitPollPreference=PREFER AND submissionCount>0 AND hostEffort=SUFFICIENT かつB07-1/B07-2不成立	REVIEW_ONLY / FORMAT_MAINTAIN_REVIEW / event / community-operator。現形式を維持する候補。	INELIGIBLE。
+B07-4	comparableConditionConfirmed=false	REVIEW_ONLY / EVENT_COMPARISON_REVIEW / event / community-operator。比較条件を確認するだけで形式変更を推奨しない。	falseが確認できなければINELIGIBLE。
+
+見直し条件： 同等条件のwindowを確定後、EVENT-001の既存configで再評価。事例の「100超応募」は普遍benchmarkにしない。
+
+禁止策： 30–50% retention等、定義不明の値を利用しない。本文から趣味・文化・意欲を推測しない。pilotを自動開始しない。
+
+最小合成fixture
+Fixture	合成入力→branch/action
+F07-01	2026-10-15T12:00:00Z / timingAccessIssue=CONFIRMED → B07-1 / EVENT_LOGISTICS_REVIEW
+F07-02	2026-10-15T12:00:00Z / comparable=true, submissionCount=4, EVENT-001条件成立, poll=PREFER, hostEffort=SUFFICIENT → B07-2 / LOW_BURDEN_FORMAT_PILOT
+F07-03	2026-10-15T12:00:00Z / poll=PREFER, submissionCount=3, hostEffort=SUFFICIENT → B07-3 / FORMAT_MAINTAIN_REVIEW
+F07-04	2026-10-15T12:00:00Z / comparableConditionConfirmed=false → B07-4 / EVENT_COMPARISON_REVIEW
+
+自然文例
+
+「時間・アクセス条件に確認済みの問題があるため、イベント形式を変える前に参加しにくさが発生する条件を確認するのが先です。」
+
+「同等条件で参加数が低く、管理者が別形式への希望を明示しているため、全面変更ではなく小規模な形式変更を試す候補として扱います。」
+
+CASE08：リリース間隔が長い
+
+caseId/version: CASE08 / v1.0
+Source: Sabotage retrospective（Discord Developer Case Studies / 運営事例）
+https://discord.com/developer-case-studies/sabotage
+
+13基礎Rule mapping: ENG-001 → RET-001 / EVENT-001。EXP/PLAY/COMMの出力をCASE08の入力には使用しない。
+
+入力定義：
+contentGap: duration、optInInterest: enum{SUFFICIENT,INSUFFICIENT,UNKNOWN}、hostCapacity: enum{SUFFICIENT,INSUFFICIENT,UNKNOWN}、integrationErrorCount: integer>=0、communityPurpose: enum。contentGapは認可済みaggregateまたは公表済み構造化情報のみ。
+
+ID	predicate	action / target / owner / review	UNKNOWN時
+B08-1	integrationErrorCount > 0	REVIEW_ONLY / INTEGRATION_STABILITY_REVIEW / affected flow/channel / operator。新規活動より既存活動の安定化を優先。	error観測不能ならINELIGIBLE。
+B08-2	integrationErrorCount=0 AND optInInterest=SUFFICIENT AND hostCapacity=SUFFICIENT AND communityPurpose≠UNKNOWN	REVIEW_ONLY / SMALL_COLLABORATIVE_CHALLENGE / guild/event / community-operator。小規模な共同活動候補。	必須入力UNKNOWNならINELIGIBLE。
+B08-3	integrationErrorCount=0 AND optInInterest=SUFFICIENT AND hostCapacity=INSUFFICIENT	REVIEW_ONLY / ASYNC_LOW_LOAD_ACTIVITY / guild/channel / community-operator。同期負荷の低い活動候補。	capacity不明ならINELIGIBLE。
+B08-4	integrationErrorCount=0 AND optInInterest=INSUFFICIENT	REVIEW_ONLY / QUIET_PERIOD_ACCEPTANCE / guild / community-operator。活動間隔だけを理由に追加施策を要求しない。	UNKNOWNは「需要なし」に変換せずINELIGIBLE。
+
+見直し条件： 次回のauthorized aggregate観測時に、error・interest・capacityを再評価。長期windowが必要で認可済みaggregateが存在しなければblocked。
+
+禁止策： 3-strike BAN、scripted DM面談、活動通貨、個人活動量による選別、release gapだけから「参加意欲低下」を推測しない。Run保持を延長して長期比較を作らない。
+
+最小合成fixture
+Fixture	合成入力→branch/action
+F08-01	2026-10-15T12:00:00Z / integrationErrorCount=2 → B08-1 / INTEGRATION_STABILITY_REVIEW
+F08-02	2026-10-15T12:00:00Z / errors=0, optInInterest=SUFFICIENT, hostCapacity=SUFFICIENT, purpose=COMMUNITY → B08-2 / SMALL_COLLABORATIVE_CHALLENGE
+F08-03	2026-10-15T12:00:00Z / errors=0, optInInterest=SUFFICIENT, hostCapacity=INSUFFICIENT → B08-3 / ASYNC_LOW_LOAD_ACTIVITY
+F08-04	2026-10-15T12:00:00Z / errors=0, optInInterest=INSUFFICIENT → B08-4 / QUIET_PERIOD_ACCEPTANCE
+
+自然文例
+
+「既存活動でintegration errorが確認されているため、活動を増やす前に現在の導線を安定させる候補です。」
+
+「追加活動への明示的な関心があり、運営capacityも確認できているため、長期間の大型施策ではなく小さな共同活動から検討できます。」
+
+CASE05–08のadapter / UI / action / fixture対応
+Case	adapter	UI	action	fixture
+CASE05	ONB/RET authorized aggregate adapter（現code未照合）	Community health / Participation review	ONBOARDING_ACCESS_REVIEW / COMMUNITY_ACTIVITY_REVIEW / SMALL_PILOT_REVIEW / ACTIVITY_LOAD_REVIEW	F05-01〜F05-04
+CASE06	EVENT / moderation-issue aggregate adapter（現code未照合）	Event / Operations review	EVENT_LOAD_REVIEW / LIMITED_RULE_REVIEW / HUMAN_TRIAGE_REVIEW / NO_EXPANSION_RECOMMENDATION	F06-01〜F06-04
+CASE07	EVENT structured adapter（現code未照合）	Event format review	EVENT_LOGISTICS_REVIEW / LOW_BURDEN_FORMAT_PILOT / FORMAT_MAINTAIN_REVIEW / EVENT_COMPARISON_REVIEW	F07-01〜F07-04
+CASE08	ENG/RET/EVENT aggregate adapter（現code未照合）	Activity / Operations review	INTEGRATION_STABILITY_REVIEW / SMALL_COLLABORATIVE_CHALLENGE / ASYNC_LOW_LOAD_ACTIVITY / QUIET_PERIOD_ACCEPTANCE	F08-01〜F08-04
+
+全actionは現段階で REVIEW_ONLY。typed editorが実環境で確認されるまで CREATE_DRAFT へ昇格しない。事例の記述は「その状況で取り得る運営判断の分岐根拠」であり、施策の成功・因果・普遍的benchmarkを意味しない。

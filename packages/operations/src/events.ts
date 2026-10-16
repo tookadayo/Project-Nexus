@@ -4,6 +4,9 @@ import { assert, type Scope } from "../../shared/src/index";
 import type { Actor } from "../../settings/src/index";
 import { operationsAccess, operationsAudit, operationsLock } from "./policy";
 import { timezoneSchema, wallTime, wallUtc, wallTimeInstant } from "./schedule";
+import { acquireRuleScopeLocks,ruleScopeLockSet } from "../../rules/src/locks";
+import { minimalOperationAudit } from "./alpha16-audit";
+import { assertMaintenanceAuthorization, type MaintenanceAuthorizationProof } from "./maintenance-authorization";
 export const eventTemplateInput = z
   .object({
     id: z.uuid().optional(),
@@ -30,7 +33,7 @@ export type EventTemplate = {
   revision: number;
 };
 export class EventOperations {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: Database, private readonly maintenanceProof?:MaintenanceAuthorizationProof) {}
   async save(s: Scope, actor: Actor, input: unknown) {
     const data = eventTemplateInput.parse(input),
       [date, time] = data.localStart.split("T"),
@@ -97,6 +100,33 @@ export class EventOperations {
       ).rows[0];
       assert(row, "EVENT_TEMPLATE_NOT_FOUND", 404);
       return calendarIcs(row);
+    });
+  }
+  async remove(s:Scope,actor:Actor,input:unknown){
+    const data=z.object({id:z.uuid(),revision:z.number().int().positive()}).strict().parse(input);
+    return this.db.transaction().execute(async tx=>{
+      await acquireRuleScopeLocks(tx,ruleScopeLockSet(s));
+      await operationsAccess(tx,s,actor,"CONFIGURE","event_operations");await operationsLock(tx,s);
+      const current=(await sql<{revision:number}>`SELECT revision FROM event_operation_templates WHERE ${tenant(s)} AND id=${data.id}::uuid FOR UPDATE`.execute(tx)).rows[0];
+      await operationsAccess(tx,s,actor,"CONFIGURE","event_operations");
+      assertMaintenanceAuthorization(this.maintenanceProof,s,actor);
+      assert(current,"EVENT_TEMPLATE_NOT_FOUND",404);assert(current.revision===data.revision,"REVISION_CONFLICT",412);
+      await sql`DELETE FROM event_operation_templates WHERE ${tenant(s)} AND id=${data.id}::uuid AND revision=${data.revision}`.execute(tx);
+      await minimalOperationAudit(tx,s,actor.key,"EVENT_TEMPLATE_DELETED",data.id,data.revision);
+      return {id:data.id,deleted:true,externalEffect:"NONE"};
+    });
+  }
+  async setEnabled(s:Scope,actor:Actor,input:unknown){
+    const data=z.object({id:z.uuid(),revision:z.number().int().positive(),enabled:z.boolean()}).strict().parse(input);
+    return this.db.transaction().execute(async tx=>{
+      await acquireRuleScopeLocks(tx,ruleScopeLockSet(s));await operationsAccess(tx,s,actor,"CONFIGURE","event_operations");await operationsLock(tx,s);
+      const row=(await sql<{revision:number;state:string}>`SELECT revision,state FROM event_operation_templates WHERE ${tenant(s)} AND id=${data.id}::uuid FOR UPDATE`.execute(tx)).rows[0];
+      await operationsAccess(tx,s,actor,"CONFIGURE","event_operations");
+      assertMaintenanceAuthorization(this.maintenanceProof,s,actor);assert(row,"EVENT_TEMPLATE_NOT_FOUND",404);assert(row.revision===data.revision,"REVISION_CONFLICT",412);
+      const state=data.enabled?'ENABLED':'DISABLED';
+      await sql`UPDATE event_operation_templates SET state=${state},revision=revision+1,calendar_sequence=calendar_sequence+1 WHERE ${tenant(s)} AND id=${data.id}::uuid`.execute(tx);
+      await minimalOperationAudit(tx,s,actor.key,data.enabled?"EVENT_TEMPLATE_ENABLED":"EVENT_TEMPLATE_DISABLED",data.id,data.revision+1);
+      return {id:data.id,revision:data.revision+1,state,externalEffect:'NONE'};
     });
   }
 }

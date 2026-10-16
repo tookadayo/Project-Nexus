@@ -6,6 +6,7 @@ import {automationLock,releaseAutomationQuota} from './quota';
 import {boundedTerminalCheckpoint} from './iteration-results';
 import {DEFAULT_AUTOMATION_LIMITS} from './types';
 import {assertLoopDeadlineCommit,isAutomationBudgetStop} from './bounded-loop';
+import {recordAutomationExecutionHeartbeat} from './execution-observation';
 
 export const RETENTION_MILLISECONDS=7*86400000;
 export type RunStatus='QUEUED'|'RUNNING'|'WAITING'|'WAITING_APPROVAL'|'COMPLETED'|'FAILED'|'CANCELLED'|'EXPIRED'|'UNKNOWN';
@@ -85,7 +86,7 @@ export class AutomationStore {
       const key='automation-run:'+s.organizationId+':'+s.guildId+':'+id;
       const locked=(await sql<{locked:boolean}>`SELECT pg_try_advisory_lock(hashtextextended(${key},0)) AS locked`.execute(connection)).rows[0]!.locked;
       if(!locked)return null;
-      try{return await work(connection);}
+      try{await recordAutomationExecutionHeartbeat(connection,s,id,this.clock?.()??new Date());return await work(connection);}
       finally{await sql`SELECT pg_advisory_unlock(hashtextextended(${key},0))`.execute(connection);}
     });
   }
@@ -123,6 +124,7 @@ export class AutomationStore {
         await sql`UPDATE automation_event_waits SET consumed_at=COALESCE(consumed_at,${now}) WHERE ${tenant(s)} AND run_id=${id}::uuid AND identity=${identity} AND state='MATCHED'`.execute(tx);
       }
       await sql`UPDATE automation_runs SET resume=${json(checkpoint)},status=${result},wake_at=${terminal(result)?null:wakeAt},steps=${state.steps},evaluations=${state.evaluations},external_actions=${state.externalActions},reason=${decisionReason},ended_at=${terminal(result)?decisionAt:null},updated_at=${decisionAt} WHERE ${tenant(s)} AND id=${id}::uuid`.execute(tx);
+      if(!terminal(result))await recordAutomationExecutionHeartbeat(tx,s,id,decisionAt);
       if(strict)committedVersion=version+1;
     });
     delete state.pendingAwaitAcknowledgements;

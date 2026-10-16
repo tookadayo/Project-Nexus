@@ -37,7 +37,7 @@ describe("alpha15 setup BFF keeps the public session boundary", () => {
     const body = JSON.stringify({requestId: organizationId, patch: {timezone: "UTC"}});
     const response = await POST(request("POST", {Origin: "http://127.0.0.1:4190", "Sec-Fetch-Site": "same-origin", Authorization: "Bearer browser-supplied-ignored"}, body), {params: Promise.resolve({operation: ["draft"]})});
     expect(response.status).toBe(200);
-    expect(mocks.proof.mock.calls[0]?.[0]).toEqual({scope: {organizationId, guildId: guild}, userId: identity.userId, sessionReference: identity.sessionReference, method: "POST", path: `/v3/organizations/${organizationId}/guilds/${guild}/web-setup/draft`, origin: "http://127.0.0.1:4190"});
+    expect(mocks.proof.mock.calls[0]?.[0]).toEqual({scope: {organizationId, guildId: guild}, userId: identity.userId, sessionReference: identity.sessionReference, method: "POST", path: `/v3/organizations/${organizationId}/guilds/${guild}/web-setup/draft`, body, origin: "http://127.0.0.1:4190"});
     const options = fetcher.mock.calls[0]?.[1] as unknown as RequestInit;
     expect(options.body).toBe(body);
     expect(options.headers).toEqual({Authorization: "Bearer synthetic-service-hop", "x-nexus-user-proof": "synthetic-signed-user-proof", "Content-Type": "application/json", Origin: "http://127.0.0.1:4190"});

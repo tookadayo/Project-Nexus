@@ -7,7 +7,7 @@ import {
   type Tx,
 } from "../../db/src/index";
 import { assert, type Scope } from "../../shared/src/index";
-import type { Actor } from "../../settings/src/index";
+import { SettingsService, type Actor } from "../../settings/src/index";
 import type { IdentityVault } from "../../identity/src/index";
 import type { ServerAuthorization } from "../../security/src/server-authorization";
 import type { DiscordPort } from "../../discord/src/rest";
@@ -20,6 +20,56 @@ import { latestCapability } from "../../lifecycle/src/discovery";
 import { ExploreService } from "../../analytics/src/explore";
 import { bindRevokedMembers } from "./membership-tombstones";
 import type { ChartSpec } from "../../analytics/src/chart-spec";
+import { acquireRuleScopeLocks, ruleScopeLockSet } from "../../rules/src/locks";
+import { minimalOperationAudit } from "./alpha16-audit";
+import { assertMaintenanceAuthorization, type MaintenanceAuthorizationProof } from "./maintenance-authorization";
+export const teamUpdateInput = z.object({ id: z.uuid(), revision: z.number().int().positive(),
+  name: z.string().trim().min(1).max(80), memberIds: z.array(z.uuid()).min(1).max(50) }).strict();
+export const teamDeleteInput = z.object({ id: z.uuid(), revision: z.number().int().positive() }).strict();
+export type OrganizationMaintenanceProfile = { scopeVerified: boolean; allowClose: boolean; allowUnlink: boolean };
+export const organizationRenameInput = z.object({ revision: z.number().int().positive(), name: z.string().trim().min(1).max(80) }).strict();
+export const organizationCloseInput = z.object({ revision: z.number().int().positive() }).strict();
+export const organizationUnlinkInput = z.object({ guildId: z.string().regex(/^\d{17,20}$/), revision: z.number().int().positive() }).strict();
+export function organizationMaintenanceReadiness(profile?: OrganizationMaintenanceProfile) {
+  const closeBlockers = !profile?.scopeVerified ? ["ORGANIZATION_MAINTENANCE_SCOPE_UNVERIFIED"] : [];
+  const unlinkBlockers = [...closeBlockers];
+  if (!profile?.scopeVerified) unlinkBlockers.push("ORGANIZATION_DETACH_WRITER_COVERAGE_UNVERIFIED");
+  if (!profile?.allowClose) closeBlockers.push("ORGANIZATION_CLOSE_DISABLED");
+  if (!profile?.allowUnlink) unlinkBlockers.push("ORGANIZATION_UNLINK_DISABLED");
+  return { rename: { enabled: true, blockers: [] as string[] }, close: { enabled: closeBlockers.length === 0, blockers: closeBlockers },
+    unlink: { enabled: unlinkBlockers.length === 0, blockers: unlinkBlockers },
+    relink: { enabled: unlinkBlockers.length === 0, blockers: [...unlinkBlockers] } };
+}
+async function organizationScopeHasSavedState(tx: Tx, s: Scope) {
+  // Closing membership is not a data-erasure operation. Refuse to make retained
+  // definitions, permissions, approvals or uncertain effects unreachable. This
+  // conservative inventory is also protected by the explicit coverage gate.
+  return (await sql`SELECT 1 WHERE
+    EXISTS(SELECT 1 FROM automation_flows WHERE ${tenant(s)}) OR EXISTS(SELECT 1 FROM automation_runs WHERE ${tenant(s)})
+    OR EXISTS(SELECT 1 FROM analysis_runs WHERE ${tenant(s)}) OR EXISTS(SELECT 1 FROM analysis_grants WHERE ${tenant(s)})
+    OR EXISTS(SELECT 1 FROM guild_config_revisions WHERE ${tenant(s)}) OR EXISTS(SELECT 1 FROM flow_versions WHERE ${tenant(s)})
+    OR EXISTS(SELECT 1 FROM event_operation_templates WHERE ${tenant(s)})
+    OR EXISTS(SELECT 1 FROM rule_config_versions WHERE ${tenant(s)}) OR EXISTS(SELECT 1 FROM rule_runtime_intents WHERE ${tenant(s)})
+    OR EXISTS(SELECT 1 FROM rule_target_safety WHERE ${tenant(s)})
+    OR EXISTS(SELECT 1 FROM rule_suggestions WHERE ${tenant(s)}) OR EXISTS(SELECT 1 FROM rule_case_contexts WHERE ${tenant(s)})
+    OR EXISTS(SELECT 1 FROM automation_template_definitions WHERE ${tenant(s)}) OR EXISTS(SELECT 1 FROM personal_preferences WHERE ${tenant(s)})
+    OR EXISTS(SELECT 1 FROM attention_items WHERE ${tenant(s)}) OR EXISTS(SELECT 1 FROM operations_interventions WHERE ${tenant(s)})
+    OR EXISTS(SELECT 1 FROM playbooks WHERE ${tenant(s)}) OR EXISTS(SELECT 1 FROM report_templates WHERE ${tenant(s)})
+    OR EXISTS(SELECT 1 FROM report_schedules WHERE ${tenant(s)}) OR EXISTS(SELECT 1 FROM report_runs WHERE ${tenant(s)})
+    OR EXISTS(SELECT 1 FROM integration_destinations WHERE ${tenant(s)}) OR EXISTS(SELECT 1 FROM api_credentials WHERE ${tenant(s)})
+    OR EXISTS(SELECT 1 FROM webhook_endpoints WHERE ${tenant(s)}) OR EXISTS(SELECT 1 FROM webhook_deliveries WHERE ${tenant(s)})
+    OR EXISTS(SELECT 1 FROM operations_intake_panels WHERE ${tenant(s)}) OR EXISTS(SELECT 1 FROM operations_requests WHERE ${tenant(s)})
+    OR EXISTS(SELECT 1 FROM saved_metric_views WHERE ${tenant(s)}) OR EXISTS(SELECT 1 FROM operational_segments WHERE ${tenant(s)})
+    OR EXISTS(SELECT 1 FROM action_outbox WHERE ${tenant(s)}) OR EXISTS(SELECT 1 FROM alpha16_privacy_jobs WHERE ${tenant(s)})`.execute(tx)).rows.length > 0;
+}
+async function teamHasReferences(tx: Tx, rootId: string, teamId: string) {
+  return (await sql`SELECT 1 FROM operations_team_bindings b WHERE b.root_organization_id=${rootId}::uuid AND b.team_id=${teamId}::uuid AND (
+    EXISTS(SELECT 1 FROM attention_items a WHERE a.organization_id=b.organization_id AND a.guild_id=b.guild_id AND a.assigned_team_id=b.team_id)
+    OR EXISTS(SELECT 1 FROM operations_interventions i WHERE i.organization_id=b.organization_id AND i.guild_id=b.guild_id AND i.assigned_team_id=b.team_id)
+    OR EXISTS(SELECT 1 FROM integration_destinations d WHERE d.organization_id=b.organization_id AND d.guild_id=b.guild_id AND d.team_id=b.team_id)
+    OR EXISTS(SELECT 1 FROM playbooks p WHERE p.organization_id=b.organization_id AND p.guild_id=b.guild_id AND p.review_team_id=b.team_id)
+  ) LIMIT 1`.execute(tx)).rows.length > 0;
+}
 type OrganizationSummary = {
   guildId: string;
   state: string;
@@ -45,7 +95,8 @@ export async function organizationBinding(tx: Tx, s: Scope) {
         id: string;
         name: string;
         home_guild_id: string;
-      }>`SELECT o.id,o.name,o.home_guild_id FROM operations_org_guilds g JOIN operations_organizations o ON o.id=g.root_organization_id WHERE g.organization_id=${s.organizationId}::uuid AND g.guild_id=${s.guildId} AND g.state='ACTIVE'`.execute(
+        revision: number;
+      }>`SELECT o.id,o.name,o.home_guild_id,o.revision FROM operations_org_guilds g JOIN operations_organizations o ON o.id=g.root_organization_id WHERE g.organization_id=${s.organizationId}::uuid AND g.guild_id=${s.guildId} AND g.state='ACTIVE'`.execute(
         tx,
       )
     ).rows[0] ?? null
@@ -57,7 +108,152 @@ export class OperationsOrganization {
     private readonly vault: IdentityVault,
     private readonly discord: DiscordPort,
     private readonly authority: ServerAuthorization,
+    private readonly options: { authorization?: MaintenanceAuthorizationProof; maintenance?: OrganizationMaintenanceProfile } = {},
   ) {}
+  maintenanceReadiness() { return organizationMaintenanceReadiness(this.options.maintenance); }
+  async renameOrganization(s: Scope, actor: Actor, input: unknown) {
+    const data = organizationRenameInput.parse(input);
+    return this.db.transaction().execute(async tx => {
+      await acquireRuleScopeLocks(tx, ruleScopeLockSet(s));
+      await operationsAccess(tx, s, actor, "GOVERN", "multi_guild");
+      const group = await organizationBinding(tx, s); assert(group, "ORGANIZATION_REQUIRED", 409);
+      await organizationLock(tx, group.id);
+      const row = (await sql<{ revision: number }>`SELECT revision FROM operations_organizations WHERE id=${group.id}::uuid FOR UPDATE`.execute(tx)).rows[0];
+      assert(row && row.revision === data.revision, "REVISION_CONFLICT", 409);
+      assertMaintenanceAuthorization(this.options.authorization, s, actor);
+      await operationsAccess(tx, s, actor, "GOVERN", "multi_guild");
+      assert(["OWNER", "ADMIN"].includes((await nexusRole(tx, s, actor.key)) ?? ""), "NEXUS_ROLE_REQUIRED", 403);
+      assertMaintenanceAuthorization(this.options.authorization, s, actor);
+      await sql`UPDATE operations_organizations SET name=${data.name},revision=revision+1 WHERE id=${group.id}::uuid AND revision=${data.revision}`.execute(tx);
+      await minimalOperationAudit(tx, s, actor.key, "ORGANIZATION_RENAMED", group.id, data.revision + 1);
+      return { id: group.id, revision: data.revision + 1 };
+    });
+  }
+  async closeOrganization(s: Scope, actor: Actor, input: unknown) {
+    const data = organizationCloseInput.parse(input);
+    assert(this.maintenanceReadiness().close.enabled, "ORGANIZATION_CLOSE_SCOPE_UNVERIFIED", 503);
+    return this.db.transaction().execute(async tx => {
+      await acquireRuleScopeLocks(tx, ruleScopeLockSet(s));
+      await operationsAccess(tx, s, actor, "GOVERN", "multi_guild");
+      const group = await organizationBinding(tx, s); assert(group, "ORGANIZATION_REQUIRED", 409);
+      assert(group.id === s.organizationId && group.home_guild_id === s.guildId, "ORGANIZATION_HOME_REQUIRED", 409);
+      await organizationLock(tx, group.id);
+      const row = (await sql<{ revision: number }>`SELECT revision FROM operations_organizations WHERE id=${group.id}::uuid FOR UPDATE`.execute(tx)).rows[0];
+      assert(row && row.revision === data.revision, "REVISION_CONFLICT", 409);
+      assert(!(await sql`SELECT 1 FROM operations_org_guilds WHERE root_organization_id=${group.id}::uuid AND (organization_id<>${s.organizationId}::uuid OR guild_id<>${s.guildId}) LIMIT 1`.execute(tx)).rows.length, "ORGANIZATION_LINKS_REMAIN", 409);
+      const members = (await sql<{ id: string; state: string; role: string }>`SELECT id,state,role FROM operations_org_members WHERE organization_id=${group.id}::uuid FOR UPDATE`.execute(tx)).rows;
+      const own = (await sql<{ member_id: string }>`SELECT member_id FROM operations_role_bindings WHERE ${tenant(s)} AND actor_hash=${actor.key} AND root_organization_id=${group.id}::uuid`.execute(tx)).rows[0];
+      // Revoked bindings are authorization tombstones. No closure may erase
+      // those tombstones or make another member fall back to Discord admin.
+      assert(members.length === 1 && members[0]!.id === own?.member_id && members[0]!.state === "ACTIVE" && members[0]!.role === "OWNER", "ORGANIZATION_MEMBERS_REMAIN", 409);
+      assert(!(await sql`SELECT 1 FROM operations_teams WHERE organization_id=${group.id}::uuid LIMIT 1`.execute(tx)).rows.length, "ORGANIZATION_TEAMS_REMAIN", 409);
+      assert(!(await organizationScopeHasSavedState(tx, s)), "ORGANIZATION_SAVED_STATE_REMAINS", 409);
+      assertMaintenanceAuthorization(this.options.authorization, s, actor);
+      await operationsAccess(tx, s, actor, "GOVERN", "multi_guild");
+      assert((await nexusRole(tx, s, actor.key)) === "OWNER", "OWNER_REQUIRED", 403);
+      assertMaintenanceAuthorization(this.options.authorization, s, actor);
+      await sql`DELETE FROM operations_organizations WHERE id=${group.id}::uuid AND revision=${data.revision}`.execute(tx);
+      await minimalOperationAudit(tx, s, actor.key, "ORGANIZATION_CLOSED", group.id, data.revision + 1);
+      return { id: group.id, closed: true as const };
+    });
+  }
+  async unlinkGuild(s: Scope, actor: Actor, userId: string, input: unknown) {
+    const data = organizationUnlinkInput.parse(input);
+    assert(this.maintenanceReadiness().unlink.enabled, "ORGANIZATION_UNLINK_SCOPE_UNVERIFIED", 503);
+    assert(actor.key === this.vault.hash(s, userId), "ACTOR_MISMATCH", 403);
+    const target = scopeForGuild(data.guildId);
+    const targetSnapshot = await this.authority.snapshot(target, userId, actor.source, actor.requestId);
+    this.authority.require(targetSnapshot);
+    return this.db.transaction().execute(async tx => {
+      await acquireRuleScopeLocks(tx, [...ruleScopeLockSet(s), ...ruleScopeLockSet(target)]);
+      await operationsAccess(tx, s, actor, "GOVERN", "multi_guild");
+      await operationsAccess(tx, target, targetSnapshot.actor, "GOVERN");
+      const group = await organizationBinding(tx, s); assert(group, "ORGANIZATION_REQUIRED", 409);
+      assert(data.guildId !== group.home_guild_id, "ORGANIZATION_HOME_UNLINK_FORBIDDEN", 409);
+      await organizationLock(tx, group.id);
+      const link = (await sql<{ revision: number; state: string }>`SELECT revision,state FROM operations_org_guilds WHERE root_organization_id=${group.id}::uuid AND organization_id=${target.organizationId}::uuid AND guild_id=${target.guildId} FOR UPDATE`.execute(tx)).rows[0];
+      assert(link, "ORGANIZATION_GUILD_NOT_FOUND", 404); assert(link.revision === data.revision, "REVISION_CONFLICT", 409);
+      assert(link.state !== "DETACHED", "ORGANIZATION_ALREADY_DETACHED", 409);
+      assert(!(await organizationScopeHasSavedState(tx, target)), "ORGANIZATION_SAVED_STATE_REMAINS", 409);
+      assertMaintenanceAuthorization(this.options.authorization, s, actor);
+      this.authority.require(targetSnapshot);
+      await operationsAccess(tx, s, actor, "GOVERN", "multi_guild");
+      await operationsAccess(tx, target, targetSnapshot.actor, "GOVERN");
+      assert(["OWNER", "ADMIN"].includes((await nexusRole(tx, s, actor.key)) ?? ""), "NEXUS_ROLE_REQUIRED", 403);
+      assertMaintenanceAuthorization(this.options.authorization, s, actor);
+      this.authority.require(targetSnapshot);
+      // Keep membership and role bindings as the existing denial authority.
+      // Removing a foreign key root would revive Discord-admin fallback.
+      await sql`UPDATE operations_org_guilds SET state='DETACHED',revision=revision+1 WHERE root_organization_id=${group.id}::uuid AND organization_id=${target.organizationId}::uuid AND guild_id=${target.guildId} AND revision=${data.revision}`.execute(tx);
+      await minimalOperationAudit(tx, s, actor.key, "ORGANIZATION_GUILD_UNLINKED", target.guildId, data.revision + 1);
+      return { guildId: target.guildId, unlinked: true as const, state: "DETACHED" as const, revision: data.revision + 1, authorizationBindingsPreserved: true as const };
+    });
+  }
+  async relinkGuild(s: Scope, actor: Actor, userId: string, input: unknown) {
+    const data = organizationUnlinkInput.parse(input);
+    assert(this.maintenanceReadiness().relink.enabled, "ORGANIZATION_REATTACH_SCOPE_UNVERIFIED", 503);
+    assert(actor.key === this.vault.hash(s, userId), "ACTOR_MISMATCH", 403);
+    const group = await this.db.transaction().execute(async tx => {
+      await operationsAccess(tx, s, actor, "GOVERN", "multi_guild");
+      assertMaintenanceAuthorization(this.options.authorization, s, actor);
+      assert(["OWNER", "ADMIN"].includes((await nexusRole(tx, s, actor.key)) ?? ""), "NEXUS_ROLE_REQUIRED", 403);
+      const current = await organizationBinding(tx, s); assert(current, "ORGANIZATION_REQUIRED", 409); return current;
+    });
+    assert(data.guildId !== group.home_guild_id, "ORGANIZATION_HOME_UNLINK_FORBIDDEN", 409);
+    const target = scopeForGuild(data.guildId), home = { organizationId: group.id, guildId: group.home_guild_id };
+    // A detached delegate has no implicit target authority. Reattachment uses
+    // explicit current Discord administration plus the current source owner/
+    // admin, never the stopped binding as a substitute for target consent.
+    const snapshot = await this.authority.snapshot(target, userId, actor.source, actor.requestId);
+    this.authority.require(snapshot); assert(!snapshot.member.bot, "ADMIN_REQUIRED", 403);
+    const members = (await sql<{ id: string; revision: number; user_ciphertext: string }>`SELECT id,revision,user_ciphertext FROM operations_org_members WHERE organization_id=${group.id}::uuid AND state='ACTIVE' ORDER BY id`.execute(this.db)).rows;
+    const observed: { memberId: string; hash: string }[] = [], checkedAt: number[] = [];
+    for (const member of members) {
+      try {
+        const memberUserId = this.vault.open(home, member.user_ciphertext), current = await this.discord.member(target.guildId, memberUserId);
+        const at = Date.now(); checkedAt.push(at);
+        if (!current.bot) observed.push({ memberId: member.id, hash: this.vault.hash(target, memberUserId) });
+      } catch (error) {
+        if (!isDiscordFailure(error) || error.status !== 404) throw error;
+        checkedAt.push(Date.now());
+      }
+    }
+    return this.db.transaction().execute(async tx => {
+      await acquireRuleScopeLocks(tx, [...ruleScopeLockSet(s), ...ruleScopeLockSet(target)]);
+      await operationsAccess(tx, s, actor, "GOVERN", "multi_guild");
+      await privacyReadLock(tx, target); await betaAccess(tx, target, "work");
+      await organizationLock(tx, group.id);
+      assert((await organizationBinding(tx, s))?.id === group.id, "ORGANIZATION_REQUIRED", 409);
+      const link = (await sql<{ state: string; revision: number }>`SELECT state,revision FROM operations_org_guilds WHERE root_organization_id=${group.id}::uuid AND organization_id=${target.organizationId}::uuid AND guild_id=${target.guildId} FOR UPDATE`.execute(tx)).rows[0];
+      assert(link, "ORGANIZATION_GUILD_NOT_FOUND", 404); assert(link.revision === data.revision, "REVISION_CONFLICT", 409);
+      assert(link.state === "DETACHED", "ORGANIZATION_NOT_DETACHED", 409);
+      const currentMembers = (await sql<{ id: string; revision: number }>`SELECT id,revision FROM operations_org_members WHERE organization_id=${group.id}::uuid AND state='ACTIVE' ORDER BY id FOR SHARE`.execute(tx)).rows;
+      assert(JSON.stringify(currentMembers) === JSON.stringify(members.map(member => ({ id: member.id, revision: member.revision }))), "ORGANIZATION_MEMBERS_CHANGED", 409);
+      assert(!(await organizationScopeHasSavedState(tx, target)), "ORGANIZATION_SAVED_STATE_REMAINS", 409);
+      const entitlements = new EntitlementService(tx), entitled = await entitlements.effective(home);
+      assert(entitled.features.includes("multi_guild") && !entitled.privacyDeleted, "PLAN_REQUIRED", 403);
+      assert(!(await entitlements.effective(target)).privacyDeleted, "PRIVACY_DELETED", 403);
+      const count = (await sql<{ n: number }>`SELECT count(*)::int AS n FROM operations_org_guilds WHERE root_organization_id=${group.id}::uuid AND state='ACTIVE'`.execute(tx)).rows[0]!.n;
+      assert(entitled.limits.guilds === null || count < entitled.limits.guilds, "BILLING_LIMIT_REACHED", 403);
+      assert((await new SettingsService(tx).get(target)).revision === snapshot.settings.revision, "REVISION_CONFLICT", 409);
+      assert(!(await sql`SELECT id FROM deletion_requests WHERE ${tenant(target)} AND (lookup_hash IS NULL OR lookup_hash=${snapshot.actor.key}) LIMIT 1`.execute(tx)).rows.length, "RESOURCE_DELETED", 410);
+      await operationsAccess(tx, s, actor, "GOVERN", "multi_guild");
+      assert(["OWNER", "ADMIN"].includes((await nexusRole(tx, s, actor.key)) ?? ""), "NEXUS_ROLE_REQUIRED", 403);
+      assertMaintenanceAuthorization(this.options.authorization, s, actor); this.authority.require(snapshot);
+      assert(checkedAt.every(at => Date.now() >= at && Date.now() - at <= 10000), "AUTHORIZATION_EXPIRED", 403);
+      // Only active bindings are refreshed after real membership checks.
+      // Revoked members and their denial roots stay intact throughout.
+      await sql`DELETE FROM operations_role_bindings b USING operations_org_members m WHERE b.organization_id=${target.organizationId}::uuid AND b.guild_id=${target.guildId} AND b.root_organization_id=${group.id}::uuid AND m.organization_id=b.root_organization_id AND m.id=b.member_id AND m.state='ACTIVE'`.execute(tx);
+      for (const member of observed)
+        await sql`INSERT INTO operations_role_bindings(organization_id,guild_id,root_organization_id,member_id,actor_hash) SELECT ${target.organizationId}::uuid,${target.guildId},${group.id}::uuid,${member.memberId}::uuid,${member.hash} WHERE NOT EXISTS(SELECT 1 FROM deletion_requests WHERE ${tenant(target)} AND (lookup_hash IS NULL OR lookup_hash=${member.hash})) ON CONFLICT DO NOTHING`.execute(tx);
+      await sql`INSERT INTO operations_team_bindings(organization_id,guild_id,team_id,root_organization_id) SELECT ${target.organizationId}::uuid,${target.guildId},id,organization_id FROM operations_teams WHERE organization_id=${group.id}::uuid ON CONFLICT DO NOTHING`.execute(tx);
+      assertMaintenanceAuthorization(this.options.authorization, s, actor); this.authority.require(snapshot);
+      assert(checkedAt.every(at => Date.now() >= at && Date.now() - at <= 10000), "AUTHORIZATION_EXPIRED", 403);
+      await sql`UPDATE operations_org_guilds SET state='ACTIVE',revision=revision+1 WHERE root_organization_id=${group.id}::uuid AND organization_id=${target.organizationId}::uuid AND guild_id=${target.guildId} AND revision=${data.revision} AND state='DETACHED'`.execute(tx);
+      await minimalOperationAudit(tx, s, actor.key, "ORGANIZATION_GUILD_REATTACHED", target.guildId, data.revision + 1);
+      return { guildId: target.guildId, state: "ACTIVE" as const, revision: data.revision + 1, reauthorized: true as const };
+    });
+  }
   async create(s: Scope, actor: Actor, userId: string, name: string) {
     z.string().trim().min(1).max(80).parse(name);
     assert(actor.key === this.vault.hash(s, userId), "ACTOR_MISMATCH", 403);
@@ -164,6 +360,7 @@ export class OperationsOrganization {
           tx,
         )
       ).rows[0];
+      assert(existing?.state !== "DETACHED", "ORGANIZATION_REATTACH_REQUIRED", 409);
       assert(
         review
           ? existing?.root_organization_id === group.id &&
@@ -328,7 +525,7 @@ export class OperationsOrganization {
           tx,
         )
       ).rows[0]!;
-      await sql`DELETE FROM operations_role_bindings WHERE root_organization_id=${group.id}::uuid AND member_id=${row.id}::uuid`.execute(
+      await sql`DELETE FROM operations_role_bindings b WHERE b.root_organization_id=${group.id}::uuid AND b.member_id=${row.id}::uuid AND NOT EXISTS(SELECT 1 FROM operations_org_guilds g WHERE g.root_organization_id=b.root_organization_id AND g.organization_id=b.organization_id AND g.guild_id=b.guild_id AND g.state='DETACHED')`.execute(
         tx,
       );
       for (const binding of bindings)
@@ -423,11 +620,65 @@ export class OperationsOrganization {
         await sql`INSERT INTO operations_team_members VALUES(${group.id}::uuid,${team.id}::uuid,${id}::uuid)`.execute(
           tx,
         );
-      await sql`INSERT INTO operations_team_bindings(organization_id,guild_id,team_id,root_organization_id) SELECT organization_id,guild_id,${team.id}::uuid,root_organization_id FROM operations_org_guilds WHERE root_organization_id=${group.id}::uuid ON CONFLICT DO NOTHING`.execute(
+      await sql`INSERT INTO operations_team_bindings(organization_id,guild_id,team_id,root_organization_id) SELECT organization_id,guild_id,${team.id}::uuid,root_organization_id FROM operations_org_guilds WHERE root_organization_id=${group.id}::uuid AND state<>'DETACHED' ON CONFLICT DO NOTHING`.execute(
         tx,
       );
       await operationsAudit(tx, s, actor.key, "TEAM_CREATED", team.id, 1);
-      return team;
+      return { ...team, revision: 1 };
+    });
+  }
+  async updateTeam(s: Scope, actor: Actor, input: unknown) {
+    const data = teamUpdateInput.parse(input), members = [...new Set(data.memberIds)].sort();
+    return this.db.transaction().execute(async (tx) => {
+      await acquireRuleScopeLocks(tx, ruleScopeLockSet(s));
+      await operationsAccess(tx, s, actor, "GOVERN", "team_assignment");
+      const group = await organizationBinding(tx, s);
+      assert(group, "ORGANIZATION_REQUIRED", 409);
+      await organizationLock(tx, group.id);
+      const team = (await sql<{ revision: number }>`SELECT revision FROM operations_teams WHERE organization_id=${group.id}::uuid AND id=${data.id}::uuid FOR UPDATE`.execute(tx)).rows[0];
+      assert(team, "TEAM_NOT_FOUND", 404);
+      assert(team.revision === data.revision, "REVISION_CONFLICT", 409);
+      const currentMembers = (await sql<{ member_id: string }>`SELECT member_id FROM operations_team_members WHERE organization_id=${group.id}::uuid AND team_id=${data.id}::uuid ORDER BY member_id`.execute(tx)).rows.map(row => row.member_id);
+      const membershipChanged = JSON.stringify(currentMembers) !== JSON.stringify(members);
+      assert(!membershipChanged || !(await teamHasReferences(tx, group.id, data.id)), "TEAM_IN_USE", 409);
+      for (const id of members)
+        assert((await sql`SELECT id FROM operations_org_members WHERE organization_id=${group.id}::uuid AND id=${id}::uuid AND state='ACTIVE' FOR SHARE`.execute(tx)).rows.length, "TEAM_MEMBER_NOT_FOUND", 404);
+      assert(!(await sql`SELECT id FROM operations_teams WHERE organization_id=${group.id}::uuid AND name=${data.name} AND id<>${data.id}::uuid`.execute(tx)).rows.length, "TEAM_NAME_CONFLICT", 409);
+      assertMaintenanceAuthorization(this.options.authorization, s, actor);
+      await operationsAccess(tx, s, actor, "GOVERN", "team_assignment");
+      assertMaintenanceAuthorization(this.options.authorization, s, actor);
+      await sql`UPDATE operations_teams SET name=${data.name},revision=revision+1 WHERE organization_id=${group.id}::uuid AND id=${data.id}::uuid AND revision=${data.revision}`.execute(tx);
+      if (membershipChanged) {
+        await sql`DELETE FROM operations_team_members WHERE organization_id=${group.id}::uuid AND team_id=${data.id}::uuid`.execute(tx);
+        for (const id of members) await sql`INSERT INTO operations_team_members(organization_id,team_id,member_id) VALUES(${group.id}::uuid,${data.id}::uuid,${id}::uuid)`.execute(tx);
+      }
+      await minimalOperationAudit(tx, s, actor.key, "TEAM_UPDATED", data.id, data.revision + 1);
+      return { id: data.id, revision: data.revision + 1 };
+    });
+  }
+  async deleteTeam(s: Scope, actor: Actor, input: unknown) {
+    const data = teamDeleteInput.parse(input);
+    return this.db.transaction().execute(async (tx) => {
+      await acquireRuleScopeLocks(tx, ruleScopeLockSet(s));
+      await operationsAccess(tx, s, actor, "GOVERN", "team_assignment");
+      const group = await organizationBinding(tx, s);
+      assert(group, "ORGANIZATION_REQUIRED", 409);
+      await organizationLock(tx, group.id);
+      const team = (await sql<{ revision: number }>`SELECT revision FROM operations_teams WHERE organization_id=${group.id}::uuid AND id=${data.id}::uuid FOR UPDATE`.execute(tx)).rows[0];
+      assert(team, "TEAM_NOT_FOUND", 404);
+      assert(team.revision === data.revision, "REVISION_CONFLICT", 409);
+      assert(!(await teamHasReferences(tx, group.id, data.id)), "TEAM_IN_USE", 409);
+      assertMaintenanceAuthorization(this.options.authorization, s, actor);
+      await operationsAccess(tx, s, actor, "GOVERN", "team_assignment");
+      assertMaintenanceAuthorization(this.options.authorization, s, actor);
+      await sql`DELETE FROM operations_teams WHERE organization_id=${group.id}::uuid AND id=${data.id}::uuid`.execute(tx);
+      await minimalOperationAudit(tx, s, actor.key, "TEAM_DELETED", data.id, data.revision + 1);
+      return { id: data.id, deleted: true as const, revision: data.revision + 1 };
+    }).catch(error => {
+      // Deferred NO ACTION FKs also fence a reference added after the explicit
+      // check. They must never clear approval/destination references for us.
+      if (error && typeof error === "object" && "code" in error && error.code === "23503") assert(false, "TEAM_IN_USE", 409);
+      throw error;
     });
   }
   async detail(s: Scope, actor: Actor) {
@@ -435,8 +686,9 @@ export class OperationsOrganization {
       await operationsAccess(tx, s, actor, "READ");
       const group = await organizationBinding(tx, s);
       if (!group || !(await nexusRole(tx, s, actor.key)))
-        return { organization: null, members: [], teams: [], guilds: [] };
+        return { organization: null, members: [], teams: [], guilds: [], maintenance: this.maintenanceReadiness() };
       return {
+        maintenance: this.maintenanceReadiness(),
         organization: group,
         members: (
           await sql`SELECT id,name,role,state,revision FROM operations_org_members WHERE organization_id=${group.id}::uuid ORDER BY name,id`.execute(
@@ -444,12 +696,12 @@ export class OperationsOrganization {
           )
         ).rows,
         teams: (
-          await sql`SELECT id,name FROM operations_teams WHERE organization_id=${group.id}::uuid ORDER BY name,id`.execute(
+          await sql`SELECT t.id,t.name,t.revision,ARRAY(SELECT m.member_id FROM operations_team_members m WHERE m.organization_id=t.organization_id AND m.team_id=t.id ORDER BY m.member_id) AS member_ids FROM operations_teams t WHERE t.organization_id=${group.id}::uuid ORDER BY t.name,t.id`.execute(
             tx,
           )
         ).rows,
         guilds: (
-          await sql`SELECT organization_id,guild_id,state FROM operations_org_guilds WHERE root_organization_id=${group.id}::uuid ORDER BY linked_at,guild_id`.execute(
+          await sql`SELECT organization_id,guild_id,state,revision FROM operations_org_guilds WHERE root_organization_id=${group.id}::uuid ORDER BY linked_at,guild_id`.execute(
             tx,
           )
         ).rows,
@@ -516,7 +768,7 @@ export async function organizationAggregate(
     ) {
       results.push({
         guildId: link.guild_id,
-        state: state.privacyDeleted ? "PRIVACY_DELETED" : "REQUIRES_REVIEW",
+        state: state.privacyDeleted ? "PRIVACY_DELETED" : link.state === "DETACHED" ? "DETACHED" : "REQUIRES_REVIEW",
         coverage: null,
         openAttention: null,
         change: null,

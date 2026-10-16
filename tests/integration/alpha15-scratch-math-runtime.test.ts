@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {afterAll,afterEach,beforeAll,expect,it,vi} from 'vitest';
 import {connect,ensureGuild,migrate,sql,tenant,type Database} from '../../packages/db/src/index';
 import {scopeForGuild} from '../../packages/security/src/scoping';
@@ -19,7 +19,7 @@ import type {ScratchTranscendental} from '../../packages/automation/src/scratch-
 import {isolatedPostgres} from '../fixtures/postgres';
 
 let db:Database,infra:Awaited<ReturnType<typeof isolatedPostgres>>,serial=0;
-const actor:Actor={key:'synthetic-math-runtime-admin',encryptedUserId:'synthetic-encrypted-identity',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic-math-runtime'};
+const actor:Actor={key:createHash('sha256').update('synthetic-math-runtime-admin').digest('hex'),encryptedUserId:'synthetic-encrypted-identity',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic-math-runtime'};
 // These are synthetic fixture capacities, not measured production or plan limits.
 const admission:AutomationAdmissionLimits={activeFlows:20,monthlyRuns:100,guildConcurrent:3,globalConcurrent:20,guildPending:20,globalPending:100,measurementId:'isolated-math-runtime-fixtures'};
 const number=(value:number):ValueInput=>({kind:'literal',type:'Number',value});

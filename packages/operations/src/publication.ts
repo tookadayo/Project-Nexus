@@ -3,6 +3,8 @@ import { z } from "zod";
 import { sql, type Database, type Tx } from "../../db/src/index";
 import { assert } from "../../shared/src/index";
 import { renderPublicationMarkdown } from "../../shared/src/publication-markdown";
+import { publicAnnouncementSourceSchema, unconfiguredPublicationReadiness } from "../../presentation/src/alpha16-publication";
+import type { IndependentSafetyAuthority, IndependentSafetyEvidence } from "../../security/src/alpha16-safety-state";
 
 export const publicationCategories = [
   "UPDATE",
@@ -39,7 +41,7 @@ export const publicationContentSchema = z
     { message: "INCIDENT_STATUS_REQUIRES_INCIDENT_CATEGORY" },
   );
 export type PublicationContent = z.infer<typeof publicationContentSchema>;
-const changeSchema = z
+export const publicationChangeSchema = z
   .object({
     id: z.uuid(),
     expectedRevision: z.number().int().nonnegative(),
@@ -52,7 +54,7 @@ const changeSchema = z
     target: z.literal("public-site").optional(),
   })
   .strict();
-export type PublicationChange = z.infer<typeof changeSchema>;
+export type PublicationChange = z.infer<typeof publicationChangeSchema>;
 type PublicationRow = {
   id: string;
   revision: number;
@@ -182,6 +184,7 @@ export class OfficialPublications {
   constructor(
     private readonly db: Database,
     private readonly readCandidate: LegalCandidateLoader = defaultCandidateLoader,
+    private readonly staticSafety?: IndependentSafetyAuthority,
   ) {}
   private async content(tx: Tx, id: string, revision: number | null) {
     if (revision === null) return null;
@@ -280,8 +283,19 @@ export class OfficialPublications {
     };
   }
   async change(input: unknown): Promise<OperatorPublication> {
-    const data = changeSchema.parse(input),
+    return this.db.transaction().execute(tx => this.changeInTransaction(tx, input));
+  }
+  prepareChange(input: unknown) {
+    const parsed = publicationChangeSchema.parse(input);
+    return { input: parsed, fingerprint: fingerprint(parsed) };
+  }
+  /** Called only by the loopback Operator's reviewed/step-up transaction. New
+   * static publication needs its own verified publisher; DB-only success must
+   * never claim that the official static generation was switched. */
+  async changeInTransaction(tx: Tx, input: unknown): Promise<OperatorPublication> {
+    const data = publicationChangeSchema.parse(input),
       hash = fingerprint(data);
+    assert(!["publish", "withdraw"].includes(data.action) || unconfiguredPublicationReadiness().enabled, "PUBLIC_PUBLISH_UNAVAILABLE", 503);
     assert(
       data.action !== "save" || data.content,
       "PUBLICATION_CONTENT_REQUIRED",
@@ -303,7 +317,7 @@ export class OfficialPublications {
           data.target === "public-site"),
       "PUBLICATION_CONFIRMATION_REQUIRED",
     );
-    return this.db.transaction().execute(async (tx) => {
+    return (async () => {
       await sql`SELECT pg_advisory_xact_lock(763214)`.execute(tx);
       const prior = (
         await sql<{
@@ -317,6 +331,11 @@ export class OfficialPublications {
         assert(prior.fingerprint === hash, "IDEMPOTENCY_CONFLICT", 409);
         return this.hydrate(tx, prior.result);
       }
+      // A staged/admitted publication keeps its exact source row until the
+      // external generation is confirmed or proven NOT_STARTED. A new draft
+      // must not silently turn an admitted remote result into a different source.
+      const pending = (await sql`SELECT 1 FROM official_static_publication_heads WHERE publication_id=${data.id}::uuid AND pending_generation IS NOT NULL`.execute(tx)).rows.length;
+      assert(!pending, "PUBLICATION_SYNC_UNRESOLVED", 409);
       const current = await this.current(tx, data.id);
       assert(
         (current?.revision ?? 0) === data.expectedRevision,
@@ -378,7 +397,20 @@ export class OfficialPublications {
         data.id,
       );
       return this.hydrate(tx, result);
-    });
+    })();
+  }
+  /** Private PC-side export of one immutable approved announcement revision.
+   * Never returns draft metadata, operator identity or arbitrary DB columns. */
+  async staticSourceInTransaction(tx: Tx, id: string, expectedRevision: number, now: Date, draft = false) {
+    z.uuid().parse(id);
+    const row = await this.current(tx, id);
+    assert(row && row.revision === expectedRevision, "REVISION_CONFLICT", 409);
+    const revision = draft ? row.edit_revision : row.status === "PUBLISHED" ? row.published_revision : null;
+    assert(revision !== null, "PUBLICATION_NOT_PUBLISHED", 409);
+    const content = await this.content(tx, id, revision);
+    assert(content, "PUBLICATION_REVISION_UNAVAILABLE", 503);
+    return publicAnnouncementSourceSchema.parse({ scope: "PUBLIC", id, sourceVersion: revision, category: content.category, incidentStatus: content.incidentStatus,
+      ja: content.ja, en: content.en, publishedAt: (row.first_published_at ?? now).toISOString(), updatedAt: draft ? now.toISOString() : (row.published_updated_at ?? now).toISOString() });
   }
   private async record(
     tx: Tx,
@@ -417,6 +449,42 @@ export class OfficialPublications {
       updatedAt: row.published_updated_at!.toISOString(),
     };
   }
+  private async staticPublicVisibility() {
+    const installed = (await sql<{ heads: boolean; manifests: boolean; safety: boolean }>`SELECT to_regclass('official_static_publication_heads') IS NOT NULL AS heads,to_regclass('official_static_publication_manifests') IS NOT NULL AS manifests,EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='official_publications' AND column_name='delivery_mode') AS safety`.execute(this.db)).rows[0];
+    if (!installed?.heads && !installed?.manifests) return sql``;
+    assert(installed?.heads && installed.manifests, "PUBLICATION_SCHEMA_UNAVAILABLE", 503);
+    if (installed.safety) {
+      // Static sources require a current process-local independent proof too.
+      // A restored future-dated DB row cannot authorize a public reader. The
+      // ordinary legacy source contract is unaffected by missing new policy.
+      let evidence: Extract<IndependentSafetyEvidence, { kind: "PUBLICATION_WITHDRAWAL" }> | null = null;
+      try {
+        if (this.staticSafety) {
+          const proof = await this.staticSafety.observe("PUBLICATION_WITHDRAWAL", null);
+          const current = this.staticSafety.require("PUBLICATION_WITHDRAWAL", null, proof);
+          if (current.kind === "PUBLICATION_WITHDRAWAL") evidence = current;
+        }
+      } catch { /* Unknown independent state hides only static sources. */ }
+      if (!evidence) return sql`AND p.delivery_mode='LEGACY' AND NOT EXISTS(SELECT 1 FROM official_static_publication_heads h WHERE h.publication_id=p.id)`;
+      return sql`AND ((p.delivery_mode='LEGACY' AND NOT EXISTS(SELECT 1 FROM official_static_publication_heads h WHERE h.publication_id=p.id)) OR EXISTS(
+      SELECT 1 FROM official_static_publication_heads h JOIN official_static_publication_manifests m ON m.publication_id=h.publication_id AND m.generation=h.active_generation
+      CROSS JOIN jsonb_array_elements(${JSON.stringify(evidence.publications)}::jsonb) current_safety
+      WHERE h.publication_id=p.id AND h.expires_at>clock_timestamp() AND h.safety_expires_at>clock_timestamp() AND h.verified_generation IS NOT NULL AND h.verified_at<=clock_timestamp()
+        AND clock_timestamp()<${new Date(evidence.expiresAt)} AND h.safety_policy_revision=${evidence.policyRevision}
+        AND current_safety->>'publicationId'=p.id::text AND current_safety->>'state'='CONFIRMED' AND current_safety->>'pendingGeneration' IS NULL
+        AND (current_safety->>'expiresAt')::timestamptz>clock_timestamp() AND (current_safety->>'generation')::bigint=h.generation
+        AND (current_safety->>'activeGeneration')::bigint=h.active_generation AND current_safety->>'activeArtifactHash'=h.active_artifact_hash
+        AND (current_safety->>'withdrawnGeneration')::bigint=h.withdrawn_generation AND (current_safety->>'withdrawnSourceVersion')::integer=h.withdrawn_source_version
+        AND h.sync_state IN ('CONFIRMED','PREPARED','NOT_STARTED') AND m.expires_at>clock_timestamp() AND m.artifact_hash=h.active_artifact_hash AND m.state='ACTIVE' AND m.effect_state='CONFIRMED' AND m.source_version=p.published_revision))`;
+    }
+    // Legacy publications without a static head keep their existing contract.
+    // A static source must have a currently valid, confirmed active generation;
+    // pending updates cannot extend the previously confirmed artifact's expiry.
+    return sql`AND (NOT EXISTS(SELECT 1 FROM official_static_publication_heads h WHERE h.publication_id=p.id) OR EXISTS(
+      SELECT 1 FROM official_static_publication_heads h JOIN official_static_publication_manifests m ON m.publication_id=h.publication_id AND m.generation=h.active_generation
+      WHERE h.publication_id=p.id AND h.expires_at>clock_timestamp() AND m.expires_at>clock_timestamp()
+        AND m.state='ACTIVE' AND m.effect_state='CONFIRMED' AND m.source_version=p.published_revision))`;
+  }
   async publicList(
     input: {
       category?: PublicationCategory;
@@ -435,6 +503,7 @@ export class OfficialPublications {
     const filter = data.category
       ? sql`AND r.content->>'category'=${data.category}`
       : sql``;
+    const staticVisibility = await this.staticPublicVisibility();
     // A single statement keeps the page and total on one database snapshot.
     const result = (
       await sql<{
@@ -453,7 +522,7 @@ export class OfficialPublications {
           content: PublicationContent;
         })[];
       }>`
-      WITH published AS (SELECT p.*,r.content FROM official_publications p JOIN official_publication_revisions r ON r.publication_id=p.id AND r.revision=p.published_revision WHERE p.status='PUBLISHED' ${filter}),
+      WITH published AS (SELECT p.*,r.content FROM official_publications p JOIN official_publication_revisions r ON r.publication_id=p.id AND r.revision=p.published_revision WHERE p.status='PUBLISHED' ${filter} ${staticVisibility}),
       page AS (SELECT * FROM published ORDER BY first_published_at DESC,id DESC LIMIT 20 OFFSET ${(data.page - 1) * 20})
       SELECT (SELECT count(*)::int FROM published) AS total,COALESCE((SELECT jsonb_agg(to_jsonb(page) ORDER BY first_published_at DESC,id DESC) FROM page),'[]'::jsonb) AS items`.execute(
         this.db,
@@ -482,10 +551,11 @@ export class OfficialPublications {
   async publicDetail(id: string, locale: LegalLocale = "ja") {
     if (!z.uuid().safeParse(id).success) return null;
     const language = localeSchema.parse(locale);
+    const staticVisibility = await this.staticPublicVisibility();
     const row = (
       await sql<
         PublicationRow & { content: PublicationContent }
-      >`SELECT p.*,r.content FROM official_publications p JOIN official_publication_revisions r ON r.publication_id=p.id AND r.revision=p.published_revision WHERE p.id=${id}::uuid AND p.status='PUBLISHED'`.execute(
+      >`SELECT p.*,r.content FROM official_publications p JOIN official_publication_revisions r ON r.publication_id=p.id AND r.revision=p.published_revision WHERE p.id=${id}::uuid AND p.status='PUBLISHED' ${staticVisibility}`.execute(
         this.db,
       )
     ).rows[0];
@@ -539,6 +609,14 @@ export class OfficialPublications {
     };
   }
   async saveLegal(input: unknown) {
+    await this.db.transaction().execute(tx => this.saveLegalInTransaction(tx, input));
+    return this.legal();
+  }
+  prepareLegalChange(input: unknown) {
+    const parsed = z.object({ expectedRevision: z.number().int().nonnegative(), requestId: z.uuid(), settings: legalSettingsSchema }).strict().parse(input);
+    return { input: parsed, fingerprint: fingerprint(parsed) };
+  }
+  async saveLegalInTransaction(tx: Tx, input: unknown) {
     const data = z
         .object({
           expectedRevision: z.number().int().nonnegative(),
@@ -548,7 +626,7 @@ export class OfficialPublications {
         .strict()
         .parse(input),
       hash = fingerprint(data);
-    await this.db.transaction().execute(async (tx) => {
+    await (async () => {
       await sql`SELECT pg_advisory_xact_lock(763214)`.execute(tx);
       const prior = (
         await sql<{
@@ -580,8 +658,8 @@ export class OfficialPublications {
         { revision },
         null,
       );
-    });
-    return this.legal();
+    })();
+    return { ...(await this.settings(tx)), releaseBlocked: true as const, blockers: legalPublicationBlockers };
   }
   async legalPreview(
     documentInput: string,

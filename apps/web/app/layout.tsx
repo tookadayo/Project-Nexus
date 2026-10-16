@@ -4,6 +4,7 @@ import "./style.css";
 import "./product.css";
 import "./brand.css";
 import { Geist } from "next/font/google";
+import { CsrfBridge } from "./auth/csrf-bridge";
 const geist = Geist({
   subsets: ["latin"],
   variable: "--nx-font-sans",
@@ -31,7 +32,7 @@ export default async function Layout({ children }: { children: ReactNode }) {
           : "en";
   return (
     <html lang={lang} className={geist.variable}>
-      <body>{children}</body>
+      <body><CsrfBridge />{children}</body>
     </html>
   );
 }

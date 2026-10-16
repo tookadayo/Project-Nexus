@@ -149,6 +149,8 @@ importers:
 
   packages/presentation: {}
 
+  packages/rules: {}
+
   packages/security: {}
 
   packages/settings:

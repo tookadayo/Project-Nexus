@@ -1,0 +1,83 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 04:03 UTC
+Reasoning: 極高. Design only; no implementation, settings changes, or tests.
+
+付録III-B：Operator最小運営UI契約
+
+位置付け：設計契約のみ。実装・設定変更・テスト・動作確認は行わない。
+Operatorは独立Fastifyをloopback限定で稼働させ、Tunnel/public BFFへ公開しない。以下のroute・permission名はすべて提案名であり、現コードとの照合は未実施。現コードで確認済みなのはprivacy retention/tombstone基盤であり、Operator画面/API/permissionの実装存在・全対象mappingは未照合である。
+
+0. III-Aからの整合修正
+
+同一deletion intentのreplay
+Idempotency-Key/receiptに紐付く同一intentは、再認証済み状態だけを理由に拒否せず、現在のsession権限・対象scope・tombstoneを再検査したうえで、受付番号・現在state等の限定statusだけを返す。過去のpreview/confirm response本文は再返却しない。新しいintentは既存tombstoneがあれば拒否する。
+
+GLOBAL/GUILD削除の直列化
+同一人物を対象とするGLOBAL/GUILD intentは共通target guardで直列化する。GLOBALがGUILDを包含する場合は既存job参照を統合して扱い、GUILD操作からGLOBALへ自動昇格しない。
+
+Operator APIエラー分類
+400 INVALID_REQUEST / 401 AUTH_REQUIRED / 403 PERMISSION_DENIED / 404 TARGET_NOT_FOUND / 409 STATE_CONFLICT / 409 TOMBSTONED / 412 VERSION_MISMATCH / 428 PRECONDITION_REQUIRED / 410 PREVIEW_EXPIRED / 422 SCOPE_MISMATCH / 429 RATE_LIMITED / 503 DEPENDENCY_UNAVAILABLE をstable codeとして提案する。副作用結果不明は通常のretryable errorにせず、既存Runtime契約のUNKNOWNとして返す。
+Previewの範囲変化はtarget identity・scope・plan revision・権限の変更を指し、新規row到着そのものでは無効化しない。tombstone後に到着する対象rowも削除・再生成・再取得を遮断する。
+
+1. 共通Operator command
+
+mutation requestの共通必須構造は以下とする。
+
+field	契約
+target	targetType:string、targetId:string、scopeKind:string、`scopeId	null`。Discord IDはopaque identifierとして保持し、型変換しない
+idempotencyKey	mutation必須。client-generated opaque string。同一command/target/scopeに限定
+ifMatch	revisionを持つ対象では必須。serverの現在revisionとCAS比較。*は禁止
+previewHash	危険操作で必須。server生成previewのcanonical SHA-256 hash
+stepUpToken	危険操作で必須。server発行。client生成値は受理しない
+reason	停止・状態変更・公開・取下げ等で必須。自由な個人情報を記録しない
+
+共通responseはrequestId、operationId|null、state、revision、updatedAt、errorCode|nullを基本とし、秘密値・token・個人本文を返さない。
+
+2. Operator最小画面
+領域	最低表示field／許可action／提案API	permission・危険操作	DB正本／revision	失敗表示	受入
+稼働状態	component, state, lastObservedAt, staleAfter, errorCode。PC process / DB / queue / worker / Discord outbound / Tunnel reachabilityを個別表示。GET /operator/v1/status	提案OPERATOR_STATUS_READ。操作は再観測のみ	各既存health/runtime正本。読み取り専用	UP/DEGRADED/DOWN/UNKNOWNを区別。観測TTL切れはUNKNOWNで正常扱いしない。status TTL 60秒を初期候補	A16-OP-01：6系統を混同せず、観測不能を正常/停止と断定しない
+参加申請・招待・Guild・利用枠	一覧：applicationId,guildId,state,plan,betaState,usage,limit,revision,updatedAt。GET /operator/v1/admissions、状態変更POST /operator/v1/admissions/{id}/state	permissionはOPERATOR_ADMISSION_READ/MANAGEを提案。状態変更はpreview+step-up+reason+If-Match。許可遷移はserver返却allowedTransitionsのみ。料金/契約変更・外部招待発行はこのcommandから発生させない	既存Plan/Beta/admission正本。CAS必須	版競合409/412を表示。外部招待は別明示操作・別契約	A16-OP-02：status変更から料金・契約・外部招待が暗黙実行されない
+Automation / Rule停止再開	scopeKind=GLOBAL/GUILD/FLOW/RULE、scopeId,state,revision,reason。GET /operator/v1/controls、POST /operator/v1/controls/automation	OPERATOR_AUTOMATION_CONTROL提案。STOP/RESUMEはpreview+step-up+If-Match。STOPは新規dispatch/evaluation gateのみ	既存Flow/Rule設定revisionとRuntime正本。既存Runを差替えない	UNKNOWNを再送しない。送信開始済みoperationの取消保証なし。RESUMEでもmissed scheduleの無制限backfillをしない	A16-OP-03：scope別gate、revision競合、UNKNOWN非再送、既存Run非差替え
+Privacy削除	III-AのPreview→Confirm→StatusをそのままUI化。提案pathはPOST /operator/v1/privacy/deletions/preview、POST /operator/v1/privacy/deletions/confirm、GET /operator/v1/privacy/deletions/{receiptId}	III-A専用GUILD/GLOBAL権限、再認証、CSRF/Origin/Host、scope確認を再利用	III-Aのtombstone/deletion job/receipt正本	失敗・進行中・live purge完了・backup expiryを混同しない	A16-DEL-01〜08を継承
+Announcement	下書き一覧：announcementId,draftRevision,publicationState,artifactVersion,artifactHash,syncState,updatedAt。GET /operator/v1/announcements、draft更新PATCH /operator/v1/announcements/{id}、公開POST .../publish、取下げPOST .../withdraw	OPERATOR_ANNOUNCEMENT_PUBLISH提案。publish/update/withdrawはIf-Match+previewHash+step-up+reason。公開field allowlistのみ	PC側Announcement正本＋I-D publication revision/manifest	DRAFT/PENDING/LIVE/SYNC_FAILED/WITHDRAWN等を区別。sync失敗を公開成功と表示しない	A16-OP-05：revision/hash/manifest切替と失敗表示がI-D契約に一致
+Backup / Restore readiness	backupState,lastSuccessfulAt,expiryAt,restoreTombstoneGeneration,deletionLagState,generatedAt。GET /operator/v1/recovery/readiness。Read-only	OPERATOR_RECOVERY_READ提案。restore実行・backup復元を単なるstatusボタンにしない	backup/restore基盤の既存正本＋I-C4 tombstone	古いbackup、tombstone不足、削除purge未完了をNOT_READY。backup7日は固定	A16-OP-06：restore前に最新tombstoneを取得し、古い削除済み情報を再出現させない
+Audit / 設定不備	Audit：actor,action,target,scope,outcome,reason,requestId,revision,at。GET /operator/v1/audit。Config health：settingKey,configured,valid,keyId,rotationStatus,blockingReason,lastCheckedAt。GET /operator/v1/config/health	OPERATOR_AUDIT_READ / OPERATOR_CONFIG_READ提案。secret値は返さない。secret変更・rotationは別明示command	既存audit/config正本。audit自身を個人情報保管庫にしない	secret/credential内容を表示せずMISSING/INVALID/ROTATION_REQUIRED等で表示	A16-OP-07：監査最小化、secret非露出、設定不備の可視化
+3. 画面共通状態
+
+全画面でloading / empty / active / stale / conflict / unavailable / unknownを区別する。
+UNKNOWN・STALE・UNAVAILABLEを成功状態として表示しない。一覧更新中も直前値を「現在値」と誤認させず、lastObservedAtを併記する。
+
+操作ボタンはサーバーが返す許可操作だけを表示する。ただしボタンの存在自体は認可ではなく、全mutationでserver-side permission・scope・revisionを再検査する。
+
+4. Operator境界
+
+Operatorは127.0.0.1等のloopback interfaceだけにbindし、0.0.0.0等の公開interfaceにはbindしない。
+
+Tunnel/public BFFからOperator routeへproxyしない。
+
+Operator自身もloopback到達だけを認証根拠にせず、III-Aのsession、CSRF、Origin、Host、再認証を利用する。
+
+Hostは許可されたloopback hostだけを受理し、任意のForwarded/X-Forwarded-*を信用しない。信頼proxyを置く場合も明示設定されたproxyだけを信頼する。
+
+Browser→OperatorはOperator自身のsame-originだけを使用し、DB/Redis/PC内部APIへBrowserから直接接続しない。
+
+Discord Gateway/RESTはPCからの直接outboundであり、Tunnel経由ではない。Operatorの「Tunnel到達性」とDiscord outbound状態を同一状態にしない。
+
+5. 削除・復元・監査の最小表示規則
+
+Privacy画面では対象Discord ID、scope、含むデータ、残るデータ、不可逆境界、receipt、現在stateだけを表示する。Discord上の他者メッセージ削除とは表示・操作とも明確に分離する。
+
+削除後は通常sessionで対象データを閲覧させない。session失効後はIII-Aの限定receiptによるstatus確認だけを許可し、通常認証・復活・他データ閲覧には使用できない。
+
+Auditには対象を特定するための最小targetだけを残し、名前、メール、投稿本文、secret、token、削除対象データのコピーを保存しない。
+
+6. 実装段階の境界
+
+alpha16：この付録で定義した画面構造、route契約、permission gate、state/revision、publication/deletion/runtimeとの接続契約を対象とする。既存機能を全面rewriteせず、既存正本へ差分接続する。
+
+alpha17：常駐process、Tunnel、DNS、backup/restoreの実環境設定・運用調整を対象とする。これらは本付録によって配備済みとは扱わない。
+
+全体動作確認はalpha16の実装が全部完了してから一括実施する。現段階では受入条件を定義しただけであり、A配置の承認も実装承認・本番稼働承認ではない。
+
+未照合項目：実Operator route/permission/table名、既存Plan/Beta/APIとの対応、実際のhealth観測source、Tunnel health観測方法、backup/restore実環境、secret rotation経路。
+新規数値候補：status TTL 60秒、step-up tokenの短期有効期間等は未検証・未承認であり、実装時の安全性・既存認証仕様との照合対象とする。保持期間は新設せず、Run終了後7日以内削除・backup7日の既存契約を維持する。

@@ -31,6 +31,10 @@ export function rolePermissions(
   return role ? permissions[role] : permissions.ADMIN;
 }
 async function revokedMembership(tx: Tx, s: Scope, actor: Actor) {
+  // DETACHED is a native stop, not removal of delegated authority. This scope
+  // remains closed even if a later privacy erasure removes its member row.
+  if ((await sql`SELECT 1 FROM operations_org_guilds WHERE organization_id=${s.organizationId}::uuid AND guild_id=${s.guildId} AND state='DETACHED' LIMIT 1`.execute(tx)).rows.length)
+    return true;
   if (
     (
       await sql`SELECT b.member_id FROM operations_role_bindings b JOIN operations_org_members m ON m.organization_id=b.root_organization_id AND m.id=b.member_id WHERE b.organization_id=${s.organizationId}::uuid AND b.guild_id=${s.guildId} AND b.actor_hash=${actor.key} AND m.state<>'ACTIVE'`.execute(

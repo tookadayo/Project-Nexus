@@ -89,11 +89,10 @@ export function registerV02(
     const state = await new EntitlementService(db).effective(s),
       results = [];
     if (featureDecision(state, "improvement_tracking").allowed)
-      for (const e of experiments)
-        results.push({
-          id: e.id,
-          ...(await new ExperimentService(db).result(s, e.id)),
-        });
+      for (const e of experiments) {
+        const snapshot = await new ExperimentService(db).latestResult(s, e.id);
+        if (snapshot) results.push({id: e.id, ...snapshot.result, evaluatedAt: snapshot.evaluated_at});
+      }
     const diagnoses = diagnose(current, baseline);
     return {
       metrics: visibleMetrics(metrics, state),

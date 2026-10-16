@@ -1,0 +1,2694 @@
+{
+  "baseline": "35b0d22398c1463e2c88d7f49d960fa8a065002a",
+  "purpose": "Historical ID mapping recorded before consolidated execution; current alpha16 results are in alpha16-validation-status.md. These historical IDs are not additional test passes.",
+  "items": [
+    {
+      "id": "T001",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Number空欄、placeholder「例:10」のまま保存/有効化",
+      "oldExpected": "未入力の診断。10や0として実行されない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T002",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "PlainText「12」をNumber欄へ直接差込み",
+      "oldExpected": "型不一致。EX11の明示変換なら12へ成功",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T003",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "EX11で空文字、空白だけ、12abc、NaN、Infinityを解析",
+      "oldExpected": "全件ParseResultの形式不正。0へ変換されない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T004",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "3+4、3−4、3×4、3÷4",
+      "oldExpected": "7、−1、12、0.75",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T005",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "1÷0、0÷0、変数d=0で1÷d",
+      "oldExpected": "ZeroDivision。Infinity/NaNを値にせず後続変更なし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T006",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "有限最大付近のNumber×2でoverflow",
+      "oldExpected": "NumericOverflow。外部送信されない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T007",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "count入力に2.5、−1、2^53を指定",
+      "oldExpected": "整数/非負/安全整数検査で拒否。黙ってroundしない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T008",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "0.1+0.2を厳密に0.3と比較",
+      "oldExpected": "false。UIは精度の説明を提供",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T009",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Number 3 < 4、3 = 3、4 > 3",
+      "oldExpected": "すべてtrue",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T010",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Number 3とPlainText「3」の比較",
+      "oldExpected": "型不一致。暗黙の数値比較なし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T011",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "2つの異なるChannelRefが同じ表示名",
+      "oldExpected": "等値false。IDをNumberへ変換しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T012",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "-7 mod 3、7 mod -3、-6 mod 3",
+      "oldExpected": "2、-2、+0",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T013",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "7 mod 0",
+      "oldExpected": "ZeroDivision",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T014",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "明示Scratch丸めモードでround(1.5)、round(-1.5)、round(-0.5)",
+      "oldExpected": "2、-1、+0",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T015",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "明示Scratch丸めモードでround decimal(1.005,2)",
+      "oldExpected": "規定の10進丸めで1.01。ブラウザの素朴な乗算roundへ依存しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T016",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "floor(-1.2)、ceil(-1.2)、truncate(-1.2)",
+      "oldExpected": "-2、-1、-1。各説明が区別される",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T017",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "abs(-4)",
+      "oldExpected": "4",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T018",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "sqrt(9)、sqrt(0)、sqrt(-1)",
+      "oldExpected": "3、0、DomainError",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T019",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "sin(0)、sin(90)、sin(180)",
+      "oldExpected": "0、1、0の代表値。一般値は採用ルーチンの誤差基準で判定",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T020",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "cos(0)、cos(90)、cos(180)",
+      "oldExpected": "1、0、-1の代表値",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T021",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "tan(0)、tan(45)、tan(90)、tan(-90)",
+      "oldExpected": "0、1、DomainError、DomainError",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T022",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "asin(1)、asin(-1)、asin(1.1)",
+      "oldExpected": "90、-90、DomainError",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T023",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "acos(-1)、acos(1)、acos(-1.1)",
+      "oldExpected": "180、0、DomainError",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T024",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "atan(1)、atan(0)、atan(-1)",
+      "oldExpected": "45、0、-45",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T025",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "ln(1)、ln(0)、ln(-1)",
+      "oldExpected": "0、DomainError、DomainError",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T026",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "log10(100)、log10(0)",
+      "oldExpected": "2、DomainError",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T027",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "e^0、e^1、overflowする指数、underflowして0になる指数",
+      "oldExpected": "1、採用精度内のe、NumericOverflow、NumericUnderflow",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T028",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "10^2、10^0、非有限になる指数、underflowする指数",
+      "oldExpected": "100、1、NumericOverflow、NumericUnderflow",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T029",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "不明な演算opcode/mathop名を保存JSONへ混入",
+      "oldExpected": "サーバーで拒否。0を返して成功しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T030",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "clamp(5,0,3)、clamp(5,3,0)",
+      "oldExpected": "3、RangeError。上下を黙って交換しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T031",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "range(1,5,2)、range(5,1,-2)、range(2,2,1)",
+      "oldExpected": "[1,3,5]、[5,3,1]、[2]",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T032",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "range(1,5,0)、range(1,5,-1)、予測件数Q+1",
+      "oldExpected": "step不正、方向不正、生成前BudgetExceeded",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T033",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "if true / elif true / else",
+      "oldExpected": "最初の枝のみ。elif条件/本文もelseも未実行",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T034",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "if false / elif true / elif true / else",
+      "oldExpected": "2番目だけ。3番目は未評価",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T035",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "if false / elif false / else",
+      "oldExpected": "elseだけ",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T036",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "if falseでelseなしの文分岐",
+      "oldExpected": "何もせず後続へ",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T037",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "値返却ifのelseなし",
+      "oldExpected": "有効化不可。未返却を0にしない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T038",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "if unknown / elif true / else",
+      "oldExpected": "不明経路のみ。elif/elseへ進まない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T039",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "if false / elif unknown / else",
+      "oldExpected": "その時点で共通不明経路へ。elseは未実行",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T040",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "C条件なのに不明経路未設定",
+      "oldExpected": "有効化拒否",
+      "oldStatus": "HISTORICAL_PARTIAL",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": "See alpha16-entry-ledger.md"
+    },
+    {
+      "id": "T041",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "条件式の動的ゼロ除算",
+      "oldExpected": "評価失敗で停止。unknown/false/elseへ変換しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T042",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "選択した枝の外部操作が結果不明",
+      "oldExpected": "他elifへ移動せず停止。自動再送なし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T043",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "if内のif/elseを編集",
+      "oldExpected": "内側elseだけが内側ifに所属。外側の接続を変えない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T044",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "if trueの本文でWait→停止/復旧、外部状態はその間変化",
+      "oldExpected": "同じ選択枝・保存位置から再開。条件再判定なし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T045",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Boolean false AND (1÷d>0)、d=0はRun入力",
+      "oldExpected": "右を未評価、false。純粋式の実行時エラーなし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T046",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Boolean true OR (1÷d>0)、d=0はRun入力",
+      "oldExpected": "右を未評価、true",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T047",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Cのtrue/false/unknown全9組でAND/OR",
+      "oldExpected": "設計本文の真理値18結果と一致",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T048",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "unknown AND false / unknown OR true",
+      "oldExpected": "右を評価しfalse / true",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T049",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "unknown AND true / unknown OR false / NOT unknown",
+      "oldExpected": "unknown / unknown / unknown",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T050",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "true ORを使って操作時認可を省略しようとする",
+      "oldExpected": "認可は独立検査され、省略不可",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T051",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "if/elif各枝を並べ替えて保存→読込→手順一覧→ブロック表示",
+      "oldExpected": "順序と本文の組、unknown辺、IDを維持。Revision差分を表示",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T052",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "既存のfalse側に処理や別のunknownハンドラがある入れ子",
+      "oldExpected": "意味を変える自動平坦化なし。従来の入れ子を保持",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T053",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "join(空文字,abc)、join([],区切り)",
+      "oldExpected": "abc、空文字",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T054",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "NumberやRefをPlainText結合へ直挿し",
+      "oldExpected": "型エラー。明示format等を案内",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T055",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "length(空)、length(A😀é)、length(家族ZWJ絵文字)",
+      "oldExpected": "0、3、採用Unicode版で1 EGC",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T056",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "letter(A😀B,2)",
+      "oldExpected": "完全な😀。サロゲート半分を返さない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T057",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "letter(abc,0)、letter(abc,4)、letter(空,1)、位置1.5",
+      "oldExpected": "全件IndexError/型エラー",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T058",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "slice(abc,4,0)、slice(空,1,0)、slice(abc,3,2)",
+      "oldExpected": "空、空、範囲外エラー",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T059",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "contains(ABC,a)、contains(ABC,空)",
+      "oldExpected": "既定false、true。大小無視モードなら前者true",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T060",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "「é」と「e＋結合アクセント」の厳密比較→明示NFC後の比較",
+      "oldExpected": "既定false、NFC後true",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T061",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "replace(aaaa,aa,b,all)",
+      "oldExpected": "bb。重なりなしで左から処理",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T062",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "replaceの検索文字が空",
+      "oldExpected": "検証エラー。大量挿入を生成しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T063",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "split(a,,b,「,」,空項目保持)→除外へ変更",
+      "oldExpected": "[a,空,b]→[a,b]",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T064",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "split(空,「,」,保持/除外)、空区切り",
+      "oldExpected": "[空]/[]、空区切りは拒否",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T065",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "不正サロゲート列の入力/読込",
+      "oldExpected": "明示診断。置換文字へ黙って変更しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T066",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "表示上短い絵文字文が外部payload制約を超える",
+      "oldExpected": "送信前の別検証で拒否。表示EGC数だけで送信許可しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T067",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "初期値未定の必須変数を読む/増やす",
+      "oldExpected": "有効化/実行検査で拒否。0補完なし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T068",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Number変数5を3増やす、同じ処理のworker応答消失後に再開",
+      "oldExpected": "正規の状態遷移は8に1回確定。再開で11へ二重加算しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T069",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "変数名を変更し保存",
+      "oldExpected": "VariableIDと全参照を保持",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T070",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "分岐内だけで宣言した値を分岐外へ差込む",
+      "oldExpected": "スコープ外で拒否",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T071",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "同一逐次フレームのloopで初期化済み合計へ明示加算",
+      "oldExpected": "許可、各反復分だけ更新。並列兄弟/子からの親書込みは拒否",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T072",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "新しいRunを開始し前Run変数を読む",
+      "oldExpected": "値を引き継がない。永続変数入口なし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T073",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "List<Number>へPlainTextを追加",
+      "oldExpected": "型不一致",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T074",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "append([1,2],3)→元一覧を読む→明示代入",
+      "oldExpected": "新値[1,2,3]、元は[1,2]、代入後だけ新値",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T075",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "insert([],1,x)、insert([a,b],3,c)、insert([a,b],4,c)",
+      "oldExpected": "[x]、[a,b,c]、IndexError",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T076",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "delete([a,b],1)、replace([a,b],2,c)、clear([a,b])",
+      "oldExpected": "[b]、[a,c]、同型[]",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T077",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "delete([],1)、replace([a],0,b)、item([a],2)、小数添字",
+      "oldExpected": "全件エラー。黙殺/空文字成功なし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T078",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "find([a,b,a],a)、find([a,b],c)、contains([],a)",
+      "oldExpected": "found(1)、not_found、false",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T079",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "「random」「last」「all」をNumber添字欄へ文字挿入",
+      "oldExpected": "型拒否。対応する明示形へ案内",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T080",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "一覧[A,A,B]を表示/非表示",
+      "oldExpected": "表示だけ変化し内容は不変、外部送信/ログ記録なし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T081",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "sum([])、average([])、min/max([])、any([])、all([])",
+      "oldExpected": "0、none、none、false、true",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T082",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "zipの長さ不一致、chunk件数0、sort同順位",
+      "oldExpected": "エラー、エラー、元順を維持",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T083",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "同じ表示名の別MemberRefをdedupe",
+      "oldExpected": "別対象のまま。安定IDの重複だけ明示規則で除去",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T084",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "自作値「人数+予備」へ80と20",
+      "oldExpected": "100。隠れた変数/時刻を読まない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T085",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "自作値内へ送信/外部read/乱数/Wait/状態代入",
+      "oldExpected": "全依存をサーバー検査し拒否",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T086",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "自作手順A→B→A、直接A→A",
+      "oldExpected": "循環を有効化前に拒否",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T087",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "必須引数追加/出力型変更後に旧呼出しを新版へ変更",
+      "oldExpected": "未対応呼出し診断。既存Runの固定子版は不変",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T088",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "自作値のある正常枝だけ戻り値欠落",
+      "oldExpected": "有効化拒否。0や空にしない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T089",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "repeat count=0、count=3",
+      "oldExpected": "本文0回/3回。0回でも後続へ進む",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T090",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "for-each対象[a,b]を入口固定、本文で元一覧へc追加",
+      "oldExpected": "反復はa,bだけ。対象を際限なく増やさない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T091",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "until条件が最初からtrue、whileが最初からfalse",
+      "oldExpected": "本文0回、condition_met相当の正常終了",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T092",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "until falseが継続、最大3",
+      "oldExpected": "本文3回、条件4回まで評価しlimit_reached。成功扱いしない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T093",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "until falseで最大0、while trueで最大0",
+      "oldExpected": "条件1回、本文0回、limit_reached",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T094",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "while/until条件がunknownまたは評価エラー",
+      "oldExpected": "不明経路/失敗を区別し、本文を開始しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T095",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "内側loopでbreak、continue",
+      "oldExpected": "直近loopだけ作用。continueでも反復/予算消費",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T096",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "子手順から親loop break、並列枝から外側continue",
+      "oldExpected": "検証拒否",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T097",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "loop本文のWait後にworker再起動",
+      "oldExpected": "同じ反復・本文PCから再開。既済操作/加算を重複しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T098",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "loopの外部書込み結果不明",
+      "oldExpected": "次反復/後続新規外部変更を止め、自動再送しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T099",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "wait=0、負数、7日超",
+      "oldExpected": "後続、拒否、拒否",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T100",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Run開始6日後に2日Wait",
+      "oldExpected": "単一7日以内でもRun期限超過で拒否",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T101",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "wakeAt=Run期限と同時、キャンセルとwake競合",
+      "oldExpected": "期限/停止が優先され新しい外部操作を開始しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T102",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Run再開・子呼出し・再試行を繰り返す",
+      "oldExpected": "startedAt/deadline/累計予算をリセットしない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T103",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "整数乱数lo=1/hi=3、lo=hi、lo>hi",
+      "oldExpected": "1/2/3の範囲、同値、逆転エラー",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T104",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "小数乱数lo=0/hi=1で多数の模擬一様bit入力、丸め上端近傍",
+      "oldExpected": "0以上1未満。hiを返さず、方式の解像度を記録",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T105",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "乱数生成保存直後に応答消失→同一キー再開",
+      "oldExpected": "同じ確定値を照合。再抽選なし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T106",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "同じRun/同じblockでも反復番号が異なる",
+      "oldExpected": "別生成として記録。値が偶然同じでも成功",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T107",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "同一動的キーへ異なる固定入力を上書き要求",
+      "oldExpected": "不整合で停止。後から変わった現在変数を勝手に再評価しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T108",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "抽出n=0、n>候補数、空shuffle",
+      "oldExpected": "空、エラー、空",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T109",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "送信結果不明を理由に乱数を引き直そうとする",
+      "oldExpected": "再抽選と自動再送を拒否",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T110",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "End runを外部操作開始後に要求",
+      "oldExpected": "新規処理は停止、既済外部操作の取消を保証せず証拠を保持",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T111",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Return/End branch/End runをそれぞれ実行",
+      "oldExpected": "呼出しだけ/枝だけ/当該Runの範囲を正確に終了。他Runへ作用しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T112",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Run終了から7日を超えて再開データへアクセス",
+      "oldExpected": "削除済み。Run復活/自動再作成なし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T113",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "本文や変数値が含まれるRunを実行しログ/監視を点検",
+      "oldExpected": "値本文をログへ保存しない。構造ID/状態/時刻等だけ",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T114",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "保持不可の一時本文をWait後に必要な値として接続",
+      "oldExpected": "有効化前に拒否。checkpoint名目で無断保存しない",
+      "oldStatus": "HISTORICAL_NOT_RUN",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": "See alpha16-entry-ledger.md"
+    },
+    {
+      "id": "T115",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "wait解除前に権限失効/対象削除/Run中止",
+      "oldExpected": "現行状態を検査し該当操作を止める。古い権限で実行しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T116",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "alias/分割/子手順/複数枝で総予算Qを超過",
+      "oldExpected": "親子枝合算でBudgetExceeded。小分けで予算を再発行しない",
+      "oldStatus": "HISTORICAL_PARTIAL",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": "See alpha16-entry-ledger.md"
+    },
+    {
+      "id": "T117",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Run期限7日、loop局所期限1時間、本文で2時間Wait",
+      "oldExpected": "effectiveDeadline超過として拒否。Run期限内という理由で許可しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T118",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "子手順/承認待機が囲みloopの局所期限に達する",
+      "oldExpected": "親の期限を継承して新規処理を停止。不明な外部操作は不明を保持",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T119",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "List代入/continue確定直後、PC保存相当境界でcrash",
+      "oldExpected": "状態・PC・反復・予算の一貫した版だけ復元。二重適用/予算復活なし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T120",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "位置検索結果を数値欄へ直接挿入→found枝でindexを選ぶ",
+      "oldExpected": "IndexResult全体の挿入は拒否、found枝のindexだけIとして使用可",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T121",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "明示Scratch丸めモードでround decimal(1234,-2)、桁数-309/309",
+      "oldExpected": "1200、PrecisionRangeError。桁数を自動clampしない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T122",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "数学的に非ゼロの結果がsubnormalとして残る/0に丸まる",
+      "oldExpected": "有限subnormalは許可、非ゼロ→0はNumericUnderflow。明示roundの0は正常",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T123",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "全数学関数の一般値・巨大有限角度を高精度参照と比較",
+      "oldExpected": "提案4 ULP以内、代表値0/±1は正確。未達は採用前ゲート不合格",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T124",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "terminalAt確定後の遅延証拠、削除後の古いcallback",
+      "oldExpected": "terminalAt/削除期限不変、通常実行と再開状態を復活させない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T125",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "小数乱数lo/hiが隣接binary64値、[-MAX,+MAX]の最大幅",
+      "oldExpected": "半開区間内に収まり、中間overflowなし。隣接範囲ならloになる",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T126",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "整数乱数の両端を±(2^53−1)にする",
+      "oldExpected": "内部範囲幅を正確に算出し、各結果は安全整数かつ範囲内",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T127",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "明示Scratch丸めモードでround decimal(-1.005,2)、round decimal(-1250,-2)",
+      "oldExpected": "-1、-1200。負の半値も+∞方向",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T128",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "contains(e＋結合アクセント,結合アクセント)とfind同入力",
+      "oldExpected": "containsはtrue、EGC境界でのfindはnot_found。意味の違いを表示",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T129",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "旧schemaで保存したround定義を開く・再保存・実行再開",
+      "oldExpected": "保存時のschema/runtime意味を維持。mode欠落を新Scratch方式へ補完しない。元の方式は実装照合してfixtureを固定",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T130",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "明示tiesAwayFromZeroで1.5、-1.5、-0.5を整数丸め",
+      "oldExpected": "2、-2、-1。Scratch方式の2、-1、0とモード説明を区別",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T131",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "新規roundでmode未指定、または旧下書きのmodeを変更",
+      "oldExpected": "未指定は有効化不可。変更は新revision/再検証/再試運転/影響再確認。開始済みRun不変",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "T132",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "小数桁丸めで-1.005を2桁、-1250を-2桁へ、各modeを明示",
+      "oldExpected": "tiesAwayFromZeroは-1.01、-1300。Scratch方式は-1、-1200。最終binary64再表現はties-to-even",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S001",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "until、N=0、初回true",
+      "oldExpected": "guard1回、body0回、condition_satisfied、正常後続1回",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S002",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "until、N=0、初回false",
+      "oldExpected": "guard1回、body0回、limit handler1回、非成功終端、正常後続0回",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S003",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "while、N=0、初回false/true",
+      "oldExpected": "falseは正常、trueはlimit。片方に自動統一しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S004",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "最後のbodyでuntil条件がtrueになる",
+      "oldExpected": "N回body、N+1回guard、正常終了。limit handlerなし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S005",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "最後のbody後もuntil条件false",
+      "oldExpected": "N回body、N+1回guard、limit handler→非成功終端。N+1回bodyなし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S006",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "guard unknown",
+      "oldExpected": "body0回、conditionUnknown handler1回。false/else/通常後続へ落ちない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S007",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "guardの型/数値評価失敗",
+      "oldExpected": "evaluationError、unknown handlerではない。値0で続けない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S008",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "明示breakとcontinue",
+      "oldExpected": "breakはbrokenでループ後続へ。continueは残bodyを飛ばし回数1をcommitし次guardへ",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S009",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "手順内loopの正当Return",
+      "oldExpected": "ループ後続を飛ばし当該callへ戻る。Run全体停止と混同しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S010",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "handler通常完了とhandler内成功Return/break元loop",
+      "oldExpected": "通常完了も非成功Run終端。元領域を回避するReturn/breakは静的拒否",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S011",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "limit handler内の許可済み外部通知",
+      "oldExpected": "既存認可・残期限/予算・全先行外部操作確定を確認し、明示した通知だけ1回。後続通常送信なし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S012",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "条件unknownだが操作権限も不明",
+      "oldExpected": "handler操作は独立認可で拒否。条件unknownを操作許可にしない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S013",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "localDeadline handlerへ外部read/write/Wait/乱数を配置",
+      "oldExpected": "有効化拒否。純粋handlerだけ許可",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S014",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Wait中に内側/外側localDeadline、同時期限",
+      "oldExpected": "最早期限の所有loop、同時なら外側を選ぶ。innerをunwindして所有handlerだけ純粋実行。存続する上位期限は外さない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S015",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Run期限とlocal期限同時、wakeAtも同時",
+      "oldExpected": "Run期限hard stopが優先。handler/通常後続/新規外部操作0回",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S016",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "取消/全体予算超過がhandler前または途中",
+      "oldExpected": "handlerも新規実行を止める。別handlerへ再帰復帰しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S017",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "外部操作結果不明がbody/handler/他枝で発生",
+      "oldExpected": "unresolved_external_resultが保持され、どのhandlerからも新規外部操作しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S018",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "handler自身の評価失敗",
+      "oldExpected": "元原因とhandler失敗のコードを保持し終端。再帰handler呼出しなし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S019",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "並列他枝が外部操作開始中にloop非成功",
+      "oldExpected": "先行操作を未開始と誤認しない。不明ならhard stop、証跡保持。handler勝手開始なし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S020",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "handler内Wait後のcrash",
+      "oldExpected": "選択原因・handler phase・PCで復帰、bodyや別handlerへ戻らない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S021",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "CT01 A.otherwise=[B]を折畳み/展開/保存",
+      "oldExpected": "AST/ID/意味hash/挙動不変。BのunknownはBに所属",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S022",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "CT01 A.otherwise=[B,X]",
+      "oldExpected": "連鎖へ自動平坦化しない。Bunknown通常終了後Xが動く旧意味を維持",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S023",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "旧CT01の空unknown[]",
+      "oldExpected": "既存通り暗黙合流。今回のloop失敗停止へ変更しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S024",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "異なるunknownを持つ旧入れ子",
+      "oldExpected": "個別unknownを保持。内容が似ていても統合/複製/procedure化しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S025",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "A=false、B=unknown、C=trueのelif",
+      "oldExpected": "Bunknownのみ1回、C/else未評価。unknown内Wait後も同じ枝",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S026",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "新規共通unknown templateを3節へ保存",
+      "oldExpected": "各展開先block/Variable/binding/targetのID写像が一意・安定、実行は選択節のコピーのみ。表示/再保存でID変化なし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S027",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "共通templateから節内localを参照",
+      "oldExpected": "静的拒否。入口を支配する適合値だけ参照可能",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S028",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "共通template修正中に保存失敗",
+      "oldExpected": "ASTコピー群とauthoring mapが部分更新されない。旧版または新版の完全な一方",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S029",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "elif節の並替＋開始済みRun",
+      "oldExpected": "条件/then/unknownが一組で移動。新Revisionだけ新順序、旧RunのPC/乱数key不変",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S030",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "共通unknown内のWait、乱数、break/Return",
+      "oldExpected": "コンパイル後のscope/終了先/動的IDを検証。旧木から等価変換したと主張しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S031",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "比較matrix全許可/不許可セル",
+      "oldExpected": "サーバーとUIが同じ判定。異型暗黙変換なし",
+      "oldStatus": "HISTORICAL_PARTIAL",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": "See alpha16-entry-ledger.md"
+    },
+    {
+      "id": "S032",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Ref同表示名・別ID/別scope",
+      "oldExpected": "同値としない。比較が存在/認可を証明しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S033",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Record key等値、構造等値、descriptorなし",
+      "oldExpected": "登録profile通り。descriptorなしは拒否。List内でも同じ規則",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S034",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Optional/ConditionResult/OperationOutcomeへ汎用比較",
+      "oldExpected": "拒否し、対応する型付き状態分岐を提示",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S035",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "any/all/find/filterの述語がConditionResult",
+      "oldExpected": "Booleanへ落とさず型エラー。空any=false/all=trueは維持",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S036",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Integer用途へliteral/変数/式/自作値で小数・危険整数",
+      "oldExpected": "全入口で同じ拒否。旧保存Number型は維持",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S037",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "最大整数幅、固定bitでr=0/W−1/W",
+      "oldExpected": "最小端/最大端/棄却。内部Number丸めやmod縮小なし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S038",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "小bit幅・短tapeを全列挙",
+      "oldExpected": "成功値ごとの本数が等しい。失敗を別集計。統計だけで証明しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S039",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "固定Q候補すべて棄却",
+      "oldExpected": "RandomSamplingExhaustedを固定。端値/剰余/予算追加/再seedなし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S040",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "entropy準備保存の応答消失・二重worker",
+      "oldExpected": "一意確定tapeだけ使用。敗者は勝者を読む。未確定候補を公開しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S041",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "棄却cursor/成功commit前後のcrash",
+      "oldExpected": "同じキーは同じ値または同じ失敗、予算二重消費/復活なし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S042",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "結果確定後に元変数が変わる",
+      "oldExpected": "旧snapshot結果を読む。現在値で再評価/不整合誤検知しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S043",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "小数隣接端点・逆符号最大幅・同値・逆転",
+      "oldExpected": "半開区間、overflowなし、同値はその値、逆転は拒否",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S044",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "e+結合アクセントへのContains/Find/Replace/Split",
+      "oldExpected": "scalarとEGC境界の仕様表通り。操作間の違いをUIで説明",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S045",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Join/Repeatで境界に結合文字やZWJをまたぐ",
+      "oldExpected": "結果を再segmentation。入力EGC数の加算で誤計数しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S046",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "CRLF、家族絵文字、肌色、国旗列、Indic、Hangul、不正surrogate",
+      "oldExpected": "採用Unicode公式fixtureとgolden通り。不正scalarは拒否",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S047",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "Replaceの$・\\\\・重なり、Split空区切り・空項目",
+      "oldExpected": "テンプレート/regex評価なし。左から非重複、空方針を維持",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S048",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "casefold/normalize後の長さ変更とFind",
+      "oldExpected": "変換後文字列の位置。元文字列への不正逆indexなし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S049",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "旧Unicode profileのRunを新版で再開",
+      "oldExpected": "旧意味を維持。欠落versionを最新に置換しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S050",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "旧roundの正負半値と隣接値、新2mode",
+      "oldExpected": "旧fixture不変、新modeは明示差。欠落modeを推測しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S051",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "数学14選択のdomain・代表値",
+      "oldExpected": "全項目を試験。三角度数、正確な0/±1、極、log/sqrt域を検証",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S052",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "最大finite角度・exact巨大周期・nextUp/Down極近傍",
+      "oldExpected": "素朴なπ変換/epsilon極判定なし。採用精度/域の技術ゲートを検証",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S053",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "最小subnormal/normal境界、0へ丸まる非ゼロ",
+      "oldExpected": "非ゼロsubnormal成功、真の非ゼロ→0はUnderflow。flag単独拒否しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S054",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "4 ULP目標・2の冪境界・oracle中点",
+      "oldExpected": "高精度の規定ulp式で判定。別の4step距離へ変更しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S055",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "decimal-round桁端・正負半値・1.005",
+      "oldExpected": "明示modeと最短10進規則どおり。旧decimal操作を置換しない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S056",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "D6 T01–T10/L01–L25全具体形",
+      "oldExpected": "欠落なし。average/minmaxのRecord出力、集合順序、zip不一致、chunk端を維持",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S057",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "型ソケット・色なし・キーボード・狭画面",
+      "oldExpected": "型/所属/unknown/非成功終端を色に依存せず判別。接続拒否理由・焦点復帰あり",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S058",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "例示placeholder/試運転値/本番値、Undo/Redo",
+      "oldExpected": "例示の自動実行なし。試運転外部送信なし。ASTとmetadata同時復元",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S059",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "terminalAt後の遅延callback、7日削除後worker",
+      "oldExpected": "terminalAt/削除期限不変。通常再開・状態復活・自動別Runなし。内容ログなし",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    },
+    {
+      "id": "S060",
+      "source": "docs/design/alpha15-scratch-implementation-evidence.md",
+      "oldInput": "opcode追跡表全採用行と正式132＋S試験",
+      "oldExpected": "実在実装と証拠へリンク。未実装/未実施を合格扱いにしない",
+      "oldStatus": "HISTORICAL_CONFIRMED",
+      "alpha16Tasks": [
+        "N16-07",
+        "N16-14",
+        "N16-15"
+      ],
+      "alpha16Result": "NOT_RUN",
+      "carryover": null
+    }
+  ]
+}

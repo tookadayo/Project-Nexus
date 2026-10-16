@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { ScratchMpfrEngine, type ScratchMpfrBinding } from "./scratch-mpfr.js";
+import { ScratchMpfrEngine, type ScratchMpfrBinding } from "./scratch-mpfr";
 
 export const SCRATCH_MPFR_ARTIFACT = Object.freeze({
   package: "gmp-wasm", packageVersion: "1.3.2", mpfrVersion: "4.2.1",

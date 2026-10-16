@@ -37,6 +37,7 @@ import {
 } from "./adaptive-projector.js";
 import { resolveChannel } from "../../shared/src/channel-scope.js";
 import { projectObservation } from "./observation.js";
+import {sanitizeBotPostReference} from "./alpha16-reference-privacy";
 export class AwaitingReference extends Error {}
 export class LifecycleService {
   constructor(
@@ -68,7 +69,7 @@ export class LifecycleService {
     );
   }
   private async processInternal(input: Envelope) {
-    const event = eventSchema.parse(input);
+    let event = eventSchema.parse(input);
     const s: Scope = {
       organizationId: event.organizationId,
       guildId: event.guildId,
@@ -125,6 +126,8 @@ export class LifecycleService {
         ).rows.length
       )
         return;
+      event=await sanitizeBotPostReference(tx,s,event);
+      if(input.referenceId&&!event.referenceId&&event.kind==="channel.post_observed")await sql`UPDATE gateway_ingest SET payload=payload-'referenceId'-'referenceType'-'botReplyReferenceContract' WHERE ${tenant(s)} AND dedupe_key=${dedupeKey(event)}`.execute(tx);
       await sql`UPDATE gateway_ingest SET projected_at=now() WHERE ${tenant(s)} AND dedupe_key=${dedupeKey(event)}`.execute(
         tx,
       );

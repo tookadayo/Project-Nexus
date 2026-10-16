@@ -18,11 +18,18 @@ import {checkScheduleMeaning,plannedCalendarMeaning,type ScheduleMeaningReader} 
 import {simulateAutomationPlan,type AutomationSimulationInput} from './simulation';
 import {ALPHA15_AUTOMATION_STORAGE,ALPHA15_BETA_ADMISSION,ALPHA15_SCRATCH_RANDOM,type AutomationStoragePolicy} from './admission';
 import {automationLock,DISABLED_AUTOMATION_ADMISSION,reserveAutomationQuota,validateAdmissionLimits,type AutomationAdmissionLimits} from './quota';
+import {acquireRuleScopeLocks,ruleScopeLockSet} from '../../rules/src/locks';
+import {assertRollbackBase,recordRollbackDraft,lockRollbackOrigin,type RollbackDraftInput,type RollbackCommitInput,type RollbackOrigin} from './rollback';
 
 interface FlowRow {id:string;name:string;draft_revision:number;active_revision:number|null;state:'DRAFT'|'ACTIVE'|'DISABLED'|'DELETED';generation:number;activator_hash:string|null;activator_ciphertext:string|null;beta_generation:number|null;updated_at:Date;}
-interface RevisionRow {revision:number;definition:FlowDefinition;semantic_hash:string;complete:boolean;}
+interface RevisionRow {revision:number;definition:FlowDefinition;semantic_hash:string;complete:boolean;restoration_requires_commit:boolean;}
 type Access=(tx:Tx,s:Scope,actor:Actor,permission:'READ'|'CONFIGURE'|'OPERATE'|'GOVERN')=>Promise<unknown>;
+export interface AutomationMutationHooks {requestBinding?:unknown;beforeWrite?:(tx:Tx)=>Promise<void>;beforeReceipt?:(tx:Tx)=>Promise<void>;}
 export interface AutomationServiceOptions {
+  /** New rollback audit persistence stays unavailable until its cleanup is wired. */
+  rollbackAudit?:{approved:boolean;purgeReady:boolean};
+  /** Authoritative current target-safety recheck. A new revision never opens UNKNOWN. */
+  rollbackSafety?:(tx:Tx,s:Scope,id:string,currentRevision:number|null,nextRevision:number,actor:Actor)=>Promise<void>;
   /** Measured host safety setting, fixed into each new random material. */
   scratchRandomAttempts?:number;
   admission?:AutomationAdmissionLimits;now?:()=>Date;authorize?:Access;
@@ -54,7 +61,7 @@ export class AutomationService {
     assert(row,'AUTOMATION_FLOW_NOT_FOUND',404);return row;
   }
   private async revision(tx:Tx,s:Scope,id:string,revision:number) {
-    const row=(await sql<RevisionRow>`SELECT revision,definition,semantic_hash,complete FROM automation_revisions WHERE ${tenant(s)} AND flow_id=${id} AND revision=${revision}`.execute(tx)).rows[0];
+    const row=(await sql<RevisionRow>`SELECT revision,definition,semantic_hash,complete,COALESCE((to_jsonb(automation_revisions)->>'restoration_requires_commit')::boolean,false) AS restoration_requires_commit FROM automation_revisions WHERE ${tenant(s)} AND flow_id=${id} AND revision=${revision}`.execute(tx)).rows[0];
     assert(row,'AUTOMATION_REVISION_NOT_FOUND',404);return row;
   }
   private async replay(tx:Tx,s:Scope,actor:Actor,requestId:string,hash:string) {
@@ -83,7 +90,7 @@ export class AutomationService {
     await this.access(this.db,s,actor,'READ');
     const row=await this.flow(this.db,s,id),revision=await this.revision(this.db,s,id,row.draft_revision);
     const scheduleReview=revision.definition.trigger.kind==='schedule'?(await sql<{review_required:boolean;review_reason:string|null}>`SELECT review_required,review_reason FROM automation_schedules WHERE ${tenant(s)} AND flow_id=${id}`.execute(this.db)).rows[0]:undefined;
-    return {id:row.id,name:row.name,draftRevision:row.draft_revision,activeRevision:row.active_revision,state:row.state,definition:revision.definition,validation:validateFlowDefinition(revision.definition,{...await scratchNumericOptions(revision.definition),temporalResolution:'fixed'}),scheduleReview:{required:scheduleReview?.review_required??false,reason:scheduleReview?.review_reason??null}};
+    return {id:row.id,name:row.name,draftRevision:row.draft_revision,activeRevision:row.active_revision,generation:row.generation,state:row.state,definition:revision.definition,validation:validateFlowDefinition(revision.definition,{...await scratchNumericOptions(revision.definition),temporalResolution:'fixed'}),scheduleReview:{required:scheduleReview?.review_required??false,reason:scheduleReview?.review_reason??null},restorationRequiresCommit:revision.restoration_requires_commit,rollbackReadiness:{preparationAvailable:Boolean(this.options.rollbackAudit?.approved&&this.options.rollbackAudit.purgeReady),activationAvailable:Boolean(this.options.rollbackAudit?.approved&&this.options.rollbackAudit.purgeReady&&this.options.rollbackSafety),reasonCode:this.options.rollbackAudit?.approved&&this.options.rollbackAudit.purgeReady?(this.options.rollbackSafety?null:'AUTOMATION_ROLLBACK_SAFETY_NOT_READY'):'AUTOMATION_ROLLBACK_AUDIT_NOT_READY'}};
   }
   async getRevision(s:Scope,actor:Actor,id:string,revision:number) {
     await this.access(this.db,s,actor,'READ');
@@ -92,12 +99,32 @@ export class AutomationService {
     const saved=await this.revision(this.db,s,id,revision);
     return {id,revision:saved.revision,definition:saved.definition};
   }
-  async save(s:Scope,actor:Actor,input:{definition:unknown;expectedRevision:number;requestId:string}) {
+  async save(s:Scope,actor:Actor,input:{definition:unknown;expectedRevision:number;requestId:string},rollback?:RollbackDraftInput,beforeWrite?:(tx:Tx)=>Promise<void>,requestBinding?:unknown) {
     await this.access(this.db,s,actor,'CONFIGURE');
+    return this.db.transaction().execute(async tx=>{
+      await acquireRuleScopeLocks(tx,ruleScopeLockSet(s,{subjectHashes:[actor.key]}));
+      return this.saveInTransaction(tx,s,actor,input,rollback,beforeWrite,requestBinding);
+    });
+  }
+  /** Native save for an already scoped transaction. Callers acquire canonical
+   * scope locks before target/Suggestion rows, and acquire automationLock before
+   * a target row if the row has to be locked before entering this helper.
+   * Validation, receipts, storage admission and immutable revision writes stay
+   * on this same connection; no Run or active revision is changed by a save. */
+  async saveInTransaction(tx:Tx,s:Scope,actor:Actor,input:{definition:unknown;expectedRevision:number;requestId:string},rollback?:RollbackDraftInput,beforeWrite?:(tx:Tx)=>Promise<void>,requestBinding?:unknown) {
+    assert(tx.isTransaction,'RULE_TRANSACTION_REQUIRED',500);
+    await this.access(tx,s,actor,'CONFIGURE');
     const candidate=input.definition as Partial<FlowDefinition>|null;
     let fixedTemporalValues:ReadonlySet<string>=new Set();
-    if(candidate&&candidate.guildId===s.guildId&&typeof candidate.id==='string'&&input.expectedRevision>0){
-      const previous=(await sql<RevisionRow>`SELECT revision,definition,semantic_hash,complete FROM automation_revisions WHERE ${tenant(s)} AND flow_id=${candidate.id} AND revision=${input.expectedRevision}`.execute(this.db)).rows[0];
+    if(rollback){
+      assert(this.options.rollbackAudit?.approved&&this.options.rollbackAudit.purgeReady,'AUTOMATION_ROLLBACK_AUDIT_NOT_READY',409);
+      assert(candidate&&typeof candidate.id==='string'&&rollback.expectedRevision===input.expectedRevision&&rollback.requestId===input.requestId,'AUTOMATION_ROLLBACK_INVALID');
+      const source=await this.revision(tx,s,candidate.id,rollback.sourceRevision);
+      assert(fingerprint(source.definition)===fingerprint(input.definition),'AUTOMATION_ROLLBACK_SOURCE_CHANGED',409);
+      fixedTemporalValues=collectFixedTemporalValues(source.definition);
+    }
+    if(!rollback&&candidate&&candidate.guildId===s.guildId&&typeof candidate.id==='string'&&input.expectedRevision>0){
+      const previous=(await sql<RevisionRow>`SELECT revision,definition,semantic_hash,complete FROM automation_revisions WHERE ${tenant(s)} AND flow_id=${candidate.id} AND revision=${input.expectedRevision}`.execute(tx)).rows[0];
       if(previous)fixedTemporalValues=collectFixedTemporalValues(previous.definition);
     }
     const numeric=await scratchNumericOptions(input.definition);
@@ -107,27 +134,56 @@ export class AutomationService {
     assertTemporalUserEdits(definition,fixedTemporalValues);
     assert(definition.guildId===s.guildId,'AUTOMATION_GUILD_MISMATCH',403);
     assert(/^[a-zA-Z0-9_-]{1,100}$/.test(definition.id),'AUTOMATION_FLOW_ID_INVALID');
-    const hash=fingerprint({kind:'SAVE',definition,expectedRevision:input.expectedRevision});
-    const result=await this.db.transaction().execute(async tx=>{
+    const hash=fingerprint({kind:rollback?'ROLLBACK_DRAFT':'SAVE',definition,expectedRevision:input.expectedRevision,...(rollback?{sourceRevision:rollback.sourceRevision,expectedActiveRevision:rollback.expectedActiveRevision,expectedGeneration:rollback.expectedGeneration}:{}),...(requestBinding===undefined?{}:{requestBinding})});
+    const result=await (async()=>{
       await this.access(tx,s,actor,'CONFIGURE');await automationLock(tx,s);
       const prior=await this.replay(tx,s,actor,input.requestId,hash);
       if(prior)return {id:prior.flow_id,revision:prior.revision!};
       const row=(await sql<FlowRow>`SELECT * FROM automation_flows WHERE ${tenant(s)} AND id=${definition.id} FOR UPDATE`.execute(tx)).rows[0];
       assert(!row||row.state!=='DELETED','AUTOMATION_FLOW_DELETED',409);
       assert((row?.draft_revision??0)===input.expectedRevision,'AUTOMATION_REVISION_CONFLICT',409);
+      if(rollback){assert(row,'AUTOMATION_FLOW_NOT_FOUND',404);assertRollbackBase(row,rollback);}
       const stored=(await sql<{flows:number;revisions:number}>`SELECT (SELECT count(*)::integer FROM automation_flows WHERE ${tenant(s)}) AS flows,(SELECT count(*)::integer FROM automation_revisions WHERE ${tenant(s)} AND flow_id=${definition.id}) AS revisions`.execute(tx)).rows[0]!;
       assert((row||stored.flows<this.storage.maxFlowsPerGuild)&&stored.revisions<this.storage.maxRevisionsPerFlow,'AUTOMATION_DEFINITION_STORAGE_LIMIT',429);
       const bytes=(await sql<{guild:number;host:number;added:number}>`SELECT (COALESCE(sum(octet_length(definition::text)) FILTER(WHERE ${tenant(s)}),0)+(SELECT COALESCE(sum(octet_length(snapshot::text)),0) FROM automation_schedule_reviews WHERE ${tenant(s)}))::float8 AS guild,(COALESCE(sum(octet_length(definition::text)),0)+(SELECT COALESCE(sum(octet_length(snapshot::text)),0) FROM automation_schedule_reviews))::float8 AS host,(SELECT octet_length(${json(definition)}::text)) AS added FROM automation_revisions`.execute(tx)).rows[0]!;
       assert(bytes.guild+bytes.added<=this.storage.maxGuildDefinitionBytes&&bytes.host+bytes.added<=this.storage.maxHostDefinitionBytes,'AUTOMATION_DEFINITION_BYTES_LIMIT',429);
       const revision=input.expectedRevision+1;
+      await beforeWrite?.(tx);
       await sql`INSERT INTO automation_flows(organization_id,guild_id,id,name,draft_revision) VALUES(${s.organizationId}::uuid,${s.guildId},${definition.id},${definition.name},${revision}) ON CONFLICT(organization_id,guild_id,id) DO UPDATE SET name=EXCLUDED.name,draft_revision=EXCLUDED.draft_revision,updated_at=now()`.execute(tx);
-      await sql`INSERT INTO automation_revisions(organization_id,guild_id,flow_id,revision,definition,semantic_hash,complete) VALUES(${s.organizationId}::uuid,${s.guildId},${definition.id},${revision},${json(definition)},${validation.semanticHash??fingerprint(definition)},${validation.complete})`.execute(tx);
-      await this.record(tx,s,actor,input.requestId,hash,definition.id,revision,'SAVE');
+      await beforeWrite?.(tx);
+      await sql`INSERT INTO automation_revisions(organization_id,guild_id,flow_id,revision,definition,semantic_hash,complete${rollback?sql`,restoration_requires_commit`:sql``}) VALUES(${s.organizationId}::uuid,${s.guildId},${definition.id},${revision},${json(definition)},${validation.semanticHash??fingerprint(definition)},${validation.complete}${rollback?sql`,true`:sql``})`.execute(tx);
+      if(rollback)await recordRollbackDraft(tx,s,definition.id,rollback,revision,this.now());
+      await beforeWrite?.(tx);await this.record(tx,s,actor,input.requestId,hash,definition.id,revision,'SAVE');await beforeWrite?.(tx);
       return {id:definition.id,revision};
-    });
+    })();
     // Return the exact committed revision even if a different tab saved again.
-    const saved=await this.revision(this.db,s,result.id,result.revision);
+    const saved=await this.revision(tx,s,result.id,result.revision);
     return {id:result.id,draftRevision:result.revision,definition:saved.definition,requestId:input.requestId,validation:validateFlowDefinition(saved.definition,{...numeric,temporalResolution:'fixed'})};
+  }
+  async prepareRollback(s:Scope,actor:Actor,id:string,input:RollbackDraftInput){
+    await this.access(this.db,s,actor,'CONFIGURE');
+    assert(Number.isSafeInteger(input.sourceRevision)&&input.sourceRevision>0&&input.sourceRevision<=input.expectedRevision,'AUTOMATION_ROLLBACK_INVALID');
+    const source=await this.revision(this.db,s,id,input.sourceRevision);
+    const saved=await this.save(s,actor,{definition:source.definition,expectedRevision:input.expectedRevision,requestId:input.requestId},input);
+    return {...saved,rollbackId:input.requestId,restoredFromRevision:input.sourceRevision,requiresFreshReview:true};
+  }
+  async rollbackHistory(s:Scope,actor:Actor,id:string){
+    await this.access(this.db,s,actor,'READ');await this.flow(this.db,s,id);
+    const rows=(await sql<RollbackOrigin>`SELECT * FROM automation_rollbacks WHERE ${tenant(s)} AND flow_id=${id} AND expires_at>${this.now()} ORDER BY created_at DESC,id LIMIT 50`.execute(this.db)).rows;
+    return {items:rows.map(row=>({rollbackId:row.id,sourceRevision:row.source_revision,preparedRevision:row.prepared_revision,baseActiveRevision:row.base_active_revision,baseGeneration:row.base_generation,state:row.state,createdAt:row.created_at.toISOString(),appliedAt:row.applied_at?.toISOString()??null,expiresAt:row.expires_at.toISOString()}))};
+  }
+  async commitRollback(s:Scope,actor:Actor,id:string,input:RollbackCommitInput){
+    return this.enable(s,actor,id,{revision:input.revision,semanticHash:input.semanticHash,requestId:input.requestId},input);
+  }
+  async managedRoles(s:Scope,actor:Actor){
+    await this.access(this.db,s,actor,'CONFIGURE');
+    const rows=(await sql<{id:string;name:string;draft_revision:number;active_revision:number|null;state:string;definition:FlowDefinition}>`SELECT f.id,f.name,f.draft_revision,f.active_revision,f.state,r.definition FROM automation_flows f JOIN automation_revisions r ON r.organization_id=f.organization_id AND r.guild_id=f.guild_id AND r.flow_id=f.id AND r.revision=f.draft_revision WHERE f.organization_id=${s.organizationId}::uuid AND f.guild_id=${s.guildId} AND f.state<>'DELETED' ORDER BY f.updated_at DESC,f.id LIMIT 200`.execute(this.db)).rows;
+    return {mode:'EXISTING_AUTOMATION_POLICY' as const,directMutationAvailable:false,reasonCode:'USE_APPROVED_AUTOMATION_ROLE_ACTION',items:rows.filter(row=>row.definition.targets?.roleIds.length).map(row=>({flowId:row.id,name:row.name,draftRevision:row.draft_revision,activeRevision:row.active_revision,state:row.state,roleIds:row.definition.targets!.roleIds,policyVersion:row.draft_revision})),policy:{liveNativePermissionsRequired:true,governApprovalRequired:true,unknownNeverResent:true,privilegedOrProtectedRolesForbidden:true}};
+  }
+  async managedRoleHistory(s:Scope,actor:Actor){
+    await this.access(this.db,s,actor,'CONFIGURE');
+    const rows=(await sql<{flow_id:string;run_id:string;revision:number;operation:string;state:string;started_at:Date;finished_at:Date|null}>`SELECT r.flow_id,o.run_id,r.revision,o.operation,o.state,o.started_at,o.finished_at FROM automation_operations o JOIN automation_runs r ON r.organization_id=o.organization_id AND r.guild_id=o.guild_id AND r.id=o.run_id WHERE o.organization_id=${s.organizationId}::uuid AND o.guild_id=${s.guildId} AND o.operation IN ('discord.addRole','discord.removeRole') ORDER BY o.started_at DESC,o.run_id,o.identity LIMIT 100`.execute(this.db)).rows;
+    return {items:rows.map(row=>({flowId:row.flow_id,runId:row.run_id,revision:row.revision,operation:row.operation,state:row.state,startedAt:row.started_at.toISOString(),finishedAt:row.finished_at?.toISOString()??null})),retention:'EXISTING_RUN_BOUND' as const};
   }
   async check(s:Scope,actor:Actor,id:string,revision:number,kind:'VALIDATE'|'TEST'|'IMPACT',mockInput:AutomationSimulationInput={}) {
     return this.db.transaction().execute(async tx=>{
@@ -171,14 +227,23 @@ export class AutomationService {
       return {...base,plannedActions:actions,waits,retentionDays:7,runDeadlineDays:7,externalChanges:0,capacityMeasured:Boolean(this.limits.measurementId),productionAvailable:productionUnavailableReason===null,productionUnavailableReason};
     });
   }
-  async enable(s:Scope,actor:Actor,id:string,input:{revision:number;semanticHash:string;requestId:string}) {
+  async enable(s:Scope,actor:Actor,id:string,input:{revision:number;semanticHash:string;requestId:string},rollback?:RollbackCommitInput,hooks?:AutomationMutationHooks) {
     let blockedReason:string|null=null;
     const result=await this.db.transaction().execute(async tx=>{
+      await acquireRuleScopeLocks(tx,ruleScopeLockSet(s,{subjectHashes:[actor.key]}));
       await this.access(tx,s,actor,'CONFIGURE');await automationLock(tx,s);
-      const hash=fingerprint({kind:'ENABLE',id,...input,requestId:undefined}),old=await this.replay(tx,s,actor,input.requestId,hash);
+      const hash=fingerprint({kind:rollback?'ROLLBACK':'ENABLE',id,...input,requestId:undefined,...(rollback?{rollbackId:rollback.rollbackId,expectedActiveRevision:rollback.expectedActiveRevision,expectedGeneration:rollback.expectedGeneration}:{}),...(hooks?.requestBinding===undefined?{}:{requestBinding:hooks.requestBinding})}),old=await this.replay(tx,s,actor,input.requestId,hash);
       if(old){const current=await this.flow(tx,s,id);assert(current.state==='ACTIVE'&&current.active_revision===old.revision,'AUTOMATION_REQUEST_STALE',409);return {id,state:'ACTIVE',activeRevision:old.revision};}
       const row=await this.flow(tx,s,id);assert(row.draft_revision===input.revision,'AUTOMATION_REVISION_CONFLICT',409);
       const revision=await this.revision(tx,s,id,input.revision),checked=validateFlowDefinition(revision.definition,{...await scratchNumericOptions(revision.definition),temporalResolution:'fixed'});
+      if(rollback){
+        assert(this.options.rollbackAudit?.approved&&this.options.rollbackAudit.purgeReady,'AUTOMATION_ROLLBACK_AUDIT_NOT_READY',409);
+        assert(this.options.rollbackSafety,'AUTOMATION_ROLLBACK_SAFETY_NOT_READY',409);
+        assert(revision.restoration_requires_commit,'AUTOMATION_ROLLBACK_NOT_PREPARED',409);
+        assertRollbackBase(row,{expectedRevision:input.revision,expectedActiveRevision:rollback.expectedActiveRevision,expectedGeneration:rollback.expectedGeneration});
+        await this.options.rollbackSafety(tx,s,id,row.active_revision,input.revision,actor);
+        await lockRollbackOrigin(tx,s,id,rollback,this.now());
+      }else assert(!revision.restoration_requires_commit,'AUTOMATION_ROLLBACK_COMMIT_REQUIRED',409);
       assert(checked.valid&&checked.complete&&checked.plan,'AUTOMATION_DEFINITION_INCOMPLETE');
       assert(revision.semantic_hash===input.semanticHash,'AUTOMATION_REVISION_CONFLICT',409);
       const checks=(await sql<{kind:string}>`SELECT kind FROM automation_checks WHERE ${tenant(s)} AND flow_id=${id} AND revision=${input.revision} AND semantic_hash=${input.semanticHash}`.execute(tx)).rows;
@@ -191,13 +256,16 @@ export class AutomationService {
       const count=(await sql<{count:number}>`SELECT count(*)::integer AS count FROM automation_flows WHERE ${tenant(s)} AND state='ACTIVE' AND id<>${id}`.execute(tx)).rows[0]!.count;
       assert(count<this.limits.activeFlows,'AUTOMATION_FLOW_LIMIT',429);
       const invitation=await betaAccess(tx,s,'work');
+      await hooks?.beforeWrite?.(tx);
       await sql`UPDATE automation_flows SET state='ACTIVE',active_revision=${input.revision},generation=generation+1,activator_hash=${actor.key},activator_ciphertext=${actor.encryptedUserId},beta_generation=${invitation?.generation??null},updated_at=now() WHERE ${tenant(s)} AND id=${id}`.execute(tx);
       await sql`UPDATE automation_schedules SET enabled=false,generation=generation+1,next_at=NULL WHERE ${tenant(s)} AND flow_id=${id}`.execute(tx);
       if(revision.definition.trigger.kind==='schedule'){
         const next=nextScheduleAt(revision.definition,this.now()),meaning=plannedCalendarMeaning(revision.definition,next);
         await sql`INSERT INTO automation_schedules(organization_id,guild_id,id,flow_id,revision,generation,rule_hash,enabled,next_at,planned_local,planned_offset) VALUES(${s.organizationId}::uuid,${s.guildId},${id},${id},${input.revision},${row.generation+1},${input.semanticHash},true,${next},${meaning?json(meaning.local):null},${meaning?.offset??null}) ON CONFLICT(organization_id,guild_id,id) DO UPDATE SET revision=EXCLUDED.revision,generation=EXCLUDED.generation,rule_hash=EXCLUDED.rule_hash,enabled=true,next_at=EXCLUDED.next_at,planned_local=EXCLUDED.planned_local,planned_offset=EXCLUDED.planned_offset,deleted_at=NULL,review_required=false,review_reason=NULL`.execute(tx);
       }
+      await hooks?.beforeReceipt?.(tx);
       await this.record(tx,s,actor,input.requestId,hash,id,input.revision,'ENABLE');
+      if(rollback)await sql`UPDATE automation_rollbacks SET state='APPLIED',applied_at=${this.now()} WHERE ${tenant(s)} AND id=${rollback.rollbackId}::uuid AND state='PREPARED'`.execute(tx);
       return {id,state:'ACTIVE',activeRevision:input.revision};
     });
     assert(result,blockedReason??'TIME_ZONE_REVIEW_REQUIRED',409);
@@ -222,15 +290,19 @@ export class AutomationService {
     const trigger=plan.definition.trigger;
     assert(trigger.kind==='manual'||trigger.kind==='schedule'||((trigger.kind==='internal'||trigger.kind==='interaction')&&validateEventTriggerInputs(trigger)),'AUTOMATION_TRIGGER_UNAVAILABLE',503);
   }
-  async disable(s:Scope,actor:Actor,id:string,requestId:string,remove=false) {
+  async disable(s:Scope,actor:Actor,id:string,requestId:string,remove=false,options?:{requestBinding?:unknown;beforeWrite?:(tx:Tx)=>Promise<void>}) {
     return this.db.transaction().execute(async tx=>{
+      await acquireRuleScopeLocks(tx,ruleScopeLockSet(s,{subjectHashes:[actor.key]}));
       await this.access(tx,s,actor,'CONFIGURE');await automationLock(tx,s);
-      const hash=fingerprint({kind:remove?'DELETE':'DISABLE',id}),old=await this.replay(tx,s,actor,requestId,hash);
+      const hash=fingerprint({kind:remove?'DELETE':'DISABLE',id,...(options?.requestBinding===undefined?{}:{requestBinding:options.requestBinding})}),old=await this.replay(tx,s,actor,requestId,hash);
       if(old)return {id,state:remove?'DELETED':'DISABLED'};
       await this.flow(tx,s,id);
+      await options?.beforeWrite?.(tx);
       await sql`UPDATE automation_flows SET state=${remove?'DELETED':'DISABLED'},generation=generation+1,deleted_at=${remove?this.now():null},updated_at=now() WHERE ${tenant(s)} AND id=${id}`.execute(tx);
+      await options?.beforeWrite?.(tx);
       await sql`UPDATE automation_schedules SET enabled=false,generation=generation+1,next_at=NULL,deleted_at=${remove?this.now():null} WHERE ${tenant(s)} AND flow_id=${id}`.execute(tx);
       await sql`UPDATE automation_runs SET cancel_requested_at=COALESCE(cancel_requested_at,${this.now()}) WHERE ${tenant(s)} AND flow_id=${id} AND ended_at IS NULL`.execute(tx);
+      await options?.beforeWrite?.(tx);
       await this.record(tx,s,actor,requestId,hash,id,null,remove?'DELETE':'DISABLE');return {id,state:remove?'DELETED':'DISABLED'};
     });
   }
@@ -241,10 +313,11 @@ export class AutomationService {
     const approval=(await sql<{run_id:string;revision:number}>`SELECT run_id,revision FROM automation_approvals WHERE ${tenant(s)} AND request_id=${id}::uuid AND approver_hash=${actor.key}`.execute(this.db)).rows[0];
     assert(approval,'AUTOMATION_REQUEST_NOT_CONFIRMED',404);return {state:'CONFIRMED',kind:'APPROVAL',revision:approval.revision,runId:approval.run_id};
   }
-  async start(s:Scope,actor:Actor,id:string,input:{requestId:string;values?:Record<string,EvaluatedValue>}) {
+  async start(s:Scope,actor:Actor,id:string,input:{requestId:string;values?:Record<string,EvaluatedValue>},hooks?:AutomationMutationHooks) {
     return this.db.transaction().execute(async tx=>{
+      await acquireRuleScopeLocks(tx,ruleScopeLockSet(s,{subjectHashes:[actor.key]}));
       await this.access(tx,s,actor,'CONFIGURE');await automationLock(tx,s);
-      const requestHash=fingerprint({kind:'START',id,values:input.values??{}}),prior=await this.replay(tx,s,actor,input.requestId,requestHash);
+      const requestHash=fingerprint({kind:'START',id,values:input.values??{},...(hooks?.requestBinding===undefined?{}:{requestBinding:hooks.requestBinding})}),prior=await this.replay(tx,s,actor,input.requestId,requestHash);
       if(prior){assert(prior.run_id,'AUTOMATION_REQUEST_CONFLICT',409);return {id:prior.run_id,state:'EXISTING',revision:prior.revision!};}
       assert(actor.encryptedUserId,'AUTOMATION_IDENTITY_REQUIRED',403);
       assert((await new SettingsService(this.db).get(s,tx)).enabled,'AUTOMATION_STOPPED',409);
@@ -255,7 +328,9 @@ export class AutomationService {
       for(const value of Object.values(input.values??{}))assertTemporalLiteralInput(value.type,value.value);
       // Scheduled occurrences use the activator. A manual run belongs to the
       // actual requester and must recheck that person's native access later.
+      await hooks?.beforeWrite?.(tx);
       const accepted=await this.acceptRun(tx,s,{...flow,activator_hash:actor.key,activator_ciphertext:actor.encryptedUserId},revision,input.requestId,input.values??{});
+      await hooks?.beforeReceipt?.(tx);
       await this.record(tx,s,actor,input.requestId,requestHash,id,accepted.revision,'START',accepted.id);return accepted;
     });
   }

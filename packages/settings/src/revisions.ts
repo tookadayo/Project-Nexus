@@ -6,11 +6,12 @@ import {
   json,
   type Database,
   type Tx,
-} from "../../db/src/index.js";
-import { assert, type Scope } from "../../shared/src/index.js";
-import { canAdmin, canOperatePanel } from "../../security/src/index.js";
-import { audit, SettingsService, settingsSchema, type Actor } from "./index.js";
-import { EntitlementService } from "./billing/entitlements.js";
+} from "../../db/src/index";
+import { assert, type Scope } from "../../shared/src/index";
+import { canAdmin, canOperatePanel } from "../../security/src/index";
+import { audit, SettingsService, settingsSchema, type Actor } from "./index";
+import { EntitlementService } from "./billing/entitlements";
+import {acquireRuleScopeLocks, ruleScopeLockSet} from "../../rules/src/locks";
 
 export type ConfigDomain =
   | "onboarding"
@@ -63,9 +64,18 @@ export class RevisionService {
       403,
     );
   }
-  async draft(s: Scope, actor: Actor, domain: ConfigDomain, value: unknown) {
-    const definition = this.validate(domain, value);
+  async draft(s: Scope, actor: Actor, domain: ConfigDomain, value: unknown, beforeWrite?: (tx: Tx) => Promise<void>) {
     return this.db.transaction().execute(async (tx) => {
+      await acquireRuleScopeLocks(tx, ruleScopeLockSet(s));
+      return this.draftInTransaction(tx, s, actor, domain, value, beforeWrite);
+    });
+  }
+  /** Native immutable draft creation for an already scoped transaction. The
+   * caller acquires canonical scope locks before any target/Suggestion rows.
+   * No published revision or active head is changed by this operation. */
+  async draftInTransaction(tx: Tx, s: Scope, actor: Actor, domain: ConfigDomain, value: unknown, beforeWrite?: (tx: Tx) => Promise<void>) {
+      assert(tx.isTransaction, "RULE_TRANSACTION_REQUIRED", 500);
+      const definition = this.validate(domain, value);
       await this.authorize(tx, s, actor);
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${s.guildId + ":config:" + domain},0))`.execute(
         tx,
@@ -78,16 +88,18 @@ export class RevisionService {
         )
       ).rows[0]!.n;
       const id = randomUUID();
+      await beforeWrite?.(tx);
       await sql`INSERT INTO guild_config_revisions(organization_id,guild_id,id,domain,version,definition,hash,author,state) VALUES(${s.organizationId}::uuid,${s.guildId},${id}::uuid,${domain},${version},${json(definition)},${configHash(definition)},${actor.key},'draft')`.execute(
         tx,
       );
+      await beforeWrite?.(tx);
       await audit(tx, s, actor, "config.drafted", null, {
         id,
         domain,
         version,
       });
+      await beforeWrite?.(tx);
       return id;
-    });
   }
   async get(s: Scope, id: string, tx: Tx = this.db) {
     const row = (
@@ -122,8 +134,10 @@ export class RevisionService {
     id: string,
     expectedHead: string | null,
     confirmationHash: string,
+    beforeWrite?: (tx: Tx) => Promise<void>,
   ) {
     return this.db.transaction().execute(async (tx) => {
+      await acquireRuleScopeLocks(tx, ruleScopeLockSet(s));
       await this.authorize(tx, s, actor);
       const next = await this.get(s, id, tx);
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${s.guildId + ":config:" + next.domain},0))`.execute(
@@ -156,9 +170,11 @@ export class RevisionService {
           "ENTITLEMENT_REQUIRED",
           403,
         );
+      await beforeWrite?.(tx);
       await sql`UPDATE guild_config_revisions SET state='published',published_at=now() WHERE ${tenant(s)} AND id=${id}::uuid AND state='draft'`.execute(
         tx,
       );
+      await beforeWrite?.(tx);
       await sql`INSERT INTO guild_config_heads VALUES(${s.organizationId}::uuid,${s.guildId},${next.domain},${id}::uuid) ON CONFLICT(organization_id,guild_id,domain) DO UPDATE SET revision_id=EXCLUDED.revision_id`.execute(
         tx,
       );
@@ -172,10 +188,12 @@ export class RevisionService {
           ...settings,
           ...(next.definition as object),
         });
+        await beforeWrite?.(tx);
         await sql`INSERT INTO guild_settings VALUES(${s.organizationId}::uuid,${s.guildId},${revision + 1},${json(updated)}) ON CONFLICT(organization_id,guild_id) DO UPDATE SET revision=EXCLUDED.revision,settings=EXCLUDED.settings`.execute(
           tx,
         );
       }
+      await beforeWrite?.(tx);
       await audit(
         tx,
         s,
@@ -184,6 +202,7 @@ export class RevisionService {
         { id: old?.id ?? null },
         { id, domain: next.domain, hash: next.hash },
       );
+      await beforeWrite?.(tx);
       return { ...next, state: "published" as const };
     });
   }

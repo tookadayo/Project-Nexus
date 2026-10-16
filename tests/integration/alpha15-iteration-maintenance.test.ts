@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { connect, ensureGuild, migrate, sql, tenant, type Database } from "../../packages/db/src/index";
 import { scopeForGuild } from "../../packages/security/src/scoping";
@@ -90,7 +90,7 @@ it("restore cancels unstarted work and releases only its reserved quota", async 
 it("restore invalidates prior checks and old enable receipts until fresh review and explicit activation", async () => {
   const scope=scopeForGuild(String(884890000000000000n+BigInt(++serial)));
   await ensureGuild(db,scope);
-  const actor:Actor={key:'synthetic-reviewer',encryptedUserId:'synthetic-ciphertext',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic'};
+  const actor:Actor={key:createHash('sha256').update('synthetic-reviewer').digest('hex'),encryptedUserId:'synthetic-ciphertext',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic'};
   const service=new AutomationService(db,{authorize:async()=>{},admission:{activeFlows:20,monthlyRuns:100,guildConcurrent:1,globalConcurrent:2,guildPending:20,globalPending:100,measurementId:'isolated-maintenance'}});
   const definition:FlowDefinition={schemaVersion:1,id:'restore-review',guildId:scope.guildId,name:'Restore review fixture',trigger:{kind:'manual',inputs:[]},variables:[],body:[{kind:'end',id:'end'}]};
   const saved=await service.save(scope,actor,{definition,expectedRevision:0,requestId:randomUUID()});

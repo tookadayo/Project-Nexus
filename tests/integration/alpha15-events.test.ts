@@ -1,5 +1,4 @@
 import { randomUUID, generateKeyPairSync, sign } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import {
   connect,
@@ -77,16 +76,9 @@ beforeAll(async () => {
   vi.stubEnv("NEXUS_HOSTED_BETA", "off");
   infra = await isolatedPostgres();
   db = connect(infra.databaseUrl);
-  await migrate(db, { throughVersion: 52 });
-  for (const name of ["054_alpha15_automation", "057_alpha15_events", "059_alpha15_schedule_reviews"])
-    await sql
-      .raw(
-        await readFile(
-          new URL(`../../migrations/${name}.sql`, import.meta.url),
-          "utf8",
-        ),
-      )
-      .execute(db);
+  // These acceptance tests run the current runtime. Include its native Run
+  // observation/retention schema; historical migration tests own old schemas.
+  await migrate(db);
 });
 afterAll(async () => {
   await db?.destroy();
@@ -1142,7 +1134,9 @@ it("lets a confirmed in-flight adapter finish while global stop waits without re
       adapter: createAlpha15DiscordAdapter(db, discord, vault),
     }),
     tick = runtime.tick(f.s, run.id);
-  await atPreflight;
+  // Surface a runtime failure before preflight directly instead of waiting for
+  // the test timeout while a rejected worker promise goes unobserved.
+  await Promise.race([atPreflight,tick.then(()=>{throw new Error("AUTOMATION_PREFLIGHT_NOT_REACHED");})]);
   let stopFinished = false;
   const stopping = f.settings
     .update(f.s, f.actor, 0, { enabled: false })

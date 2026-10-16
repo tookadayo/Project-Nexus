@@ -1,5 +1,5 @@
 import {afterAll, beforeAll, expect, it, vi} from "vitest";
-import {randomUUID} from "node:crypto";
+import {createHash,randomUUID} from "node:crypto";
 import {connect, ensureGuild, json, migrate, sql, tenant, type Database} from "../../packages/db/src/index";
 import {WebSetupService} from "../../packages/operations/src/web-setup";
 import {SettingsService, type Actor} from "../../packages/settings/src/index";
@@ -13,7 +13,7 @@ afterAll(async () => { await db?.destroy(); await infra?.stop(); vi.unstubAllEnv
 async function fixture() {
   const s = scopeForGuild(String(933333333333333330n + BigInt(++sequence)));
   await ensureGuild(db, s);
-  const actor: Actor = {key: "datetime-setup", permissions: "8", roles: [], source: "WEB_DASHBOARD", requestId: randomUUID()};
+  const actor: Actor = {key: createHash("sha256").update("datetime-setup").digest("hex"), permissions: "8", roles: [], source: "WEB_DASHBOARD", requestId: randomUUID()};
   return {s, actor, service: new WebSetupService(db, new FakeDiscord()), settings: new SettingsService(db)};
 }
 

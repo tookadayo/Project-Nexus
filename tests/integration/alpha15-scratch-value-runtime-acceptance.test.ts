@@ -21,7 +21,7 @@ import {FakeDiscord} from '../fixtures/discord';
 import {isolatedPostgres} from '../fixtures/postgres';
 
 let db:Database,infra:Awaited<ReturnType<typeof isolatedPostgres>>,serial=0;
-const actor:Actor={key:'synthetic-value-runtime-admin',encryptedUserId:'synthetic-encrypted-identity',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic-value-runtime'};
+const actor:Actor={key:createHash('sha256').update('synthetic-value-runtime-admin').digest('hex'),encryptedUserId:'synthetic-encrypted-identity',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic-value-runtime'};
 const admission:AutomationAdmissionLimits={activeFlows:20,monthlyRuns:100,guildConcurrent:2,globalConcurrent:10,guildPending:20,globalPending:100,measurementId:'isolated-value-runtime-fixtures'};
 const numberList:ValueType={kind:'List',element:'Number'};
 const number=(value:number):ValueInput=>({kind:'literal',type:'Number',value});

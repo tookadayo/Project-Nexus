@@ -5,9 +5,10 @@ import {Client,GatewayIntentBits,Events,type Interaction} from 'discord.js';
 import {InstallNotices} from './install-notices';
 import {DiscordRest} from '../../../packages/discord/src/rest';
 import {observeRoleCoverage,disconnectRoleCoverage,resetRoleCoverage} from '../../../packages/discord/src/role-coverage';
+import {sanitizeBotPostReference,withoutBotPostReference} from '../../../packages/lifecycle/src/alpha16-reference-privacy';
 import {Redis} from 'ioredis';
 import {randomUUID} from 'node:crypto';
-import {normalizeMany,eventSchema,dedupeKey,type Envelope,type Dispatch} from '../../../packages/events/src/index.js';
+import {normalizeMany,eventSchema,dedupeKey,BOT_REPLY_REFERENCE_CONTRACT,type Envelope,type Dispatch} from '../../../packages/events/src/index.js';
 import {scopeForGuild} from '../../../packages/security/src/index.js';
 import type {IdentityVault} from '../../../packages/identity/src/index.js';
 import {sql,tenant,json,ensureGuild,privacyReadLock,type Database,type Tx} from '../../../packages/db/src/index.js';
@@ -19,13 +20,16 @@ export class GatewayPublisher {
  async publish(event:Envelope){return traceStep('event.persist',{'signal.kind':event.kind},()=>this.persist(event));}
  private async persist(event:Envelope){
   event=eventSchema.parse(event);
-  if(!this.db){if(hostedBetaEnabled())throw new Error('BETA_STATE_REQUIRED');return this.publishOnce(event);}
+  if(!this.db){if(hostedBetaEnabled())throw new Error('BETA_STATE_REQUIRED');return this.publishOnce(withoutBotPostReference(event));}
   let streamUnavailable=false;
   await this.db.transaction().execute(async tx=>{
    const s={organizationId:event.organizationId,guildId:event.guildId};
    await privacyReadLock(tx,s);
    try{const beta=await betaAccess(tx,s,'work',event.betaGeneration);if(beta)event={...event,betaGeneration:beta.generation};}
    catch(error){if(error instanceof Error&&error.message==='BETA_UNAVAILABLE')return;throw error;}
+   const priorReference=event.referenceId;
+   event=await sanitizeBotPostReference(tx,s,event);
+   if(priorReference&&!event.referenceId&&event.kind==='channel.post_observed')await sql`UPDATE gateway_ingest SET payload=payload-'referenceId'-'referenceType'-'botReplyReferenceContract' WHERE ${tenant(s)} AND dedupe_key=${dedupeKey(event)}`.execute(tx);
    try{await this.publishOnce(event,tx);}catch(error){if(error instanceof Error&&error.message==='Gateway stream unavailable')streamUnavailable=true;else throw error;}
   });
   if(streamUnavailable)throw new Error('Gateway stream unavailable');
@@ -62,7 +66,7 @@ export function createGateway(redis:Redis,vault:IdentityVault,onError:()=>void=(
   for(const guild of client.guilds.cache.values())if(shardId===undefined||guild.shardId===shardId){
    if(kind==='telemetry.heartbeat'&&disconnected.has(guild.shardId))continue;
    await registerGuild(guild.id);
-   const event:Envelope={...scopeForGuild(guild.id),shardId:guild.shardId,gatewaySessionId:healthSession,sequence:healthSequence++,kind,healthReason:reason,requestedIntents:intentDenied.has(guild.shardId)?['messages','reactions','polls','voice','scheduledEvents','autoMod']:['members','messages','reactions','polls','voice','scheduledEvents','autoMod'],at:new Date().toISOString(),context:'PRODUCTION'};
+   const event:Envelope={...scopeForGuild(guild.id),shardId:guild.shardId,gatewaySessionId:healthSession,sequence:healthSequence++,kind,healthReason:reason,botReplyReferenceContract:BOT_REPLY_REFERENCE_CONTRACT,requestedIntents:intentDenied.has(guild.shardId)?['messages','reactions','polls','voice','scheduledEvents','autoMod']:['members','messages','reactions','polls','voice','scheduledEvents','autoMod'],at:new Date().toISOString(),context:'PRODUCTION'};
    await publisher.publish(event).catch(onError);
   }
  };

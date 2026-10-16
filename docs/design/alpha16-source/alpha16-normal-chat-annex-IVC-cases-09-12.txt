@@ -1,0 +1,150 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 04:35 UTC
+Reasoning: 極高. Design only. Integration review pending.
+
+付録IV-C：実事例09–12
+
+共通fixture基準時刻： evaluationAsOf = 2026-10-15T12:00:00Z
+実装状態： 以下の actionId、field、adapter/editor は設計上の提案。現コードへの存在は未照合。初期 mode=REVIEW_ONLY。上位gateはIV-0に従う。
+分岐規則： B1→B2→B3→B4のfirst-match。各枝の必要入力がUNKNOWNならその枝を INELIGIBLE/INPUT_UNKNOWN として停止し、後続枝へ進まない。
+
+CASE09：提案後の状況が分からない
+
+caseId/version: CASE09 / v1.0
+source: 「Rocket League Germany」運営者事例
+https://discord.com/community/case-study-rocket-league-germany
+
+入力定義：
+suggestionStatus: enum {SUBMITTED, ACKNOWLEDGED, UNDER_REVIEW, ACCEPTED, BLOCKED, DECLINED, DUPLICATE, COMPLETED}／ownerRole: enum {NONE, ASSIGNED, UNKNOWN}／reviewDueAt: timestamp|null／canonicalIssueRef: string|null。由来は構造化Suggestion状態。本文内容・票数は入力しない。adapter未確認時はMISSING。
+
+枝	predicate → action / target / owner / review	UNKNOWN時
+09-B1	(status=SUBMITTED OR ACKNOWLEDGED) AND ownerRole=NONE AND canonicalIssueRef!=NULL → SUGGESTION_OWNER_REVIEW / target=canonicalIssueRef / owner=Community Manager / 担当役割と次回確認時点を決める案	status/owner/refの必要値UNKNOWN→INELIGIBLE/INPUT_UNKNOWN、停止
+09-B2	NOT B1 AND status=UNDER_REVIEW AND ownerRole=ASSIGNED AND reviewDueAt<asOf → SUGGESTION_REVIEW_DUE / target=canonicalIssueRef / owner=ownerRole / 次回review cadenceを明示	due/owner/ref UNKNOWN→停止
+09-B3	NOT B1/B2 AND status=BLOCKED AND ownerRole=ASSIGNED AND canonicalIssueRef!=NULL → SUGGESTION_DEPENDENCY_REVIEW / target=canonicalIssueRef / owner=ownerRole / blockerの状態確認。実装日を約束しない	status/owner/ref UNKNOWN→停止
+09-B4	NOT B1-B3 AND (status=DECLINED OR status=DUPLICATE) AND canonicalIssueRef!=NULL → SUGGESTION_REASON_REFERENCE_REVIEW / target=canonicalIssueRef / owner=Community Manager / 既存理由・参照先を確認する案	status/ref UNKNOWN→停止
+
+最小fixture（baseline）：
+status=UNDER_REVIEW, ownerRole=ASSIGNED, reviewDueAt=2026-10-20T12:00Z, canonicalIssueRef=ISS-09-A
+
+fixture	baselineとの差分	期待
+F09-01	status=SUBMITTED, ownerRole=NONE	B1 / REVIEW_ONLY / SUGGESTION_OWNER_REVIEW
+F09-02	reviewDueAt=2026-10-14T12:00Z	B2 / REVIEW_ONLY / SUGGESTION_REVIEW_DUE
+F09-03	status=BLOCKED	B3 / REVIEW_ONLY / SUGGESTION_DEPENDENCY_REVIEW
+F09-04	status=DECLINED	B4 / REVIEW_ONLY / SUGGESTION_REASON_REFERENCE_REVIEW
+
+自然文例：
+
+「受付後の担当役割がまだ設定されていません。まず担当と次回確認時点を決める案が適しています。」
+
+「検討期限を過ぎています。実装日を約束するのではなく、次回レビュー時点を明示するのが先です。」
+
+禁止： 票数による自動採否、自由文の意味判定、statusの自動変更。
+
+CASE10：channel分散
+
+caseId/version: CASE10 / v1.0
+source: 公式ガイダンス
+https://discord.com/community/understanding-server-insights
+https://discord.com/community/channel-categories-and-names
+
+入力定義：
+channelId:string／purpose: enum {REPORTING,RULES,ACCESSIBILITY,ARCHIVE,RESOURCE,SPECIALIST,GENERAL,OTHER,UNKNOWN}／overlapStatus: enum {NONE,CONFIRMED,UNKNOWN}／protectedUse: enum {NONE,REPORTING,RULES,ACCESSIBILITY,ARCHIVE,RESOURCE,SPECIALIST}／seasonalState: enum {NONE,ACTIVE,INACTIVE,UNKNOWN}／lifecycleState: enum {NEW,ESTABLISHED,UNKNOWN}／accessState: enum {ALLOWED,RESTRICTED,UNKNOWN}／nameIssue: enum {NONE,AMBIGUOUS,DUPLICATE,TOO_LONG,UNKNOWN}／channelMessageCount: integer>=0／uniqueContributorCount: integer>=0。集計値は認可済みaggregateのみ。
+newChannelAgeMax=30日は設計候補、許容範囲7–90日、未承認。channelMessageCountMax=10 posts/28日もCASE10専用候補、許容範囲1–1000、未承認。別metricのthresholdは流用しない。
+
+枝	predicate → action / target / owner / review	UNKNOWN時
+10-B1	accessState=RESTRICTED OR nameIssue∈{AMBIGUOUS,DUPLICATE,TOO_LONG} → CHANNEL_NAVIGATION_REVIEW / target=channelId / owner=Community Manager / access・名称・導線を確認	該当predicateの必要値がUNKNOWNでTRUEを確認できない場合→停止
+10-B2	NOT B1 AND (protectedUse!=NONE OR seasonalState!=NONE OR lifecycleState=NEW) → CHANNEL_PRESERVE_REVIEW / target=channelId / owner=Community Manager / 保護用途・季節性・新設を確認し維持/時期再確認	protected/seasonal/lifecycle UNKNOWN→停止
+10-B3	NOT B1/B2 AND purpose!=UNKNOWN AND overlapStatus=CONFIRMED AND channelMessageCount < 10（28日window）→ CHANNEL_CONSOLIDATION_REVIEW / target=channelId / owner=Community Manager / 可逆的な整理trialを検討	purpose/overlap/countがUNKNOWN→停止
+10-B4	NOT B1-B3 AND (purpose=UNKNOWN OR overlapStatus=UNKNOWN OR channelMessageCountが取得不能) → CHANNEL_PURPOSE_CONFIRM / target=channelId / owner=Community Manager / 目的・比較条件を確認	sourceそのものがない場合はMISSING/REVIEW_ONLY
+
+最小fixture（baseline）：
+accessState=ALLOWED, nameIssue=NONE, protectedUse=NONE, seasonalState=NONE, lifecycleState=ESTABLISHED, purpose=GENERAL, overlapStatus=NONE, channelMessageCount=25, uniqueContributorCount=8
+
+fixture	baselineとの差分	期待
+F10-01	nameIssue=DUPLICATE	B1 / REVIEW_ONLY / CHANNEL_NAVIGATION_REVIEW
+F10-02	protectedUse=RESOURCE	B2 / REVIEW_ONLY / CHANNEL_PRESERVE_REVIEW
+F10-03	overlapStatus=CONFIRMED, channelMessageCount=9	B3 / REVIEW_ONLY / CHANNEL_CONSOLIDATION_REVIEW
+F10-04	purpose=UNKNOWN	B4 / REVIEW_ONLY / CHANNEL_PURPOSE_CONFIRM
+
+自然文例：
+
+「このchannelはRESOURCE用途として扱われているため、利用件数だけで整理対象にはせず、まず用途を維持するか確認します。」
+
+「目的が明確で、他channelとの重複も確認されています。28日間の利用量を踏まえ、削除ではなく可逆的な整理方法を検討する案です。」
+
+禁止： 投稿数だけによる削除・archive、権限変更、個人ごとの利用評価、native閲覧率の推定。
+
+CASE11：eventをheadcountだけで評価
+
+caseId/version: CASE11 / v1.0
+source: 公式助言
+https://discord.com/community/understanding-event-metrics
+
+入力定義：
+eventId:string／eventPurpose: enum {COMMUNITY_CONNECTION,LEARNING,FEEDBACK,RECREATION,GROWTH,OTHER,UNKNOWN}／rsvpCount: integer>=0／attendanceCount: integer>=0／populationMatch: enum {MATCH,MISMATCH,UNKNOWN}／feedback: enum {GOAL_MET,GOAL_NOT_MET,NEUTRAL,UNKNOWN}／scheduledAt: timestamp／timeChanged:boolean／accessCheck: enum {PASS,FAIL,UNKNOWN}／reminderDeliveryStatus: enum {DELIVERED,PARTIAL,FAILED,UNKNOWN}／hostCapacity: enum {AVAILABLE,LIMITED,UNKNOWN}／eventOwnedBy: enum {MODERATOR,COMMUNITY,STAFF,UNKNOWN}／repeatAttendanceRate: decimal|null。
+eventConversionReviewThreshold=0.30（attendance/rsvp）はCASE11専用の未承認候補、bounds 0.05–0.95。smallEventMaxAttendance=20も未承認候補、bounds 1–100。repeatAttendanceRateは既存の認可済みaggregateが成立する場合のみ。
+
+枝	predicate → action / target / owner / review	UNKNOWN時
+11-B1	populationMatch=MATCH AND rsvpCount>0 AND attendanceCount/rsvpCount<0.30 AND (accessCheck=FAIL OR reminderDeliveryStatus=FAILED OR timeChanged=TRUE) → EVENT_LOGISTICS_REVIEW / target=eventId / owner=Event Owner / 時刻・access・reminderを確認	比率またはlogistics入力UNKNOWN→停止
+11-B2	NOT B1 AND feedback=GOAL_MET AND attendanceCount<=20 AND eventPurpose!=UNKNOWN → EVENT_GOAL_MAINTAIN_REVIEW / target=eventId / owner=Event Owner / 小規模でも目的達成として維持を検討	feedback/purpose/attendance UNKNOWN→停止
+11-B3	NOT B1/B2 AND attendanceCount>0 AND feedback=UNKNOWN AND repeatAttendanceRate < RET-001の当該metric設定値 → EVENT_FORMAT_QUESTION_REVIEW / target=eventId / owner=Event Owner / 任意のformat確認	repeat rate/feedback UNKNOWN→停止
+11-B4	NOT B1-B3 AND eventOwnedBy=COMMUNITY AND hostCapacity=LIMITED → COMMUNITY_HOST_SUPPORT_REVIEW / target=eventId / owner=Community Event Owner / host checklist/supportを限定的に確認	ownership/capacity UNKNOWN→停止
+
+最小fixture（baseline）：
+eventId=EV-11-A, eventPurpose=COMMUNITY_CONNECTION, rsvpCount=100, attendanceCount=60, populationMatch=MATCH, feedback=UNKNOWN, scheduledAt=2026-10-12T12:00Z, timeChanged=FALSE, accessCheck=PASS, reminderDeliveryStatus=DELIVERED, hostCapacity=AVAILABLE, eventOwnedBy=STAFF, repeatAttendanceRate=0.50
+
+fixture	baselineとの差分	期待
+F11-01	attendanceCount=20, accessCheck=FAIL	B1 / REVIEW_ONLY / EVENT_LOGISTICS_REVIEW
+F11-02	attendanceCount=15, feedback=GOAL_MET	B2 / REVIEW_ONLY / EVENT_GOAL_MAINTAIN_REVIEW
+F11-03	attendanceCount=30, repeatAttendanceRate=0.10	B3 / REVIEW_ONLY / EVENT_FORMAT_QUESTION_REVIEW
+F11-04	eventOwnedBy=COMMUNITY, hostCapacity=LIMITED	B4 / REVIEW_ONLY / COMMUNITY_HOST_SUPPORT_REVIEW
+
+自然文例：
+
+「登録100人に対して参加60人ですが、今回は確認済みのaccess問題があります。人数だけで評価せず、まず参加までの導線を確認する案です。」
+
+「参加人数は大きくありませんが、管理者が目的達成を確認しています。規模を増やすより、現在の形式を維持して様子を見る案です。」
+
+禁止： RSVP人数だけで成功/失敗を決めること、参加者の個人属性・居住地・意欲推定、speakerとattendanceの混同、自動的なevent変更。
+
+CASE12：重要告知とroutine ping
+
+caseId/version: CASE12 / v1.0
+source: 公式保存ガイダンス＋機能FAQ
+https://pax.discord.com/community/server-information-and-announcement-channels
+https://support.discord.com/hc/en-us/articles/360032008192-Announcement-Channel-FAQ
+
+入力定義：
+announcementId:string／announcementCategory: enum {DURABLE_REFERENCE,ROUTINE_UPDATE,URGENT_CORRECTION,OTHER,UNKNOWN}／mentionScope: enum {NONE,OPT_IN,ROLE_TARGETED,MASS,UNKNOWN}／mentionCount: integer>=0|null／canonicalLink:string|null／missingInfoReport: enum {NONE,REPEATED_INFO_REQUEST,CHANGE_DETAIL_MISSING,AUDIENCE_MISSING,UNKNOWN}／publishState: enum {DRAFT,READY,PUBLISHED,WITHDRAWN,UNKNOWN}／audience: enum {INTERNAL,SERVER_MEMBERS,EXTERNAL_FOLLOWERS,UNKNOWN}／correctionFlag:boolean。由来は構造化announcement/publication状態。本文意味は解析しない。adapter/editor未確認時はMISSING。
+
+枝	predicate → action / target / owner / review	UNKNOWN時
+12-B1	correctionFlag=TRUE AND announcementId!=NULL → ANNOUNCEMENT_CORRECTION_REVIEW / target=announcementId / owner=Community Manager / 変更点・対象audience・canonical referenceを確認	correctionFlag/announcementId UNKNOWN→停止
+12-B2	NOT B1 AND announcementCategory=ROUTINE_UPDATE AND mentionScope=MASS AND mentionCount>0 → ANNOUNCEMENT_DIGEST_REVIEW / target=announcementId / owner=Community Manager / opt-inまたはdigest化を検討	category/scope/count UNKNOWN→停止
+12-B3	NOT B1/B2 AND missingInfoReport=REPEATED_INFO_REQUEST AND canonicalLink!=NULL → ANNOUNCEMENT_REFERENCE_VISIBILITY_REVIEW / target=announcementId / owner=Community Manager / 短いreferenceと可視性を確認	report/link UNKNOWN→停止
+12-B4	NOT B1-B3 AND audience=EXTERNAL_FOLLOWERS AND publishState∈{DRAFT,READY} → ANNOUNCEMENT_PUBLIC_SCOPE_REVIEW / target=announcementId / owner=Community Manager / 外部公開範囲と権限を確認	audience/state UNKNOWN→停止
+
+最小fixture（baseline）：
+announcementId=ANN-12-A, announcementCategory=ROUTINE_UPDATE, mentionScope=NONE, mentionCount=0, canonicalLink=/info/12, missingInfoReport=NONE, publishState=DRAFT, audience=INTERNAL, correctionFlag=FALSE
+
+fixture	baselineとの差分	期待
+F12-01	correctionFlag=TRUE	B1 / REVIEW_ONLY / ANNOUNCEMENT_CORRECTION_REVIEW
+F12-02	mentionScope=MASS, mentionCount=30	B2 / REVIEW_ONLY / ANNOUNCEMENT_DIGEST_REVIEW
+F12-03	missingInfoReport=REPEATED_INFO_REQUEST	B3 / REVIEW_ONLY / ANNOUNCEMENT_REFERENCE_VISIBILITY_REVIEW
+F12-04	audience=EXTERNAL_FOLLOWERS, publishState=READY	B4 / REVIEW_ONLY / ANNOUNCEMENT_PUBLIC_SCOPE_REVIEW
+
+自然文例：
+
+「訂正として扱われているため、まず変更点と対象範囲を確認する案です。通常のroutine告知として一括通知する判断には進めません。」
+
+「routine updateを全体mentionで送る状態です。投稿自体は行わず、opt-in通知やdigestに分けられるかを確認する案です。」
+
+禁止： 自動publish、mass ping、reaction数から未読・疲労を推定すること、private incidentや未公開計画を公開案へ混入すること、外部公開範囲の自動変更。
+
+4-case対応表
+Case	adapter / UI	action	fixture
+CASE09	Structured Suggestion State Adapter → Suggestion/Review UI	SUGGESTION_OWNER_REVIEW / SUGGESTION_REVIEW_DUE / SUGGESTION_DEPENDENCY_REVIEW / SUGGESTION_REASON_REFERENCE_REVIEW	F09-01〜04
+CASE10	Structured Channel Metadata + authorized channel aggregate → Channel Review UI	CHANNEL_NAVIGATION_REVIEW / CHANNEL_PRESERVE_REVIEW / CHANNEL_CONSOLIDATION_REVIEW / CHANNEL_PURPOSE_CONFIRM	F10-01〜04
+CASE11	Structured Event/RSVP/Attendance aggregate → Event Review UI	EVENT_LOGISTICS_REVIEW / EVENT_GOAL_MAINTAIN_REVIEW / EVENT_FORMAT_QUESTION_REVIEW / COMMUNITY_HOST_SUPPORT_REVIEW	F11-01〜04
+CASE12	Structured Announcement/Publication State → Announcement Review UI	ANNOUNCEMENT_CORRECTION_REVIEW / ANNOUNCEMENT_DIGEST_REVIEW / ANNOUNCEMENT_REFERENCE_VISIBILITY_REVIEW / ANNOUNCEMENT_PUBLIC_SCOPE_REVIEW	F12-01〜04
+
+設計上の固定点： 未確認adapter/typed editorを存在すると仮定しない。したがってCREATE_DRAFTへ昇格する根拠がない場合はREVIEW_ONLY。各caseの数値候補は未検証・承認待ちであり、実測値・benchmarkではない。fixtureも合成設計例であり、実測・実行済みテスト結果ではない。

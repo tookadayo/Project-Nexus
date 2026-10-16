@@ -107,10 +107,12 @@ it("requires the display assertion and forwards only after current authorization
   expect(fetcher.mock.calls[0]?.[0]).toBe(
     `http://127.0.0.1:3001/v3/organizations/${scopeForGuild(b).organizationId}/guilds/${b}/settings/retention`,
   );
-  const forwarded = fetcher.mock.calls[0]!, headers = new Headers(forwarded[1]?.headers), path = new URL(forwarded[0]).pathname;
-  const proof = readPublicApiProof(headers.get("x-nexus-user-proof"), "POST", path, scopeForGuild(b));
+  const forwarded = fetcher.mock.calls[0]!, headers = new Headers(forwarded[1]?.headers), url = new URL(forwarded[0]), path = url.pathname + url.search;
+  const proof = readPublicApiProof(headers.get("x-nexus-user-proof"), "POST", path, scopeForGuild(b), undefined, undefined, forwarded[1]?.body);
   expect(proof.userId).toBe(userId); expect(proof.origin).toBe("http://localhost:3100");
-  expect(() => readPublicApiProof(headers.get("x-nexus-user-proof"), "POST", path, scopeForGuild(a))).toThrow();
+  expect(proof.version).toBe(2);
+  expect(() => readPublicApiProof(headers.get("x-nexus-user-proof"), "POST", path, scopeForGuild(a), undefined, undefined, forwarded[1]?.body)).toThrow();
+  expect(() => readPublicApiProof(headers.get("x-nexus-user-proof"), "POST", path, scopeForGuild(b), undefined, undefined, { days: 90, revision: 1 })).toThrow();
 });
 it("never treats the client assertion as permission", async () => {
   context.mockResolvedValueOnce(null);

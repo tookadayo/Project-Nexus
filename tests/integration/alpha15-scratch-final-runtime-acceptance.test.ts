@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {afterAll,beforeAll,expect,it,vi} from 'vitest';
 import {connect,ensureGuild,migrate,sql,tenant,type Database} from '../../packages/db/src/index';
 import {scopeForGuild} from '../../packages/security/src/scoping';
@@ -11,7 +11,7 @@ import type {FlowDefinition,Statement,ValueInput,ValueType} from '../../packages
 import {isolatedPostgres} from '../fixtures/postgres';
 
 let db:Database,infra:Awaited<ReturnType<typeof isolatedPostgres>>,serial=0;
-const actor:Actor={key:'synthetic-final-runtime-admin',encryptedUserId:'encrypted-synthetic-identity',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic-final-runtime'};
+const actor:Actor={key:createHash('sha256').update('synthetic-final-runtime-admin').digest('hex'),encryptedUserId:'encrypted-synthetic-identity',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic-final-runtime'};
 const admission:AutomationAdmissionLimits={activeFlows:10,monthlyRuns:20,guildConcurrent:2,globalConcurrent:4,guildPending:10,globalPending:20,measurementId:'isolated-final-runtime-acceptance'};
 const textList:ValueType={kind:'List',element:'PlainText'};
 const number=(value:number):ValueInput=>({kind:'literal',type:'Number',value});

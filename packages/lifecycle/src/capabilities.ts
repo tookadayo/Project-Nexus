@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {PermissionFlagsBits} from 'discord-api-types/v10';
-import {sql,tenant,json,type Database} from '../../db/src/index.js';
-import {assert,type Scope} from '../../shared/src/index.js';
+import {sql,tenant,json,type Database} from '../../db/src/index';
+import {assert,type Scope} from '../../shared/src/index';
 import type {DiscordPort,GuildNativeState} from '../../discord/src/rest.js';
 import type {Settings} from '../../settings/src/index.js';
 export type OnboardingMode=Settings['onboardingMode'];

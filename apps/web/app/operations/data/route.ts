@@ -63,16 +63,17 @@ const json = (value: unknown) =>
   NextResponse.json(value, { headers: { "Cache-Control": "no-store" } });
 function domains(c: Awaited<ReturnType<typeof operationsContext>>) {
   const { db, vault, discord, tokens, authority } = c.services;
+  const proof = { scope: c.scope, actorHash: c.actor.key, expiresAt: new Date(c.snapshot.checkedAt + 10000) };
   return {
     attention: new AttentionInbox(db),
-    destinations: new Destinations(db, discord),
+    destinations: new Destinations(db, discord, proof),
     playbooks: new Playbooks(db),
     reports: new Reports(db),
     intake: new OperationsIntake(db, vault, discord, tokens),
     improvements: new InterventionReview(db),
     events: new EventOperations(db),
-    credentials: new ApiCredentials(db, vault),
-    webhooks: new Webhooks(db, vault),
+    credentials: new ApiCredentials(db, vault, proof),
+    webhooks: new Webhooks(db, vault, proof),
     organization: new OperationsOrganization(db, vault, discord, authority),
   };
 }
@@ -247,6 +248,7 @@ export async function POST(request: NextRequest) {
     const { scope: s, actor: a } = c,
       d = domains(c);
     const id = () => z.object({ id: z.uuid() }).strict().parse(input).id;
+    const revisionTarget = () => z.object({ id: z.uuid(), expectedRevision: z.number().int().positive() }).strict().parse(input);
     let result: unknown;
     switch (action) {
       case "attention":
@@ -255,12 +257,16 @@ export async function POST(request: NextRequest) {
       case "destination":
         result = await d.destinations.create(s, a, input);
         break;
-      case "destinationDisable":
-        result = await d.destinations.disable(s, a, id());
+      case "destinationDisable": {
+        const target = revisionTarget();
+        result = await d.destinations.disable(s, a, target.id, target.expectedRevision);
         break;
-      case "destinationResume":
-        result = await d.destinations.resume(s, a, id());
+      }
+      case "destinationResume": {
+        const target = revisionTarget();
+        result = await d.destinations.resume(s, a, target.id, target.expectedRevision);
         break;
+      }
       case "playbook":
         result = await d.playbooks.save(s, a, input);
         break;
@@ -330,24 +336,30 @@ export async function POST(request: NextRequest) {
       case "credential":
         result = await d.credentials.create(s, a, input);
         break;
-      case "credentialRevoke":
-        result = await d.credentials.revoke(s, a, id());
+      case "credentialRevoke": {
+        const target = revisionTarget();
+        result = await d.credentials.revoke(s, a, target.id, target.expectedRevision);
         break;
-      case "credentialResume":
-        result = await d.credentials.resume(s, a, id());
+      }
+      case "credentialResume": {
+        const target = revisionTarget();
+        result = await d.credentials.resume(s, a, target.id, target.expectedRevision);
         break;
+      }
       case "webhook":
         result = await d.webhooks.create(s, a, input);
         break;
-      case "webhookRotate":
-        result = await d.webhooks.rotate(s, a, id());
+      case "webhookRotate": {
+        const target = revisionTarget();
+        result = await d.webhooks.rotate(s, a, target.id, target.expectedRevision);
         break;
+      }
       case "webhookEnabled": {
         const data = z
-          .object({ id: z.uuid(), enabled: z.boolean() })
+          .object({ id: z.uuid(), enabled: z.boolean(), expectedRevision: z.number().int().positive() })
           .strict()
           .parse(input);
-        result = await d.webhooks.setEnabled(s, a, data.id, data.enabled);
+        result = await d.webhooks.setEnabled(s, a, data.id, data.enabled, data.expectedRevision);
         break;
       }
       case "organization": {

@@ -17,7 +17,7 @@ import {
   compareClock,
   type StateClock,
 } from "./typed-state";
-import { isDirectReply } from "../../events/src/index";
+import { isDirectReply, BOT_REPLY_REFERENCE_CONTRACT, MASS_MENTION_CONTRACT, SCHEDULED_EVENT_TIME_CONTRACT } from "../../events/src/index";
 import type { Settings } from "../../settings/src/index";
 import { latestCapability, requestCapabilityRefresh } from "./discovery";
 import { projectNativeSnapshot } from "./native";
@@ -58,6 +58,10 @@ const factData = z
     tagConflict: z.boolean().optional(),
     entityType: z.number().int().optional(),
     status: z.number().int().optional(),
+    scheduledStartAt:z.iso.datetime().nullable().optional(),
+    scheduledEndAt:z.iso.datetime().nullable().optional(),
+    scheduledMetadataObservedAt:z.iso.datetime().optional(),
+    eventScheduleContract:z.literal(SCHEDULED_EVENT_TIME_CONTRACT).optional(),
   })
   .strict();
 export async function adaptiveFact(
@@ -137,7 +141,9 @@ export async function projectLocationPost(tx: Tx,s: Scope,e: Envelope,cfg: Setti
   const surface = await resolveSurface(tx,s,e.channelId), resolved = resolveChannel(cfg.communityModel,cfg.analysisScope,surface.metadata,e.channelId);
   if (!resolved.selected) return;
   const kind = e.authorKind ?? (e.humanVerified === true ? "HUMAN" : "UNKNOWN");
-  await sql`INSERT INTO location_post_observations(organization_id,guild_id,message_id,channel_id,sent_at,author_kind,subject_hash,reference_id,message_type) VALUES(${s.organizationId}::uuid,${s.guildId},${e.messageId},${e.channelId},${new Date(e.at)},${kind},${subjectHash},${e.referenceId ?? null},${e.messageType ?? 0}) ON CONFLICT DO NOTHING`.execute(tx);
+  const referenceContract=e.kind==="channel.post_observed"&&(kind==="BOT"||kind==="WEBHOOK")&&e.botReplyReferenceContract===BOT_REPLY_REFERENCE_CONTRACT?BOT_REPLY_REFERENCE_CONTRACT:null;
+  const mentionContract=e.massMentionContract===MASS_MENTION_CONTRACT&&typeof e.mentionEveryone==="boolean"&&typeof e.roleMentionCount==="number"&&Number.isInteger(e.roleMentionCount)&&e.roleMentionCount>=0&&e.roleMentionCount<=1000?MASS_MENTION_CONTRACT:null;
+  await sql`INSERT INTO location_post_observations(organization_id,guild_id,message_id,channel_id,sent_at,author_kind,subject_hash,reference_id,message_type,reference_contract_version,mention_everyone,role_mention_count,mention_contract_version) VALUES(${s.organizationId}::uuid,${s.guildId},${e.messageId},${e.channelId},${new Date(e.at)},${kind},${subjectHash},${e.referenceId ?? null},${e.messageType ?? 0},${referenceContract},${mentionContract?e.mentionEveryone!:null},${mentionContract?e.roleMentionCount!:null},${mentionContract}) ON CONFLICT DO NOTHING`.execute(tx);
   if (kind !== "HUMAN" || !subjectHash) return;
   const direct = isDirectReply(e), forum = resolved.surface === "FORUM_POST" || resolved.surface === "MEDIA_POST";
   if (direct)
@@ -183,7 +189,7 @@ export async function projectStructure(
     return true;
   }
   if (
-    e.kind.startsWith("channel.") ||
+    (e.kind.startsWith("channel.") && e.kind !== "channel.post_observed") ||
     [
       "thread.created",
       "thread.updated",
@@ -306,6 +312,12 @@ export async function projectStructure(
         entityType: e.entityType,
         status: e.kind.endsWith("deleted") ? 4 : e.eventStatus,
         activeSince,
+        // Missing legacy/partial fields explicitly invalidate this metadata;
+        // an old scheduled time is never carried forward across a new update.
+        scheduledStartAt:e.scheduledStartAt??null,
+        scheduledEndAt:e.scheduledEndAt??null,
+        scheduledMetadataObservedAt:e.eventScheduleContract===SCHEDULED_EVENT_TIME_CONTRACT?e.scheduledMetadataObservedAt??null:null,
+        eventScheduleContract:e.eventScheduleContract??null,
       },
       at,
     );
@@ -314,6 +326,10 @@ export async function projectStructure(
       channelId: e.channelId,
       entityType: e.entityType,
       status: e.eventStatus,
+      scheduledStartAt:e.scheduledStartAt,
+      scheduledEndAt:e.scheduledEndAt,
+      scheduledMetadataObservedAt:e.scheduledMetadataObservedAt,
+      eventScheduleContract:e.eventScheduleContract,
     });
     if (e.eventStatus === 2 && e.channelId && e.entityType !== 3) {
       const sessions = (

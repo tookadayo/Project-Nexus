@@ -13,6 +13,7 @@ import { SettingsService, type Actor } from "../../settings/src/index";
 import { EntitlementService } from "../../settings/src/billing/entitlements";
 import { latestCapability, analysisChannelScope } from "../../lifecycle/src/discovery";
 import { operationsAccess } from "../../operations/src/policy";
+import { acquireRuleScopeLocks, ruleScopeLockSet } from "../../rules/src/locks";
 import {
   buildMetricEvidence,
   evidenceContext,
@@ -439,11 +440,13 @@ export class ExploreService {
         previous = (
           await sql<{
             revision: number;
-          }>`SELECT revision FROM operational_segments WHERE ${tenant(s)} AND id=${id}::uuid FOR UPDATE`.execute(
+            name: string;
+          }>`SELECT revision,name FROM operational_segments WHERE ${tenant(s)} AND id=${id}::uuid FOR UPDATE`.execute(
             tx,
           )
         ).rows[0];
       assert(!segment.id || previous, "SEGMENT_NOT_FOUND", 404);
+      assert(!previous?.name.startsWith("view:"), "SEGMENT_IN_USE", 409);
       assert(
         !previous || previous.revision === segment.revision,
         "REVISION_CONFLICT",
@@ -462,7 +465,35 @@ export class ExploreService {
     assert(view, "SAVED_VIEW_NOT_FOUND", 404);
     return this.chart(s, viewToQuery(view), now);
   }
+  async removeView(s: Scope, actor: Actor, input: unknown) {
+    const data = z.object({ id: z.uuid(), revision: z.number().int().positive() }).strict().parse(input);
+    return this.db.transaction().execute(async tx => {
+      await this.writeAccess(tx, s, actor);
+      const row = (await sql<{ revision: number; segment_id: string }>`SELECT revision,segment_id FROM saved_metric_views WHERE ${tenant(s)} AND id=${data.id}::uuid FOR UPDATE`.execute(tx)).rows[0];
+      assert(row, "SAVED_VIEW_NOT_FOUND", 404);
+      assert(row.revision === data.revision, "REVISION_CONFLICT", 409);
+      // Existing FK cascades are not permission to rewrite report definitions.
+      // The row lock also fences concurrent FK references during this check.
+      assert(!(await sql`SELECT 1 FROM report_template_views WHERE ${tenant(s)} AND view_id=${data.id}::uuid LIMIT 1`.execute(tx)).rows.length, "SAVED_VIEW_IN_USE", 409);
+      await sql`DELETE FROM saved_metric_views WHERE ${tenant(s)} AND id=${data.id}::uuid`.execute(tx);
+      await sql`DELETE FROM operational_segments WHERE ${tenant(s)} AND id=${row.segment_id}::uuid AND name=${"view:" + data.id} AND NOT EXISTS(SELECT 1 FROM saved_metric_views WHERE ${tenant(s)} AND segment_id=${row.segment_id}::uuid)`.execute(tx);
+      return { id: data.id, deleted: true as const };
+    });
+  }
+  async removeSegment(s: Scope, actor: Actor, input: unknown) {
+    const data = z.object({ id: z.uuid(), revision: z.number().int().positive() }).strict().parse(input);
+    return this.db.transaction().execute(async tx => {
+      await this.writeAccess(tx, s, actor);
+      const row = (await sql<{ revision: number; name: string }>`SELECT revision,name FROM operational_segments WHERE ${tenant(s)} AND id=${data.id}::uuid FOR UPDATE`.execute(tx)).rows[0];
+      assert(row, "SEGMENT_NOT_FOUND", 404);
+      assert(row.revision === data.revision, "REVISION_CONFLICT", 409);
+      assert(!row.name.startsWith("view:") && !(await sql`SELECT 1 FROM saved_metric_views WHERE ${tenant(s)} AND segment_id=${data.id}::uuid LIMIT 1`.execute(tx)).rows.length, "SEGMENT_IN_USE", 409);
+      await sql`DELETE FROM operational_segments WHERE ${tenant(s)} AND id=${data.id}::uuid`.execute(tx);
+      return { id: data.id, deleted: true as const };
+    });
+  }
   private async writeAccess(tx: Tx, s: Scope, actor: Actor) {
+    await acquireRuleScopeLocks(tx, ruleScopeLockSet(s));
     await operationsAccess(tx, s, actor, "ANALYZE", "surface_breakdowns");
     await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"explore:" + s.organizationId + ":" + s.guildId},0))`.execute(
       tx,

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { connect, ensureGuild, migrate, sql, tenant, type Database } from "../../packages/db/src/index";
 import { scopeForGuild } from "../../packages/security/src/scoping";
@@ -10,7 +10,7 @@ import type { FlowDefinition, ValueInput } from "../../packages/automation/src/t
 import { isolatedPostgres } from "../fixtures/postgres";
 
 let db: Database, infra: Awaited<ReturnType<typeof isolatedPostgres>>, serial = 0;
-const actor: Actor = { key: "synthetic-conditional-admin", encryptedUserId: "synthetic-encrypted-identity", permissions: "8", roles: [], source: "WEB_DASHBOARD", requestId: "synthetic-conditional" };
+const actor: Actor = { key: createHash("sha256").update("synthetic-conditional-admin").digest("hex"), encryptedUserId: "synthetic-encrypted-identity", permissions: "8", roles: [], source: "WEB_DASHBOARD", requestId: "synthetic-conditional" };
 const admission: AutomationAdmissionLimits = { activeFlows: 20, monthlyRuns: 100, guildConcurrent: 2, globalConcurrent: 4, guildPending: 20, globalPending: 100, measurementId: "isolated-conditional-fixtures" };
 const number = (value: number): ValueInput => ({ kind: "literal", type: "Number", value });
 const boolean = (value: boolean): ValueInput => ({ kind: "literal", type: "Boolean", value });

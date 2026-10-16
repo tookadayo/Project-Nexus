@@ -108,6 +108,8 @@ export async function POST(request: NextRequest) {
           z
             .object({ action: z.literal("saveSegment"), segment: z.unknown() })
             .strict(),
+          z.object({ action: z.literal("deleteView"), id: z.uuid(), revision: z.number().int().positive() }).strict(),
+          z.object({ action: z.literal("deleteSegment"), id: z.uuid(), revision: z.number().int().positive() }).strict(),
         ])
         .parse(JSON.parse(await billingBody(request, 8192))),
       explore = new ExploreService(context.services.db);
@@ -115,9 +117,9 @@ export async function POST(request: NextRequest) {
       request.headers.get("X-Nexus-Guild"),
       context.scope.guildId,
     );
-    const result =
-      input.action === "saveView"
-        ? await explore.save(context.scope, context.actor, input.view)
+    const result = input.action === "deleteView" ? await explore.removeView(context.scope, context.actor, { id: input.id, revision: input.revision })
+      : input.action === "deleteSegment" ? await explore.removeSegment(context.scope, context.actor, { id: input.id, revision: input.revision })
+      : input.action === "saveView" ? await explore.save(context.scope, context.actor, input.view)
         : await explore.saveSegment(
             context.scope,
             context.actor,

@@ -89,6 +89,12 @@ export function publicSessionPolicy(env: NodeJS.ProcessEnv = process.env) {
       .parse(env.NEXUS_PUBLIC_ABSOLUTE_SECONDS),
   };
 }
+/** Existing session maintenance removes expired replay tokens; there is no
+ * separate replay/history table or retention purpose. Revoked sessions clear
+ * tokens too. Entries can authorize nothing after their signed proof expires. */
+export async function prunePublicApiNonces(db: Database) {
+  await sql`UPDATE public_oauth_sessions AS s SET proof_nonces=CASE WHEN revoked_at IS NOT NULL OR expires_at<=clock_timestamp() THEN '{}'::jsonb ELSE COALESCE((SELECT jsonb_object_agg(key,value) FROM jsonb_each(s.proof_nonces) WHERE (value::text)::numeric>extract(epoch FROM clock_timestamp())*1000),'{}'::jsonb) END WHERE proof_nonces<>'{}'::jsonb`.execute(db);
+}
 export class PublicSessions {
   readonly cipher: PublicTokenCipher;
   constructor(
@@ -116,7 +122,7 @@ export class PublicSessions {
   }
   async revoke(value: string | undefined) {
     if (!value || !/^[A-Za-z0-9_-]{43}$/.test(value)) return;
-    await sql`UPDATE public_oauth_sessions SET revoked_at=COALESCE(revoked_at,clock_timestamp()),token_ciphertext=NULL,refresh_owner=NULL,refresh_until=NULL,generation=generation+1 WHERE digest=${publicSessionDigest(value)}`.execute(
+    await sql`UPDATE public_oauth_sessions SET revoked_at=COALESCE(revoked_at,clock_timestamp()),token_ciphertext=NULL,proof_nonces='{}'::jsonb,refresh_owner=NULL,refresh_until=NULL,generation=generation+1 WHERE digest=${publicSessionDigest(value)}`.execute(
       this.db,
     );
   }
@@ -124,7 +130,7 @@ export class PublicSessions {
     z.string()
       .regex(/^\d{17,20}$/)
       .parse(userId);
-    await sql`UPDATE public_oauth_sessions SET revoked_at=COALESCE(revoked_at,clock_timestamp()),token_ciphertext=NULL,user_ciphertext='',refresh_owner=NULL,refresh_until=NULL,generation=generation+1 WHERE user_digest=${this.cipher.userDigest(userId)}`.execute(
+    await sql`UPDATE public_oauth_sessions SET revoked_at=COALESCE(revoked_at,clock_timestamp()),token_ciphertext=NULL,proof_nonces='{}'::jsonb,user_ciphertext='',refresh_owner=NULL,refresh_until=NULL,generation=generation+1 WHERE user_digest=${this.cipher.userDigest(userId)}`.execute(
       this.db,
     );
   }
@@ -233,6 +239,7 @@ export class PublicSessions {
     return null;
   }
   async purge() {
+    await prunePublicApiNonces(this.db);
     await sql`DELETE FROM public_oauth_sessions WHERE expires_at<clock_timestamp() OR revoked_at<clock_timestamp()-interval '1 day'`.execute(
       this.db,
     );

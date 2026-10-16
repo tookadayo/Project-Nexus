@@ -100,6 +100,12 @@ export class ActionWorker {
     return traceStep("action.outbox", {}, async () => {
       const action = await this.claim(s);
       if (!action) return false;
+      if (Object.hasOwn(action.payload, "ruleRuntimeContract") || Object.hasOwn(action.payload, "ruleOperationIntentId")) {
+        // The legacy worker has no alpha16 Intent/fence/send-admission adapter.
+        // Stop before any provider read or write; a flag cannot upgrade it.
+        await sql`UPDATE action_outbox SET state='FAILED',lease_until=NULL,lease_token=NULL,error_category='RULE_RUNTIME_UNSUPPORTED',last_error='Rule runtime dispatch is unavailable',completed_at=now(),updated_at=now() WHERE ${tenant(s)} AND id=${action.id}::uuid AND lease_token=${action.leaseToken}::uuid`.execute(this.db);
+        return true;
+      }
       let executing = false;
       try {
         action.policy = betaActionPolicy(

@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {afterAll,afterEach,beforeAll,expect,it,vi} from 'vitest';
 import {connect,ensureGuild,migrate,sql,tenant,type Database} from '../../packages/db/src/index';
 import {scopeForGuild} from '../../packages/security/src/scoping';
@@ -14,7 +14,7 @@ import {isolatedPostgres} from '../fixtures/postgres';
 
 let db:Database,infra:Awaited<ReturnType<typeof isolatedPostgres>>,serial=0;
 const guildPlaceholder='SYNTHETIC_GUILD',channel='881222222222222222';
-const actor:Actor={key:'synthetic-control-admin',encryptedUserId:'encrypted-synthetic-identity',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic-control'};
+const actor:Actor={key:createHash('sha256').update('synthetic-control-admin').digest('hex'),encryptedUserId:'encrypted-synthetic-identity',permissions:'8',roles:[],source:'WEB_DASHBOARD',requestId:'synthetic-control'};
 const admission:AutomationAdmissionLimits={activeFlows:20,monthlyRuns:100,guildConcurrent:2,globalConcurrent:20,guildPending:20,globalPending:100,measurementId:'isolated-control-acceptance'};
 const number=(value:number):ValueInput=>({kind:'literal',type:'Number',value});
 const truth=(value:boolean):ValueInput=>({kind:'literal',type:'Boolean',value});

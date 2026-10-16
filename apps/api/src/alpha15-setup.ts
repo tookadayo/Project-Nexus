@@ -13,6 +13,7 @@ import {
   publicApiContext,
   publicApiIdentity,
   type PublicApiRequest,
+  type ValidatedPublicApiIdentity,
 } from "../../../packages/security/src/public-api";
 import {
   webSetupPatchSchema,
@@ -140,12 +141,13 @@ export function registerAlpha15Setup(
     if (req.routeOptions.url?.startsWith(base))
       reply.header("Cache-Control", "no-store");
   });
-  const context = (req: PublicApiRequest) =>
+  const context = (req: PublicApiRequest, onValidatedIdentity?: (identity: ValidatedPublicApiIdentity) => void) =>
     publicApiContext(req, db, key, discord, vault, "CONFIGURE", {
       setup: true,
+      onValidatedIdentity,
     });
-  const service = async (req: PublicApiRequest) => {
-    const auth = await context(req);
+  const service = async (req: PublicApiRequest, onValidatedIdentity?: (identity: ValidatedPublicApiIdentity) => void) => {
+    const auth = await context(req, onValidatedIdentity);
     assert(discord, "WEB_CONNECTION_UNAVAILABLE", 503);
     return { auth, setup: new WebSetupService(db, discord, auth) };
   };
@@ -155,8 +157,9 @@ export function registerAlpha15Setup(
       : null;
   app.get(base + "/status", async (req, reply) => {
     reply.header("Cache-Control", "no-store");
+    let validatedIdentity: ValidatedPublicApiIdentity | undefined;
     try {
-      const { auth, setup } = await service(req);
+      const { auth, setup } = await service(req, identity => { validatedIdentity = identity; });
       assert(discord, "WEB_CONNECTION_UNAVAILABLE", 503);
       return {
         ...(await setup.status(
@@ -169,7 +172,11 @@ export function registerAlpha15Setup(
     } catch (error) {
       if (!isDiscordFailure(error) || ![403, 404].includes(error.status))
         throw error;
-      const identity = await publicApiIdentity(req, db, key),
+      // Bot absence is the single read-only fallback. Reuse this handler's
+      // validated identity instead of consuming the same v2 nonce twice.
+      // OAuth guild-management and actual bot absence are still checked now.
+      assert(validatedIdentity, "SESSION_REQUIRED", 401);
+      const identity = validatedIdentity,
         guild = await selectManagedGuild(
           identity.accessToken,
           identity.scope.guildId,

@@ -1,0 +1,3109 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 00:58 UTC
+Normal ChatGPT reasoning selection: 極高 (4 of 5, not Pro)
+Design proposal based on supplied read-only code audit. A/B selection remains USER DECISION, not approved.
+
+NEXUS alpha16 全体設計改訂版
+Windows Runtime / Cloudflare Tunnel / 全機能統合アーキテクチャ
+
+Version: alpha16 Design Revision
+Status: 設計段階・未実装
+Implementation: 未実施
+Runtime Test: 未実施
+修正: 未実施
+Codex実装指示: 未作成
+動作確認・修正方針: alpha16設計完了後にまとめて実施
+
+0. 本書の位置付け
+
+本書では、以下を明確に区別する。
+
+[C] Current Code Audit
+
+今回提示された読み取り専用コード監査で確認された現状。
+
+[D] Current Design
+
+alpha15および直近のNEXUS統合設計で既に定義されている設計契約。
+
+[A] Architecture Proposal A
+
+お名前.com側には静的公式Webを置き、Dashboard/BFFをWindows PCへ移す案。
+
+[B] Architecture Proposal B
+
+公式WebとDashboardを静的化し、ブラウザーからPC APIへ直接接続する案。
+
+[U] Unverified
+
+コード・インフラ・契約情報等について、現在の資料だけでは確認できない事項。
+
+本書で[C]または[D]と記載するものについても、実際の本番動作を確認したことを意味しない。
+
+1. alpha16の基本方針
+
+NEXUS alpha16では、Web・分析・Automation・AIを別々のシステムとして扱わず、次の一つのRuntime体系として設計する。
+
+ユーザー向けUIはWeb、永続状態・認証処理・分析・ルールエンジン・Automation・Scheduler・外部サービス連携はWindows NEXUS Server PCを中心に実行する。
+
+ただし、公式サイトなどの静的コンテンツだけはレンタルサーバーへ配置できる。
+
+したがって、
+
+「WebをサーバーPCへ置く」ことと「NEXUSの実行処理をサーバーPCへ置く」ことを分離する。
+
+2. 推奨アーキテクチャ
+
+alpha16では、現時点ではA案を推奨する。
+
+ただし、内部APIは将来B案へ移行できるよう、PC APIを独立したドメインサービス境界として設計する。
+
+推奨構成
+Internet
+   │
+   ├───────────────→ www.example.com
+   │                    │
+   │                    ▼
+   │              お名前.com
+   │              静的公式Web
+   │
+   │
+   └───────────────→ app.example.com
+                        │
+                     Cloudflare
+                        │
+                 Cloudflare Tunnel
+                        │
+                        ▼
+              Windows NEXUS Server PC
+                        │
+          ┌─────────────┴─────────────┐
+          │                           │
+      Next.js                    PC API
+      Dashboard                    │
+      BFF                         │
+          │                 ┌──────┼────────┐
+          │                 │      │        │
+          │              Analysis Runtime  Rule Engine
+          │                 │      │        │
+          │                 └──────┼────────┘
+          │                        │
+          │                  Automation Runtime
+          │                        │
+          │               Scheduler / Worker
+          │                        │
+          │                   PostgreSQL
+          │
+          └──── signed internal API ───→ PC API
+
+この構成ではブラウザーはPC APIへ直接アクセスしない。
+
+つまり、
+
+Browser → Tunnel → Next.js BFF → internal PC API
+
+となる。
+
+現在の
+
+Browser → same-origin Next.js BFF → signed PC API
+
+という認証境界を維持できる。
+
+3. Cloudflare Tunnelの責務
+
+Cloudflare のTunnelは、NEXUSの認証システムでもguild認可システムでもない。
+
+責務は、
+
+インターネットからWindows PC上の指定されたHTTPサービスへ安全に到達させること
+
+に限定する。
+
+Cloudflareの現行資料では、cloudflared がPC側からCloudflareへアウトバウンド接続を確立し、そのTunnelを通してoriginへトラフィックを転送する構成が明示されている。公開originに対して受信ポートを直接開ける必要がない点が今回の構成と一致する。
+
+したがって、
+
+Tunnelを通す
+
+Dashboard/BFF
+
+必要なPC API公開エンドポイント
+
+Discord Interaction Endpoint
+
+Stripe Webhook Endpoint
+
+Tunnelを通さない
+
+Discord Gateway
+
+PC内部API
+
+PostgreSQL
+
+Redis
+
+operator
+
+Windows管理サービス
+
+ファイルシステム
+
+デバッグコンソール
+
+とする。
+
+Discord Gatewayは現在の監査どおり、Windows PCからDiscordへ直接アウトバウンド接続する。
+
+4. A案とB案の比較
+項目	A：Next.js/BFFもPC	B：静的Dashboard＋直接API
+公式Web	お名前.com静的	お名前.com静的
+Dashboard	PC上Next.js	お名前.com静的
+Browser→PC	Tunnel経由	Tunnel経由
+Browser→API直接	なし	あり
+BFF	維持	廃止/大幅縮小
+現在の認証境界	ほぼ維持可能	大幅変更
+session	Next.js/BFF側で維持可能	PC APIへ移設
+CORS	Dashboardでは原則不要	必須
+CSRF	既存境界を維持しやすい	API側で再設計
+Explore移行量	中	大
+Operations移行量	中	大
+Billing移行量	必要	必要
+PC停止時	Dashboardも利用不能	Dashboard shellは表示可能
+Tunnel停止時	Dashboardへ到達不能	Dashboard shellは表示可能
+セキュリティ表面	小さい	大きい
+現在コードとの整合性	高い	低い
+将来の完全分離	可能	最初から達成
+alpha16変更量	小〜中	大
+将来移行	BFFを薄くしておけば容易	既に分離済み
+推奨	alpha16推奨	将来候補
+判定
+A案
+
+alpha16の推奨案。
+
+理由は、現在のコードがすでに
+
+Browser → same-origin Next.js BFF → signed PC API
+
+という境界を持っているためである。
+
+Dashboard/BFFをPCへ移すことで、現在の認証・session・Server Component・BFF構造を大きく壊さずに、RuntimeをPCへ集約できる。
+
+B案
+
+技術的には成立するが、alpha16で一気に採用するには変更量が大きい。
+
+現在のNext.jsはcookies/headersなどrequest-time機能に依存しているため、静的exportをそのまま適用できない。Next.js公式仕様でも静的exportではCookies、Headers、Proxy、Server Actions等の動的サーバー機能が利用できないとされている。
+
+したがってBは単なる「Dashboardをお名前.comへコピー」ではない。
+
+auth移行
+
+session移行
+
+BFF移行
+
+CORS
+
+CSRF
+
+Explore API化
+
+Operations API化
+
+Billing API化
+
+public endpoint整理
+
+client-side data fetching化
+
+を伴う。
+
+5. A案を採用する場合の重要な設計条件
+
+A案は単にNext.jsをPCへ移すだけでは不十分。
+
+Next.js BFFは、
+
+認証・UIレンダリング・API façade
+
+として扱い、NEXUSのドメインロジックの正本にはしない。
+
+理想的な境界は、
+
+Browser
+   ↓
+Next.js BFF
+   ↓
+PC API
+   ↓
+Domain Services
+   ↓
+PostgreSQL / External Services
+
+である。
+
+現在BFF側に存在するDB直接アクセスは、今回の監査で確認されている。
+
+auth/server-access
+
+Explore
+
+Operations
+
+Billing
+
+その他DB直接参照
+
+について、alpha16ではPC API bridgeへ集約する設計単位を定義する。
+
+ただし、これは「現在すでに移行済み」という意味ではない。
+
+6. 全機能の配置表
+機能	現状 [C/D]	A案	B案	必要変更	未確認
+公式公開Web	D：静的Web設計	お名前.com	お名前.com	DNS/公開構成整理	実際の契約仕様
+Dashboard	C：Next.js BFF	PC上Next.js	静的Dashboard	Aは配置変更、Bは全面client化	現在の実配備先
+Home	D：主要Dashboard	PC BFF/API	Static shell＋API	API化	最新画面との完全一致
+Journey	D	PC API	PC API	Analytics bridge	同上
+Opportunities	D	PC API＋Rule Engine	PC API＋Rule Engine	Suggestions API	同上
+Actions	D	PC API/Automation	PC API/Automation	API bridge	同上
+Results	D	PC API	PC API	Run/Experiment API	同上
+Settings	D	PC BFF/API	PC API	認証/認可API	同上
+Block Editor	D：alpha15拡張	PC Next.js	静的UI＋API	Draft/Validation API	現在実装状態
+認証/OAuth	C：Next.js＋DB＋Discord	PC上BFF/Auth	PC API	Bは移設	OAuth設定
+Session	C：DB session store	PC DB	PC API DB	Aは維持可能	DB実配置
+Guild認可	C/D：server-side	PC	PC API	guild scope統一	現権限取得方式
+基礎分析v3	C：PC側	PC	PC	API bridge	実処理詳細
+詳細分析	C：PC保存処理、HTTP bridge不足	PC API	PC API	Analysis API bridge	保存schema
+Explore	C：Next.js→DB	PC API	PC API	graph/viewsegment API	schema
+Operations	C：Next.js→DB	PC API	PC API	attention/intake/etc. API	schema
+Automation	C/D：PC Runtime	PC	PC	UI/API bridge	実装範囲
+Wait/Resume	D：Run state契約	PC	PC	durability整理	crash実測未実施
+Scheduler	C：PC＋Postgres	PC	PC	原則維持	Redis依存
+Discord Gateway	C：PC直接接続	PC直接	PC直接	Tunnelへ移さない	Gateway実配備
+Discord API操作	C/D：Runtime	PC	PC	直前認可/結果不明維持	全操作確認
+Discord Interactions	C：PC endpoint想定	Tunnel→PC	Tunnel→PC	endpoint整理	URL設定
+Plans/Entitlement	C：PC側受付等	PC	PC	API化	DB実配置
+Beta admission	C：PC側	PC	PC	公開フォーム/API整理	現受付仕様
+Billing catalog	C：DB	PC DB	PC DB	Billing Service化	DB場所
+Stripe Checkout	C：Next.js	PC Billing Service	PC API	移設	Stripe設定
+Stripe Webhook	C：Next.js	Tunnel→PC	Tunnel→PC	移設＋署名検証	現endpoint
+Announcements	C：Next.js→DB＋local operator	PC DB→静的同期	PC DB→静的同期	publish pipeline	お名前.com upload方法
+Legal	C：未公開	静的	静的	公開工程が必要	文面・公開日
+Status	C：未公開告知	静的/公開snapshot	静的/公開snapshot	公開同期設計	運用方針
+Contact	C：無効	PC public endpoint	PC public endpoint	abuse/privacy設計	受付仕様
+Privacy deletion	C：tombstone/retentionあり	PC	PC	API化	DB/backup
+Privacy retention	C：PC側処理あり	PC	PC	purpose ledger整理	全保持期間
+operator	C：loopback Fastify	loopbackのみ	loopbackのみ	Tunnel公開禁止	operator auth
+Rule-based AI	C：固定閾値診断	PC	PC	新規Rule Engine	rule catalog
+Suggestion	C：未設計	PC DB	PC DB	新規	retention未決
+Polling	C：未統合	基本通信	基本通信	API contract	interval未決
+SSE	C：未設計	BFF経由の任意補助	API直接の任意補助	event contract	Tunnel実環境
+PC health	C：限定的	PC	PC	health/readiness API	実状態取得
+Runtime停止	C：Web timeout	app unavailable	shell＋unavailable	UI状態設計	監視方式
+Tunnel停止	C：未分離	app unavailable	API unavailable	state distinction	外部監視
+DB/Redis	C：配置未確認	PCを推奨	PCを推奨	配置決定	要確認
+7. Dashboardの責務
+
+alpha16のDashboardは引き続きNEXUSの主要な「理解・分析・設計・比較」の場とする。
+
+現在の情報設計である、
+
+Home
+
+Journey
+
+Opportunities
+
+Actions
+
+Results
+
+Settings
+
+をインフラ変更によって壊さない。
+
+Dashboardは以下を担当する。
+
+Automation編集
+
+条件/分岐/変数/Wait
+
+試運転
+
+Validation
+
+Impact確認
+
+有効化
+
+Analytics表示
+
+Explore
+
+Operations
+
+Suggestions表示
+
+SuggestionからDraftへの反映
+
+Billing UI
+
+Beta/導入状態
+
+Settings
+
+一方、
+
+Discordへの実操作
+
+Scheduler実行
+
+Run実行
+
+Rule Engine
+
+DB正本
+
+Stripe秘密処理
+
+はDashboardの責務ではない。
+
+8. 認証境界
+A案
+
+ブラウザーからは、
+
+https://app.example.com
+
+だけをNEXUS Dashboardのoriginとして使用する。
+
+ブラウザー：
+
+Browser
+ ↓
+app.example.com
+ ↓
+Cloudflare Tunnel
+ ↓
+Next.js BFF
+
+BFF：
+
+Next.js BFF
+ ↓
+session validation
+ ↓
+signed internal request
+ ↓
+PC API
+
+とする。
+
+Session Cookie
+
+A案ではDashboardのhostに限定したcookieを推奨する。
+
+例：
+
+Secure
+
+HttpOnly
+
+Path=/
+
+host-only
+
+SameSite=Laxを基本候補
+
+Domain属性を付けない
+
+__Host- prefixも候補とする。
+
+OWASP/MDNでも、host限定cookieやSecure/HttpOnly/SameSiteによってcookieの到達範囲を狭めることが推奨されている。
+
+重要
+
+www.example.comにsession cookieを共有しない。
+
+つまり、
+
+www.example.com
+= 公開Web
+
+app.example.com
+= authenticated Dashboard
+
+として、公式サイトと認証領域を分離する。
+
+9. B案での認証
+
+B案では、
+
+www.example.com
+     ↓
+app.example.com
+     ↓
+api.example.com
+
+となり、DashboardとAPIがcross-originになる。
+
+その場合は、
+
+fetch credentials
+
+CORS
+
+session cookie
+
+CSRF
+
+Origin validation
+
+Fetch Metadata
+
+explicit allowed origins
+
+が必要になる。
+
+credential付きcross-origin requestでは、ブラウザー側のcredentials指定とAPI側のAccess-Control-Allow-Credentials等が必要で、Access-Control-Allow-Origin: *は使用できない。
+
+したがってB案では、
+
+Allowed Origin
+= https://app.example.com
+
+のような明示的allowlistを使用する。
+
+10. CSRF
+
+SameSiteだけをCSRF対策の正本にしない。
+
+A案
+
+DashboardとBFFがsame-originなので比較的単純だが、
+
+POST
+
+PUT
+
+PATCH
+
+DELETE
+
+Draft変更
+
+Suggestion操作
+
+Automation変更
+
+Billing操作
+
+Settings変更
+
+にはCSRF protectionを適用する。
+
+推奨構成：
+
+session cookie
+
+CSRF token
+
+Origin/Referer確認
+
+Fetch Metadata補助
+
+GETによる状態変更禁止
+
+OWASPもSameSiteを防御の一層として扱い、state-changing requestにはCSRF tokenやOrigin検証等を組み合わせることを推奨している。
+
+11. 署名付き内部API
+
+現在存在する「署名付きPC API」はA案でも維持する。
+
+ただし、その署名はユーザー認証ではない。
+
+意味は、
+
+Next.js BFFから正規の内部サービス要求が送られたことを検証する
+
+ためのservice-to-service authenticationである。
+
+署名対象には少なくとも、
+
+HTTP method
+
+path
+
+body digest
+
+timestamp
+
+nonce
+
+request ID
+
+等を含める設計候補とする。
+
+PC APIは、
+
+timestamp
+
+nonce
+
+replay
+
+signature
+
+request ID
+
+を検証する。
+
+秘密鍵はPC上だけに置く。
+
+ブラウザーへ署名鍵を絶対に出さない。
+
+NEXT_PUBLIC_*等のクライアント公開環境変数へ内部秘密を入れない。
+
+12. guild単位の認可
+
+Cloudflare Tunnelはguild認可を行わない。
+
+NEXUS APIが行う。
+
+すべてのguild resourceについて、
+
+Authenticated User
++
+guildId
++
+NEXUS authorization
++
+current Discord authority
++
+resource ownership/scope
++
+action permission
+
+を確認する。
+
+特に、
+
+/api/guilds/123/...
+
+というURLやrequest bodyのguildId=123だけを信用しない。
+
+URLを書き換えて別guildを参照できないよう、サーバー側でresource scopeを再照合する。
+
+Discordの権限はサーバー・ロール・チャンネル等の階層を持つため、外部操作の直前には現在の権限を再確認する。
+
+13. 秘密の配置
+お名前.com
+
+置いてよいもの：
+
+HTML
+
+CSS
+
+JS
+
+public images
+
+public fonts
+
+public legal pages
+
+公開announcement artifact
+
+公開status artifact
+
+置かない：
+
+Discord Bot Token
+
+Discord OAuth secret
+
+Session secret
+
+DB credentials
+
+Stripe secret
+
+Stripe webhook secret
+
+Cloudflare Tunnel credential
+
+internal API signing secret
+
+operator credential
+
+Windows PC
+
+保存対象：
+
+Discord credentials
+
+OAuth client secret
+
+session secret
+
+DB credentials
+
+Stripe secret
+
+Stripe webhook signing secret
+
+Cloudflare Tunnel credential
+
+internal API signing secret
+
+announcement publish credential
+
+すべてserver-side onlyとする。
+
+CloudflareのTunnel credentialもconnectorを動かすための秘密情報なので、PC側のみで管理する。現行Cloudflare資料でもTunnel tokenを持つ者はconnectorを実行できるため、漏洩時のcredential rotationが必要とされている。
+
+14. PostgreSQLとRedis
+現状
+
+[C] DB/Redisの実際の配備先は未確認。
+
+したがって「現在PCにある」と断定しない。
+
+alpha16提案
+
+PostgreSQLを、
+
+NEXUS Runtimeの永続状態の正本
+
+とする。
+
+配置はWindows PC側を推奨する。
+
+保存対象：
+
+User/session関連
+
+guild configuration
+
+Automation Draft
+
+Active Revision
+
+Run
+
+checkpoint
+
+Wait
+
+Scheduler occurrence
+
+analysis result
+
+Explore state
+
+Operations state
+
+Billing entitlement
+
+Beta admission
+
+Announcement canonical record
+
+Suggestion
+
+privacy tombstone
+
+等。
+
+Redisを使用する場合も、
+
+Redis = queue/cache/temporary coordination
+
+であり、
+
+PostgreSQL = source of truth
+
+とする。
+
+RedisだけからRun状態を復元できる設計にはしない。
+
+15. Automation Runtime
+
+Automation Runtimeはalpha15で確定した安全契約を継承する。
+
+immutable Revision
+
+Run ID
+
+fixed FlowRevision
+
+bounded loop
+
+Wait
+
+Scheduler
+
+checkpoint
+
+external operation result
+
+result unknown
+
+cancellation
+
+deadline
+
+authorization recheck
+
+deletion/tombstone check
+
+をPC側で管理する。
+
+16. 「PC停止時にcheckpointが保存される」と仮定しない
+
+これはalpha16で明確に修正する。
+
+正しい考え方は、
+
+PCが突然停止しても安全であるよう、停止前の正常な実行過程で必要な状態を永続化しておく。
+
+である。
+
+例えば外部副作用について、
+
+1. operation intentを永続化
+2. unique operation keyを確定
+3. 外部操作開始
+4. 結果を記録
+
+とする。
+
+もし3と4の間でPCが落ちた場合、
+
+external_result_unknown
+
+として扱う。
+
+成功したと推測して再送しない。
+
+17. 古いWorker対策
+
+Workerには、
+
+Run state version
+
+worker lease
+
+fencing/version token
+
+transition ID
+
+等の概念を設ける。
+
+古いWorkerがPC復旧後に遅れて戻ってきても、
+
+現在のRun状態を上書きできない
+
+ようにする。
+
+特に、
+
+Worker A
+ ↓
+Wait前の状態
+
+PC停止
+
+Worker B
+ ↓
+Recovery
+ ↓
+新状態
+
+Worker A復帰
+
+のケースで、Worker Aが古い状態を書き戻してはいけない。
+
+18. 再開時の検査
+
+Run再開時には必ず、
+
+Run期限
+
+terminal状態
+
+cancellation
+
+deletion/tombstone
+
+guild authorization
+
+current Discord authority
+
+entitlement
+
+fixed Revision
+
+operation state
+
+external result unknown
+
+scheduler occurrence
+
+retention expiry
+
+を再確認する。
+
+旧Revisionを使用することと、旧権限を使用することは別である。
+
+Revisionは固定しても、現在の認可状態を再確認する。
+
+19. 外部操作のExactly-onceを主張しない
+
+Discord等の外部APIに対して、
+
+NEXUSが必ずexactly-onceを保証する
+
+とは設計しない。
+
+保証できるのは、
+
+自分の内部状態の重複遷移を防ぐ
+
+operation IDを持つ
+
+結果不明を区別する
+
+再送を無条件に行わない
+
+外部証拠を確認できる場合だけ照合する
+
+という範囲。
+
+結果不明なら、
+
+Unknownのまま止める
+
+。
+
+これはalpha15から維持する。
+
+20. Scheduler
+
+SchedulerはWindows PC側。
+
+ただしWindows Task SchedulerそのものをNEXUS Schedulerとして使用しない。
+
+Windows Task Scheduler
+        ↓
+NEXUS Runtime起動
+        ↓
+NEXUS Scheduler
+        ↓
+Occurrence
+        ↓
+Run
+
+という関係。
+
+NEXUS Schedulerは、
+
+schedule definition
+
+occurrence
+
+dueAt
+
+generation
+
+next occurrence
+
+cancellation
+
+missed occurrence
+
+をPostgreSQLで管理する。
+
+PC停止後に過去の予定を無条件に大量再送しない。
+
+alpha15の「過去予定を自動追送しない」方針を維持する。
+
+21. Discord
+Gateway
+Windows PC
+   │
+   └──── outbound ───→ Discord Gateway
+
+Tunnelを通さない。
+
+REST
+
+Automation RuntimeからDiscord APIへ直接接続する。
+
+Interaction
+Discord
+ ↓
+https://discord-api.example.com/...
+ ↓
+Cloudflare
+ ↓
+Tunnel
+ ↓
+PC API
+
+またはA案ではNext.js側の公開endpointを経由してPC APIへ内部転送する。
+
+ただし、Discord Interactionをユーザーsessionとして扱わない。
+
+Discord側から来たリクエストはDiscordの署名検証等、別のmachine-to-machine authentication境界で処理する。
+
+Discordは2026年にもPrivileged Intentsの扱いを変更しているため、必要なデータアクセスは最小限にする。特にMessage Content、Guild Members、Presenceは通常のユーザー認証とは別のDiscord API権限・ポリシー領域として扱う。
+
+22. Analytics
+
+基礎分析v3・詳細分析ともPC側を正本とする。
+
+Discord events
+      ↓
+PC Analysis Runtime
+      ↓
+Aggregate / Diagnosis / Analysis Result
+      ↓
+PostgreSQL
+      ↓
+PC API
+      ↓
+Next.js BFF
+      ↓
+Dashboard
+
+N-AGG等で既に定義されている、
+
+MetricId
+
+許可された期間
+
+aggregate
+
+coverage
+
+maturity
+
+no-dataと0の区別
+
+元本文を再取得しない
+
+個人推定を行わない
+
+という契約を維持する。
+
+分析結果をWebがDBへ直接取りに行く構造にはしない。
+
+23. 詳細分析HTTP bridge
+
+[C] 現在、PC側に詳細分析保存処理はあるが、HTTP bridgeが不足している。
+
+alpha16では、
+
+Dashboard
+ ↓
+BFF
+ ↓
+Analysis API
+ ↓
+Analysis Runtime
+ ↓
+PostgreSQL
+
+を正式な境界とする。
+
+B案では、
+
+Dashboard
+ ↓
+Analysis API
+
+になるだけで、Analysis Runtime自体は変わらない。
+
+この設計にすることでA→B移行を容易にする。
+
+24. Explore
+
+現在確認されている、
+
+graph
+
+viewsegment
+
+等のNext.js→DB直接経路を、alpha16ではPC APIへ集約する。
+
+Explore UI
+ ↓
+BFF
+ ↓
+Explore API
+ ↓
+PostgreSQL / Analysis Read Model
+
+Explore APIはguild scopeを必ず検証する。
+
+Exploreは分析結果の閲覧・比較を担当し、外部Discord操作を直接実行しない。
+
+25. Operations
+
+以下をOperations APIの対象とする。
+
+attention
+
+intake
+
+events
+
+playbook
+
+experiments
+
+reports
+
+orgteams
+
+webhookcredentials
+
+現在のNext.js→DB直接アクセスは[C]で確認されているが、実装済みAPI bridgeとは断定しない。
+
+alpha16では、
+
+Operations UI
+ ↓
+BFF
+ ↓
+Operations API
+ ↓
+PC domain service
+ ↓
+PostgreSQL
+
+を正規経路とする。
+
+webhookcredentials等の秘密情報はUIに平文で返さず、必要な操作だけserver-sideで実行する。
+
+26. Rule-based AI
+
+alpha16では、現在の固定閾値診断を、
+
+Rule Engine
+
+として正式に独立させる。
+
+ただし、これは自由なAgentではない。
+
+Rule Engineの原則
+
+PC側でのみ実行
+
+外部書込み不可
+
+Discord操作不可
+
+Billing操作不可
+
+Permission変更不可
+
+Automation Active Revision変更不可
+
+Scheduler変更不可
+
+User deletion変更不可
+
+Suggestion生成のみ
+
+構造化Factのみ入力
+
+27. Rule Engineの入力Fact
+
+Rule Engineは直接Discord本文を自由に読む仕組みにしない。
+
+入力は、
+
+Analysis Fact
+
+Automation Fact
+
+Explore Fact
+
+Operations Fact
+
+Experiment Fact
+
+Billing/Entitlement Fact
+
+Runtime Health Fact
+
+configuration Fact
+
+等の構造化情報とする。
+
+各Factには最低限、
+
+factId
+
+targetType
+
+targetId
+
+metric/rule subject
+
+value
+
+observedAt
+
+dataAsOf
+
+freshness
+
+coverage
+
+missing/partial/suppressed state
+
+sourceVersion
+
+等を持たせる。
+
+28. 欠測と鮮度
+
+Rule Engineは、
+
+「データがない」
+
+ことを
+
+「値が0」
+
+として扱わない。
+
+また、
+
+stale data
+
+を
+
+fresh data
+
+として扱わない。
+
+例えば、
+
+fresh
+partial
+stale
+missing
+suppressed
+error
+
+等の品質状態を区別する。
+
+必要Factが不足している場合、
+
+推奨を生成しない
+
+か、
+
+「データ不足のため判断できない」
+
+という診断だけを生成する。
+
+29. Rule Version
+
+各Ruleには、
+
+ruleId
+
+ruleVersion
+
+を持たせる。
+
+Rule変更時に過去のSuggestionを再解釈しない。
+
+さらにEngine自体にも、
+
+engineVersion
+
+を持たせる。
+
+したがって、
+
+Suggestion
+ ├─ ruleId
+ ├─ ruleVersion
+ ├─ engineVersion
+ └─ evidence
+
+で、
+
+「なぜこの提案が生成されたのか」
+
+を後から説明できる。
+
+30. SuggestionはAutomation専用にしない
+
+Suggestionの対象は、
+
+targetType
+targetId
+targetVersion
+
+で表現する。
+
+例えば、
+
+automation
+
+analysis
+
+explore
+
+operations
+
+experiment
+
+report
+
+settings
+
+onboarding
+
+announcement
+
+billing
+
+system
+
+等を対象にできる。
+
+ただし、すべてのtargetTypeが同じ操作権限を持つわけではない。
+
+31. SuggestionのSafety Class
+
+各targetTypeには変更能力を持たせる。
+
+ADVISORY_ONLY
+
+Billing
+
+Legal
+
+System
+
+Security
+
+Permission
+
+Privacy
+
+など。
+
+提案は説明だけ。
+
+DRAFT_ONLY
+
+Automation
+
+Announcement
+
+Experiment
+
+Playbook
+
+Operations configuration
+
+など。
+
+提案から下書きを作ることは可能。
+
+NO_AI_MUTATION
+
+認証資格
+
+Discord credentials
+
+Stripe secret
+
+Webhook credentials
+
+権限変更
+
+deletion
+
+Active billing subscription
+
+Cloudflare/Tunnel設定
+
+など。
+
+Rule Engineから変更経路を作らない。
+
+32. Suggestionの構造
+
+Suggestionは概念的に、
+
+suggestionId
+
+scope
+ ├─ guildId / user scope
+
+target
+ ├─ targetType
+ ├─ targetId
+ └─ targetVersion
+
+rule
+ ├─ ruleId
+ ├─ ruleVersion
+ └─ engineVersion
+
+evidence
+ ├─ factId
+ ├─ dataAsOf
+ ├─ freshness
+ └─ coverage
+
+reasonCode
+explanation
+proposedChange
+safetyClass
+
+status
+
+createdAt
+expiresAt
+
+を持つ。
+
+proposedChangeは任意コードやHTTP命令ではなく、
+
+対象Revisionに対する型付き・検証可能な変更案
+
+とする。
+
+33. Suggestionの重複排除
+
+同じ問題をRule Engineが何度評価しても、
+
+同じSuggestionを無限生成しない。
+
+dedupe keyの候補：
+
+guildId
++
+targetType
++
+targetId
++
+targetVersion
++
+ruleId
++
+conditionFingerprint
+
+同一状態が継続している場合は、Suggestionそのものを増殖させず、
+
+firstDetectedAt
+
+lastObservedAt
+
+occurrenceCount
+
+等の状態へ集約する。
+
+状態が変化した場合は新しいSuggestionとして扱える。
+
+34. Suggestion Lifecycle
+
+最低限、
+
+new
+ ↓
+viewed
+ ↓
+dismissed
+
+または
+
+new
+ ↓
+apply_requested
+ ↓
+applied_to_draft
+
+または
+
+new
+ ↓
+expired
+
+または
+
+new
+ ↓
+superseded
+
+を扱う。
+
+失敗した場合は、
+
+apply_failed
+
+を履歴として残す。
+
+35. Suggestion履歴
+
+Suggestion自体だけでなく、
+
+誰が・いつ・何をしたか
+
+を履歴化する。
+
+例：
+
+created
+
+viewed
+
+dismissed
+
+expired
+
+apply_requested
+
+draft_created
+
+apply_failed
+
+superseded
+
+actorは、
+
+system
+
+user
+
+operator
+
+を区別する。
+
+Rule Engine自身は、
+
+created
+
+はできるが、
+
+apply_requested
+
+を勝手に生成できない。
+
+36. SuggestionからAutomationを変更する境界
+
+最重要契約。
+
+Rule Engine
+ ↓
+Suggestion
+ ↓
+Web表示
+
+ここまでは完全に非破壊。
+
+ユーザーが、
+
+「下書きへ反映」
+
+を選択して初めて、
+
+Suggestion
+ ↓
+Apply to Draft
+ ↓
+新Draft Revision
+ ↓
+Validation
+ ↓
+試運転
+ ↓
+Impact Confirmation
+ ↓
+明示的Enable
+ ↓
+Active Revision
+
+へ進む。
+
+Suggestionから直接、
+
+Active Revision変更
+
+してはいけない。
+
+37. Suggestionによる外部操作禁止
+
+Suggestion表示・生成・適用によって、直接、
+
+Discord送信
+
+Discord編集
+
+Role変更
+
+Permission変更
+
+Scheduler変更
+
+Run開始
+
+Run停止
+
+Stripe Checkout開始
+
+Subscription変更
+
+Billing自動課金
+
+Announcement公開
+
+Legal公開
+
+Privacy deletion変更
+
+を行わない。
+
+特に、
+
+「AIの提案を表示した」＝「AIが変更した」
+
+にならないようにする。
+
+38. Billing
+
+現在：
+
+[C] Billing catalogはDB、Stripe Checkout/WebhookはNext.js。
+
+alpha16：
+
+Dashboard
+ ↓
+BFF
+ ↓
+Billing API
+ ↓
+Stripe
+
+とする。
+
+Stripe Checkout Sessionはサーバー側で生成する設計が公式仕様に沿う。
+
+Webhookは、
+
+Stripe
+ ↓
+HTTPS public endpoint
+ ↓
+Cloudflare Tunnel
+ ↓
+PC Billing Webhook
+ ↓
+PostgreSQL
+
+とする。
+
+Stripeの現行ドキュメントではWebhook endpointは公開HTTPS URLで受信し、Stripe-SignatureとWebhook signing secretを用いて検証し、raw bodyを変更せずに検証する必要があるとされている。
+
+Browserの「決済完了画面」をEntitlementの正本にしない。
+
+EntitlementはPC側Billing Serviceが管理する。
+
+39. BillingとRule Engineの境界
+
+Rule Engineは、
+
+「現在のプランではこの機能が利用できません」
+
+などを提案できる。
+
+しかし、
+
+「このプランへ変更しますか？」
+
+というUIへの案内まで。
+
+直接、
+
+Checkout Session作成
+
+Subscription変更
+
+自動課金
+
+Coupon適用
+
+支払い方法変更
+
+を行わない。
+
+40. Plan / Beta
+
+PlanとBeta admissionはPC側のEntitlement/Admission Serviceを正本とする。
+
+公開Webに表示される料金情報は、
+
+説明用の静的コンテンツ
+
+であり、
+
+利用可能機能を決める正本
+
+ではない。
+
+実際の権限はPC側で、
+
+plan
++
+beta admission
++
+permission
++
+grant
++
+data availability
+
+を分離して判断する。
+
+Closed Beta 1は独立した通常planとして扱わず、admission状態として扱う既存方針を維持する。
+
+41. Announcements
+
+現在：
+
+[C] Next.js → DB、local operatorによる公開操作。
+
+alpha16：
+
+Local Operator
+ ↓
+PC Announcement Service
+ ↓
+PostgreSQL canonical announcement
+ ↓
+Publish Artifact
+ ↓
+お名前.com static hosting
+
+とする。
+
+公開データには、
+
+announcementId
+
+publicationVersion
+
+title
+
+body
+
+publishedAt
+
+revokedAt
+
+visibility
+
+等を持たせる。
+
+公開物はバージョン付きmanifest等で管理し、
+
+古い公開物がcanonical DBを上書きしない
+
+ようにする。
+
+42. Announcement撤回
+
+静的Webでは、
+
+DBから削除した瞬間に世界中のキャッシュから消える
+
+とは限らない。
+
+したがって撤回は、
+
+canonical record
+ ↓
+revokedAt
+ ↓
+new publication version
+ ↓
+static artifact update
+
+とする。
+
+正確な「撤回がユーザーに反映されるまでの時間」は、お名前.com側の配信・cache仕様確認後に決定する。
+
+現時点では数値を設定しない。
+
+43. Legal / Status / Contact
+
+現在の状態を完成扱いしない。
+
+Legal
+
+静的Webとして公開可能。
+
+ただし、
+
+Privacy Policy
+
+Terms
+
+Beta Terms
+
+Cookie/Tracking説明等
+
+は正式公開工程が必要。
+
+Status
+
+静的ページ＋公開用status snapshotを候補とする。
+
+ユーザー向けには、
+
+Operational
+
+Degraded
+
+Maintenance
+
+Unavailable
+
+等の粗い状態だけを公開する。
+
+内部DB、IP、credential、worker詳細は公開しない。
+
+Contact
+
+現在[C]では無効。
+
+alpha16では、
+
+Static contact form
+ ↓
+PC public contact endpoint
+
+を候補とする。
+
+ただし、
+
+spam対策
+
+rate limit
+
+privacy
+
+retention
+
+abuse
+
+response policy
+
+が決まるまでは「完成済み」と表示しない。
+
+44. Privacy
+
+alpha15から維持する、
+
+purpose-based retention
+
+deletion
+
+tombstone
+
+no cross-guild identity
+
+no unnecessary raw message storage
+
+least privilege
+
+を全PCサービスへ適用する。
+
+特にalpha16では、
+
+Rule Engineが存在するからといって、分析対象データの範囲を拡大しない。
+
+Rule Engineへの入力は既存の許可済みFactのみ。
+
+45. Deletion / Tombstone
+
+ユーザーまたはguildの削除後に、古いcallbackやworkerが再びデータを作らないよう、
+
+tombstone
+
+を利用する。
+
+処理順：
+
+Incoming event
+ ↓
+tombstone check
+ ↓
+deleted?
+ ├─ yes → reject/reduce to minimal receipt
+ └─ no  → normal processing
+
+古いWorkerが、
+
+「以前存在していたユーザーだから復活させる」
+
+ことは禁止。
+
+46. Run retentionとSuggestion retentionを分離
+
+Runの再開状態に既存の7日削除契約があるとしても、
+
+Suggestion = 7日
+
+とは自動的に決めない。
+
+Suggestionは別目的のデータなので、
+
+作成
+
+閲覧
+
+却下
+
+期限切れ
+
+Draft反映
+
+適用結果
+
+の保持期間を別途定義する。
+
+Billingや法的記録も同じく、Runの7日ルールへ一律に合わせない。
+
+47. Pollingを基本通信とする
+
+alpha16の基本状態取得はPolling。
+
+Browser
+ ↓
+GET current state
+ ↓
+BFF
+ ↓
+PC API
+ ↓
+PostgreSQL
+
+とする。
+
+Pollingは、
+
+Run
+
+Automation
+
+Scheduler
+
+Analysis
+
+Suggestions
+
+Operations
+
+等の最新状態取得に利用する。
+
+48. SSEは任意の補助
+
+SSEを採用する場合も、
+
+SSE = 通知
+API/DB = 正本
+
+とする。
+
+例えば、
+
+event: suggestion.updated
+data: {"suggestionId":"..."}
+
+だけ送る。
+
+ブラウザーは通知を受けたら、
+
+GET /suggestions/...
+
+で最新状態を取得する。
+
+Cloudflareの現行資料でもHTTP経由のSSEストリーミング自体はHTTPの長時間接続として扱われるため、SSEを採用する場合は実際のTunnel構成で接続維持・heartbeat・proxy挙動を確認する。alpha16の正本通信としてSSEを必須化しない。
+
+49. SSE切断時
+
+SSEが切断されても、
+
+データが消えた
+
+とは扱わない。
+
+SSE disconnected
+ ↓
+Polling fallback
+ ↓
+GET current state
+ ↓
+SSE reconnect
+ ↓
+resync
+
+とする。
+
+イベントを受信できなかった場合でも、再接続後のGETによって現在状態を取得できる。
+
+50. 「現在状態不明」の表示
+
+これはalpha16のUI契約として非常に重要。
+
+以下を混同しない。
+
+0件
+
+と
+
+データ取得不能
+
+と
+
+データがまだない
+
+と
+
+データが古い
+
+は別。
+
+表示状態：
+
+状態	UI
+current	現在値
+stale	古い値＋stale表示
+unavailable	サーバー取得不能
+no-data	データなし
+partial	部分データ
+unknown	判定不能
+
+取得失敗時に、
+
+[]
+
+や
+
+0
+
+へ変換しない。
+
+51. A案の障害時UX
+
+A案では、
+
+Browser
+ ↓
+app.example.com
+ ↓
+Tunnel
+ ↓
+PC
+
+なので、PC全体が停止した場合、
+
+Dashboardそのものが利用できない。
+
+これはA案の明確な制約として設計書へ残す。
+
+公式Web：
+
+www.example.com
+
+はPCが停止していても表示可能。
+
+Dashboard：
+
+app.example.com
+
+はPC停止時に利用不能。
+
+したがって公式Webから、
+
+「NEXUS Dashboard」
+
+と
+
+「System Status」
+
+へ到達できる導線を用意する。
+
+PC停止時にDashboard内部でエラー画面を表示することは保証しない。
+
+52. A案のTunnel停止
+
+PCは動いているがTunnelだけ停止した場合、
+
+PC Runtime       = potentially running
+PostgreSQL       = potentially running
+Scheduler        = potentially running
+Discord Gateway  = potentially running
+Tunnel           = unavailable
+
+となり得る。
+
+ブラウザーからはDashboardへ到達できない。
+
+したがって、
+
+Tunnel停止 = Runtime停止
+
+とUI上で断定しない。
+
+Runtimeの実状態はPC側でのみ正しく判定できる。
+
+53. B案の障害時UX
+
+B案なら、
+
+Static Dashboard
+     ↓
+表示可能
+     ↓
+PC API
+     ×
+
+となるため、PC停止時にもDashboard shellは表示できる。
+
+ただし、
+
+現在Run
+
+Analytics
+
+Suggestions
+
+Automation
+
+Settings
+
+Billing
+
+等は取得不能。
+
+したがって、
+
+「Dashboardは表示できるが、NEXUS Runtimeへ接続できません」
+
+とする。
+
+これはB案の大きなUX上のメリット。
+
+54. PC停止とRuntime停止の区別
+
+alpha16ではPCを一つの状態として扱わない。
+
+最低限、
+
+web/bff
+api
+database
+worker
+scheduler
+analysis
+rule-engine
+discord-gateway
+billing
+
+を論理的に分離する。
+
+ただしDashboardに内部詳細をすべて公開する必要はない。
+
+ユーザー向けには、
+
+NEXUS Runtime
+ ├─ Available
+ ├─ Degraded
+ └─ Unavailable
+
+程度へ集約できる。
+
+55. PC再起動
+
+PC再起動時は、
+
+Windows
+ ↓
+NEXUS services start
+ ↓
+PostgreSQL available
+ ↓
+API available
+ ↓
+Worker recovery
+ ↓
+Scheduler recovery
+ ↓
+Discord Gateway reconnect
+ ↓
+Rule Engine ready
+
+という依存関係を持つ。
+
+ただし、これは「すべてが同時に正常になる」と仮定しない。
+
+各serviceに、
+
+startup
+
+ready
+
+degraded
+
+stopped
+
+等の状態を持たせる。
+
+56. Rule Engine停止時
+
+Rule Engine停止は、
+
+Automation Runtime停止
+
+ではない。
+
+Automationは引き続き動作可能。
+
+逆に、
+
+Automation Runtime停止
+
+しても、
+
+過去の分析結果からRule EngineがSuggestionを生成する
+
+ことは設計上可能。
+
+ただしFactの鮮度を確認し、古いデータに基づく提案には適切なstale状態を付与する。
+
+57. Discord Gateway停止時
+
+Gateway停止は、
+
+NEXUS全体停止
+
+ではない。
+
+Gateway依存のリアルタイムイベント取得が停止する。
+
+REST APIで可能な処理は別途実行可能。
+
+ただし、必要なイベントが届いていない場合、
+
+「データが0件」
+
+ではなく、
+
+「イベント取得状態が不完全」
+
+とする。
+
+58. Billing障害
+
+Stripe障害やWebhook遅延時には、
+
+client-side success redirectだけでpaid entitlementを確定しない。
+
+Billing状態が確認できない場合は、
+
+paid capabilityを安全側に倒す。
+
+ただし既存ユーザーへ突然「無料へ変更された」と誤表示しない。
+
+状態として、
+
+active
+pending
+grace/unknown
+unavailable
+
+等を検討する。
+
+正確な状態名はBilling設計時に確定する。
+
+59. 公開WebとDashboardのDNS境界
+
+推奨論理構成：
+
+www.example.com
+    ↓
+お名前.com static
+
+app.example.com
+    ↓
+Cloudflare Tunnel
+    ↓
+Windows Next.js
+
+api.example.com
+    ↓
+将来B案用
+    ↓
+Cloudflare Tunnel
+    ↓
+Windows PC API
+
+A案ではapi.example.comをブラウザー向けに公開する必要はない。
+
+将来Bへ移行する場合に使用できる。
+
+Cloudflareの現行Tunnel資料では、public hostnameをTunnelからorigin serviceへルーティングする構成が正式にサポートされている。
+
+60. DNSについての未決事項
+
+Cloudflareの現行APIセットアップ資料では、公開アプリをTunnel経由で公開する前にCloudflareへサイトを追加し、nameserverをCloudflareへ変更する手順が示されている。
+
+したがって、
+
+お名前.comでドメインを契約している
+
+ことと、
+
+お名前.comをDNS authorityとして使い続ける
+
+ことは別問題。
+
+alpha16では、
+
+現在のDNS authority
+
+お名前.com契約プラン
+
+CloudflareへのDNS移管可否
+
+静的Web originの接続方法
+
+app/api hostnameの設定方法
+
+を確認するまで、DNS構成を確定しない。
+
+61. お名前.com側で必要な能力
+
+A/B共通で必要なのは基本的に、
+
+静的ファイルを配信できること
+
+。
+
+Aでは、
+
+公式Web
+
+Legal
+
+公開Status
+
+Announcement artifact
+
+程度。
+
+Bではそれに加えて、
+
+Static Dashboard
+
+JS
+
+CSS
+
+Dashboard assets
+
+が必要。
+
+一方、
+
+常駐Node.js
+reverse proxy
+PostgreSQL
+Redis
+
+はお名前.com側に必要としない設計にする。
+
+現在の契約プランで常駐Node.js/reverse proxyが可能かどうかは、今回の監査では未確認なので設計上の前提にしない。
+
+62. Operator
+
+現在[C]で確認されている、
+
+別loopback Fastify
+
+を維持する。
+
+127.0.0.1
+   ↓
+Operator
+
+とする。
+
+Cloudflare Tunnelに、
+
+operator.example.com
+
+等を設定してはいけない。
+
+Operatorは、
+
+Announcement publish
+
+Announcement revoke
+
+system diagnostics
+
+retention maintenance
+
+controlled administration
+
+等を担当できる。
+
+ただしguild user向けAPIとは認証境界を分ける。
+
+63. Announcement / Billing / Privacy / Operatorの共通原則
+
+これらは「管理機能」だが、同一権限として扱わない。
+
+Guild User
+    ≠
+Billing Operator
+    ≠
+Privacy Operator
+    ≠
+System Operator
+
+特に、
+
+Guild administratorだからNEXUS全体のoperatorになれる
+
+とはしない。
+
+64. Rule EngineとOperatorの境界
+
+Rule Engineが、
+
+「Announcementを更新した方がよい」
+
+とSuggestionを作ることはできる。
+
+しかし、
+
+Rule Engine
+ ↓
+Operator
+ ↓
+Announcement publish
+
+を自動実行しない。
+
+Operatorが明示的に判断する。
+
+同様に、
+
+「このTunnel設定を変更した方がよい」
+
+というsystem suggestionを生成することは将来的に可能だが、TunnelそのものをRule Engineが変更してはいけない。
+
+65. API設計の原則
+
+APIを次の3種類へ分ける。
+
+User API
+
+認証済みDashboard用。
+
+/auth
+/guilds
+/automations
+/analysis
+/explore
+/operations
+/suggestions
+/billing
+/settings
+Public API
+
+認証不要で公開する必要があるものだけ。
+
+/public/status
+/public/contact
+/public/beta
+
+等。
+
+Machine-to-machine API
+/discord/interactions
+/stripe/webhook
+
+等。
+
+それぞれ認証方式を混ぜない。
+
+66. Public APIにguildデータを混ぜない
+
+例えば、
+
+/public/status
+
+からguild情報を取得できないようにする。
+
+また、
+
+/public/announcements
+
+に非公開Draftが混入しないよう、
+
+canonical announcement
+
+と
+
+published artifact
+
+を分離する。
+
+67. Future B Migrationを容易にする設計
+
+A案を採用しても、PC APIを将来B案へ公開できる形にしておく。
+
+現在：
+
+Browser
+ ↓
+Next.js BFF
+ ↓
+PC API
+
+将来：
+
+Browser
+ ↓
+PC API
+
+となる。
+
+したがってPC APIは、
+
+「Next.js専用内部関数」
+
+として設計せず、
+
+NEXUS Domain API
+
+として設計する。
+
+ただしalpha16では公開originへ直接出さない。
+
+68. A→B移行時に変わるもの
+
+主に、
+
+Dashboard rendering
+
+session boundary
+
+browser API client
+
+CORS
+
+CSRF
+
+OAuth callback
+
+cookie location
+
+が変わる。
+
+一方、
+
+Analysis Runtime
+
+Explore service
+
+Operations service
+
+Automation Runtime
+
+Scheduler
+
+PostgreSQL
+
+Rule Engine
+
+Suggestion
+
+Billing Service
+
+Discord Gateway
+
+は基本的にそのまま使える。
+
+したがって、alpha16ではA案を採用してもB案への道を閉ざさないことを設計目標とする。
+
+69. Migration / Design Work Packages
+
+これは実装手順ではなく、alpha16設計上の依存単位である。
+
+A16-ARCH-01
+
+Hosting Boundary
+
+お名前.com
+
+Cloudflare
+
+PC
+
+Browser
+
+の責務を確定。
+
+A16-ARCH-02
+
+API Boundary
+
+BFF
+
+PC API
+
+public API
+
+machine API
+
+を分離。
+
+A16-ARCH-03
+
+Auth Boundary
+
+OAuth
+
+session
+
+guild authorization
+
+CSRF
+
+internal signing
+
+を統合。
+
+A16-ARCH-04
+
+Persistence
+
+PostgreSQL
+
+Redis
+
+Run
+
+Scheduler
+
+Suggestion
+
+Billing
+
+deletion
+
+の正本を確定。
+
+A16-ARCH-05
+
+Feature API Bridge
+
+Analysis
+
+Explore
+
+Operations
+
+Automation
+
+Settings
+
+Billing
+
+をPC APIへ接続する設計を確定。
+
+A16-ARCH-06
+
+Runtime Durability
+
+intent
+
+checkpoint
+
+worker fencing
+
+unknown
+
+recovery
+
+retention
+
+を統合。
+
+A16-ARCH-07
+
+Rule Engine
+
+Fact
+
+freshness
+
+ruleVersion
+
+evidence
+
+dedupe
+
+suggestion lifecycle
+
+を確定。
+
+A16-ARCH-08
+
+Public Publishing
+
+announcements
+
+legal
+
+status
+
+contact
+
+static artifact
+
+を確定。
+
+A16-ARCH-09
+
+Realtime
+
+polling
+
+optional SSE
+
+reconnect
+
+stale/unknown
+
+を確定。
+
+A16-ARCH-10
+
+Operational Boundary
+
+operator
+
+PC health
+
+Tunnel
+
+Windows startup
+
+secrets
+
+を確定。
+
+70. alpha16でまだ決めないもの
+
+以下は、根拠なしに数値を設定しない。
+
+Polling interval
+
+SSE heartbeat interval
+
+Suggestion retention期間
+
+Announcement cache TTL
+
+Contact retention期間
+
+Rule Engine evaluation frequency
+
+Worker lease duration
+
+Redis retention
+
+最大同時Run数
+
+最大Suggestion数
+
+Cloudflare料金
+
+お名前.com料金
+
+PCの必要スペック
+
+これらは実測・契約・公式資料・運用要件から決める。
+
+Cloudflareの現行資料にはTunnelのorigin connection parameter等の数値は掲載されているが、それをNEXUSのアプリケーション契約へそのままコピーしない。
+
+71. 現在の未確認事項
+
+alpha16設計完了前に、少なくとも以下を確認対象とする。
+
+Infrastructure
+
+お名前.comの正確な契約プラン
+
+現在のDNS authority
+
+CloudflareへDNSを移管できるか
+
+お名前.com静的hostingの実仕様
+
+DB実配置
+
+Redis実配置
+
+Windows PCの常駐方法
+
+PC再起動時のservice startup方法
+
+Application
+
+現在のNext.js version
+
+current BFF deployment
+
+PC API deployment
+
+DB schema
+
+Redis/BullMQの実際の依存関係
+
+detailed analysis HTTP bridgeの現在状態
+
+Announcement publish mechanism
+
+Stripe endpoint configuration
+
+Discord Interaction endpoint configuration
+
+Security
+
+OAuth redirect URI
+
+session cookie attributes
+
+internal signing secret storage
+
+Tunnel credential storage
+
+operator authentication
+
+Product
+
+Suggestion retention
+
+Suggestion target registry
+
+public status policy
+
+contact form policy
+
+billing entitlement states
+
+exact legal publication status
+
+72. Next.jsについての追加注意
+
+alpha16ではNext.jsをPCへ配置する場合、現在のコードが依存しているrequest-time機能を維持することになる。
+
+Next.js公式ではNode.js server deploymentはフル機能をサポートする一方、static exportは制限付きで、CookiesやHeadersなどrequest-time機能を利用できない。
+
+したがってA案では、
+
+Next.jsを静的exportしない。
+
+通常のNode.js serverとしてPC上で稼働させる設計を基本とする。
+
+また、現在のNext.js versionは今回確認していない。公式では2026年10月14日にセキュリティ更新が案内されているため、実装開始前には実際のversionとpatch状態を別途確認する。これは現在のNEXUSコードが既に対応済みという意味ではない。
+
+73. Discord Data Privacy
+
+NEXUSの既存方針、
+
+No MESSAGE_CONTENT保存
+No cross-guild identity
+No unnecessary personal profiling
+
+をRule Engineにも適用する。
+
+Discordの2026年のDeveloper Policy/Privileged Intents変更を考慮し、Message Content等の取得は必要最小限とする。Discord自身もMessage Content、Guild Members、PresenceをPrivileged Intentsとして区別している。
+
+74. 最終アーキテクチャ
+
+alpha16の推奨構成を一枚にまとめると、
+
+                         Internet
+                            │
+              ┌─────────────┴─────────────┐
+              │                           │
+              ▼                           ▼
+     www.example.com              app.example.com
+       お名前.com                       │
+      Static Web                    Cloudflare
+              │                         │
+              │                     Tunnel
+              │                         │
+              │                         ▼
+              │              ┌─────────────────────┐
+              │              │ Windows NEXUS PC    │
+              │              │                     │
+              │              │ Next.js Dashboard   │
+              │              │       + BFF         │
+              │              │          │          │
+              │              │     signed API      │
+              │              │          │          │
+              │              │     PC Domain API   │
+              │              │          │          │
+              │              │ ┌────────┼────────┐ │
+              │              │ │        │        │ │
+              │              │Analysis Rule   Operations
+              │              │ │       Engine     │
+              │              │ │        │        │ │
+              │              │ └────────┼────────┘ │
+              │              │          │          │
+              │              │ Automation Runtime  │
+              │              │ Scheduler / Worker  │
+              │              │          │          │
+              │              │     PostgreSQL      │
+              │              │                     │
+              │              │ Operator(loopback)  │
+              │              └─────────┬───────────┘
+              │                        │
+              │                outbound direct
+              │                        │
+              │              ┌─────────┴─────────┐
+              │              ▼                   ▼
+              │           Discord              Stripe
+              │           Gateway             API/Webhook
+              │
+              └──── static announcements/legal/status
+75. 最終判断
+推奨
+
+alpha16ではA案を推奨する。
+
+ただし、A案を単純な「Next.jsをPCへコピー」として扱わない。
+
+正確には、
+
+Static Public Web + PC-hosted Next.js/BFF + PC Domain API + PC Runtime
+
+という構成にする。
+
+これが現在の、
+
+Browser → same-origin Next.js BFF → signed PC API
+
+という実際のコード構造との互換性が最も高い。
+
+B案について
+
+B案は不適切なのではない。
+
+むしろ将来的には、
+
+Static Dashboard + direct PC API
+
+は非常に綺麗な構成になる。
+
+ただし現在のコードには、
+
+DB session
+
+cookies
+
+headers
+
+BFF
+
+server-side auth
+
+Explore DB access
+
+Operations DB access
+
+Billing server logic
+
+が存在するため、alpha16でBへ直接移行すると変更範囲が大きくなる。
+
+したがって、
+
+alpha16 = A
+
+将来 = Bへ移行可能
+
+という二段階構成が最も合理的。
+
+76. alpha16の最重要設計原則
+
+最後に、今回の改訂でNEXUS全体を貫く原則を固定する。
+
+① レンタルサーバーはStatic Public Surface
+
+公式Web、Legal、公開Announcement、公開Status等。
+
+② Windows PCはNEXUS Runtime
+
+Auth、DB、Analysis、Explore、Operations、Automation、Scheduler、Billing、Rule Engine、Suggestion、Discord連携等。
+
+③ TunnelはNetwork Boundary
+
+Tunnel自身を認証・guild認可・Runtime正本として扱わない。
+
+④ Browserは内部API秘密を知らない
+
+署名鍵、DB credential、Bot Token、Stripe secret、Tunnel credential等はブラウザーへ出さない。
+
+⑤ A案では同一origin BFFを維持
+
+これによって現在の認証境界を大きく壊さない。
+
+⑥ PC APIを将来B案の境界として設計
+
+現在は内部APIだが、将来的にBrowser-facing APIへ昇格できるようにする。
+
+⑦ PostgreSQLが永続状態の正本
+
+Redisやブラウザー状態を正本にしない。
+
+⑧ Rule Engineは提案者であって実行者ではない
+
+AIは、
+
+Detect → Explain → Recommend
+
+まで。
+
+Act
+
+は既存の明示的なNEXUS操作フローだけが担当する。
+
+⑨ Suggestionは自動変更ではない
+Suggestion
+ ↓
+View
+ ↓
+Apply to Draft
+ ↓
+Validate
+ ↓
+Test
+ ↓
+Impact Confirmation
+ ↓
+Explicit Enable
+
+を維持する。
+
+⑩ 外部結果不明は成功に変換しない
+
+再送による二重操作を避ける。
+
+⑪ PC停止とTunnel停止をRuntime状態と混同しない
+
+Webが見えないことと、Automationが停止したことは別。
+
+⑫ 0・No Data・Stale・Unknown・Unavailableを分離
+
+現在状態を取得できないときに、偽の「0件」を表示しない。
+
+⑬ PrivacyはRule Engineにも継承
+
+AIを理由に取得データ・保持期間・guild横断識別を拡張しない。
+
+77. alpha16設計の完了条件
+
+alpha16を「設計完了」とするためには、少なくとも次の未決事項が解消されている必要がある。
+
+A/Bの最終採用判断
+
+DNS/Cloudflare構成
+
+お名前.com契約・静的hosting仕様
+
+DB/Redis実配置
+
+Auth/session境界
+
+PC API境界
+
+全機能のAPI bridge
+
+Runtime crash safety
+
+Scheduler recovery
+
+Analysis/Explore/Operations API
+
+Billing移設境界
+
+Announcement static sync
+
+Legal/status/contact公開方針
+
+Privacy retention
+
+Suggestion schema/lifecycle
+
+Rule Engine Fact契約
+
+Polling/SSE契約
+
+PC/Tunnel停止時UX
+
+Operator boundary
+
+Secret placement
+
+これらが確定するまで、alpha16を実装可能状態とは扱わない。
+
+結論
+
+今回のコード監査によって、以前の「Web → Tunnel → Windows PC」という方針は成立することがかなり明確になりました。
+
+ただし、正確には、
+
+公式Web → お名前.com静的配信
+Dashboard → Windows PC上のNext.js/BFF
+Browser → Cloudflare Tunnel → Windows PC
+BFF → 署名付き内部PC API
+Analysis / Explore / Operations / Automation / Scheduler / Billing / Rule Engine → Windows PC
+PostgreSQL → PC側の永続状態正本
+Discord Gateway → PCから直接Outbound
+Operator → PC localhostのみ
+
+という構成がalpha16の基準になります。
+
+そして、B案を将来可能にするために、PC APIをNEXUSの正式なDomain API境界として設計する。
+
+この方針なら、alpha16で大規模な認証・Dashboard再構築を行わず、現在の実装構造を活かしながらRuntimeをWindows PCへ集約できます。
+
+なお、料金についてはalpha16の設計契約へ数値を入れていません。Cloudflareの現行公式資料でTunnelの接続・origin設定は確認しましたが、料金プランを本設計の前提にする必要はないため、現時点では未確定のままとします。
+
+本書は設計改訂のみであり、実装・動作試験・修正・Codexへの実装指示は一切行っていません。

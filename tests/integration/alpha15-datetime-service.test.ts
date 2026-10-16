@@ -1,4 +1,4 @@
-import {randomUUID} from "node:crypto";
+import {createHash,randomUUID} from "node:crypto";
 import Fastify from "fastify";
 import {afterAll, beforeAll, expect, it, vi} from "vitest";
 import {connect, ensureGuild, json, migrate, sql, tenant, type Database} from "../../packages/db/src/index";
@@ -38,7 +38,7 @@ async function fixture(clock?: {now: Date}) {
   const definition: FlowDefinition = {schemaVersion: 1, id: "datetime", guildId: s.guildId, name: "Date/time service", trigger: {kind: "manual", inputs: []}, variables: [], body: [{kind: "end", id: "end"}]};
   async function call(method: "GET" | "PUT" | "POST", suffix: string, body?: unknown, headers: Record<string, string> = {}) {
     const path = base + suffix;
-    return app.inject({method, url: path, headers: {authorization: `Bearer ${apiToken(key, s)}`, "x-nexus-user-proof": createPublicApiProof({scope: s, userId: user, sessionReference: reference, method, path: path.split("?")[0]!, ...(method !== "GET" ? {origin: "https://nexus.example"} : {})}), ...(method !== "GET" ? {origin: "https://nexus.example", "content-type": "application/json"} : {}), ...headers}, ...(body === undefined ? {} : {payload: JSON.stringify(body)})});
+    return app.inject({method, url: path, headers: {authorization: `Bearer ${apiToken(key, s)}`, "x-nexus-user-proof": createPublicApiProof({scope: s, userId: user, sessionReference: reference, method, path, body, ...(method !== "GET" ? {origin: "https://nexus.example"} : {})}), ...(method !== "GET" ? {origin: "https://nexus.example", "content-type": "application/json"} : {}), ...headers}, ...(body === undefined ? {} : {payload: JSON.stringify(body)})});
   }
   const save = (value: FlowDefinition, expectedRevision = 0) => call("PUT", `/flows/${value.id}/draft`, {definition: value, expectedRevision, requestId: randomUUID()});
   return {s, app, discord, service, definition, call, save};
@@ -80,7 +80,7 @@ it("DT10 requires current real-user READ authorization for the time-zone endpoin
 it("DT10 reports malformed raw guild regions as unconfirmed after the service READ gate", async () => {
   const f = await fixture(); try {
     const authorize = vi.fn(async () => {}), service = new AutomationService(db, {authorize});
-    const actor: Actor = {key: "synthetic-zone-reader", permissions: "8", roles: [], source: "WEB_DASHBOARD", requestId: randomUUID()};
+    const actor: Actor = {key: createHash("sha256").update("synthetic-zone-reader").digest("hex"), permissions: "8", roles: [], source: "WEB_DASHBOARD", requestId: randomUUID()};
     await sql`INSERT INTO guild_settings(organization_id,guild_id,revision,settings) VALUES(${f.s.organizationId}::uuid,${f.s.guildId},6,${json({timezone: "No/Such_Zone"})})`.execute(db);
     expect(await service.timeZonePreference(f.s, actor)).toEqual({timeZone: null, source: "invalid", revision: 6});
     expect(authorize).toHaveBeenCalledWith(db, f.s, actor, "READ");

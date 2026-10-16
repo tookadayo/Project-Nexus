@@ -1,4 +1,4 @@
-import { binary64Dyadic, ScratchNumericError, type ScratchMathOperator } from "./scratch-numeric.js";
+import { binary64Dyadic, ScratchNumericError, type ScratchMathOperator } from "./scratch-numeric";
 
 /** The minimal audited gmp-wasm C binding surface; no package or WASM is imported here. */
 export interface ScratchMpfrBinding {

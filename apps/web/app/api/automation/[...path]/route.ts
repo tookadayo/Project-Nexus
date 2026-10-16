@@ -14,7 +14,7 @@ async function forward(req: NextRequest, route: RouteContext) {
     const { path } = await route.params;
     if (!path.length || path.length > 5 || path.some(part => !/^[a-zA-Z0-9_-]{1,100}$/.test(part)))
       throw new DomainError("INVALID_CONFIGURATION", 400);
-    const mutation = req.method !== "GET";
+    const mutation = !["GET", "HEAD"].includes(req.method);
     if (mutation && !sameOrigin(req)) throw new DomainError("ORIGIN_REJECTED", 403);
     const session = req.cookies.get("nexus_session")?.value;
     const current = await dashboardContext(session, req.cookies.get("nexus_guild")?.value);
@@ -27,7 +27,7 @@ async function forward(req: NextRequest, route: RouteContext) {
       throw new DomainError("INVALID_CONFIGURATION", 413);
     const response = await fetch(url, {
       method: req.method,
-      headers: { ...publicApiHeaders(current, session, req.method, url), "Content-Type": "application/json" },
+      headers: { ...publicApiHeaders(current, session, req.method, url, body), "Content-Type": "application/json" },
       body,
       cache: "no-store",
       signal: AbortSignal.timeout(15000),

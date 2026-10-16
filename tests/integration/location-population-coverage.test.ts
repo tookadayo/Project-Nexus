@@ -84,7 +84,11 @@ it("treats new-only positive records as lower bounds when the window crosses col
 });
 
 it("compares sub-millisecond collector introduction in SQL before accepting an epoch or complete zero", async () => {
-  const f = await analysisFixture(db,"FREE",false);
+  const base = await analysisFixture(db,"FREE",false),now = Date.now();
+  // This case isolates the collector boundary in a recent empty window. The
+  // fixture's current heartbeat must not make these test events stale replays.
+  const f = {...base,start:new Date(now-2000),end:new Date(now-1000)};
+  await sql`UPDATE discord_integration_health SET last_gateway_at=${f.start} WHERE ${tenant(f.s)}`.execute(db);
   await sql`UPDATE location_population_collection SET introduced_at=${f.start}::timestamptz+interval '0.5 milliseconds' WHERE ${tenant(f.s)}`.execute(db);
   await sql`DELETE FROM collection_epochs WHERE ${tenant(f.s)}`.execute(db);
   const e: Envelope = {...f.s,shardId:0,gatewaySessionId:"precision",sequence:1,context:"PRODUCTION",kind:"telemetry.connected",at:f.start.toISOString()};
