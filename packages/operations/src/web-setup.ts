@@ -87,6 +87,16 @@ function initialSettings(current: SettingsView) {
       : {}),
   });
 }
+async function savedTimeZoneSource(tx: Tx, s: Scope) {
+  const saved = (
+    await sql<{ settings: Record<string, unknown> }>`SELECT settings FROM guild_settings WHERE ${tenant(s)}`.execute(tx)
+  ).rows[0]?.settings;
+  if (!saved) return "missing" as const;
+  if (!Object.hasOwn(saved, "timezone")) return "legacy" as const;
+  return settingsSchema.shape.timezone.removeDefault().safeParse(saved.timezone).success
+    ? ("saved" as const)
+    : ("invalid" as const);
+}
 export class WebSetupService {
   constructor(
     private readonly db: Database,
@@ -194,6 +204,9 @@ export class WebSetupService {
         settingsRevision: current.revision,
         setupVersion: current.setupVersion,
         existing: current.revision > 0,
+        // Compatibility defaults in SettingsService are not evidence of a
+        // user's saved region. Clients must confirm a candidate separately.
+        timeZoneSource: await savedTimeZoneSource(tx, s),
         missing: current.setupVersion < 3 ? ["review"] : [],
         settings: initialSettings(current),
         ...(draft ? { draft: setupDraftView(draft) } : {}),
@@ -282,6 +295,10 @@ export class WebSetupService {
           "REVISION_CONFLICT",
           409,
         );
+      // A new draft must not silently promote UTC/legacy defaults into a
+      // confirmed guild setting. An explicit field also confirms unchanged UTC.
+      if (!row && (await savedTimeZoneSource(tx, s)) !== "saved")
+        assert(Object.hasOwn(patch, "timezone"), "TIMEZONE_CONFIRMATION_REQUIRED");
       const settings = webSetupSettingsSchema.parse({
         ...(row?.settings ?? initialSettings(current)),
         ...patch,

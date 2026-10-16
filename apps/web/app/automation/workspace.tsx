@@ -19,6 +19,7 @@ import {
   type CheckResult,
   type EditorTargets,
   type FlowDetail,
+  type FlowRevision,
   type FlowSummary,
   type ImpactResult,
   type SimulationResult,
@@ -30,6 +31,10 @@ import {
   branches,
   childList,
   cloneStatement,
+  conditionChain,
+  conditionChainRoot,
+  editConditionChain,
+  flowDefinitionDifferences,
   createDraft,
   createStatement,
   captureActionOutcome,
@@ -50,10 +55,25 @@ import {
   type Locale,
   type PaletteCard,
 } from "./model";
-import { ValueSlot, literalText } from "./value-slot";
+import {
+  ValueSlot,
+  literalText,
+  AutomationSemanticProfile,
+} from "./value-slot";
+import {
+  saveCommonUnknownDraft,
+  type CommonUnknownDraft,
+} from "../../../../packages/automation/src/scratch-authoring";
+import {
+  scratchMathAvailable,
+  type ScratchMathOperator,
+} from "../../../../packages/automation/src/scratch-numeric";
 import { TriggerEditor } from "./trigger-editor";
 import { BoundedWaitEditor } from "./bounded-wait-editor";
-import { ResultBranchEditor, ApprovalBlockEditor } from "./result-branch-editor";
+import {
+  ResultBranchEditor,
+  ApprovalBlockEditor,
+} from "./result-branch-editor";
 import { RepeatResultsEditor } from "./repeat-results-editor";
 import { DefinitionManager } from "./definition-manager";
 import { runBuiltinDeclarations } from "../../../../packages/automation/src/builtins";
@@ -69,11 +89,29 @@ const EMPTY_TARGETS: EditorTargets = {
   roles: [],
   available: false,
 };
+const cavityId = (nodeId: string, branch: string) =>
+  `automation-cavity-${encodeURIComponent(JSON.stringify([nodeId, branch]))}`;
+const MATH_CHOICES: readonly [ScratchMathOperator, string, string][] = [
+  ["abs", "絶対値", "Absolute value"],
+  ["floor", "切り下げ", "Floor"],
+  ["ceiling", "切り上げ", "Ceiling"],
+  ["sqrt", "平方根", "Square root"],
+  ["sin", "サイン（度）", "Sine (degrees)"],
+  ["cos", "コサイン（度）", "Cosine (degrees)"],
+  ["tan", "タンジェント（度）", "Tangent (degrees)"],
+  ["asin", "逆サイン（度）", "Arc sine (degrees)"],
+  ["acos", "逆コサイン（度）", "Arc cosine (degrees)"],
+  ["atan", "逆タンジェント（度）", "Arc tangent (degrees)"],
+  ["ln", "自然対数", "Natural logarithm"],
+  ["log", "常用対数", "Base-10 logarithm"],
+  ["exp", "eの累乗", "Exponential"],
+  ["exp10", "10の累乗", "Power of ten"],
+];
 export interface AutomationWorkspaceProps {
   locale: Locale;
   guildId: string;
   guildName?: string;
-  timeZone?: string;
+  timeZone?: string | null;
   targets?: EditorTargets;
   endpoint?: string;
   initialDefinition?: FlowDefinition;
@@ -106,7 +144,7 @@ export function AutomationWorkspace({
   locale,
   guildId,
   guildName,
-  timeZone = "UTC",
+  timeZone: providedTimeZone,
   targets: providedTargets,
   endpoint = "/api/automation",
   initialDefinition,
@@ -119,6 +157,9 @@ export function AutomationWorkspace({
     () => automationClient(endpoint, guildId),
     [endpoint, guildId],
   );
+  const [timeZone, setTimeZone] = useState<string | null>(providedTimeZone ?? null);
+  const [timeZoneCandidate, setTimeZoneCandidate] = useState<string | null>(null);
+  const [zoneUnavailable, setZoneUnavailable] = useState(false);
   const [fetchedTargets, setFetchedTargets] =
     useState<EditorTargets>(EMPTY_TARGETS);
   const targets = providedTargets ?? fetchedTargets;
@@ -145,11 +186,15 @@ export function AutomationWorkspace({
     [announcement, setAnnouncement] = useState(""),
     [conflict, setConflict] = useState(false),
     [uncertain, setUncertain] = useState<PendingRequest | null>(null),
-    [confirm, setConfirm] = useState<"enable" | "discard" | "disable" | null>(
-      null,
-    ),
+    [confirm, setConfirm] = useState<
+      "enable" | "discard" | "disable" | "profile" | null
+    >(null),
     [nextFlow, setNextFlow] = useState<string | null>(null);
-  const [scheduleReview,setScheduleReview]=useState<FlowDetail["scheduleReview"]>();
+  const [scheduleReview, setScheduleReview] =
+    useState<FlowDetail["scheduleReview"]>();
+  const [commonDraft, setCommonDraft] = useState<CommonUnknownDraft | null>(
+    null,
+  );
   const [query, setQuery] = useState(""),
     [view, setView] = useState<"blocks" | "steps">("blocks"),
     [panel, setPanel] = useState<"blocks" | "palette" | "details">("blocks"),
@@ -163,6 +208,7 @@ export function AutomationWorkspace({
   });
   const flight = useRef(false),
     epoch = useRef(0);
+  const commonSourcePanel = useRef<"blocks" | "palette" | "details">("blocks");
   const definition = history?.present.definition,
     selectedId = history?.present.selectedId;
   const dirty = Boolean(definition && JSON.stringify(definition) !== saved);
@@ -174,8 +220,8 @@ export function AutomationWorkspace({
   const variables = definition
     ? availableVariables(definition, selectedId, locale)
     : [];
-  const selectedProcedure = definition?.procedures?.find(
-    (item) => matchesProcedureArea(area,item),
+  const selectedProcedure = definition?.procedures?.find((item) =>
+    matchesProcedureArea(area, item),
   );
   const activeBody = definition
     ? area === "detached"
@@ -184,6 +230,7 @@ export function AutomationWorkspace({
     : [];
   const availableCards = PALETTE.filter(
     (card) =>
+      (card.kind !== "end" || definition?.semanticProfile !== "scratch.v1") &&
       (card.kind !== "parallel" ||
         AUTOMATION_CATALOG.find((item) => item.id === "CT07")?.availability ===
           "available") &&
@@ -287,11 +334,16 @@ export function AutomationWorkspace({
   };
   useEffect(() => {
     let current = true;
+    try { setTimeZoneCandidate(Intl.DateTimeFormat().resolvedOptions().timeZone || null); }
+    catch { setTimeZoneCandidate(null); }
     setLoading(true);
     setProblem("");
-    client
-      .list()
-      .then(async (result) => {
+    Promise.all([client.list(), providedTimeZone !== undefined ? Promise.resolve({timeZone:providedTimeZone,source:providedTimeZone?'saved':'missing'}) : client.timeZone().catch(() => ({timeZone:null,source:'unavailable'}))])
+      .then(async ([result, preference]) => {
+        if (!current) return;
+        const savedZone = preference.source === 'saved' ? preference.timeZone : null;
+        setTimeZone(savedZone);
+        setZoneUnavailable(preference.source !== 'saved');
         if (!current) return;
         setItems(result.items);
         if (initialFlowId && !initialDefinition) {
@@ -305,6 +357,7 @@ export function AutomationWorkspace({
               : initialTemplate === "ticket"
                 ? "wait"
                 : initialTemplate,
+            savedZone,
           );
         if (current) setLoading(false);
       })
@@ -422,7 +475,7 @@ export function AutomationWorkspace({
       setBusy("");
     }
   };
-  const newDraft = (template = "blank") => {
+  const newDraft = (template = "blank", initialZone = timeZone) => {
     const next = createDraft(guildId, locale);
     if (template === "notice") {
       next.name = words(
@@ -436,7 +489,7 @@ export function AutomationWorkspace({
           kind: "recurring",
           frequency: "weekly",
           time: "18:00",
-          timeZone,
+          timeZone: initialZone ?? "",
           startDate: "",
           endDate: "",
           weekdays: [5],
@@ -628,7 +681,8 @@ export function AutomationWorkspace({
             : await client.disable(flowId, requestId);
         if (currentEpoch !== epoch.current) return;
         setActiveRevision(kind === "disable" ? null : detail.activeRevision);
-        if(kind==="enable")setScheduleReview({required:false,reason:null});
+        if (kind === "enable")
+          setScheduleReview({ required: false, reason: null });
         setConfirm(null);
         setAnnouncement(
           words(
@@ -737,11 +791,39 @@ export function AutomationWorkspace({
     else void load(id);
   };
   const summarize = (node: Statement) => {
+    if (node.kind === "boundedLoop")
+      return PALETTE.find((card) => card.id === node.mode);
     if (node.kind === "action")
       return PALETTE.find((card) => card.operation === node.operation);
     if (node.kind === "random")
       return PALETTE.find((card) => card.mode === node.mode);
     return PALETTE.find((card) => card.kind === node.kind);
+  };
+  const copyOwner = (id: string) =>
+    definition?.scratchAuthoring?.chains.find((chain) =>
+      chain.copies.some((copy) => Object.values(copy.nodeIds).includes(id)),
+    );
+  const openCommonDraft = (draft: CommonUnknownDraft) => {
+    commonSourcePanel.current = panel;
+    setCommonDraft(draft);
+    setPanel("blocks");
+  };
+  const commonDraftFor = (
+    chain: NonNullable<FlowDefinition["scratchAuthoring"]>["chains"][number],
+  ): CommonUnknownDraft | undefined => {
+    const entry = definition && locate(definition, chain.entryId)?.statement;
+    if (entry?.kind !== "branch") return;
+    const clauses = conditionChain(entry);
+    return {
+      id: chain.id,
+      clauses: clauses.map(({ id, condition, then }) => ({
+        id,
+        condition,
+        then,
+      })),
+      otherwise: clauses.at(-1)!.otherwise,
+      template: chain.template,
+    };
   };
   const tree = (
     list: Statement[],
@@ -759,10 +841,29 @@ export function AutomationWorkspace({
       {list.map((node, index) => {
         const card = summarize(node),
           nested = branches(node),
-          found = locate(definition!, node.id);
+          isCollapsed = Boolean(definition?.ui?.collapsed?.includes(node.id)),
+          found = locate(definition!, node.id),
+          commonChain = definition?.scratchAuthoring?.chains.find((chain) =>
+            chain.clauseIds.includes(node.id),
+          ),
+          controlled = Boolean(
+            copyOwner(node.id) ||
+            definition?.scratchAuthoring?.chains.some((chain) =>
+              chain.clauseIds.includes(node.id),
+            ),
+          );
         return (
           <li
             key={node.id}
+            data-block-id={node.id}
+            data-statement-kind={node.kind}
+            data-shape={
+              nested.length
+                ? "container"
+                : ["end", "return", "endBranch", "endRun"].includes(node.kind)
+                  ? "terminal"
+                  : "statement"
+            }
             className={`automation-block category-${card?.category ?? "control"} ${nested.length ? "is-container" : ""} ${node.enabled === false ? "is-disabled" : ""} ${selectedId === node.id ? "is-selected" : ""}`}
           >
             <div className="automation-block-head">
@@ -770,6 +871,44 @@ export function AutomationWorkspace({
                 type="button"
                 className="automation-block-title"
                 aria-pressed={selectedId === node.id}
+                aria-keyshortcuts="ArrowUp ArrowDown Home End Alt+ArrowUp Alt+ArrowDown"
+                onKeyDown={(event) => {
+                  if (
+                    event.altKey &&
+                    (event.key === "ArrowUp" || event.key === "ArrowDown")
+                  ) {
+                    event.preventDefault();
+                    if (!locked && !controlled)
+                      edit(
+                        moveStatement(
+                          definition!,
+                          node.id,
+                          event.key === "ArrowUp" ? "up" : "down",
+                        ),
+                      );
+                    return;
+                  }
+                  if (
+                    !["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)
+                  )
+                    return;
+                  event.preventDefault();
+                  const titles = Array.from(
+                    event.currentTarget
+                      .closest(".automation-tree")!
+                      .querySelectorAll<HTMLButtonElement>(
+                        ".automation-block-title",
+                      ),
+                  ).filter((button) => button.getClientRects().length > 0);
+                  const at = titles.indexOf(event.currentTarget);
+                  const next =
+                    event.key === "Home"
+                      ? titles[0]
+                      : event.key === "End"
+                        ? titles.at(-1)
+                        : titles[at + (event.key === "ArrowUp" ? -1 : 1)];
+                  next?.focus();
+                }}
                 onClick={() => select(node.id)}
               >
                 <span className="automation-order">{index + 1}</span>
@@ -783,13 +922,22 @@ export function AutomationWorkspace({
                       nested.length ? "Contains steps" : "Statement",
                     )}
                   </small>
-                  {card
-                    ? words(locale, card.ja, card.en)
-                    : words(
+                  {node.kind === "branch" &&
+                  parentId &&
+                  branch === "otherwise" &&
+                  list.length === 1
+                    ? words(
                         locale,
-                        "対応していない手順（保持）",
-                        "Unsupported step (preserved)",
-                      )}
+                        "それ以外でもし（前の条件が不成立のときだけ）",
+                        "Else if (only when the previous condition is false)",
+                      )
+                    : card
+                      ? words(locale, card.ja, card.en)
+                      : words(
+                          locale,
+                          "対応していない手順（保持）",
+                          "Unsupported step (preserved)",
+                        )}
                   {node.kind === "declare" && <b> · {node.variable.name}</b>}
                 </span>
               </button>
@@ -805,97 +953,178 @@ export function AutomationWorkspace({
                 "Edit without dragging",
               )}
             >
-              <button
-                type="button"
-                disabled={locked || index === 0}
-                onClick={() => edit(moveStatement(definition!, node.id, "up"))}
+              <fieldset
+                className="automation-block-controls"
+                disabled={locked || controlled}
               >
-                {words(locale, "上へ", "Up")}
-              </button>
-              <button
-                type="button"
-                disabled={locked || index === list.length - 1}
-                onClick={() =>
-                  edit(moveStatement(definition!, node.id, "down"))
-                }
-              >
-                {words(locale, "下へ", "Down")}
-              </button>
-              <button
-                type="button"
-                disabled={
-                  locked ||
-                  !branches(list[index - 1] ?? { id: "", kind: "end" }).length
-                }
-                onClick={() =>
-                  edit(moveStatement(definition!, node.id, "inside"))
-                }
-              >
-                {words(locale, "前の中へ", "Inside previous")}
-              </button>
-              <button
-                type="button"
-                disabled={locked || !found?.parent}
-                onClick={() =>
-                  edit(moveStatement(definition!, node.id, "outside"))
-                }
-              >
-                {words(locale, "外へ", "Out")}
-              </button>
-              <button
-                type="button"
-                disabled={locked}
-                onClick={() => {
-                  const cloned = cloneStatement(node);
-                  modify((next) => {
-                    const location = locate(next, node.id);
-                    location?.siblings.splice(location.index + 1, 0, cloned);
-                  }, cloned.id);
-                }}
-              >
-                {words(locale, "複製", "Duplicate")}
-              </button>
-              <button
-                type="button"
-                disabled={locked}
-                onClick={() =>
-                  edit(
-                    moveStatement(
-                      definition!,
-                      node.id,
-                      area === "detached" ? "restore" : "unused",
-                    ),
-                  )
-                }
-              >
-                {words(
-                  locale,
-                  area === "detached" ? "手順へ戻す" : "保管する",
-                  area === "detached" ? "Restore to steps" : "Not used",
-                )}
-              </button>
-              <button
-                type="button"
-                disabled={locked}
-                onClick={() => {
-                  modify((next) => {
-                    const location = locate(next, node.id);
-                    location?.siblings.splice(location.index, 1);
-                  }, undefined);
-                  setFieldErrors({});
-                }}
-              >
-                {words(locale, "削除", "Delete")}
-              </button>
+                <button
+                  type="button"
+                  disabled={locked || index === 0}
+                  onClick={() =>
+                    edit(moveStatement(definition!, node.id, "up"))
+                  }
+                >
+                  {words(locale, "上へ", "Up")}
+                </button>
+                <button
+                  type="button"
+                  disabled={locked || index === list.length - 1}
+                  onClick={() =>
+                    edit(moveStatement(definition!, node.id, "down"))
+                  }
+                >
+                  {words(locale, "下へ", "Down")}
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    locked ||
+                    !branches(list[index - 1] ?? { id: "", kind: "end" }).length
+                  }
+                  onClick={() =>
+                    edit(moveStatement(definition!, node.id, "inside"))
+                  }
+                >
+                  {words(locale, "前の中へ", "Inside previous")}
+                </button>
+                <button
+                  type="button"
+                  disabled={locked || !found?.parent}
+                  onClick={() =>
+                    edit(moveStatement(definition!, node.id, "outside"))
+                  }
+                >
+                  {words(locale, "外へ", "Out")}
+                </button>
+                <button
+                  type="button"
+                  disabled={locked}
+                  onClick={() => {
+                    const cloned = cloneStatement(node);
+                    modify((next) => {
+                      const location = locate(next, node.id);
+                      location?.siblings.splice(location.index + 1, 0, cloned);
+                    }, cloned.id);
+                  }}
+                >
+                  {words(locale, "複製", "Duplicate")}
+                </button>
+                <button
+                  type="button"
+                  disabled={locked}
+                  onClick={() =>
+                    edit(
+                      moveStatement(
+                        definition!,
+                        node.id,
+                        area === "detached" ? "restore" : "unused",
+                      ),
+                    )
+                  }
+                >
+                  {words(
+                    locale,
+                    area === "detached" ? "手順へ戻す" : "保管する",
+                    area === "detached" ? "Restore to steps" : "Not used",
+                  )}
+                </button>
+                <button
+                  type="button"
+                  disabled={locked}
+                  onClick={() => {
+                    modify((next) => {
+                      const location = locate(next, node.id);
+                      location?.siblings.splice(location.index, 1);
+                    }, undefined);
+                    setFieldErrors({});
+                  }}
+                >
+                  {words(locale, "削除", "Delete")}
+                </button>
+              </fieldset>
             </div>
+            {nested.length > 0 && (
+              <button
+                type="button"
+                className="automation-fold-control"
+                disabled={locked}
+                aria-expanded={!isCollapsed}
+                aria-controls={nested
+                  .map((child) => cavityId(node.id, child.key))
+                  .join(" ")}
+                onClick={() =>
+                  modify((next) => {
+                    const collapsed = new Set(next.ui?.collapsed ?? []);
+                    if (collapsed.has(node.id)) collapsed.delete(node.id);
+                    else collapsed.add(node.id);
+                    next.ui = { ...next.ui, collapsed: [...collapsed] };
+                  }, node.id)
+                }
+              >
+                {isCollapsed
+                  ? words(locale, "内側の手順を展開", "Expand inner steps")
+                  : words(
+                      locale,
+                      "内側の手順を折りたたむ",
+                      "Collapse inner steps",
+                    )}
+              </button>
+            )}
             {nested.map((child) => (
-              <section key={child.key} className="automation-cavity">
-                <h4>{words(locale, child.ja, child.en)}</h4>
+              <section
+                key={child.key}
+                id={cavityId(node.id, child.key)}
+                hidden={isCollapsed}
+                className="automation-cavity"
+                data-owner={node.id}
+                data-branch={child.key}
+              >
+                <h4>
+                  {commonChain && child.key === "unknown"
+                    ? words(
+                        locale,
+                        "共通の確認できないときの手順（専用画面でまとめて編集）",
+                        "Common unknown path (edit all clauses together)",
+                      )
+                    : words(locale, child.ja, child.en)}
+                </h4>
                 {tree(child.body, node.id, child.key, depth + 1)}
+                {node.kind === "boundedLoop" &&
+                  child.key.startsWith("handler:") && (
+                    <p className="automation-terminal-label">
+                      {words(
+                        locale,
+                        "この経路の後は実行を非成功で終了します。下の通常手順へは進みません。",
+                        "This path ends the run without success. It never continues to the normal steps below.",
+                      )}
+                    </p>
+                  )}
+                {commonChain && child.key === "unknown" && (
+                  <button
+                    type="button"
+                    className="automation-add-inside"
+                    disabled={locked}
+                    onClick={() => {
+                      const draft = commonDraftFor(commonChain);
+                      if (draft) openCommonDraft(draft);
+                    }}
+                  >
+                    {words(
+                      locale,
+                      "共通の不明経路を編集",
+                      "Edit the common unknown path",
+                    )}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="automation-add-inside"
-                  disabled={locked}
+                  hidden={Boolean(commonChain && child.key === "unknown")}
+                  disabled={
+                    locked ||
+                    Boolean(copyOwner(node.id)) ||
+                    (child.key === "unknown" && controlled)
+                  }
                   onClick={() => {
                     select(node.id);
                     setPanel("palette");
@@ -940,858 +1169,1909 @@ export function AutomationWorkspace({
     : [];
 
   return (
-    <section
-      className="automation-workspace"
-      aria-label={words(locale, "自動化を組み立てる", "Build an automation")}
-      lang={locale}
-    >
-      <header className="automation-page-heading">
-        <div>
-          <p className="automation-eyebrow">NEXUS AUTOMATION</p>
-          <h1>{words(locale, "自動化", "Automation")}</h1>
-          <p>
+    <AutomationSemanticProfile.Provider value={definition?.semanticProfile}>
+      <section
+        className="automation-workspace"
+        aria-label={words(locale, "自動化を組み立てる", "Build an automation")}
+        lang={locale}
+      >
+        <header className="automation-page-heading">
+          <div>
+            <p className="automation-eyebrow">NEXUS AUTOMATION</p>
+            <h1>{words(locale, "自動化", "Automation")}</h1>
+            <p>
+              {words(
+                locale,
+                "きっかけと手順をつなぎ、送信せずに確かめます。",
+                "Connect a start trigger and steps, then test without sending.",
+              )}
+            </p>
+          </div>
+          <span className="automation-server">
+            {guildName ?? words(locale, "選択中のサーバー", "Selected server")}
+          </span>
+        </header>
+        {readOnly && (
+          <p role="status" className="automation-notice">
             {words(
               locale,
-              "きっかけと手順をつなぎ、送信せずに確かめます。",
-              "Connect a start trigger and steps, then test without sending.",
+              "現在の資格では閲覧できます。編集と有効化には管理資格が必要です。",
+              "Your current access allows viewing. Editing and enabling require management authority.",
             )}
           </p>
-        </div>
-        <span className="automation-server">
-          {guildName ?? words(locale, "選択中のサーバー", "Selected server")}
-        </span>
-      </header>
-      {readOnly && (
-        <p role="status" className="automation-notice">
-          {words(
-            locale,
-            "現在の資格では閲覧できます。編集と有効化には管理資格が必要です。",
-            "Your current access allows viewing. Editing and enabling require management authority.",
-          )}
-        </p>
-      )}
-      {problem && (
-        <div role="alert" className="automation-problem">
-          <p>{problem}</p>
-          {uncertain ? (
-            <button
-              type="button"
-              disabled={Boolean(busy)}
-              onClick={() => void lookup()}
-            >
-              {words(locale, "結果を照合する", "Check request status")}
-            </button>
-          ) : conflict && definition ? (
-            <button
-              type="button"
-              disabled={Boolean(busy)}
-              onClick={() => {
-                setNextFlow(definition.id);
-                setConfirm("discard");
-              }}
-            >
-              {words(locale, "最新の版を読み直す", "Reload latest revision")}
-            </button>
-          ) : items === null ? (
-            <button
-              type="button"
-              onClick={() => {
-                setLoading(true);
-                client
-                  .list()
-                  .then((result) => {
-                    setItems(result.items);
-                    setProblem("");
-                  })
-                  .catch(showError)
-                  .finally(() => setLoading(false));
-              }}
-            >
-              {words(locale, "再取得", "Fetch again")}
-            </button>
-          ) : null}
-          {!uncertain && (
-            <a href="/servers">
-              {words(locale, "サーバー選択へ戻る", "Back to server selection")}
-            </a>
-          )}
-        </div>
-      )}
-      {scheduleReview?.required&&<section className="automation-notice" role="status"><strong>{words(locale,"予定の時刻を確認して再度有効化してください","Review schedule times and explicitly enable again")}</strong><p>{words(locale,
-        scheduleReview.reason==="TIME_ZONE_MEANING_UNAVAILABLE"?"現在の規則で予定の時刻を確認できないため、今後の予定起動を停止しています。日時・地域・次回予定を確認し、新しい版を保存して検証・試運転・影響確認の後に明示して有効化してください。確認済みの実行結果は変わりません。":"タイムゾーンの意味や規則の変更を検出したため、今後の予定起動を停止しています。日時・地域・次回予定を確認し、新しい版を保存して検証・試運転・影響確認の後に明示して有効化してください。確認済みの実行結果は変わりません。",
-        scheduleReview.reason==="TIME_ZONE_MEANING_UNAVAILABLE"?"Future scheduled starts are paused because schedule times could not be verified under current rules. Review dates, the region and next occurrences, save a new revision, validate, simulate, review impact and explicitly enable it. Confirmed run results are unchanged.":"A change in time-zone meaning or rules paused future scheduled starts. Review the dates, region and next occurrences, save a new revision, validate, simulate, review impact and explicitly enable it. Confirmed run results are unchanged.")}</p></section>}
-      <p className="automation-sr-only" role="status" aria-live="polite">
-        {announcement}
-      </p>
-      {loading ? (
-        <p role="status">
-          {words(locale, "自動化を確認しています…", "Checking automations…")}
-        </p>
-      ) : (
-        items !== null && (
-          <>
-            <div className="automation-flow-picker">
-              <label>
-                {words(locale, "保存された自動化", "Saved automations")}
-                <select
-                  value={definition?.id ?? ""}
-                  disabled={Boolean(busy) || Boolean(uncertain) || conflict}
-                  onChange={(event) => requestSwitch(event.target.value)}
-                >
-                  <option value="">
-                    {words(locale, "自動化を選択", "Choose an automation")}
-                  </option>
-                  {items.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name} · {stateLabel(locale, item.state)}
-                    </option>
-                  ))}
-                  {definition &&
-                    !items.some((item) => item.id === definition.id) && (
-                      <option value={definition.id}>
-                        {definition.name} · {words(locale, "未保存", "Unsaved")}
-                      </option>
-                    )}
-                </select>
-              </label>
+        )}
+        {zoneUnavailable && (
+          <p role="status" className="automation-notice">
+            {words(locale, "サーバーの地域が未確認です。新しい予約では地域を選択してください。", "The server time zone is unconfirmed. Choose a region for a new schedule.")}{" "}
+            <a href={`/setup?guild=${encodeURIComponent(guildId)}&edit=1`}>{words(locale, "初期設定で確認", "Confirm in setup")}</a>
+          </p>
+        )}
+        {problem && (
+          <div role="alert" className="automation-problem">
+            <p>{problem}</p>
+            {uncertain ? (
               <button
                 type="button"
-                disabled={locked}
-                onClick={() => requestSwitch("new")}
+                disabled={Boolean(busy)}
+                onClick={() => void lookup()}
               >
-                {words(locale, "空の下書きを作る", "Create a blank draft")}
+                {words(locale, "結果を照合する", "Check request status")}
               </button>
-            </div>
-            {!definition ? (
-              <div className="automation-start">
-                <h2>
-                  {words(
-                    locale,
-                    "自動化はまだ選択されていません",
-                    "Choose or create an automation",
-                  )}
-                </h2>
-                <p>
-                  {items.length === 0
-                    ? words(
-                        locale,
-                        "自動化はまだありません。例か空の下書きから始められます。",
-                        "No automations yet. Start from an example or a blank draft.",
-                      )
-                    : words(
-                        locale,
-                        "保存された手順を選ぶか、新しく組み立てます。",
-                        "Choose saved steps or build something new.",
+            ) : conflict && definition ? (
+              <button
+                type="button"
+                disabled={Boolean(busy)}
+                onClick={() => {
+                  setNextFlow(definition.id);
+                  setConfirm("discard");
+                }}
+              >
+                {words(locale, "最新の版を読み直す", "Reload latest revision")}
+              </button>
+            ) : items === null ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setLoading(true);
+                  client
+                    .list()
+                    .then((result) => {
+                      setItems(result.items);
+                      setProblem("");
+                    })
+                    .catch(showError)
+                    .finally(() => setLoading(false));
+                }}
+              >
+                {words(locale, "再取得", "Fetch again")}
+              </button>
+            ) : null}
+            {!uncertain && (
+              <a href="/servers">
+                {words(
+                  locale,
+                  "サーバー選択へ戻る",
+                  "Back to server selection",
+                )}
+              </a>
+            )}
+          </div>
+        )}
+        {scheduleReview?.required && (
+          <section className="automation-notice" role="status">
+            <strong>
+              {words(
+                locale,
+                "予定の時刻を確認して再度有効化してください",
+                "Review schedule times and explicitly enable again",
+              )}
+            </strong>
+            <p>
+              {words(
+                locale,
+                scheduleReview.reason === "TIME_ZONE_MEANING_UNAVAILABLE"
+                  ? "現在の規則で予定の時刻を確認できないため、今後の予定起動を停止しています。日時・地域・次回予定を確認し、新しい版を保存して検証・試運転・影響確認の後に明示して有効化してください。確認済みの実行結果は変わりません。"
+                  : "タイムゾーンの意味や規則の変更を検出したため、今後の予定起動を停止しています。日時・地域・次回予定を確認し、新しい版を保存して検証・試運転・影響確認の後に明示して有効化してください。確認済みの実行結果は変わりません。",
+                scheduleReview.reason === "TIME_ZONE_MEANING_UNAVAILABLE"
+                  ? "Future scheduled starts are paused because schedule times could not be verified under current rules. Review dates, the region and next occurrences, save a new revision, validate, simulate, review impact and explicitly enable it. Confirmed run results are unchanged."
+                  : "A change in time-zone meaning or rules paused future scheduled starts. Review the dates, region and next occurrences, save a new revision, validate, simulate, review impact and explicitly enable it. Confirmed run results are unchanged.",
+              )}
+            </p>
+          </section>
+        )}
+        <p className="automation-sr-only" role="status" aria-live="polite">
+          {announcement}
+        </p>
+        {loading ? (
+          <p role="status">
+            {words(locale, "自動化を確認しています…", "Checking automations…")}
+          </p>
+        ) : (
+          items !== null && (
+            <>
+              <div className="automation-flow-picker">
+                <label>
+                  {words(locale, "保存された自動化", "Saved automations")}
+                  <select
+                    value={definition?.id ?? ""}
+                    disabled={Boolean(busy) || Boolean(uncertain) || conflict}
+                    onChange={(event) => requestSwitch(event.target.value)}
+                  >
+                    <option value="">
+                      {words(locale, "自動化を選択", "Choose an automation")}
+                    </option>
+                    {items.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name} · {stateLabel(locale, item.state)}
+                      </option>
+                    ))}
+                    {definition &&
+                      !items.some((item) => item.id === definition.id) && (
+                        <option value={definition.id}>
+                          {definition.name} ·{" "}
+                          {words(locale, "未保存", "Unsaved")}
+                        </option>
                       )}
-                </p>
-                <div className="automation-template-grid">
-                  <button disabled={locked} onClick={() => newDraft("notice")}>
-                    <strong>
-                      {words(locale, "予定のお知らせ", "Scheduled notice")}
-                    </strong>
-                    <span>
-                      {words(
-                        locale,
-                        "曜日・地域・送信先を設定",
-                        "Choose weekdays, region and destination",
-                      )}
-                    </span>
-                  </button>
-                  <button disabled={locked} onClick={() => newDraft("wait")}>
-                    <strong>
-                      {words(locale, "受付の再確認", "Recheck a ticket")}
-                    </strong>
-                    <span>
-                      {words(
-                        locale,
-                        "明示初期値：24時間待機。通知は未設定",
-                        "Explicit initial value: wait 24 hours. Sending is not configured.",
-                      )}
-                    </span>
-                  </button>
-                  <button disabled={locked} onClick={() => newDraft()}>
-                    <strong>
-                      {words(locale, "自由に組み立てる", "Build your own")}
-                    </strong>
-                    <span>
-                      {words(
-                        locale,
-                        "共通の型付きブロックを使う",
-                        "Use the shared typed block language",
-                      )}
-                    </span>
-                  </button>
-                </div>
-                <p>
-                  {words(
-                    locale,
-                    "全プランで同じブロック言語と送信なし試運転を使います。Betaの利用枠はサーバーで確認し、購入や自動課金は行いません。",
-                    "All plans share the block language and simulation. Beta capacity is checked on the server; no purchase or automatic charge is made.",
-                  )}
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="automation-draft-heading">
-                  <label>
-                    {words(locale, "自動化の名前", "Automation name")}
-                    <input
-                      value={definition.name}
-                      maxLength={100}
-                      disabled={locked}
-                      onChange={(event) =>
-                        modify((next) => {
-                          next.name = event.target.value;
-                        })
-                      }
-                    />
-                  </label>
-                  <div>
-                    <strong>
-                      {dirty
-                        ? words(locale, "未保存の変更", "Unsaved changes")
-                        : words(locale, "保存した下書き", "Saved draft")}{" "}
-                      · {words(locale, "下書き版", "Draft revision")}{" "}
-                      {revision || "—"}
-                    </strong>
-                    <small>
-                      {words(locale, "有効版", "Enabled revision")}{" "}
-                      {activeRevision ?? "—"} ·{" "}
-                      {words(
-                        locale,
-                        "保存と有効化は別の操作です",
-                        "Saving and enabling are separate actions",
-                      )}
-                    </small>
-                  </div>
-                </div>
-                <div className="automation-toolbar">
-                  <button
-                    type="button"
-                    disabled={locked || !history?.past.length}
-                    onClick={() => {
-                      setHistory((previous) =>
-                        previous ? undoEdit(previous) : previous,
-                      );
-                      setReview({});
-                      setFieldErrors({});
-                    }}
-                  >
-                    {words(locale, "編集を戻す", "Undo edit")}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={locked || !history?.future.length}
-                    onClick={() => {
-                      setHistory((previous) =>
-                        previous ? redoEdit(previous) : previous,
-                      );
-                      setReview({});
-                      setFieldErrors({});
-                    }}
-                  >
-                    {words(locale, "やり直す", "Redo edit")}
-                  </button>
-                  <button
-                    type="button"
-                    className="automation-primary"
-                    disabled={locked || !dirty || hasErrors}
-                    onClick={() => void run("save")}
-                  >
-                    {busy === "save"
-                      ? words(locale, "保存を確認中…", "Checking save…")
-                      : words(locale, "下書きを保存", "Save draft")}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={locked || dirty || revision < 1 || hasErrors}
-                    onClick={() => void run("validate")}
-                  >
-                    {words(locale, "構造を確認", "Validate steps")}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={locked || dirty || revision < 1 || hasErrors}
-                    onClick={() => void run("test")}
-                  >
-                    {words(locale, "送信せずに試す", "Test without sending")}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={locked || dirty || revision < 1 || hasErrors}
-                    onClick={() => void run("impact")}
-                  >
-                    {words(locale, "影響を確認", "Review impact")}
-                  </button>
-                  <button
-                    type="button"
-                    className="automation-primary"
-                    disabled={locked || !checked}
-                    onClick={() => setConfirm("enable")}
-                  >
-                    {words(locale, "確認して有効にする", "Review and enable")}
-                  </button>
-                  {activeRevision !== null && (
-                    <button
-                      disabled={locked}
-                      onClick={() => setConfirm("disable")}
-                    >
-                      {words(locale, "新規起動を停止", "Stop new starts")}
-                    </button>
-                  )}
-                </div>
-                <p className="automation-hint">
-                  {words(
-                    locale,
-                    "Undoは現在タブの編集だけを戻します。本番の送信や承認は変わりません。",
-                    "Undo changes edits in this tab only. Sent actions and approvals are unchanged.",
-                  )}
-                  {history?.trimmed &&
-                    " " +
-                      words(
-                        locale,
-                        "古い編集は履歴の上限により戻せません。",
-                        "Older edits are no longer available because the history limit was reached.",
-                      )}
-                </p>
-                <nav
-                  className="automation-mobile-tabs"
-                  aria-label={words(locale, "編集する場所", "Editor panels")}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  disabled={locked}
+                  onClick={() => requestSwitch("new")}
                 >
-                  {(["blocks", "palette", "details"] as const).map((name) => (
-                    <button
-                      key={name}
-                      type="button"
-                      aria-pressed={panel === name}
-                      onClick={() => setPanel(name)}
-                    >
-                      {words(
-                        locale,
-                        ...({
-                          blocks: ["手順", "Steps"],
-                          palette: ["部品を探す", "Find blocks"],
-                          details: ["詳細入力", "Step details"],
-                        }[name] as [string, string]),
-                      )}
-                    </button>
-                  ))}
-                </nav>
-                <div className="automation-editor-grid">
-                  <aside
-                    className={`automation-palette mobile-${panel === "palette" ? "open" : "closed"}`}
-                  >
-                    <h2>{words(locale, "部品を探す", "Find blocks")}</h2>
-                    <label>
-                      {words(
-                        locale,
-                        "名前・普通の言葉で検索",
-                        "Search by name or plain words",
-                      )}
-                      <input
-                        type="search"
-                        value={query}
-                        placeholder={words(
+                  {words(locale, "空の下書きを作る", "Create a blank draft")}
+                </button>
+              </div>
+              {!definition ? (
+                <div className="automation-start">
+                  <h2>
+                    {words(
+                      locale,
+                      "自動化はまだ選択されていません",
+                      "Choose or create an automation",
+                    )}
+                  </h2>
+                  <p>
+                    {items.length === 0
+                      ? words(
                           locale,
-                          "例: 足す、待つ、送る",
-                          "e.g. add, wait, send",
+                          "自動化はまだありません。例か空の下書きから始められます。",
+                          "No automations yet. Start from an example or a blank draft.",
+                        )
+                      : words(
+                          locale,
+                          "保存された手順を選ぶか、新しく組み立てます。",
+                          "Choose saved steps or build something new.",
                         )}
-                        onChange={(event) => setQuery(event.target.value)}
+                  </p>
+                  <div className="automation-template-grid">
+                    <button
+                      disabled={locked}
+                      onClick={() => newDraft("notice")}
+                    >
+                      <strong>
+                        {words(locale, "予定のお知らせ", "Scheduled notice")}
+                      </strong>
+                      <span>
+                        {words(
+                          locale,
+                          "曜日・地域・送信先を設定",
+                          "Choose weekdays, region and destination",
+                        )}
+                      </span>
+                    </button>
+                    <button disabled={locked} onClick={() => newDraft("wait")}>
+                      <strong>
+                        {words(locale, "受付の再確認", "Recheck a ticket")}
+                      </strong>
+                      <span>
+                        {words(
+                          locale,
+                          "明示初期値：24時間待機。通知は未設定",
+                          "Explicit initial value: wait 24 hours. Sending is not configured.",
+                        )}
+                      </span>
+                    </button>
+                    <button disabled={locked} onClick={() => newDraft()}>
+                      <strong>
+                        {words(locale, "自由に組み立てる", "Build your own")}
+                      </strong>
+                      <span>
+                        {words(
+                          locale,
+                          "共通の型付きブロックを使う",
+                          "Use the shared typed block language",
+                        )}
+                      </span>
+                    </button>
+                  </div>
+                  <p>
+                    {words(
+                      locale,
+                      "全プランで同じブロック言語と送信なし試運転を使います。Betaの利用枠はサーバーで確認し、購入や自動課金は行いません。",
+                      "All plans share the block language and simulation. Beta capacity is checked on the server; no purchase or automatic charge is made.",
+                    )}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="automation-draft-heading">
+                    <label>
+                      {words(locale, "自動化の名前", "Automation name")}
+                      <input
+                        value={definition.name}
+                        maxLength={100}
+                        disabled={locked}
+                        onChange={(event) =>
+                          modify((next) => {
+                            next.name = event.target.value;
+                          })
+                        }
                       />
                     </label>
-                    <p className="automation-hint">
-                      {words(
-                        locale,
-                        "クリックで追加。条件の内側も追加ボタンから選べます。",
-                        "Click to add. Use Add inside to select a branch.",
-                      )}
-                    </p>
-                    <p className="automation-insertion">
-                      {words(locale, "追加先：", "Add to: ")}
-                      {insertion.parentId
-                        ? words(locale, "選択した内側", "Selected branch")
-                        : area === "detached"
-                          ? words(locale, "今回は使わない", "Not used")
-                          : words(
-                              locale,
-                              "現在の手順の末尾",
-                              "End of current steps",
-                            )}
-                      <button onClick={() => setInsertion({ branch: area })}>
-                        {words(locale, "末尾へ変更", "Use end")}
+                    <div>
+                      <strong>
+                        {dirty
+                          ? words(locale, "未保存の変更", "Unsaved changes")
+                          : words(locale, "保存した下書き", "Saved draft")}{" "}
+                        · {words(locale, "下書き版", "Draft revision")}{" "}
+                        {revision || "—"}
+                      </strong>
+                      <small>
+                        {words(locale, "有効版", "Enabled revision")}{" "}
+                        {activeRevision ?? "—"} ·{" "}
+                        {words(
+                          locale,
+                          "保存と有効化は別の操作です",
+                          "Saving and enabling are separate actions",
+                        )}
+                      </small>
+                    </div>
+                  </div>
+                  <div className="automation-toolbar">
+                    <button
+                      type="button"
+                      disabled={locked || !history?.past.length}
+                      onClick={() => {
+                        setHistory((previous) =>
+                          previous ? undoEdit(previous) : previous,
+                        );
+                        setReview({});
+                        setFieldErrors({});
+                      }}
+                    >
+                      {words(locale, "編集を戻す", "Undo edit")}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={locked || !history?.future.length}
+                      onClick={() => {
+                        setHistory((previous) =>
+                          previous ? redoEdit(previous) : previous,
+                        );
+                        setReview({});
+                        setFieldErrors({});
+                      }}
+                    >
+                      {words(locale, "やり直す", "Redo edit")}
+                    </button>
+                    <button
+                      type="button"
+                      className="automation-primary"
+                      disabled={locked || !dirty || hasErrors}
+                      onClick={() => void run("save")}
+                    >
+                      {busy === "save"
+                        ? words(locale, "保存を確認中…", "Checking save…")
+                        : words(locale, "下書きを保存", "Save draft")}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={locked || dirty || revision < 1 || hasErrors}
+                      onClick={() => void run("validate")}
+                    >
+                      {words(locale, "構造を確認", "Validate steps")}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={locked || dirty || revision < 1 || hasErrors}
+                      onClick={() => void run("test")}
+                    >
+                      {words(locale, "送信せずに試す", "Test without sending")}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={locked || dirty || revision < 1 || hasErrors}
+                      onClick={() => void run("impact")}
+                    >
+                      {words(locale, "影響を確認", "Review impact")}
+                    </button>
+                    <button
+                      type="button"
+                      className="automation-primary"
+                      disabled={locked || !checked}
+                      onClick={() => setConfirm("enable")}
+                    >
+                      {words(locale, "確認して有効にする", "Review and enable")}
+                    </button>
+                    {activeRevision !== null && (
+                      <button
+                        disabled={locked}
+                        onClick={() => setConfirm("disable")}
+                      >
+                        {words(locale, "新規起動を停止", "Stop new starts")}
                       </button>
-                    </p>
-                    <fieldset disabled={locked}>
-                      {availableCards.map((card) => (
+                    )}
+                  </div>
+                  <p className="automation-hint">
+                    {words(
+                      locale,
+                      "Undoは現在タブの編集だけを戻します。本番の送信や承認は変わりません。",
+                      "Undo changes edits in this tab only. Sent actions and approvals are unchanged.",
+                    )}
+                    {history?.trimmed &&
+                      " " +
+                        words(
+                          locale,
+                          "古い編集は履歴の上限により戻せません。",
+                          "Older edits are no longer available because the history limit was reached.",
+                        )}
+                  </p>
+                  <nav
+                    className="automation-mobile-tabs"
+                    aria-label={words(locale, "編集する場所", "Editor panels")}
+                  >
+                    {(["blocks", "palette", "details"] as const).map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        aria-pressed={panel === name}
+                        onClick={() => setPanel(name)}
+                      >
+                        {words(
+                          locale,
+                          ...({
+                            blocks: ["手順", "Steps"],
+                            palette: ["部品を探す", "Find blocks"],
+                            details: ["詳細入力", "Step details"],
+                          }[name] as [string, string]),
+                        )}
+                      </button>
+                    ))}
+                  </nav>
+                  <div className="automation-editor-grid">
+                    <aside
+                      className={`automation-palette mobile-${panel === "palette" ? "open" : "closed"}`}
+                    >
+                      <h2>{words(locale, "部品を探す", "Find blocks")}</h2>
+                      <label>
+                        {words(
+                          locale,
+                          "名前・普通の言葉で検索",
+                          "Search by name or plain words",
+                        )}
+                        <input
+                          type="search"
+                          value={query}
+                          placeholder={words(
+                            locale,
+                            "例: 足す、待つ、送る",
+                            "e.g. add, wait, send",
+                          )}
+                          onChange={(event) => setQuery(event.target.value)}
+                        />
+                      </label>
+                      <p className="automation-hint">
+                        {words(
+                          locale,
+                          "クリックで追加。条件の内側も追加ボタンから選べます。",
+                          "Click to add. Use Add inside to select a branch.",
+                        )}
+                      </p>
+                      <p className="automation-insertion">
+                        {words(locale, "追加先：", "Add to: ")}
+                        {insertion.parentId
+                          ? words(locale, "選択した内側", "Selected branch")
+                          : area === "detached"
+                            ? words(locale, "今回は使わない", "Not used")
+                            : words(
+                                locale,
+                                "現在の手順の末尾",
+                                "End of current steps",
+                              )}
+                        <button onClick={() => setInsertion({ branch: area })}>
+                          {words(locale, "末尾へ変更", "Use end")}
+                        </button>
+                      </p>
+                      <fieldset disabled={locked}>
                         <button
                           type="button"
-                          key={card.id}
-                          className={`automation-palette-card category-${card.category}`}
+                          className="automation-palette-card category-control"
+                          disabled={definition.semanticProfile !== "scratch.v1"}
                           onClick={() =>
-                            add(
-                              card,
-                              insertion.parentId,
-                              insertion.parentId ? insertion.branch : area,
-                            )
+                            openCommonDraft({
+                              id: uid(),
+                              clauses: [
+                                {
+                                  id: uid(),
+                                  condition: missing("ConditionResult"),
+                                  then: [],
+                                },
+                              ],
+                              otherwise: [],
+                              template: [],
+                            })
                           }
                         >
                           <span
                             className="automation-card-shape"
                             aria-hidden="true"
                           >
-                            {[
-                              "branch",
-                              "repeat",
-                              "parallel",
-                              "poll",
-                              "awaitEvent",
-                            ].includes(card.kind)
-                              ? "⊏"
-                              : card.category === "value"
-                                ? "▱"
-                                : "▰"}
+                            ⊏
                           </span>
                           <span>
-                            {words(locale, card.ja, card.en)}
+                            {words(
+                              locale,
+                              "共通の不明経路を持つ新しい条件連鎖",
+                              "New condition chain with a common unknown path",
+                            )}
                             <small>
                               {words(
                                 locale,
-                                card.category === "value"
-                                  ? "値・計算"
-                                  : card.category === "time"
-                                    ? "待つ・時間"
-                                    : card.category === "discord"
-                                      ? "Discordの操作"
-                                      : "条件・手順",
-                                card.category === "value"
-                                  ? "Values & calculations"
-                                  : card.category === "time"
-                                    ? "Wait & time"
-                                    : card.category === "discord"
-                                      ? "Discord actions"
-                                      : "Conditions & steps",
+                                "新規作成のみ・既存の不明経路は変換しません",
+                                "New chains only · existing unknown paths are preserved",
                               )}
                             </small>
                           </span>
-                          <span aria-hidden="true">＋</span>
                         </button>
-                      ))}
-                    </fieldset>
-                    <details>
-                      <summary>
-                        {words(
-                          locale,
-                          "まだ利用できない候補",
-                          "Unavailable candidates",
-                        )}{" "}
-                        ({unavailableCards.length})
-                      </summary>
-                      {unavailableCards.map((card) => (
-                        <div key={card.id} className="automation-unavailable">
-                          <strong>{card.label[locale]}</strong>
-                          <small>
-                            {card.reason?.[locale] ??
-                              words(
-                                locale,
-                                "契約の実装と試験が必要です。",
-                                "Implementation and contract tests are required.",
-                              )}
-                          </small>
-                        </div>
-                      ))}
-                    </details>
-                  </aside>
-                  <main
-                    className={`automation-canvas mobile-${panel === "blocks" ? "open" : "closed"}`}
-                  >
-                    <div className="automation-view-bar">
-                      <div
-                        role="group"
-                        aria-label={words(
-                          locale,
-                          "同じ手順の表示方法",
-                          "View the same steps",
-                        )}
-                      >
-                        <button
-                          type="button"
-                          aria-pressed={view === "blocks"}
-                          onClick={() => setView("blocks")}
-                        >
-                          {words(locale, "ブロックで編集", "Edit with blocks")}
-                        </button>
-                        <button
-                          type="button"
-                          aria-pressed={view === "steps"}
-                          onClick={() => setView("steps")}
-                        >
-                          {words(locale, "手順一覧", "Steps")}
-                        </button>
-                      </div>
-                      <label>
-                        {words(locale, "編集対象", "Editing")}
-                        <select
-                          value={area}
-                          onChange={(event) => {
-                            setArea(event.target.value);
-                            setInsertion({ branch: event.target.value });
-                            setHistory((previous) =>
-                              previous
-                                ? {
-                                    ...previous,
-                                    present: {
-                                      ...previous.present,
-                                      selectedId: undefined,
-                                    },
-                                  }
-                                : previous,
-                            );
-                          }}
-                        >
-                          <option value="body">
-                            {words(locale, "主手順", "Main steps")}
-                          </option>
-                          {definition.procedures?.map((item) => (
-                            <option
-                              key={`${item.id}@${item.revision}`}
-                              value={procedureArea(item.id,item.revision)}
+                        {availableCards.map((card) => (
+                          <button
+                            type="button"
+                            key={card.id}
+                            className={`automation-palette-card category-${card.category}`}
+                            disabled={
+                              [
+                                "boundedLoop",
+                                "searchBranch",
+                                "endBranch",
+                                "endRun",
+                              ].includes(card.kind) &&
+                              definition.semanticProfile !== "scratch.v1"
+                            }
+                            title={
+                              [
+                                "boundedLoop",
+                                "searchBranch",
+                                "endBranch",
+                                "endRun",
+                              ].includes(card.kind) &&
+                              definition.semanticProfile !== "scratch.v1"
+                                ? words(
+                                    locale,
+                                    "新しい意味版への明示改版が必要です。",
+                                    "Explicitly adopt the new semantic profile first.",
+                                  )
+                                : undefined
+                            }
+                            onClick={() =>
+                              add(
+                                card,
+                                insertion.parentId,
+                                insertion.parentId ? insertion.branch : area,
+                              )
+                            }
+                          >
+                            <span
+                              className="automation-card-shape"
+                              aria-hidden="true"
                             >
-                              {item.name} · {words(locale,"版","revision")} {item.revision}
-                            </option>
-                          ))}
-                          <option value="detached">
-                            {words(locale, "今回は使わない", "Not used")}
-                          </option>
-                        </select>
-                      </label>
-                    </div>
-                    <fieldset
-                      disabled={locked}
-                      className="automation-definition-fields"
-                    >
-                      {area === "body" ? (
-                        <>
-                          <TriggerEditor
-                            trigger={definition.trigger}
-                            locale={locale}
-                            timeZone={timeZone}
-                            onChange={(next) =>
-                              modify((current) => {
-                                current.trigger = next;
-                              })
-                            }
-                          />
-                          <TargetPolicy
-                            definition={definition}
-                            targets={targets}
-                            locale={locale}
-                            onChange={(policy) =>
-                              modify((next) => {
-                                next.targets = policy;
-                              })
-                            }
-                          />
-                        </>
-                      ) : selectedProcedure ? (
-                        <section className="automation-trigger">
-                          <h3>
-                            {words(
-                              locale,
-                              "共通手順（固定版）",
-                              "Shared procedure (fixed revision)",
-                            )}
-                          </h3>
-                          <label>
-                            {words(locale, "名前", "Name")}
-                            <input
-                              value={selectedProcedure.name}
-                              onChange={(event) =>
-                                modify((next) => {
-                                  next.procedures!.find(
-                                    (item) => item.id === selectedProcedure.id && item.revision===selectedProcedure.revision,
-                                  )!.name = event.target.value;
-                                })
-                              }
-                            />
-                          </label>
-                          <DeclarationList
-                            locale={locale}
-                            title={words(
-                              locale,
-                              "型付き引数",
-                              "Typed arguments",
-                            )}
-                            values={selectedProcedure.inputs}
-                            onChange={(values) =>
-                              modify((next) => {
-                                next.procedures!.find(
-                                  (item) => item.id === selectedProcedure.id && item.revision===selectedProcedure.revision,
-                                )!.inputs = values;
-                              })
-                            }
-                          />
-                          <DeclarationList
-                            locale={locale}
-                            title={words(
-                              locale,
-                              "名前付き戻り値",
-                              "Named results",
-                            )}
-                            values={selectedProcedure.outputs}
-                            onChange={(values) =>
-                              modify((next) => {
-                                next.procedures!.find(
-                                  (item) => item.id === selectedProcedure.id && item.revision===selectedProcedure.revision,
-                                )!.outputs = values;
-                              })
-                            }
-                          />
-                        </section>
-                      ) : (
-                        <p className="automation-notice">
+                              {[
+                                "branch",
+                                "repeat",
+                                "boundedLoop",
+                                "parallel",
+                                "poll",
+                                "awaitEvent",
+                              ].includes(card.kind)
+                                ? "⊏"
+                                : card.category === "value"
+                                  ? "▱"
+                                  : "▰"}
+                            </span>
+                            <span>
+                              {words(locale, card.ja, card.en)}
+                              <small>
+                                {words(
+                                  locale,
+                                  card.category === "value"
+                                    ? "値・計算"
+                                    : card.category === "time"
+                                      ? "待つ・時間"
+                                      : card.category === "discord"
+                                        ? "Discordの操作"
+                                        : card.category === "reuse"
+                                          ? "共通手順"
+                                          : "条件・手順",
+                                  card.category === "value"
+                                    ? "Values & calculations"
+                                    : card.category === "time"
+                                      ? "Wait & time"
+                                      : card.category === "discord"
+                                        ? "Discord actions"
+                                        : card.category === "reuse"
+                                          ? "Shared steps"
+                                          : "Conditions & steps",
+                                )}
+                              </small>
+                            </span>
+                            <span aria-hidden="true">＋</span>
+                          </button>
+                        ))}
+                      </fieldset>
+                      <details>
+                        <summary>
                           {words(
                             locale,
-                            "この領域のブロックは実行計画に入りません。元の構造と値は保持します。",
-                            "Blocks here are excluded from the execution plan. Their structure and values are preserved.",
+                            "数学関数の計算規則",
+                            "Math calculation rules",
                           )}
-                        </p>
-                      )}
-                    </fieldset>
-                    <div className={`automation-tree view-${view}`}>
-                      {tree(activeBody)}
-                    </div>
-                    <button
-                      type="button"
-                      disabled={locked}
-                      className="automation-add-main"
-                      onClick={() => {
-                        setInsertion({ branch: area });
-                        setPanel("palette");
-                      }}
-                    >
-                      {words(locale, "ここに追加", "Add here")} ＋
-                    </button>
-                    <DefinitionManager key={definition.id} definition={definition} locale={locale} targets={targets} disabled={locked}
-                      onChange={next=>edit(next)} onValidity={validity}
-                      onEditProcedure={(id,revision)=>{
-                        setArea(procedureArea(id,revision));setInsertion({branch:procedureArea(id,revision)});setPanel("blocks");
-                        setHistory(previous=>previous?{...previous,present:{...previous.present,selectedId:undefined}}:previous);
-                      }}/>
-                  </main>
-                  <aside
-                    className={`automation-details mobile-${panel === "details" ? "open" : "closed"}`}
-                  >
-                    <h2>{words(locale, "選択した手順", "Selected step")}</h2>
-                    <fieldset
-                      disabled={locked}
-                      className="automation-definition-fields"
-                    >
-                      {selected ? (
-                        <StatementEditor
-                          statement={selected}
-                          onChange={replace}
-                          definition={definition}
-                          locale={locale}
-                          variables={variables}
-                          targets={targets}
-                          onValidity={validity}
-                          onCaptureOutcome={()=>edit(captureActionOutcome(definition,selected.id,locale))}
-                        />
-                      ) : (
-                        <p>
+                        </summary>
+                        <p className="automation-hint">
                           {words(
                             locale,
-                            "ブロックの名前を押すと、入力・対象・型を変更できます。",
-                            "Select a block name to edit its inputs, targets and types.",
+                            "数学関数はサーバーの固定版MPFRで計算します。三角関数の入力と逆三角関数の出力は度数です。有効範囲の有限入力は最大4 ulpの誤差に収め、表現できる微小値（subnormal）を0へ切り捨てず保持します。定義外や表現範囲外はエラーとして扱います。",
+                            "Math functions use the fixed MPFR engine on the server. Trigonometric inputs and inverse-trigonometric outputs are in degrees. Finite inputs within the domain have at most 4 ulp error; representable tiny values (subnormals) are preserved. Invalid domains and values outside the representable range are errors.",
                           )}
                         </p>
-                      )}
-                    </fieldset>
-                    <details>
-                      <summary>
-                        {words(locale, "変数と使用範囲", "Variables and scope")}
-                      </summary>
-                      <input
-                        aria-label={words(
-                          locale,
-                          "変数を探す",
-                          "Search variables",
-                        )}
-                        type="search"
-                        value={variableQuery}
-                        onChange={(event) =>
-                          setVariableQuery(event.target.value)
-                        }
-                      />
-                      {allVariables.length ? (
                         <ul>
-                          {allVariables.map((item) => (
-                            <li key={item.id}>
-                              <strong>{item.name}</strong> ·{" "}
-                              {typeName(item.type)}
-                              {item.description && (
-                                <small>{item.description}</small>
+                          {MATH_CHOICES.map(([operator, ja, en]) => (
+                            <li key={operator}>
+                              {words(locale, ja, en)}
+                              {!scratchMathAvailable(operator) && (
+                                <>
+                                  {" "}
+                                  ·{" "}
+                                  {words(
+                                    locale,
+                                    "検証待ち",
+                                    "Awaiting verification",
+                                  )}
+                                </>
                               )}
                             </li>
                           ))}
                         </ul>
-                      ) : (
+                      </details>
+                      <details>
+                        <summary>
+                          {words(
+                            locale,
+                            "まだ利用できない候補",
+                            "Unavailable candidates",
+                          )}{" "}
+                          ({unavailableCards.length})
+                        </summary>
+                        {unavailableCards.map((card) => (
+                          <div key={card.id} className="automation-unavailable">
+                            <strong>{card.label[locale]}</strong>
+                            <small>
+                              {card.reason?.[locale] ??
+                                words(
+                                  locale,
+                                  "契約の実装と試験が必要です。",
+                                  "Implementation and contract tests are required.",
+                                )}
+                            </small>
+                          </div>
+                        ))}
+                      </details>
+                    </aside>
+                    <main
+                      className={`automation-canvas mobile-${panel === "blocks" ? "open" : "closed"}`}
+                    >
+                      {commonDraft && (
+                        <CommonUnknownEditor
+                          key={commonDraft.id}
+                          draft={commonDraft}
+                          definition={definition}
+                          locale={locale}
+                          targets={targets}
+                          disabled={locked}
+                          onCancel={() => {
+                            setCommonDraft(null);
+                            setPanel(commonSourcePanel.current);
+                          }}
+                          onApply={(draft) => {
+                            try {
+                              const next = saveCommonUnknownDraft(
+                                definition,
+                                draft,
+                              );
+                              edit(next, draft.clauses[0]!.id);
+                              setCommonDraft(null);
+                            } catch {
+                              setProblem(
+                                words(
+                                  locale,
+                                  "共通経路を保存できません。型・所属・節の構造を確認してください。下書き全体は変更していません。",
+                                  "The common path could not be saved. Review types, scope and clause structure. The whole draft is unchanged.",
+                                ),
+                              );
+                            }
+                          }}
+                        />
+                      )}
+                      <p className="automation-hint">
+                        {words(
+                          locale,
+                          "ブロック名で↑↓・Home・Endを使って移動、Alt＋↑↓で順番を変更します。Tabで操作を選び、Enterで確定します。",
+                          "On a block name, use ↑↓, Home or End to navigate; Alt+↑↓ changes its order. Tab chooses controls and Enter confirms.",
+                        )}
+                      </p>
+                      {definition.semanticProfile !== "scratch.v1" && (
+                        <div className="automation-notice">
+                          <p>
+                            {words(
+                              locale,
+                              "この定義は保存時の意味を維持しています。Scratch追加の型・文字・計算規則は、明示して新しい版へ移すまで適用されません。",
+                              "This definition keeps its saved semantics. New Scratch type, text and calculation rules apply only after an explicit revision change.",
+                            )}
+                          </p>
+                          <button
+                            type="button"
+                            disabled={locked}
+                            onClick={() => setConfirm("profile")}
+                          >
+                            {words(
+                              locale,
+                              "新しいScratch意味版への変更を確認",
+                              "Review a change to Scratch semantics",
+                            )}
+                          </button>
+                        </div>
+                      )}
+                      <div className="automation-view-bar">
+                        <div
+                          role="group"
+                          aria-label={words(
+                            locale,
+                            "同じ手順の表示方法",
+                            "View the same steps",
+                          )}
+                        >
+                          <button
+                            type="button"
+                            aria-pressed={view === "blocks"}
+                            onClick={() => setView("blocks")}
+                          >
+                            {words(
+                              locale,
+                              "ブロックで編集",
+                              "Edit with blocks",
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            aria-pressed={view === "steps"}
+                            onClick={() => setView("steps")}
+                          >
+                            {words(locale, "手順一覧", "Steps")}
+                          </button>
+                        </div>
+                        <label>
+                          {words(locale, "編集対象", "Editing")}
+                          <select
+                            value={area}
+                            onChange={(event) => {
+                              setArea(event.target.value);
+                              setInsertion({ branch: event.target.value });
+                              setHistory((previous) =>
+                                previous
+                                  ? {
+                                      ...previous,
+                                      present: {
+                                        ...previous.present,
+                                        selectedId: undefined,
+                                      },
+                                    }
+                                  : previous,
+                              );
+                            }}
+                          >
+                            <option value="body">
+                              {words(locale, "主手順", "Main steps")}
+                            </option>
+                            {definition.procedures?.map((item) => (
+                              <option
+                                key={`${item.id}@${item.revision}`}
+                                value={procedureArea(item.id, item.revision)}
+                              >
+                                {item.name} · {words(locale, "版", "revision")}{" "}
+                                {item.revision}
+                              </option>
+                            ))}
+                            <option value="detached">
+                              {words(locale, "今回は使わない", "Not used")}
+                            </option>
+                          </select>
+                        </label>
+                      </div>
+                      <fieldset
+                        disabled={locked}
+                        className="automation-definition-fields"
+                      >
+                        {area === "body" ? (
+                          <>
+                            <TriggerEditor
+                              trigger={definition.trigger}
+                              locale={locale}
+                              timeZone={timeZone}
+                              guildId={guildId}
+                              timeZoneCandidate={timeZoneCandidate}
+                              onValidity={(message) => validity("trigger", message)}
+                              onChange={(next) =>
+                                modify((current) => {
+                                  current.trigger = next;
+                                })
+                              }
+                            />
+                            <TargetPolicy
+                              definition={definition}
+                              targets={targets}
+                              locale={locale}
+                              onChange={(policy) =>
+                                modify((next) => {
+                                  next.targets = policy;
+                                })
+                              }
+                            />
+                          </>
+                        ) : selectedProcedure ? (
+                          <section className="automation-trigger">
+                            <h3>
+                              {words(
+                                locale,
+                                "共通手順（固定版）",
+                                "Shared procedure (fixed revision)",
+                              )}
+                            </h3>
+                            <label>
+                              {words(locale, "名前", "Name")}
+                              <input
+                                value={selectedProcedure.name}
+                                onChange={(event) =>
+                                  modify((next) => {
+                                    next.procedures!.find(
+                                      (item) =>
+                                        item.id === selectedProcedure.id &&
+                                        item.revision ===
+                                          selectedProcedure.revision,
+                                    )!.name = event.target.value;
+                                  })
+                                }
+                              />
+                            </label>
+                            <DeclarationList
+                              locale={locale}
+                              title={words(
+                                locale,
+                                "型付き引数",
+                                "Typed arguments",
+                              )}
+                              values={selectedProcedure.inputs}
+                              onChange={(values) =>
+                                modify((next) => {
+                                  next.procedures!.find(
+                                    (item) =>
+                                      item.id === selectedProcedure.id &&
+                                      item.revision ===
+                                        selectedProcedure.revision,
+                                  )!.inputs = values;
+                                })
+                              }
+                            />
+                            <DeclarationList
+                              locale={locale}
+                              title={words(
+                                locale,
+                                "名前付き戻り値",
+                                "Named results",
+                              )}
+                              values={selectedProcedure.outputs}
+                              onChange={(values) =>
+                                modify((next) => {
+                                  next.procedures!.find(
+                                    (item) =>
+                                      item.id === selectedProcedure.id &&
+                                      item.revision ===
+                                        selectedProcedure.revision,
+                                  )!.outputs = values;
+                                })
+                              }
+                            />
+                          </section>
+                        ) : (
+                          <p className="automation-notice">
+                            {words(
+                              locale,
+                              "この領域のブロックは実行計画に入りません。元の構造と値は保持します。",
+                              "Blocks here are excluded from the execution plan. Their structure and values are preserved.",
+                            )}
+                          </p>
+                        )}
+                      </fieldset>
+                      <div className={`automation-tree view-${view}`}>
+                        {tree(activeBody)}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={locked}
+                        className="automation-add-main"
+                        onClick={() => {
+                          setInsertion({ branch: area });
+                          setPanel("palette");
+                        }}
+                      >
+                        {words(locale, "ここに追加", "Add here")} ＋
+                      </button>
+                      <DefinitionManager
+                        key={definition.id}
+                        definition={definition}
+                        locale={locale}
+                        targets={targets}
+                        disabled={locked}
+                        onChange={(next) => edit(next)}
+                        onValidity={validity}
+                        onEditProcedure={(id, revision) => {
+                          setArea(procedureArea(id, revision));
+                          setInsertion({ branch: procedureArea(id, revision) });
+                          setPanel("blocks");
+                          setHistory((previous) =>
+                            previous
+                              ? {
+                                  ...previous,
+                                  present: {
+                                    ...previous.present,
+                                    selectedId: undefined,
+                                  },
+                                }
+                              : previous,
+                          );
+                        }}
+                      />
+                    </main>
+                    <aside
+                      className={`automation-details mobile-${panel === "details" ? "open" : "closed"}`}
+                    >
+                      <h2>{words(locale, "選択した手順", "Selected step")}</h2>
+                      <fieldset
+                        disabled={locked}
+                        className="automation-definition-fields"
+                      >
+                        {selected ? (
+                          <>
+                            {copyOwner(selected.id) ? (
+                              <div className="automation-notice">
+                                <p>
+                                  {words(
+                                    locale,
+                                    "共通の確認できないときの手順です。専用画面からすべての節をまとめて編集します。",
+                                    "This step belongs to the common unknown path. Use its editor to update every clause together.",
+                                  )}
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const draft = commonDraftFor(
+                                      copyOwner(selected.id)!,
+                                    );
+                                    if (draft) {
+                                      openCommonDraft(draft);
+                                    }
+                                  }}
+                                >
+                                  {words(
+                                    locale,
+                                    "共通の不明経路を編集",
+                                    "Edit the common unknown path",
+                                  )}
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                {selected.kind === "branch" && (
+                                  <ConditionChainEditor
+                                    definition={definition}
+                                    selectedId={selected.id}
+                                    locale={locale}
+                                    onChange={(next, id) => edit(next, id)}
+                                    onSelect={select}
+                                    onEditCommon={(draft) => {
+                                      openCommonDraft(draft);
+                                    }}
+                                  />
+                                )}
+                                {!definition.scratchAuthoring?.chains.some(
+                                  (chain) =>
+                                    chain.clauseIds.includes(selected.id),
+                                ) && (
+                                  <StatementEditor
+                                    statement={selected}
+                                    onChange={replace}
+                                    definition={definition}
+                                    locale={locale}
+                                    variables={variables}
+                                    targets={targets}
+                                    onValidity={validity}
+                                    onCaptureOutcome={() =>
+                                      edit(
+                                        captureActionOutcome(
+                                          definition,
+                                          selected.id,
+                                          locale,
+                                        ),
+                                      )
+                                    }
+                                  />
+                                )}
+                              </>
+                            )}
+                          </>
+                        ) : (
+                          <p>
+                            {words(
+                              locale,
+                              "ブロックの名前を押すと、入力・対象・型を変更できます。",
+                              "Select a block name to edit its inputs, targets and types.",
+                            )}
+                          </p>
+                        )}
+                      </fieldset>
+                      <details>
+                        <summary>
+                          {words(
+                            locale,
+                            "変数と使用範囲",
+                            "Variables and scope",
+                          )}
+                        </summary>
+                        <input
+                          aria-label={words(
+                            locale,
+                            "変数を探す",
+                            "Search variables",
+                          )}
+                          type="search"
+                          value={variableQuery}
+                          onChange={(event) =>
+                            setVariableQuery(event.target.value)
+                          }
+                        />
+                        {allVariables.length ? (
+                          <ul>
+                            {allVariables.map((item) => (
+                              <li key={item.id}>
+                                <strong>{item.name}</strong> ·{" "}
+                                {typeName(item.type)}
+                                <label className="automation-inspect-choice">
+                                  <input
+                                    type="checkbox"
+                                    disabled={locked}
+                                    checked={
+                                      simulation.inspectVariables?.includes(
+                                        item.id,
+                                      ) ?? false
+                                    }
+                                    onChange={(event) => {
+                                      setSimulation((previous) => ({
+                                        ...previous,
+                                        inspectVariables: event.target.checked
+                                          ? [
+                                              ...new Set([
+                                                ...(previous.inspectVariables ??
+                                                  []),
+                                                item.id,
+                                              ]),
+                                            ]
+                                          : (
+                                              previous.inspectVariables ?? []
+                                            ).filter((id) => id !== item.id),
+                                      }));
+                                      setReview((previous) => ({
+                                        ...previous,
+                                        test: undefined,
+                                      }));
+                                    }}
+                                    aria-label={words(
+                                      locale,
+                                      `${item.name}: この試運転で値を確認`,
+                                      `${item.name}: Inspect this trial`,
+                                    )}
+                                  />
+                                  {words(
+                                    locale,
+                                    "この試運転で値を確認",
+                                    "Inspect this trial",
+                                  )}
+                                </label>
+                                {item.description && (
+                                  <small>{item.description}</small>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p>
+                            {words(
+                              locale,
+                              "変数はまだありません。",
+                              "No variables yet.",
+                            )}
+                          </p>
+                        )}
                         <p>
                           {words(
                             locale,
-                            "変数はまだありません。",
-                            "No variables yet.",
+                            "名前を変えても参照は維持します。並列の親・兄弟の値には代入できません。",
+                            "Renaming preserves references. Parallel branches cannot assign parent or sibling values.",
                           )}
                         </p>
-                      )}
-                      <p>
+                      </details>
+                    </aside>
+                  </div>
+                  {hasErrors && (
+                    <section className="automation-problem">
+                      <h2>
                         {words(
                           locale,
-                          "名前を変えても参照は維持します。並列の親・兄弟の値には代入できません。",
-                          "Renaming preserves references. Parallel branches cannot assign parent or sibling values.",
+                          "入力を修正してください",
+                          "Review these inputs",
                         )}
-                      </p>
-                    </details>
-                  </aside>
-                </div>
-                {hasErrors && (
-                  <section className="automation-problem">
-                    <h2>
-                      {words(
-                        locale,
-                        "入力を修正してください",
-                        "Review these inputs",
-                      )}
-                    </h2>
-                    <ul>
-                      {Object.entries(fieldErrors).map(([path, message]) => (
-                        <li key={path}>{message}</li>
-                      ))}
-                    </ul>
-                  </section>
-                )}
-                <SimulationInputPanel
-                  definition={definition}
-                  locale={locale}
-                  targets={targets}
-                  value={simulation}
-                  disabled={locked}
-                  onChange={(next) => {
-                    setSimulation(next);
-                    setReview((previous) => ({ ...previous, test: undefined }));
-                  }}
-                />
-                <ReviewResults
-                  review={review}
-                  locale={locale}
-                  revision={revision}
-                />
-                <AutomationRunPanel
-                  key={definition.id}
-                  locale={locale}
-                  guildId={guildId}
-                  endpoint={endpoint}
-                  definition={definition}
-                  activeRevision={activeRevision}
-                  draftRevision={revision}
-                  highlightRunId={initialRunId}
-                  dirty={dirty}
-                  targets={targets}
-                  disabled={locked}
-                />
-              </>
+                      </h2>
+                      <ul>
+                        {Object.entries(fieldErrors).map(([path, message]) => (
+                          <li key={path}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const pieces = path.split(".");
+                                for (
+                                  let length = pieces.length - 1;
+                                  length > 0;
+                                  length--
+                                ) {
+                                  const owner = pieces
+                                    .slice(0, length)
+                                    .join(".");
+                                  if (locate(definition, owner)) {
+                                    select(owner);
+                                    break;
+                                  }
+                                }
+                                requestAnimationFrame(() =>
+                                  document
+                                    .getElementById(
+                                      `slot-${path.replace(/[^a-zA-Z0-9_-]/g, "-")}`,
+                                    )
+                                    ?.focus(),
+                                );
+                              }}
+                            >
+                              {message}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+                  <SavedRevisionComparison
+                    key={`revision-comparison-${definition.id}`}
+                    client={client}
+                    saved={saved}
+                    revision={revision}
+                    locale={locale}
+                  />
+                  <SimulationInputPanel
+                    definition={definition}
+                    locale={locale}
+                    targets={targets}
+                    value={simulation}
+                    onValidity={(valid) => validity("simulation-clock", valid ? null : words(locale, "試運転の日時を確認してください。", "Check the simulation date/time."))}
+                    disabled={locked}
+                    onChange={(next) => {
+                      setSimulation(next);
+                      setReview((previous) => ({
+                        ...previous,
+                        test: undefined,
+                      }));
+                    }}
+                  />
+                  <ReviewResults
+                    review={review}
+                    locale={locale}
+                    revision={revision}
+                    inspectVariables={simulation.inspectVariables ?? []}
+                    variables={collectVariables(definition, locale)}
+                  />
+                  <AutomationRunPanel
+                    key={definition.id}
+                    locale={locale}
+                    guildId={guildId}
+                    endpoint={endpoint}
+                    definition={definition}
+                    activeRevision={activeRevision}
+                    draftRevision={revision}
+                    highlightRunId={initialRunId}
+                    dirty={dirty}
+                    targets={targets}
+                    disabled={locked}
+                  />
+                </>
+              )}
+            </>
+          )
+        )}
+        {confirm === "profile" && definition && (
+          <ConfirmationDialog
+            label={words(
+              locale,
+              "Scratch意味版への変更",
+              "Change to Scratch semantics",
             )}
-          </>
-        )
-      )}
-      {confirm && (
-        <ConfirmationDialog
-          label={words(
-            locale,
-            confirm === "enable"
-              ? "確認した版を有効にする"
-              : confirm === "disable"
-                ? "新規起動を停止する"
-                : "未保存の編集を破棄する",
-            confirm === "enable"
-              ? "Enable the reviewed revision"
-              : confirm === "disable"
-                ? "Stop new starts"
-                : "Discard unsaved edits",
-          )}
-          busy={Boolean(busy)}
-          onCancel={() => setConfirm(null)}
-          className="automation-dialog"
-        >
-          <h2>
-            {words(
+            onCancel={() => setConfirm(null)}
+            className="automation-dialog"
+          >
+            <h2>
+              {words(
+                locale,
+                "この下書きを新しい意味版へ改版",
+                "Revise this draft to the new semantic profile",
+              )}
+            </h2>
+            <p>
+              {words(
+                locale,
+                "変更前：保存時の数値・文字・比較規則。変更後：Scratch追加用の明示した型比較・文字境界・数値規則と上限付き条件反復。この変更は下書きだけに適用し、開始済みの実行は元の版を使います。",
+                "Before: the saved number, text and comparison rules. After: the explicit Scratch type comparisons, text boundaries, numeric rules and bounded condition loops. This changes the draft; runs already started keep their original revision.",
+              )}
+            </p>
+            <p>
+              {words(
+                locale,
+                "変更後は入力検証、送信なしの試運転、影響確認をやり直してください。Undoで下書きの意味版も戻せます。",
+                "Repeat validation, simulation without sending and impact review after this change. Undo also restores the draft semantic profile.",
+              )}
+            </p>
+            <button type="button" onClick={() => setConfirm(null)}>
+              {words(locale, "取消", "Cancel")}
+            </button>
+            <button
+              type="button"
+              className="automation-primary"
+              onClick={() => {
+                modify((next) => {
+                  next.semanticProfile = "scratch.v1";
+                });
+                setConfirm(null);
+              }}
+            >
+              {words(
+                locale,
+                "変更を下書きへ適用",
+                "Apply the change to this draft",
+              )}
+            </button>
+          </ConfirmationDialog>
+        )}
+        {confirm && confirm !== "profile" && (
+          <ConfirmationDialog
+            label={words(
               locale,
               confirm === "enable"
-                ? "この版を有効にしますか"
+                ? "確認した版を有効にする"
                 : confirm === "disable"
-                  ? "新しい起動を停止しますか"
-                  : "未保存の編集を破棄しますか",
+                  ? "新規起動を停止する"
+                  : "未保存の編集を破棄する",
               confirm === "enable"
-                ? "Enable this revision?"
+                ? "Enable the reviewed revision"
                 : confirm === "disable"
-                  ? "Stop new starts?"
-                  : "Discard unsaved edits?",
+                  ? "Stop new starts"
+                  : "Discard unsaved edits",
             )}
-          </h2>
-          <p>
-            {confirm === "enable"
-              ? words(
-                  locale,
-                  `下書き版 ${revision} の対象・内容・件数・権限・7日以内の実行期限を確認してください。有効化は次の起点から適用します。`,
-                  `Review revision ${revision}: targets, content, counts, permissions and the seven-day run deadline. Enabling applies to future starts.`,
-                )
-              : confirm === "disable"
+            busy={Boolean(busy)}
+            onCancel={() => setConfirm(null)}
+            className="automation-dialog"
+          >
+            <h2>
+              {words(
+                locale,
+                confirm === "enable"
+                  ? "この版を有効にしますか"
+                  : confirm === "disable"
+                    ? "新しい起動を停止しますか"
+                    : "未保存の編集を破棄しますか",
+                confirm === "enable"
+                  ? "Enable this revision?"
+                  : confirm === "disable"
+                    ? "Stop new starts?"
+                    : "Discard unsaved edits?",
+              )}
+            </h2>
+            <p>
+              {confirm === "enable"
                 ? words(
                     locale,
-                    "これからの起動を止めます。確認済みの外部操作を取り消す機能ではありません。",
-                    "Future starts will stop. Confirmed external actions are not undone.",
+                    `下書き版 ${revision} の対象・内容・件数・権限・7日以内の実行期限を確認してください。有効化は次の起点から適用します。`,
+                    `Review revision ${revision}: targets, content, counts, permissions and the seven-day run deadline. Enabling applies to future starts.`,
                   )
-                : words(
+                : confirm === "disable"
+                  ? words(
+                      locale,
+                      "これからの起動を止めます。確認済みの外部操作を取り消す機能ではありません。",
+                      "Future starts will stop. Confirmed external actions are not undone.",
+                    )
+                  : words(
+                      locale,
+                      "現在タブの未保存編集とUndo履歴を破棄し、選んだ下書きを読みます。",
+                      "Unsaved edits and Undo history in this tab will be discarded before loading the selected draft.",
+                    )}
+            </p>
+            <button
+              type="button"
+              disabled={Boolean(busy)}
+              onClick={() => setConfirm(null)}
+            >
+              {words(locale, "取消", "Cancel")}
+            </button>
+            <button
+              type="button"
+              className="automation-primary"
+              disabled={Boolean(busy) || (confirm === "enable" && !checked)}
+              onClick={() => {
+                if (confirm === "discard") {
+                  const next = nextFlow;
+                  setConfirm(null);
+                  setNextFlow(null);
+                  if (next === "new") newDraft();
+                  else if (next) void load(next);
+                } else void run(confirm);
+              }}
+            >
+              {words(
+                locale,
+                confirm === "enable"
+                  ? "この版を有効にする"
+                  : confirm === "disable"
+                    ? "新規起動を停止"
+                    : "破棄して開く",
+                confirm === "enable"
+                  ? "Enable this revision"
+                  : confirm === "disable"
+                    ? "Stop new starts"
+                    : "Discard and open",
+              )}
+            </button>
+          </ConfirmationDialog>
+        )}
+      </section>
+    </AutomationSemanticProfile.Provider>
+  );
+}
+
+function CommonUnknownEditor({
+  draft: initial,
+  definition,
+  locale,
+  targets,
+  disabled,
+  onCancel,
+  onApply,
+}: {
+  draft: CommonUnknownDraft;
+  definition: FlowDefinition;
+  locale: Locale;
+  targets: EditorTargets;
+  disabled: boolean;
+  onCancel: () => void;
+  onApply: (draft: CommonUnknownDraft) => void;
+}) {
+  const [draft, setDraft] = useState(() => structuredClone(initial));
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const validity = useCallback(
+    (path: string, message: string | null) =>
+      setErrors((previous) => {
+        if (previous[path] === message || (!message && !previous[path]))
+          return previous;
+        const next = { ...previous };
+        if (message) next[path] = message;
+        else delete next[path];
+        return next;
+      }),
+    [],
+  );
+  const entry = definition.scratchAuthoring?.chains.find(
+    (chain) => chain.id === draft.id,
+  )?.entryId;
+  const external = availableVariables(definition, entry, locale);
+  const change = (update: (next: CommonUnknownDraft) => void) =>
+    setDraft((previous) => {
+      const next = structuredClone(previous);
+      update(next);
+      return next;
+    });
+  const editList = (
+    body: Statement[],
+    onChange: (body: Statement[]) => void,
+    name: string,
+  ) => (
+    <TemplateStepList
+      key={name}
+      body={body}
+      definition={definition}
+      locale={locale}
+      targets={targets}
+      variables={external}
+      onChange={onChange}
+      onValidity={validity}
+      path={name}
+    />
+  );
+  return (
+    <ConfirmationDialog
+      label={words(
+        locale,
+        "共通の不明経路の編集",
+        "Edit the common unknown path",
+      )}
+      onCancel={onCancel}
+      busy={disabled}
+      className="automation-dialog automation-common-dialog"
+    >
+      <section
+        className="automation-common-editor"
+        aria-label={words(
+          locale,
+          "新規連鎖と共通の不明経路の編集",
+          "Edit a new chain and its common unknown path",
+        )}
+      >
+        <h2>
+          {words(
+            locale,
+            "共通の不明経路を持つ条件連鎖",
+            "Condition chain with a common unknown path",
+          )}
+        </h2>
+        <p>
+          {words(
+            locale,
+            "どこかの条件が不明になったら、この共通経路を1回実行します。適用すると連鎖全体をまとめて下書きへ保存します。既存の異なる不明経路を統合する操作ではありません。",
+            "When a condition is unknown, this common path runs once. Applying saves the whole chain together in the draft. Existing distinct unknown branches are never merged.",
+          )}
+        </p>
+        <fieldset disabled={disabled} className="automation-definition-fields">
+          {draft.clauses.map((clause, index) => (
+            <section key={clause.id} className="automation-common-clause">
+              <h3>
+                {words(
+                  locale,
+                  index === 0 ? "もし" : "それ以外でもし",
+                  index === 0 ? "If" : "Else if",
+                )}{" "}
+                {index + 1}
+              </h3>
+              <ValueSlot
+                value={clause.condition}
+                locale={locale}
+                label={words(locale, "この節の条件", "Clause condition")}
+                path={`common.${draft.id}.${clause.id}`}
+                variables={external}
+                targets={targets}
+                guildId={definition.guildId}
+                pureDefinitions={definition.pureDefinitions}
+                onValidity={validity}
+                onChange={(condition) =>
+                  change((next) => {
+                    next.clauses[index]!.condition = condition;
+                  })
+                }
+              />
+              <div className="automation-clause-actions">
+                <button
+                  type="button"
+                  disabled={index === 0}
+                  onClick={() =>
+                    change((next) => {
+                      [next.clauses[index - 1], next.clauses[index]] = [
+                        next.clauses[index]!,
+                        next.clauses[index - 1]!,
+                      ];
+                    })
+                  }
+                >
+                  {words(locale, "節を上へ", "Move clause up")}
+                </button>
+                <button
+                  type="button"
+                  disabled={index === draft.clauses.length - 1}
+                  onClick={() =>
+                    change((next) => {
+                      [next.clauses[index + 1], next.clauses[index]] = [
+                        next.clauses[index]!,
+                        next.clauses[index + 1]!,
+                      ];
+                    })
+                  }
+                >
+                  {words(locale, "節を下へ", "Move clause down")}
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    draft.clauses.length === 1 || clause.then.length > 0
+                  }
+                  title={
+                    clause.then.length
+                      ? words(
+                          locale,
+                          "本文を空にしてから削除してください。",
+                          "Remove the body steps first.",
+                        )
+                      : undefined
+                  }
+                  onClick={() =>
+                    change((next) => {
+                      next.clauses.splice(index, 1);
+                    })
+                  }
+                >
+                  {words(locale, "この条件節を削除", "Remove this clause")}
+                </button>
+              </div>
+              <details>
+                <summary>
+                  {words(locale, "成立したときの本文", "Body when true")} (
+                  {clause.then.length})
+                </summary>
+                {editList(
+                  clause.then,
+                  (body) =>
+                    change((next) => {
+                      next.clauses[index]!.then = body;
+                    }),
+                  `then.${clause.id}`,
+                )}
+              </details>
+            </section>
+          ))}
+          <button
+            type="button"
+            onClick={() =>
+              change((next) => {
+                next.clauses.push({
+                  id: uid(),
+                  condition: missing("ConditionResult"),
+                  then: [],
+                });
+              })
+            }
+          >
+            {words(locale, "それ以外でもしを追加", "Add else if")}
+          </button>
+          <details>
+            <summary>
+              {words(
+                locale,
+                "すべて不成立のとき",
+                "When every condition is false",
+              )}{" "}
+              ({draft.otherwise.length})
+            </summary>
+            {editList(
+              draft.otherwise,
+              (body) =>
+                change((next) => {
+                  next.otherwise = body;
+                }),
+              "otherwise",
+            )}
+          </details>
+          <details open>
+            <summary>
+              {words(
+                locale,
+                "共通の不明経路のテンプレート",
+                "Common unknown path template",
+              )}{" "}
+              ({draft.template.length})
+            </summary>
+            <p className="automation-hint">
+              {words(
+                locale,
+                "連鎖の前から使える入力と、このテンプレート内の値だけを使えます。各節の本文で作った値は使えません。",
+                "Use inputs available before the chain and values created inside this template. Values created in a clause body are unavailable.",
+              )}
+            </p>
+            {editList(
+              draft.template,
+              (body) =>
+                change((next) => {
+                  next.template = body;
+                }),
+              "template",
+            )}
+          </details>
+          <button
+            type="button"
+            disabled={Object.keys(errors).length > 0}
+            onClick={() => onApply(draft)}
+          >
+            {words(
+              locale,
+              "連鎖全体を下書きへ適用",
+              "Apply the whole chain to the draft",
+            )}
+          </button>
+          <button type="button" onClick={onCancel}>
+            {words(locale, "取消して戻る", "Cancel and go back")}
+          </button>
+        </fieldset>
+      </section>
+    </ConfirmationDialog>
+  );
+}
+
+function TemplateStepList({
+  body,
+  definition,
+  locale,
+  targets,
+  variables,
+  onChange,
+  onValidity,
+  path,
+}: {
+  body: Statement[];
+  definition: FlowDefinition;
+  locale: Locale;
+  targets: EditorTargets;
+  variables: VariableDeclaration[];
+  onChange: (body: Statement[]) => void;
+  onValidity: (path: string, message: string | null) => void;
+  path: string;
+}) {
+  const virtual = {
+    ...definition,
+    body,
+    variables,
+    detached: [],
+    scratchAuthoring: undefined,
+  };
+  const update = (index: number, node: Statement) =>
+    onChange(body.map((old, at) => (at === index ? node : old)));
+  return (
+    <div className="automation-template-steps">
+      <ol>
+        {body.map((node, index) => (
+          <li key={node.id}>
+            <details>
+              <summary>
+                {index + 1}.{" "}
+                {PALETTE.find(
+                  (card) =>
+                    card.kind === node.kind &&
+                    (!card.operation ||
+                      (node.kind === "action" &&
+                        node.operation === card.operation)),
+                )?.[locale] ?? node.kind}
+              </summary>
+              <StatementEditor
+                statement={node}
+                onChange={(value) => update(index, value)}
+                definition={virtual}
+                locale={locale}
+                variables={availableVariables(virtual, node.id, locale)}
+                targets={targets}
+                onValidity={onValidity}
+                onCaptureOutcome={() =>
+                  onChange(captureActionOutcome(virtual, node.id, locale).body)
+                }
+              />
+              {branches(node).map((child) => (
+                <details key={child.key}>
+                  <summary>{words(locale, child.ja, child.en)}</summary>
+                  <TemplateStepList
+                    body={child.body}
+                    definition={virtual}
+                    locale={locale}
+                    targets={targets}
+                    variables={(() => {
+                      const context = structuredClone(virtual),
+                        probe = `scope-${node.id}`;
+                      childList(context, node.id, child.key)!.unshift({
+                        id: probe,
+                        kind: "end",
+                      });
+                      return availableVariables(context, probe, locale);
+                    })()}
+                    path={`${path}.${node.id}.${child.key}`}
+                    onValidity={onValidity}
+                    onChange={(nextBody) => {
+                      const next = structuredClone(node);
+                      branches(next)
+                        .find((branch) => branch.key === child.key)!
+                        .body.splice(0, child.body.length, ...nextBody);
+                      update(index, next);
+                    }}
+                  />
+                </details>
+              ))}
+              <div className="automation-clause-actions">
+                <button
+                  type="button"
+                  disabled={index === 0}
+                  onClick={() => {
+                    const next = [...body];
+                    [next[index - 1], next[index]] = [
+                      next[index]!,
+                      next[index - 1]!,
+                    ];
+                    onChange(next);
+                  }}
+                >
+                  {words(locale, "上へ", "Up")}
+                </button>
+                <button
+                  type="button"
+                  disabled={index === body.length - 1}
+                  onClick={() => {
+                    const next = [...body];
+                    [next[index + 1], next[index]] = [
+                      next[index]!,
+                      next[index + 1]!,
+                    ];
+                    onChange(next);
+                  }}
+                >
+                  {words(locale, "下へ", "Down")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onChange(body.filter((_old, at) => at !== index))
+                  }
+                >
+                  {words(locale, "削除", "Delete")}
+                </button>
+              </div>
+            </details>
+          </li>
+        ))}
+      </ol>
+      {body.length === 0 && (
+        <p className="automation-hint">
+          {words(
+            locale,
+            "手順はまだありません。空のままも明示した経路です。",
+            "No steps yet. An empty path is still an explicit path.",
+          )}
+        </p>
+      )}
+      <label>
+        {words(locale, "ここに手順を追加", "Add a step here")}
+        <select
+          value=""
+          onChange={(event) => {
+            const card = PALETTE.find((card) => card.id === event.target.value);
+            if (card) onChange([...body, createStatement(card, locale)]);
+          }}
+        >
+          <option value="">
+            {words(locale, "部品を選択", "Choose a block")}
+          </option>
+          {PALETTE.filter((card) => !card.unavailable).map((card) => (
+            <option key={card.id} value={card.id}>
+              {card[locale]}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
+
+function ConditionChainEditor({
+  definition,
+  selectedId,
+  locale,
+  onChange,
+  onSelect,
+  onEditCommon,
+}: {
+  definition: FlowDefinition;
+  selectedId: string;
+  locale: Locale;
+  onChange: (next: FlowDefinition, selectedId: string) => void;
+  onSelect: (id: string) => void;
+  onEditCommon: (draft: CommonUnknownDraft) => void;
+}) {
+  const root = conditionChainRoot(definition, selectedId)!;
+  const clauses = conditionChain(root);
+  const [removing, setRemoving] = useState<string>();
+  const managed = definition.scratchAuthoring?.chains.find(
+    (chain) => chain.entryId === root.id,
+  );
+  const apply = (
+    action: Parameters<typeof editConditionChain>[2],
+    focus: string,
+  ) => {
+    onChange(editConditionChain(definition, root.id, action), focus);
+    setRemoving(undefined);
+  };
+  return (
+    <section
+      className="automation-condition-chain"
+      aria-label={words(
+        locale,
+        "もし・それ以外でもし",
+        "If and else-if clauses",
+      )}
+    >
+      <h3>
+        {words(
+          locale,
+          "条件を上から順に確認",
+          "Check conditions from top to bottom",
+        )}
+      </h3>
+      <p className="automation-hint">
+        {words(
+          locale,
+          "最初に成立した節だけを実行します。各節の『確認できないとき』は別々に保持します。",
+          "Only the first true clause runs. Each clause keeps its own unknown branch.",
+        )}
+      </p>
+      <ol>
+        {clauses.map((clause, index) => (
+          <li key={clause.id}>
+            <button
+              type="button"
+              aria-pressed={clause.id === selectedId}
+              onClick={() => onSelect(clause.id)}
+            >
+              {words(
+                locale,
+                index === 0 ? "もし" : "それ以外でもし",
+                index === 0 ? "If" : "Else if",
+              )}{" "}
+              {index + 1}
+            </button>
+            <small>
+              {words(
+                locale,
+                `成立時 ${clause.then.length} 手順・この節の不明 ${clause.unknown.length} 手順`,
+                `True: ${clause.then.length} steps · This clause's unknown: ${clause.unknown.length} steps`,
+              )}
+            </small>
+            {!managed && (
+              <div className="automation-clause-actions">
+                <button
+                  type="button"
+                  disabled={index === 0}
+                  onClick={() =>
+                    apply({ kind: "move", index, direction: -1 }, clause.id)
+                  }
+                >
+                  {words(locale, "節を上へ", "Move clause up")}
+                </button>
+                <button
+                  type="button"
+                  disabled={index === clauses.length - 1}
+                  onClick={() =>
+                    apply({ kind: "move", index, direction: 1 }, clause.id)
+                  }
+                >
+                  {words(locale, "節を下へ", "Move clause down")}
+                </button>
+                <button
+                  type="button"
+                  disabled={clauses.length === 1}
+                  onClick={() => setRemoving(clause.id)}
+                >
+                  {words(locale, "この条件節を削除", "Remove this clause")}
+                </button>
+              </div>
+            )}
+            {removing === clause.id && (
+              <div
+                className="automation-notice"
+                role="group"
+                aria-label={words(
+                  locale,
+                  "条件節の削除確認",
+                  "Confirm clause removal",
+                )}
+              >
+                <p>
+                  {words(
                     locale,
-                    "現在タブの未保存編集とUndo履歴を破棄し、選んだ下書きを読みます。",
-                    "Unsaved edits and Undo history in this tab will be discarded before loading the selected draft.",
+                    "この条件・成立時の本文・この節の不明経路を削除します。最後のそれ以外は残ります。",
+                    "Remove this condition, its true body and its unknown branch. The final else body is kept.",
                   )}
+                </p>
+                <button type="button" onClick={() => setRemoving(undefined)}>
+                  {words(locale, "取消", "Cancel")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    apply(
+                      { kind: "remove", index },
+                      clauses[index === 0 ? 1 : 0]!.id,
+                    )
+                  }
+                >
+                  {words(locale, "条件節を削除する", "Remove clause")}
+                </button>
+              </div>
+            )}
+          </li>
+        ))}
+      </ol>
+      {!managed && (
+        <button
+          type="button"
+          onClick={() => {
+            const clause = createStatement(
+              PALETTE.find((card) => card.id === "branch")!,
+              locale,
+            ) as Extract<Statement, { kind: "branch" }>;
+            apply({ kind: "add", clause }, clause.id);
+          }}
+        >
+          {words(locale, "それ以外でもしを追加", "Add else if")}
+        </button>
+      )}
+      {root.otherwise.length > 1 && root.otherwise[0]?.kind === "branch" && (
+        <p className="automation-notice">
+          {words(
+            locale,
+            "不成立側には条件以外の後続もあります。所属を保った入れ子として表示します。",
+            "The false branch also contains following steps. It stays visibly nested to preserve ownership.",
+          )}
+        </p>
+      )}
+      {managed && (
+        <>
+          <p className="automation-hint">
+            {words(
+              locale,
+              "共通の不明経路を持つ新規連鎖です。専用の連鎖編集で一括更新してください。",
+              "This new chain uses a common unknown template. Update it atomically in the dedicated chain editor.",
+            )}
           </p>
           <button
             type="button"
-            disabled={Boolean(busy)}
-            onClick={() => setConfirm(null)}
-          >
-            {words(locale, "取消", "Cancel")}
-          </button>
-          <button
-            type="button"
-            className="automation-primary"
-            disabled={Boolean(busy) || (confirm === "enable" && !checked)}
-            onClick={() => {
-              if (confirm === "discard") {
-                const next = nextFlow;
-                setConfirm(null);
-                setNextFlow(null);
-                if (next === "new") newDraft();
-                else if (next) void load(next);
-              } else void run(confirm);
-            }}
+            onClick={() =>
+              onEditCommon({
+                id: managed.id,
+                clauses: clauses.map(({ id, condition, then }) => ({
+                  id,
+                  condition,
+                  then,
+                })),
+                otherwise: clauses.at(-1)!.otherwise,
+                template: managed.template,
+              })
+            }
           >
             {words(
               locale,
-              confirm === "enable"
-                ? "この版を有効にする"
-                : confirm === "disable"
-                  ? "新規起動を停止"
-                  : "破棄して開く",
-              confirm === "enable"
-                ? "Enable this revision"
-                : confirm === "disable"
-                  ? "Stop new starts"
-                  : "Discard and open",
+              "共通の不明経路を編集",
+              "Edit the common unknown path",
             )}
           </button>
-        </ConfirmationDialog>
+        </>
       )}
     </section>
   );
@@ -1814,7 +3094,7 @@ function StatementEditor({
   variables: VariableDeclaration[];
   targets: EditorTargets;
   onValidity: (path: string, message: string | null) => void;
-  onCaptureOutcome:()=>void;
+  onCaptureOutcome: () => void;
 }) {
   const writable = writableVariables(definition, statement.id);
   const slot = (
@@ -1953,6 +3233,35 @@ function StatementEditor({
       )}
       {statement.kind === "branch" && (
         <>
+          <label>
+            {words(locale, "条件の種類", "Condition type")}
+            <select
+              value={
+                statement.condition.type === "ConditionResult"
+                  ? "ConditionResult"
+                  : "Boolean"
+              }
+              onChange={(event) =>
+                onChange({
+                  ...statement,
+                  condition: missing(
+                    event.target.value as "Boolean" | "ConditionResult",
+                  ),
+                })
+              }
+            >
+              <option value="Boolean">
+                {words(locale, "成立・不成立", "True or false")}
+              </option>
+              <option value="ConditionResult">
+                {words(
+                  locale,
+                  "成立・不成立・確認できない",
+                  "True, false or unknown",
+                )}
+              </option>
+            </select>
+          </label>
           {slot(
             statement.condition,
             words(locale, "成立する条件", "Condition"),
@@ -1968,8 +3277,245 @@ function StatementEditor({
           </p>
         </>
       )}
-      {(statement.kind==="resultBranch"||statement.kind==="optionalBranch")&&<ResultBranchEditor statement={statement} onChange={onChange} definition={definition} locale={locale} variables={variables} targets={targets} onValidity={onValidity}/>}
-      {statement.kind==="approval"&&<ApprovalBlockEditor statement={statement} onChange={onChange} definition={definition} locale={locale} variables={variables} targets={targets} onValidity={onValidity}/>}
+      {statement.kind === "searchBranch" && (
+        <>
+          <label>
+            {words(locale, "検索結果の種類", "Search result kind")}
+            <select
+              value={
+                typeof statement.value.type === "object" &&
+                statement.value.type.kind === "Record"
+                  ? statement.value.type.schemaId
+                  : "nexus.index-result.v1"
+              }
+              onChange={(event) => {
+                const list = event.target.value === "nexus.search-result.v1";
+                onChange({
+                  ...statement,
+                  value: missing(
+                    list
+                      ? {
+                          kind: "Record",
+                          schemaId: "nexus.search-result.v1",
+                          typeArgs: ["PlainText"],
+                        }
+                      : { kind: "Record", schemaId: "nexus.index-result.v1" },
+                  ),
+                  output: list
+                    ? {
+                        id: uid(),
+                        name: words(locale, "見つかった項目", "Found item"),
+                        type: "PlainText",
+                      }
+                    : undefined,
+                });
+              }}
+            >
+              <option value="nexus.index-result.v1">
+                {words(locale, "文字の位置", "Text position")}
+              </option>
+              <option value="nexus.search-result.v1">
+                {words(locale, "一覧の項目と位置", "List item and position")}
+              </option>
+            </select>
+          </label>
+          {statement.output &&
+            declaration(statement.output, (output) =>
+              onChange({
+                ...statement,
+                output,
+                value: missing({
+                  kind: "Record",
+                  schemaId: "nexus.search-result.v1",
+                  typeArgs: [output.type],
+                }),
+              }),
+            )}
+          {slot(
+            statement.value,
+            words(locale, "状態を持つ検索結果", "Search result with status"),
+            "value",
+            (value) => onChange({ ...statement, value }),
+          )}
+          {declaration(
+            statement.index,
+            (index) => onChange({ ...statement, index }),
+            false,
+          )}
+          <p className="automation-hint">
+            {words(
+              locale,
+              "見つかった内側だけで位置や項目を使えます。未一致を0や空文字に変えません。",
+              "Use the position and item only inside the found path. No match is never converted to zero or empty text.",
+            )}
+          </p>
+        </>
+      )}
+      {statement.kind === "boundedLoop" && (
+        <>
+          <label>
+            {words(locale, "条件の種類", "Condition type")}
+            <select
+              value={
+                statement.condition.type === "ConditionResult"
+                  ? "ConditionResult"
+                  : "Boolean"
+              }
+              onChange={(event) =>
+                onChange({
+                  ...statement,
+                  condition: missing(
+                    event.target.value as "Boolean" | "ConditionResult",
+                  ),
+                })
+              }
+            >
+              <option value="Boolean">
+                {words(locale, "成立・不成立", "True or false")}
+              </option>
+              <option value="ConditionResult">
+                {words(
+                  locale,
+                  "成立・不成立・確認できない",
+                  "True, false or unknown",
+                )}
+              </option>
+            </select>
+          </label>
+          <label>
+            {words(locale, "繰り返す条件", "Loop mode")}
+            <select
+              value={statement.mode}
+              onChange={(event) =>
+                onChange({
+                  ...statement,
+                  mode: event.target.value as "while" | "until",
+                })
+              }
+            >
+              <option value="while">
+                {words(locale, "成立する間（while）", "While true")}
+              </option>
+              <option value="until">
+                {words(locale, "成立するまで（until）", "Until true")}
+              </option>
+            </select>
+          </label>
+          {slot(
+            statement.condition,
+            words(locale, "毎回確認する条件", "Condition to check each time"),
+            "condition",
+            (condition) => onChange({ ...statement, condition }),
+          )}
+          {slot(
+            statement.maxBody,
+            words(locale, "本文を実行する最大回数", "Maximum body executions"),
+            "maxBody",
+            (maxBody) => onChange({ ...statement, maxBody }),
+            true,
+          )}
+          {slot(
+            statement.until ?? missing("Instant"),
+            words(
+              locale,
+              "開始時に固定する期限（必須・UTC）",
+              "Deadline frozen on entry (required, UTC)",
+            ),
+            "until",
+            (until) => onChange({ ...statement, until }),
+          )}
+          <p className="automation-hint">
+            {words(
+              locale,
+              "上限が0でも条件を1回確認します。上限到達・条件不明・評価失敗・局所期限では通常の後続へ進みません。実行期限・取消・予算切れ・外部結果不明は終了経路も停止します。",
+              "Even a zero limit checks the condition once. Limits, unknown conditions, evaluation failures and local deadlines never continue to normal following steps. Run expiry, cancellation, exhausted budgets and unknown external results stop handlers too.",
+            )}
+          </p>
+          <fieldset className="automation-loop-handlers">
+            <legend>
+              {words(
+                locale,
+                "理由ごとの終了経路",
+                "Termination paths by reason",
+              )}
+            </legend>
+            {(
+              [
+                ["limit", "上限に達したとき", "When the limit is reached"],
+                [
+                  "conditionUnknown",
+                  "条件を確認できないとき",
+                  "When the condition is unknown",
+                ],
+                [
+                  "evaluationError",
+                  "評価に失敗したとき",
+                  "When evaluation fails",
+                ],
+                [
+                  "localDeadline",
+                  "局所期限を迎えたとき（純粋な処理のみ）",
+                  "At the local deadline (pure steps only)",
+                ],
+              ] as const
+            ).map(([reason, ja, en]) => (
+              <label key={reason}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(statement.handlers[reason])}
+                  disabled={Boolean(statement.handlers[reason]?.length)}
+                  title={
+                    statement.handlers[reason]?.length
+                      ? words(
+                          locale,
+                          "手順を空にしてから経路を解除してください。",
+                          "Remove the path steps before disabling it.",
+                        )
+                      : undefined
+                  }
+                  onChange={(event) => {
+                    const handlers = { ...statement.handlers };
+                    if (event.target.checked) handlers[reason] = [];
+                    else delete handlers[reason];
+                    onChange({ ...statement, handlers });
+                  }}
+                />
+                {words(locale, ja, en)}
+              </label>
+            ))}
+            <p className="automation-hint">
+              {words(
+                locale,
+                "未指定ならその理由で停止します。指定した経路も最後に非成功で実行を終えます。本文は手順一覧の対応する内側に追加してください。",
+                "An unset path stops with that reason. A configured path also ends the run without success. Add its steps in the matching cavity in the step list.",
+              )}
+            </p>
+          </fieldset>
+        </>
+      )}
+      {(statement.kind === "resultBranch" ||
+        statement.kind === "optionalBranch") && (
+        <ResultBranchEditor
+          statement={statement}
+          onChange={onChange}
+          definition={definition}
+          locale={locale}
+          variables={variables}
+          targets={targets}
+          onValidity={onValidity}
+        />
+      )}
+      {statement.kind === "approval" && (
+        <ApprovalBlockEditor
+          statement={statement}
+          onChange={onChange}
+          definition={definition}
+          locale={locale}
+          variables={variables}
+          targets={targets}
+          onValidity={onValidity}
+        />
+      )}
       {statement.kind === "repeat" && (
         <>
           {statement.count
@@ -2009,7 +3555,14 @@ function StatementEditor({
               "The count or list is frozen at loop start. Zero repeats skip the body and continue.",
             )}
           </p>
-          <RepeatResultsEditor statement={statement} onChange={onChange} definition={definition} locale={locale} targets={targets} onValidity={onValidity}/>
+          <RepeatResultsEditor
+            statement={statement}
+            onChange={onChange}
+            definition={definition}
+            locale={locale}
+            targets={targets}
+            onValidity={onValidity}
+          />
         </>
       )}
       {statement.kind === "wait" && (
@@ -2223,7 +3776,8 @@ function StatementEditor({
               (output) => onChange({ ...statement, output }),
               false,
             )}
-          {!statement.output && !statement.outcome &&
+          {!statement.output &&
+            !statement.outcome &&
             [
               "discord.sendMessage",
               "discord.createThread",
@@ -2256,7 +3810,21 @@ function StatementEditor({
                 {words(locale, "結果に名前を付ける", "Name the result")}
               </button>
             )}
-          {statement.outcome ? declaration(statement.outcome,(outcome)=>onChange({...statement,outcome}),false) : <button type="button" onClick={onCaptureOutcome}>{words(locale,"型付き操作結果として受け取り分岐を追加","Capture the typed outcome and add its branches")}</button>}
+          {statement.outcome ? (
+            declaration(
+              statement.outcome,
+              (outcome) => onChange({ ...statement, outcome }),
+              false,
+            )
+          ) : (
+            <button type="button" onClick={onCaptureOutcome}>
+              {words(
+                locale,
+                "型付き操作結果として受け取り分岐を追加",
+                "Capture the typed outcome and add its branches",
+              )}
+            </button>
+          )}
           {statement.operation === "discord.sendMessage" ||
           statement.operation === "discord.editOwnMessage" ? (
             <MessagePreview
@@ -2377,11 +3945,12 @@ function StatementEditor({
               value={`${statement.procedureId}@${statement.revision}`}
               onChange={(event) => {
                 const procedure = definition.procedures?.find(
-                  (item) => `${item.id}@${item.revision}` === event.target.value,
+                  (item) =>
+                    `${item.id}@${item.revision}` === event.target.value,
                 );
                 onChange({
                   ...statement,
-                  procedureId: procedure?.id??"",
+                  procedureId: procedure?.id ?? "",
                   revision: procedure?.revision ?? 1,
                   args: Object.fromEntries(
                     (procedure?.inputs ?? []).map((item) => [
@@ -2402,7 +3971,10 @@ function StatementEditor({
                 {words(locale, "手順を選択", "Choose a procedure")}
               </option>
               {definition.procedures?.map((item) => (
-                <option key={`${item.id}@${item.revision}`} value={`${item.id}@${item.revision}`}>
+                <option
+                  key={`${item.id}@${item.revision}`}
+                  value={`${item.id}@${item.revision}`}
+                >
                   {item.name} · {words(locale, "版", "revision")}{" "}
                   {item.revision}
                 </option>
@@ -2413,7 +3985,11 @@ function StatementEditor({
             slot(
               input,
               definition.procedures
-                ?.find((item) => item.id === statement.procedureId&&item.revision===statement.revision)
+                ?.find(
+                  (item) =>
+                    item.id === statement.procedureId &&
+                    item.revision === statement.revision,
+                )
                 ?.inputs.find((item) => item.id === id)?.name ??
                 words(locale, "引数", "Argument"),
               id,
@@ -2486,9 +4062,217 @@ function StatementEditor({
           )}
         </p>
       )}
+      {statement.kind === "endBranch" && (
+        <p>
+          {words(
+            locale,
+            "いちばん内側の並列の枝だけを終えます。ほかの枝は続きます。宣言した枝の結果はすべて必要です。",
+            "Ends only the innermost parallel branch. Other branches continue. Every declared branch result is still required.",
+          )}
+        </p>
+      )}
+      {statement.kind === "endRun" && (
+        <p>
+          {words(
+            locale,
+            "子手順とすべての並列を含め、この実行の新しい処理を止めます。開始済みの外部操作は取り消せず、結果不明は結果不明のままです。",
+            "Stops new steps in this run, including child procedures and all parallel branches. Already started external actions cannot be undone; unknown results stay unknown.",
+          )}
+        </p>
+      )}
     </div>
   );
 }
+function SavedRevisionComparison({
+  client,
+  saved,
+  revision,
+  locale,
+}: {
+  client: ReturnType<typeof automationClient>;
+  saved: string;
+  revision: number;
+  locale: Locale;
+}) {
+  const [source, setSource] = useState("");
+  const [result, setResult] = useState<FlowRevision | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+  const epoch = useRef(0);
+  const flight = useRef(false);
+  const target = useMemo(
+    () => (saved ? (JSON.parse(saved) as FlowDefinition) : null),
+    [saved],
+  );
+  useEffect(() => {
+    epoch.current++;
+    flight.current = false;
+    setBusy(false);
+    setSource(revision > 1 ? String(revision - 1) : "");
+    setResult(null);
+    setProblem("");
+    return () => {
+      epoch.current++;
+    };
+  }, [revision, saved]);
+  if (!target || revision < 2) return null;
+  const difference = result
+    ? flowDefinitionDifferences(result.definition, target)
+    : null;
+  const compare = async () => {
+    if (flight.current) return;
+    const chosen = Number(source);
+    setResult(null);
+    if (
+      !/^[1-9][0-9]*$/.test(source) ||
+      !Number.isSafeInteger(chosen) ||
+      chosen >= revision
+    ) {
+      setProblem(
+        words(
+          locale,
+          "現在の保存版より前の版番号を入力してください。",
+          "Enter a saved revision number earlier than the current revision.",
+        ),
+      );
+      return;
+    }
+    flight.current = true;
+    setBusy(true);
+    setProblem("");
+    const requestEpoch = epoch.current;
+    try {
+      const loaded = await client.revision(target.id, chosen);
+      if (requestEpoch !== epoch.current) return;
+      if (
+        loaded.id !== target.id ||
+        loaded.revision !== chosen ||
+        loaded.definition.id !== target.id ||
+        loaded.definition.guildId !== target.guildId
+      )
+        throw new Error("REVISION_SCOPE_MISMATCH");
+      setResult(loaded);
+    } catch (error) {
+      if (requestEpoch !== epoch.current) return;
+      setProblem(
+        words(
+          locale,
+          error instanceof AutomationRequestError && error.status === 403
+            ? "この保存版を確認する権限がありません。"
+            : error instanceof AutomationRequestError && error.status === 404
+              ? "指定した保存版は見つかりません。"
+              : "保存版を取得できませんでした。差分は確認できていません。",
+          error instanceof AutomationRequestError && error.status === 403
+            ? "You do not have permission to review this saved revision."
+            : error instanceof AutomationRequestError && error.status === 404
+              ? "The requested saved revision was not found."
+              : "The saved revision could not be retrieved. Changes have not been verified.",
+        ),
+      );
+    } finally {
+      if (requestEpoch === epoch.current) {
+        flight.current = false;
+        setBusy(false);
+      }
+    }
+  };
+  return (
+    <details className="automation-revision-comparison">
+      <summary>
+        {words(locale, "保存済み版の内容を比較", "Compare saved revisions")}
+      </summary>
+      <p>
+        {words(
+          locale,
+          "比較するのは保存済みの設定です。未保存の変更や試運転の値は含みません。",
+          "This compares saved configuration. Unsaved edits and trial values are excluded.",
+        )}
+      </p>
+      <label>
+        {words(locale, "比較元の保存版番号", "Earlier saved revision number")}
+        <input
+          type="number"
+          min={1}
+          max={revision - 1}
+          step={1}
+          value={source}
+          disabled={busy}
+          onChange={(event) => {
+            setSource(event.target.value);
+            setResult(null);
+            setProblem("");
+          }}
+        />
+      </label>
+      <p>
+        {words(
+          locale,
+          `比較先: 保存済み版 ${revision}`,
+          `Compare to: saved revision ${revision}`,
+        )}
+      </p>
+      <button type="button" disabled={busy} onClick={() => void compare()}>
+        {busy
+          ? words(locale, "取得中…", "Loading…")
+          : words(locale, "差分を表示", "Show changes")}
+      </button>
+      {problem && <p role="alert">{problem}</p>}
+      {result && difference && (
+        <section
+          className="automation-saved-revision-diff"
+          aria-label={words(
+            locale,
+            "保存版間の内容差分",
+            "Content changes between saved revisions",
+          )}
+        >
+          <h3>
+            {words(
+              locale,
+              `保存済み版 ${result.revision} → 保存済み版 ${revision}`,
+              `Saved revision ${result.revision} → saved revision ${revision}`,
+            )}
+          </h3>
+          {difference.changes.length ? (
+            <ol>
+              {difference.changes.map((change) => (
+                <li key={change.path}>
+                  <code>{change.path}</code>
+                  <div>
+                    <strong>{words(locale, "変更前", "Before")}</strong>
+                    <pre>{change.before}</pre>
+                  </div>
+                  <div>
+                    <strong>{words(locale, "変更後", "After")}</strong>
+                    <pre>{change.after}</pre>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p>
+              {words(
+                locale,
+                "内容に差分はありません。",
+                "The saved contents are identical.",
+              )}
+            </p>
+          )}
+          {difference.omitted && (
+            <p>
+              {words(
+                locale,
+                "差分が多いため先頭100件を表示しています。",
+                "Showing the first 100 changes.",
+              )}
+            </p>
+          )}
+        </section>
+      )}
+    </details>
+  );
+}
+
 function ParallelOutputs({
   statement,
   onChange,
@@ -2921,11 +4705,20 @@ function collectVariables(
       )
         result.push(node.output);
       if (node.kind === "repeat") result.push(node.itemVariable);
+      if (node.kind === "boundedLoop" && node.reason) result.push(node.reason);
       if (node.kind === "action" && node.output) result.push(node.output);
-      if(node.kind==="action"&&node.outcome)result.push(node.outcome);
-      if(node.kind==="resultBranch") {result.push(node.output);if(node.reason)result.push(node.reason);}
-      if(node.kind==="optionalBranch")result.push(node.output);
-      if(node.kind==="repeat")result.push(...(node.results??[]).map(item=>item.output));
+      if (node.kind === "action" && node.outcome) result.push(node.outcome);
+      if (node.kind === "resultBranch") {
+        result.push(node.output);
+        if (node.reason) result.push(node.reason);
+      }
+      if (node.kind === "optionalBranch") result.push(node.output);
+      if (node.kind === "searchBranch") {
+        result.push(node.index);
+        if (node.output) result.push(node.output);
+      }
+      if (node.kind === "repeat")
+        result.push(...(node.results ?? []).map((item) => item.output));
       for (const branch of branches(node)) visit(branch.body);
     }
   };
@@ -2934,7 +4727,10 @@ function collectVariables(
     result.push(...procedure.inputs, ...procedure.outputs);
     visit(procedure.body);
   }
-  return result;
+  return result.filter(
+    (item, index, all) =>
+      all.findIndex((candidate) => candidate.id === item.id) === index,
+  );
 }
 function MessagePreview({
   text,
@@ -3000,14 +4796,104 @@ function MessagePreview({
     </section>
   );
 }
+function SimulationInspector({
+  inspection,
+  requested,
+  variables,
+  locale,
+}: {
+  inspection: NonNullable<SimulationResult["inspection"]>;
+  requested: string[];
+  variables: VariableDeclaration[];
+  locale: Locale;
+}) {
+  const [visible, setVisible] = useState(true);
+  useEffect(() => setVisible(true), [inspection]);
+  const values = inspection.values.filter((item) =>
+    requested.includes(item.variableId),
+  );
+  const unavailable = inspection.unavailable.filter((id) =>
+    requested.includes(id),
+  );
+  const name = (id: string) =>
+    variables.find((item) => item.id === id)?.name ??
+    words(locale, "選択した値", "Selected value");
+  return (
+    <section
+      className="automation-simulation-inspector"
+      aria-label={words(
+        locale,
+        "この試運転だけの変数と一覧",
+        "Variables and lists for this trial only",
+      )}
+    >
+      <h3>
+        {words(
+          locale,
+          "この試運転だけの変数と一覧",
+          "Variables and lists for this trial only",
+        )}
+      </h3>
+      <p className="automation-hint">
+        {words(
+          locale,
+          "表示を選んだ値だけです。本番の値ではなく、この模擬試運転の画面だけに表示します。定義や実行記録には保存しません。再表示しても再実行・再抽選しません。",
+          "Only values you chose to inspect are shown. These are mock trial values on this screen, not production values. They are excluded from definitions and execution records. Showing them again does not rerun or redraw anything.",
+        )}
+      </p>
+      <button type="button" onClick={() => setVisible((previous) => !previous)}>
+        {words(
+          locale,
+          visible ? "値を閉じる" : "値を再表示",
+          visible ? "Hide values" : "Show values again",
+        )}
+      </button>
+      {visible && (
+        <div className="automation-inspected-values">
+          {values.map((item) => (
+            <article key={item.variableId}>
+              <strong>{name(item.variableId)}</strong> ·{" "}
+              {typeName(item.type, locale)}
+              <pre>{JSON.stringify(item.value, null, 2)}</pre>
+            </article>
+          ))}
+          {unavailable.map((id) => (
+            <p key={id}>
+              {name(id)} ·{" "}
+              {words(
+                locale,
+                "この試運転では値が確定しませんでした。",
+                "No value was established in this trial.",
+              )}
+            </p>
+          ))}
+          {!values.length && !unavailable.length && (
+            <p>
+              {words(
+                locale,
+                "この試運転で表示を選んだ値はありません。",
+                "No values were selected for this trial.",
+              )}
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ReviewResults({
   review,
   locale,
   revision,
+  inspectVariables,
+  variables,
 }: {
   review: Review;
   locale: Locale;
   revision: number;
+  inspectVariables: string[];
+  variables: VariableDeclaration[];
 }) {
   const checks = Object.entries(review).filter(([, value]) =>
     Boolean(value),
@@ -3081,7 +4967,20 @@ function ReviewResults({
                   "External changes 0 · Production runs 0 · Approvals consumed 0. Evaluation uses mock inputs and outcomes, without checking live Discord state. Omitted results are undetermined. Mock values never replace production inputs.",
                 )}
               </p>
-              {review.test?.iterations&&<IterationResultsSummary items={review.test.iterations} locale={locale}/>}
+              {review.test?.iterations && (
+                <IterationResultsSummary
+                  items={review.test.iterations}
+                  locale={locale}
+                />
+              )}
+              {review.test?.inspection?.mode === "SIMULATION_ONLY" && (
+                <SimulationInspector
+                  inspection={review.test.inspection}
+                  requested={inspectVariables}
+                  variables={variables}
+                  locale={locale}
+                />
+              )}
             </>
           )}
           {kind === "impact" && (

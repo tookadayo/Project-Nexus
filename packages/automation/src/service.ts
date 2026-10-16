@@ -5,21 +5,26 @@ import {SettingsService,type Actor} from '../../settings/src/index';
 import {operationsAccess} from '../../operations/src/policy';
 import {betaAccess} from '../../security/src/hosted-beta';
 import {validateFlowDefinition} from './definition';
+import {scratchNumericOptions} from './scratch-math-server';
+import {collectFixedTemporalValues,assertTemporalUserEdits,assertTemporalLiteralInput} from './temporal-edit';
+import {assertTimeZone} from './datetime';
 import {evaluateValue} from './expression';
 import type {FlowDefinition,ExecutionPlan,EvaluatedValue,Statement} from './types';
 import {MAX_RUN_SECONDS} from './types';
 import {validateEventTriggerInputs} from './event-contract';
-import {AutomationStore,fingerprint,type ResumeState,type AutomationApproval,type RunRecord} from './store';
+import {AutomationStore,fingerprint,type ResumeState,type AutomationApproval,type RunRecord,type ScheduleOccurrenceSnapshot} from './store';
 import {nextScheduleAt} from './scheduler';
 import {checkScheduleMeaning,plannedCalendarMeaning,type ScheduleMeaningReader} from './schedule-rules';
 import {simulateAutomationPlan,type AutomationSimulationInput} from './simulation';
-import {ALPHA15_AUTOMATION_STORAGE,type AutomationStoragePolicy} from './admission';
+import {ALPHA15_AUTOMATION_STORAGE,ALPHA15_BETA_ADMISSION,ALPHA15_SCRATCH_RANDOM,type AutomationStoragePolicy} from './admission';
 import {automationLock,DISABLED_AUTOMATION_ADMISSION,reserveAutomationQuota,validateAdmissionLimits,type AutomationAdmissionLimits} from './quota';
 
 interface FlowRow {id:string;name:string;draft_revision:number;active_revision:number|null;state:'DRAFT'|'ACTIVE'|'DISABLED'|'DELETED';generation:number;activator_hash:string|null;activator_ciphertext:string|null;beta_generation:number|null;updated_at:Date;}
 interface RevisionRow {revision:number;definition:FlowDefinition;semantic_hash:string;complete:boolean;}
 type Access=(tx:Tx,s:Scope,actor:Actor,permission:'READ'|'CONFIGURE'|'OPERATE'|'GOVERN')=>Promise<unknown>;
 export interface AutomationServiceOptions {
+  /** Measured host safety setting, fixed into each new random material. */
+  scratchRandomAttempts?:number;
   admission?:AutomationAdmissionLimits;now?:()=>Date;authorize?:Access;
   /** Only connector operations with verified permissions/result contracts. */
   adoptedActions?:ReadonlySet<string>;
@@ -29,6 +34,7 @@ export interface AutomationServiceOptions {
   approvalPolicy?:(tx:Tx,s:Scope,run:RunRecord,approval:AutomationApproval,actor:Actor)=>Promise<{fingerprint:string;changedChannelCount:number}>;
 }
 export class AutomationService {
+  readonly scratchRandomAttempts:number|undefined;
   readonly limits:AutomationAdmissionLimits;
   readonly store:AutomationStore;
   readonly storage:AutomationStoragePolicy;
@@ -36,7 +42,9 @@ export class AutomationService {
   private readonly access:Access;
   constructor(readonly db:Database,readonly options:AutomationServiceOptions={}) {
     this.limits=validateAdmissionLimits({...options.admission??DISABLED_AUTOMATION_ADMISSION});
-    this.store=new AutomationStore(db);this.now=options.now??(()=>new Date());
+    this.scratchRandomAttempts=options.scratchRandomAttempts??(this.limits.measurementId===ALPHA15_BETA_ADMISSION.measurementId?ALPHA15_SCRATCH_RANDOM.attemptLimit:undefined);
+    assert(this.scratchRandomAttempts===undefined||Number.isSafeInteger(this.scratchRandomAttempts)&&this.scratchRandomAttempts>0,'AUTOMATION_RANDOM_CONFIGURATION_INVALID');
+    this.now=options.now??(()=>new Date());this.store=new AutomationStore(db,this.now);
     this.storage={...options.storage??ALPHA15_AUTOMATION_STORAGE};
     assert(Object.values(this.storage).every(value=>Number.isSafeInteger(value)&&value>0),'AUTOMATION_STORAGE_POLICY_INVALID');
     this.access=options.authorize??((tx,s,actor,permission)=>operationsAccess(tx,s,actor,permission));
@@ -62,16 +70,41 @@ export class AutomationService {
     const rows=(await sql<FlowRow>`SELECT id,name,draft_revision,active_revision,state,generation,updated_at FROM automation_flows WHERE ${tenant(s)} AND state<>'DELETED' ORDER BY updated_at DESC,id LIMIT 200`.execute(this.db)).rows;
     return {items:rows.map(row=>({id:row.id,name:row.name,draftRevision:row.draft_revision,activeRevision:row.active_revision,state:row.state,updatedAt:row.updated_at.toISOString()})),limits:{...this.limits,storage:this.storage,kind:'HOST_SAFETY',commercial:false}};
   }
+  async timeZonePreference(s:Scope,actor:Actor) {
+    await this.access(this.db,s,actor,'READ');
+    const row=(await sql<{settings:Record<string,unknown>;revision:number}>`SELECT settings,revision FROM guild_settings WHERE ${tenant(s)}`.execute(this.db)).rows[0];
+    if(!row)return {timeZone:null,source:'missing' as const,revision:0};
+    if(!Object.hasOwn(row.settings,'timezone'))return {timeZone:null,source:'legacy' as const,revision:row.revision};
+    const zone=row.settings.timezone;
+    try{assert(typeof zone==='string','TIME_ZONE_INVALID');assertTimeZone(zone);}catch{return {timeZone:null,source:'invalid' as const,revision:row.revision};}
+    return {timeZone:zone,source:'saved' as const,revision:row.revision};
+  }
   async get(s:Scope,actor:Actor,id:string) {
     await this.access(this.db,s,actor,'READ');
     const row=await this.flow(this.db,s,id),revision=await this.revision(this.db,s,id,row.draft_revision);
     const scheduleReview=revision.definition.trigger.kind==='schedule'?(await sql<{review_required:boolean;review_reason:string|null}>`SELECT review_required,review_reason FROM automation_schedules WHERE ${tenant(s)} AND flow_id=${id}`.execute(this.db)).rows[0]:undefined;
-    return {id:row.id,name:row.name,draftRevision:row.draft_revision,activeRevision:row.active_revision,state:row.state,definition:revision.definition,validation:validateFlowDefinition(revision.definition),scheduleReview:{required:scheduleReview?.review_required??false,reason:scheduleReview?.review_reason??null}};
+    return {id:row.id,name:row.name,draftRevision:row.draft_revision,activeRevision:row.active_revision,state:row.state,definition:revision.definition,validation:validateFlowDefinition(revision.definition,{...await scratchNumericOptions(revision.definition),temporalResolution:'fixed'}),scheduleReview:{required:scheduleReview?.review_required??false,reason:scheduleReview?.review_reason??null}};
+  }
+  async getRevision(s:Scope,actor:Actor,id:string,revision:number) {
+    await this.access(this.db,s,actor,'READ');
+    assert(Number.isSafeInteger(revision)&&revision>0&&revision<=2147483647,'AUTOMATION_REVISION_INVALID');
+    await this.flow(this.db,s,id);
+    const saved=await this.revision(this.db,s,id,revision);
+    return {id,revision:saved.revision,definition:saved.definition};
   }
   async save(s:Scope,actor:Actor,input:{definition:unknown;expectedRevision:number;requestId:string}) {
-    const validation=validateFlowDefinition(input.definition);
+    await this.access(this.db,s,actor,'CONFIGURE');
+    const candidate=input.definition as Partial<FlowDefinition>|null;
+    let fixedTemporalValues:ReadonlySet<string>=new Set();
+    if(candidate&&candidate.guildId===s.guildId&&typeof candidate.id==='string'&&input.expectedRevision>0){
+      const previous=(await sql<RevisionRow>`SELECT revision,definition,semantic_hash,complete FROM automation_revisions WHERE ${tenant(s)} AND flow_id=${candidate.id} AND revision=${input.expectedRevision}`.execute(this.db)).rows[0];
+      if(previous)fixedTemporalValues=collectFixedTemporalValues(previous.definition);
+    }
+    const numeric=await scratchNumericOptions(input.definition);
+    const validation=validateFlowDefinition(input.definition,{...numeric,fixedTemporalValues});
     assert(!validation.issues.some(issue=>issue.severity==='error')&&validation.definition,'AUTOMATION_DEFINITION_INVALID');
     const definition=validation.definition;
+    assertTemporalUserEdits(definition,fixedTemporalValues);
     assert(definition.guildId===s.guildId,'AUTOMATION_GUILD_MISMATCH',403);
     assert(/^[a-zA-Z0-9_-]{1,100}$/.test(definition.id),'AUTOMATION_FLOW_ID_INVALID');
     const hash=fingerprint({kind:'SAVE',definition,expectedRevision:input.expectedRevision});
@@ -94,17 +127,24 @@ export class AutomationService {
     });
     // Return the exact committed revision even if a different tab saved again.
     const saved=await this.revision(this.db,s,result.id,result.revision);
-    return {id:result.id,draftRevision:result.revision,definition:saved.definition,requestId:input.requestId,validation:validateFlowDefinition(saved.definition)};
+    return {id:result.id,draftRevision:result.revision,definition:saved.definition,requestId:input.requestId,validation:validateFlowDefinition(saved.definition,{...numeric,temporalResolution:'fixed'})};
   }
   async check(s:Scope,actor:Actor,id:string,revision:number,kind:'VALIDATE'|'TEST'|'IMPACT',mockInput:AutomationSimulationInput={}) {
     return this.db.transaction().execute(async tx=>{
       await this.access(tx,s,actor,'CONFIGURE');await automationLock(tx,s);
+      if(kind==='TEST'){
+        for(const value of Object.values(mockInput.values??{}))assertTemporalLiteralInput(value.type,value.value);
+        for(const value of Object.values(mockInput.outputs??{}))assertTemporalLiteralInput(value.type,value.value);
+        for(const reads of Object.values(mockInput.pollReads??{}))for(const read of reads)if(read.output)assertTemporalLiteralInput(read.output.type,read.output.value);
+        if(mockInput.clock!==undefined)assertTemporalLiteralInput('Instant',mockInput.clock);
+        for(const event of Object.values(mockInput.awaitEvents??{}))if(event.state==='MATCHED')assertTemporalLiteralInput('Instant',event.occurredAt);
+      }
       const flow=await this.flow(tx,s,id);assert(flow.draft_revision===revision,'AUTOMATION_REVISION_CONFLICT',409);
-      const saved=await this.revision(tx,s,id,revision),checked=validateFlowDefinition(saved.definition);
+      const saved=await this.revision(tx,s,id,revision),numeric=await scratchNumericOptions(saved.definition),checked=validateFlowDefinition(saved.definition,{...numeric,temporalResolution:'fixed'});
       const base={revision,semanticHash:checked.semanticHash??saved.semantic_hash,valid:checked.valid,complete:checked.complete,issues:checked.issues};
       const scheduleReview=checked.valid&&checked.complete?await checkScheduleMeaning(tx,s,id,revision,saved.definition,this.now(),this.options.scheduleMeaningReader,true,this.storage):{required:false,reason:null};
       if(scheduleReview.required)return {...base,valid:false,scheduleReview,issues:[...base.issues,{severity:'error' as const,code:'TIME_ZONE_REVIEW_REQUIRED',path:'trigger.schedule',message:'Time-zone rules changed. Save a new revision, review its dates and explicitly enable it.'}]};
-      const simulation=kind==='TEST'&&checked.plan?simulateAutomationPlan(checked.plan,mockInput,this.now().toISOString()):null;
+      const simulation=kind==='TEST'&&checked.plan?simulateAutomationPlan(checked.plan,mockInput,this.now().toISOString(),{...numeric,temporalResolution:'fixed'}):null;
       if(checked.valid&&checked.complete&&(kind!=='TEST'||simulation?.status==='COMPLETED'))await sql`INSERT INTO automation_checks(organization_id,guild_id,flow_id,revision,kind,semantic_hash) VALUES(${s.organizationId}::uuid,${s.guildId},${id},${revision},${kind},${saved.semantic_hash}) ON CONFLICT(organization_id,guild_id,flow_id,revision,kind) DO UPDATE SET checked_at=now(),semantic_hash=EXCLUDED.semantic_hash`.execute(tx);
       if(kind==='VALIDATE')return base;
       const actions: {blockId:string;operation:string;state:'PLANNED'|'UNAVAILABLE'}[]=[],waits:string[]=[];
@@ -114,8 +154,10 @@ export class AutomationService {
         if(statement.kind==='branch'){visit(statement.then);visit(statement.otherwise);visit(statement.unknown);}
         if(statement.kind==='resultBranch'){visit(statement.succeeded);visit(statement.failed);visit(statement.notStarted);visit(statement.unknown);}
         if(statement.kind==='optionalBranch'){visit(statement.present);visit(statement.unset);}
+        if(statement.kind==='searchBranch'){visit(statement.found);visit(statement.notFound);}
         if(statement.kind==='approval'){waits.push(statement.id);visit(statement.approved);visit(statement.rejected);visit(statement.expired);}
         if(statement.kind==='repeat')visit(statement.body);
+        if(statement.kind==='boundedLoop'){visit(statement.body);Object.values(statement.handlers).forEach(body=>body&&visit(body));}
         if(statement.kind==='switch')statement.cases.forEach(choice=>visit(choice.body));
         if(statement.kind==='parallel')statement.branches.forEach(branch=>visit(branch.body));
         if(statement.kind==='poll'){actions.push({blockId:statement.id,operation:'nexus.readTicket',state:this.options.adoptedActions?.has('nexus.readTicket')?'PLANNED':'UNAVAILABLE'});waits.push(statement.id);visit(statement.matched);visit(statement.exhausted);visit(statement.timedOut);}
@@ -136,7 +178,7 @@ export class AutomationService {
       const hash=fingerprint({kind:'ENABLE',id,...input,requestId:undefined}),old=await this.replay(tx,s,actor,input.requestId,hash);
       if(old){const current=await this.flow(tx,s,id);assert(current.state==='ACTIVE'&&current.active_revision===old.revision,'AUTOMATION_REQUEST_STALE',409);return {id,state:'ACTIVE',activeRevision:old.revision};}
       const row=await this.flow(tx,s,id);assert(row.draft_revision===input.revision,'AUTOMATION_REVISION_CONFLICT',409);
-      const revision=await this.revision(tx,s,id,input.revision),checked=validateFlowDefinition(revision.definition);
+      const revision=await this.revision(tx,s,id,input.revision),checked=validateFlowDefinition(revision.definition,{...await scratchNumericOptions(revision.definition),temporalResolution:'fixed'});
       assert(checked.valid&&checked.complete&&checked.plan,'AUTOMATION_DEFINITION_INCOMPLETE');
       assert(revision.semantic_hash===input.semanticHash,'AUTOMATION_REVISION_CONFLICT',409);
       const checks=(await sql<{kind:string}>`SELECT kind FROM automation_checks WHERE ${tenant(s)} AND flow_id=${id} AND revision=${input.revision} AND semantic_hash=${input.semanticHash}`.execute(tx)).rows;
@@ -168,8 +210,11 @@ export class AutomationService {
       if(statement.kind==='branch'){visit(statement.then);visit(statement.otherwise);visit(statement.unknown);}
       if(statement.kind==='resultBranch'){visit(statement.succeeded);visit(statement.failed);visit(statement.notStarted);visit(statement.unknown);}
       if(statement.kind==='optionalBranch'){visit(statement.present);visit(statement.unset);}
+      if(statement.kind==='searchBranch'){visit(statement.found);visit(statement.notFound);}
       if(statement.kind==='approval'){visit(statement.approved);visit(statement.rejected);visit(statement.expired);}
       if(statement.kind==='repeat')visit(statement.body);
+      if(statement.kind==='boundedLoop'){visit(statement.body);Object.values(statement.handlers).forEach(body=>body&&visit(body));}
+      if(statement.kind==='random'&&plan.definition.semanticProfile==='scratch.v1')assert(this.scratchRandomAttempts,'AUTOMATION_RANDOM_CAPACITY_UNMEASURED',503);
       if(statement.kind==='poll'){assert(this.options.adoptedActions?.has('nexus.readTicket'),'AUTOMATION_ACTION_UNAVAILABLE',503);visit(statement.matched);visit(statement.exhausted);visit(statement.timedOut);}
       if(statement.kind==='awaitEvent'){assert(this.options.adoptedActions?.has('nexus.readTicket'),'AUTOMATION_ACTION_UNAVAILABLE',503);visit(statement.matched);visit(statement.timedOut);}
       if(statement.kind==='switch')statement.cases.forEach(choice=>visit(choice.body));
@@ -204,27 +249,30 @@ export class AutomationService {
       assert(actor.encryptedUserId,'AUTOMATION_IDENTITY_REQUIRED',403);
       assert((await new SettingsService(this.db).get(s,tx)).enabled,'AUTOMATION_STOPPED',409);
       const flow=await this.flow(tx,s,id);assert(flow.state==='ACTIVE'&&flow.active_revision,'AUTOMATION_NOT_ACTIVE',409);
-      const revision=await this.revision(tx,s,id,flow.active_revision),validated=validateFlowDefinition(revision.definition);
+      const revision=await this.revision(tx,s,id,flow.active_revision),validated=validateFlowDefinition(revision.definition,{...await scratchNumericOptions(revision.definition),temporalResolution:'fixed'});
       assert(validated.plan,'AUTOMATION_DEFINITION_INVALID');this.requireCapabilities(validated.plan);
       assert(revision.definition.trigger.kind==='manual','AUTOMATION_MANUAL_TRIGGER_REQUIRED');
+      for(const value of Object.values(input.values??{}))assertTemporalLiteralInput(value.type,value.value);
       // Scheduled occurrences use the activator. A manual run belongs to the
       // actual requester and must recheck that person's native access later.
       const accepted=await this.acceptRun(tx,s,{...flow,activator_hash:actor.key,activator_ciphertext:actor.encryptedUserId},revision,input.requestId,input.values??{});
       await this.record(tx,s,actor,input.requestId,requestHash,id,accepted.revision,'START',accepted.id);return accepted;
     });
   }
-  async acceptRun(tx:Tx,s:Scope,flow:FlowRow,revision:RevisionRow,dedupeKey:string,values:Record<string,EvaluatedValue>) {
+  async acceptRun(tx:Tx,s:Scope,flow:FlowRow,revision:RevisionRow,dedupeKey:string,values:Record<string,EvaluatedValue>,occurrence?:ScheduleOccurrenceSnapshot) {
     const inputHash=fingerprint(values),old=(await sql<{id:string;input_hash:string;flow_id:string;revision:number}>`SELECT id,input_hash,flow_id,revision FROM automation_runs WHERE ${tenant(s)} AND dedupe_key=${dedupeKey}`.execute(tx)).rows[0];
     if(old){assert(old.input_hash===inputHash&&old.flow_id===flow.id,'AUTOMATION_REQUEST_CONFLICT',409);return {id:old.id,state:'EXISTING',revision:old.revision};}
     assert(flow.activator_ciphertext&&flow.activator_hash,'AUTOMATION_IDENTITY_REQUIRED',403);
     const now=this.now(),month=await reserveAutomationQuota(tx,s,this.limits,now),id=randomUUID();
     // Values are validated by the same language contracts before persistence.
-    const context=validateFlowDefinition(revision.definition);assert(context.plan,'AUTOMATION_DEFINITION_INVALID');
+    const context=validateFlowDefinition(revision.definition,{...await scratchNumericOptions(revision.definition),temporalResolution:'fixed'});assert(context.plan,'AUTOMATION_DEFINITION_INVALID');
     const declared='inputs' in revision.definition.trigger?revision.definition.trigger.inputs:[];
     assert(Object.keys(values).every(key=>declared.some(variable=>variable.id===key)),'AUTOMATION_INPUT_UNDECLARED');
     const normalized:Record<string,EvaluatedValue>={};
-    for(const variable of declared){const value=values[variable.id];assert(value&&JSON.stringify(value.type)===JSON.stringify(variable.type),'AUTOMATION_INPUT_INVALID');const evaluated=evaluateValue({kind:'literal',type:variable.type,value:value.value},{guildId:s.guildId,variables:{},limits:context.plan.limits});normalized[variable.id]={...evaluated,provenance:[{source:'input',guildId:s.guildId,resumable:true}]};}
+    for(const variable of declared){const value=values[variable.id];assert(value&&JSON.stringify(value.type)===JSON.stringify(variable.type),'AUTOMATION_INPUT_INVALID');const evaluated=evaluateValue({kind:'literal',type:variable.type,value:value.value},{guildId:s.guildId,variables:{},limits:context.plan.limits,semanticProfile:context.plan.definition.semanticProfile});normalized[variable.id]={...evaluated,provenance:[{source:'input',guildId:s.guildId,resumable:true}]};}
     const resume:ResumeState={frames:[{path:'body',index:0,locals:[]}],variables:normalized,startedAt:now.toISOString(),steps:0,evaluations:0,externalActions:0};
+    if(occurrence)resume.scheduleOccurrence=structuredClone(occurrence);
+    if(context.plan.definition.semanticProfile==='scratch.v1'){resume.semanticProfile='scratch.v1';resume.checkpointVersion=0;}
     assert(Buffer.byteLength(JSON.stringify(resume))<=context.plan.limits.maxValueBytes,'AUTOMATION_STATE_LIMIT');
     await sql`INSERT INTO automation_runs(organization_id,guild_id,id,flow_id,revision,semantic_hash,dedupe_key,input_hash,actor_hash,actor_ciphertext,beta_generation,status,usage_month,started_at,deadline_at,resume) VALUES(${s.organizationId}::uuid,${s.guildId},${id}::uuid,${flow.id},${revision.revision},${revision.semantic_hash},${dedupeKey},${inputHash},${flow.activator_hash},${flow.activator_ciphertext},${flow.beta_generation},'QUEUED',${month}::date,${now},${new Date(now.getTime()+MAX_RUN_SECONDS*1000)},${json(resume)})`.execute(tx);
     return {id,state:'QUEUED',revision:revision.revision};

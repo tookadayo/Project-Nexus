@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   FlowDefinition,
   ElapsedScheduleSpec,
@@ -12,38 +12,62 @@ import type {
 import {
   nextScheduleOccurrences,
   offsetAt,
-  parseInstant,
   zonedDateTimeCandidates,
 } from "../../../../packages/automation/src/datetime";
-import {nextElapsedOccurrences} from '../../../../packages/automation/src/elapsed-schedule';
+import { nextElapsedOccurrences } from "../../../../packages/automation/src/elapsed-schedule";
+import {
+  parseUserInstantInput,
+  localTimeType,
+  INSTANT_RANGE_V2_TYPE,
+} from "../../../../packages/automation/src/temporal-types";
+import {
+  DateOnlyControl,
+  LocalTimeControl,
+  UserInstantControl,
+} from "./date-controls";
 import { words, uid, typeName, type Locale } from "./model";
 import { AUTOMATION_CATALOG } from "../../../../packages/automation/src/catalog";
+import { TypeSelect } from "./type-picker";
 import {
   INTERNAL_EVENT_FIELDS,
   INTERACTION_EVENT_FIELDS,
 } from "../../../../packages/automation/src/event-contract";
 
-export function elapsedInputInstant(value:string):string {
-  if(!value)return '';
-  try{return parseInstant(value+(value.length===16?':00Z':'Z'));}catch{return value;}
+export function elapsedInputInstant(value: string): string {
+  if (!value) return "";
+  try {
+    return parseUserInstantInput(value);
+  } catch {
+    return value;
+  }
 }
 
 export function TriggerEditor({
   trigger,
   onChange,
   locale,
-  timeZone = "UTC",
+  timeZone,
+  timeZoneCandidate,
+  guildId,
+  onValidity,
 }: {
   trigger: TriggerDefinition;
   onChange: (next: TriggerDefinition) => void;
   locale: Locale;
-  timeZone?: string;
+  timeZone?: string | null;
+  timeZoneCandidate?: string | null;
+  guildId?: string;
+  onValidity?: (error: string | null) => void;
 }) {
   const preview = useMemo(() => {
     if (trigger.kind !== "schedule") return { items: [], error: "" };
     try {
       const rule = trigger.schedule;
-      if(rule.kind==='elapsed')return {items:nextElapsedOccurrences(rule,new Date(),5),error:''};
+      if (rule.kind === "elapsed")
+        return {
+          items: nextElapsedOccurrences(rule, new Date(), 5),
+          error: "",
+        };
       if (rule.kind === "once") {
         const candidates = zonedDateTimeCandidates(rule.at);
         if (!candidates.length)
@@ -78,7 +102,15 @@ export function TriggerEditor({
         error: "",
       };
     } catch {
-      if(trigger.schedule.kind==='elapsed')return {items:[],error:words(locale,'基準日時・終了日時（UTC）と、正の整数の経過秒を入力してください。終了日時は基準日時より後の100年以内です。','Enter UTC anchor and end instants, and a positive whole number of elapsed seconds. The end must follow the anchor within 100 years.')};
+      if (trigger.schedule.kind === "elapsed")
+        return {
+          items: [],
+          error: words(
+            locale,
+            "基準日時・終了日時（UTC）と、正の整数の経過秒を入力してください。終了日時は基準日時より後の100年以内です。",
+            "Enter UTC anchor and end instants, and a positive whole number of elapsed seconds. The end must follow the anchor within 100 years.",
+          ),
+        };
       return {
         items: [],
         error: words(
@@ -92,7 +124,7 @@ export function TriggerEditor({
   const once: ZonedDateTimeSpec =
     trigger.kind === "schedule" && trigger.schedule.kind === "once"
       ? trigger.schedule.at
-      : { date: "", time: "", timeZone };
+      : { date: "", time: "", timeZone: timeZone ?? "" };
   const recurring: RecurrenceSpec =
     trigger.kind === "schedule" && trigger.schedule.kind === "recurring"
       ? trigger.schedule
@@ -100,7 +132,7 @@ export function TriggerEditor({
           kind: "recurring",
           frequency: "weekly",
           time: "",
-          timeZone,
+          timeZone: timeZone ?? "",
           startDate: "",
           endDate: "",
           weekdays: [],
@@ -108,8 +140,18 @@ export function TriggerEditor({
           repeatedTime: "earlier",
           pastOccurrences: "skip",
         };
-  const elapsed:ElapsedScheduleSpec=trigger.kind==='schedule'&&trigger.schedule.kind==='elapsed'?trigger.schedule:{kind:'elapsed',anchor:'',intervalSeconds:Number.NaN,end:'',pastOccurrences:'skip'};
-  const setElapsed=(patch:Partial<ElapsedScheduleSpec>)=>onChange({kind:'schedule',schedule:{...elapsed,...patch}});
+  const elapsed: ElapsedScheduleSpec =
+    trigger.kind === "schedule" && trigger.schedule.kind === "elapsed"
+      ? trigger.schedule
+      : {
+          kind: "elapsed",
+          anchor: "",
+          intervalSeconds: Number.NaN,
+          end: "",
+          pastOccurrences: "skip",
+        };
+  const setElapsed = (patch: Partial<ElapsedScheduleSpec>) =>
+    onChange({ kind: "schedule", schedule: { ...elapsed, ...patch } });
   const setOnce = (patch: Partial<ZonedDateTimeSpec>) =>
     onChange({
       kind: "schedule",
@@ -126,6 +168,33 @@ export function TriggerEditor({
     });
   const setRecurring = (patch: Partial<RecurrenceSpec>) =>
     onChange({ kind: "schedule", schedule: { ...recurring, ...patch } });
+  const controlValidity = (valid: boolean) =>
+    onValidity?.(
+      valid
+        ? null
+        : words(
+            locale,
+            "日時の形式を確認してください。新しい入力は秒までです。",
+            "Review the date/time input. New inputs have at most second precision.",
+          ),
+    );
+  const zoneReview = (zone: string) => {
+    if (trigger.kind !== "schedule" || trigger.schedule.kind === "elapsed")
+      return [];
+    if (trigger.schedule.kind === "once")
+      return zonedDateTimeCandidates({ ...once, timeZone: zone }).map(
+        (instant) =>
+          `${once.date} ${once.time} · ${zone} · UTC${offsetAt(instant, zone)} · ${instant}`,
+      );
+    return nextScheduleOccurrences(
+      { ...recurring, timeZone: zone },
+      new Date().toISOString(),
+      5,
+    ).map(
+      (item) =>
+        `${item.localDate} ${item.localTime} · ${item.timeZone} · UTC${item.offset} · ${item.instant}`,
+    );
+  };
   return (
     <section className="automation-trigger">
       <span className="automation-kind-label">
@@ -145,6 +214,7 @@ export function TriggerEditor({
             trigger.kind === "schedule" ? trigger.schedule.kind : trigger.kind
           }
           onChange={(event) => {
+            onValidity?.(null);
             const kind = event.target.value;
             if (kind === "once")
               onChange({
@@ -153,7 +223,8 @@ export function TriggerEditor({
               });
             else if (kind === "recurring")
               onChange({ kind: "schedule", schedule: recurring });
-            else if(kind==='elapsed')onChange({kind:'schedule',schedule:elapsed});
+            else if (kind === "elapsed")
+              onChange({ kind: "schedule", schedule: elapsed });
             else if (kind === "internal")
               onChange({
                 kind: "internal",
@@ -178,7 +249,13 @@ export function TriggerEditor({
           <option value="recurring">
             {words(locale, "地域の時刻で繰り返す", "Repeat at a local time")}
           </option>
-          <option value="elapsed">{words(locale,'経過時間ごとに新しい処理を開始','Start a new run after each elapsed interval')}</option>
+          <option value="elapsed">
+            {words(
+              locale,
+              "経過時間ごとに新しい処理を開始",
+              "Start a new run after each elapsed interval",
+            )}
+          </option>
           <option
             value="internal"
             disabled={
@@ -254,74 +331,185 @@ export function TriggerEditor({
       )}
       {trigger.kind === "schedule" && (
         <>
-          {trigger.schedule.kind==='elapsed'?(
+          {trigger.schedule.kind !== "elapsed" &&
+            !(trigger.schedule.kind === "once"
+              ? once.timeZone
+              : recurring.timeZone) && (
+              <section className="automation-zone-review">
+                <p>
+                  {words(
+                    locale,
+                    "共有予定の地域を確認してください。表示言語や端末の移動で予定を変更しません。",
+                    "Confirm the region for this shared schedule. Display language and device travel do not change schedules.",
+                  )}
+                </p>
+                {!timeZone && timeZoneCandidate ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onValidity?.(null);
+                      if (trigger.schedule.kind === "once")
+                        setOnce({ timeZone: timeZoneCandidate });
+                      else setRecurring({ timeZone: timeZoneCandidate });
+                    }}
+                  >
+                    {words(
+                      locale,
+                      `端末の地域候補 ${timeZoneCandidate} を使用`,
+                      `Use device region candidate ${timeZoneCandidate}`,
+                    )}
+                  </button>
+                ) : (
+                  <p>
+                    {words(
+                      locale,
+                      "地域を選択してください。UTCを自動で適用しません。",
+                      "Choose a region. UTC is not applied automatically.",
+                    )}
+                  </p>
+                )}
+                <a
+                  href={
+                    guildId
+                      ? `/setup?guild=${encodeURIComponent(guildId)}&edit=1`
+                      : "/servers"
+                  }
+                >
+                  {words(
+                    locale,
+                    "共有する地域の設定を確認",
+                    "Review the shared region setting",
+                  )}
+                </a>
+              </section>
+            )}
+          {trigger.schedule.kind === "elapsed" ? (
             <div className="automation-date-grid">
-              <label>{words(locale,'基準日時（UTC・含む）','Anchor instant (UTC, included)')}<input type="datetime-local" step="1" value={elapsed.anchor.endsWith('Z')?elapsed.anchor.slice(0,19):elapsed.anchor} onChange={event=>setElapsed({anchor:elapsedInputInstant(event.target.value)})}/></label>
-              <label>{words(locale,'間隔（経過秒）','Interval (elapsed seconds)')}<input type="number" min="1" step="1" value={Number.isFinite(elapsed.intervalSeconds)?elapsed.intervalSeconds:''} onChange={event=>setElapsed({intervalSeconds:event.target.value===''?Number.NaN:Number(event.target.value)})}/></label>
-              <label>{words(locale,'終了日時（UTC・含まない）','End instant (UTC, excluded)')}<input type="datetime-local" step="1" value={elapsed.end.endsWith('Z')?elapsed.end.slice(0,19):elapsed.end} onChange={event=>setElapsed({end:elapsedInputInstant(event.target.value)})}/></label>
-              <p className="automation-hint">{words(locale,'基準日時から同じ経過時間ごとに、別の処理を開始します。夏時間で間隔は変わりません。終了日時以降や過ぎた回は実行しません。各処理の期限は最大7日です。','Starts an independent run at each interval from the fixed anchor. Daylight saving does not change the elapsed interval. The end instant and missed occurrences are excluded. Each run lasts at most seven days.')}</p>
+              <UserInstantControl
+                value={elapsed.anchor}
+                onChange={(text) => setElapsed({ anchor: text ?? "" })}
+                locale={locale}
+                label={words(
+                  locale,
+                  "基準日時（UTC・含む）",
+                  "Anchor instant (UTC, included)",
+                )}
+                onValidity={controlValidity}
+              />
+              <label>
+                {words(locale, "間隔（経過秒）", "Interval (elapsed seconds)")}
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={
+                    Number.isFinite(elapsed.intervalSeconds)
+                      ? elapsed.intervalSeconds
+                      : ""
+                  }
+                  onChange={(event) =>
+                    setElapsed({
+                      intervalSeconds:
+                        event.target.value === ""
+                          ? Number.NaN
+                          : Number(event.target.value),
+                    })
+                  }
+                />
+              </label>
+              <UserInstantControl
+                value={elapsed.end}
+                onChange={(text) => setElapsed({ end: text ?? "" })}
+                locale={locale}
+                label={words(
+                  locale,
+                  "終了日時（UTC・含まない）",
+                  "End instant (UTC, excluded)",
+                )}
+                onValidity={controlValidity}
+              />
+              <p className="automation-hint">
+                {words(
+                  locale,
+                  "基準日時から同じ経過時間ごとに、別の処理を開始します。夏時間で間隔は変わりません。終了日時以降や過ぎた回は実行しません。各処理の期限は最大7日です。",
+                  "Starts an independent run at each interval from the fixed anchor. Daylight saving does not change the elapsed interval. The end instant and missed occurrences are excluded. Each run lasts at most seven days.",
+                )}
+              </p>
             </div>
-          ):trigger.schedule.kind === "once" ? (
+          ) : trigger.schedule.kind === "once" ? (
             <div className="automation-date-grid">
-              <label>
-                {words(locale, "日付", "Date")}
-                <input
-                  type="date"
-                  value={once.date}
-                  onChange={(event) => setOnce({ date: event.target.value })}
-                />
-              </label>
-              <label>
-                {words(locale, "現地の時刻", "Local time")}
-                <input
-                  type="time"
-                  value={once.time}
-                  onChange={(event) => setOnce({ time: event.target.value })}
-                />
-              </label>
+              <DateOnlyControl
+                value={once.date}
+                onChange={(text) => setOnce({ date: text })}
+                locale={locale}
+                label={words(locale, "日付", "Date")}
+                onValidity={controlValidity}
+              />
+              <TimePrecisionSelect
+                value={once.timePrecision ?? "minute"}
+                locale={locale}
+                onChange={(precision) =>
+                  setOnce({ time: "", timePrecision: precision })
+                }
+              />
+              <LocalTimeControl
+                value={once.time}
+                precision={once.timePrecision ?? "minute"}
+                onChange={(text) => setOnce({ time: text })}
+                locale={locale}
+                label={words(locale, "現地時刻", "Local time")}
+                onValidity={controlValidity}
+              />
               <TimeZoneInput
                 value={once.timeZone}
                 locale={locale}
                 onChange={(value) => setOnce({ timeZone: value })}
+                onValidity={controlValidity}
+                preview={zoneReview}
               />
             </div>
           ) : (
             <>
               <div className="automation-date-grid">
-                <label>
-                  {words(locale, "開始日（含む）", "Start date (included)")}
-                  <input
-                    type="date"
-                    value={recurring.startDate}
-                    onChange={(event) =>
-                      setRecurring({ startDate: event.target.value })
-                    }
-                  />
-                </label>
-                <label>
-                  {words(locale, "終了日（含む）", "End date (included)")}
-                  <input
-                    type="date"
-                    value={recurring.endDate}
-                    onChange={(event) =>
-                      setRecurring({ endDate: event.target.value })
-                    }
-                  />
-                </label>
-                <label>
-                  {words(locale, "現地の時刻", "Local time")}
-                  <input
-                    type="time"
-                    value={recurring.time}
-                    onChange={(event) =>
-                      setRecurring({ time: event.target.value })
-                    }
-                  />
-                </label>
+                <DateOnlyControl
+                  value={recurring.startDate}
+                  onChange={(text) => setRecurring({ startDate: text })}
+                  locale={locale}
+                  label={words(
+                    locale,
+                    "開始日（含む）",
+                    "Start date (included)",
+                  )}
+                  onValidity={controlValidity}
+                />
+                <DateOnlyControl
+                  value={recurring.endDate}
+                  onChange={(text) => setRecurring({ endDate: text })}
+                  locale={locale}
+                  label={words(locale, "終了日（含む）", "End date (included)")}
+                  onValidity={controlValidity}
+                />
+                <TimePrecisionSelect
+                  value={recurring.timePrecision ?? "minute"}
+                  locale={locale}
+                  onChange={(precision) =>
+                    setRecurring({ time: "", timePrecision: precision })
+                  }
+                />
+                <LocalTimeControl
+                  value={recurring.time}
+                  precision={recurring.timePrecision ?? "minute"}
+                  onChange={(text) => setRecurring({ time: text })}
+                  locale={locale}
+                  label={words(locale, "現地時刻", "Local time")}
+                  onValidity={controlValidity}
+                />
                 <TimeZoneInput
                   value={recurring.timeZone}
                   locale={locale}
                   onChange={(value) => setRecurring({ timeZone: value })}
+                  onValidity={controlValidity}
+                  preview={zoneReview}
                 />
               </div>
               <label>
@@ -343,6 +531,9 @@ export function TriggerEditor({
                   </option>
                   <option value="monthly">
                     {words(locale, "毎月", "Every month")}
+                  </option>
+                  <option value="yearly">
+                    {words(locale, "毎年", "Every year")}
                   </option>
                 </select>
               </label>
@@ -384,7 +575,28 @@ export function TriggerEditor({
                   </div>
                 </fieldset>
               )}
-              {recurring.frequency === "monthly" && (
+              {recurring.frequency === "yearly" && (
+                <label>
+                  {words(locale, "毎年の月", "Month each year")}
+                  <select
+                    value={recurring.month ?? ""}
+                    onChange={(event) =>
+                      setRecurring({ month: Number(event.target.value) })
+                    }
+                  >
+                    <option value="">
+                      {words(locale, "月を選択", "Choose a month")}
+                    </option>
+                    {Array.from({ length: 12 }, (_item, index) => (
+                      <option key={index + 1} value={index + 1}>
+                        {index + 1}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {(recurring.frequency === "monthly" ||
+                recurring.frequency === "yearly") && (
                 <label>
                   {words(locale, "毎月の日付", "Day each month")}
                   <select
@@ -481,7 +693,15 @@ export function TriggerEditor({
               )}
             </section>
           )}
-          {trigger.schedule.kind!=='elapsed'&&<p className="automation-notice">{words(locale,'地域の時刻規則が変わった場合は、将来の開始を停止します。新しい版を保存し、候補日時を再確認して有効にしてください。','If regional time rules change, future starts stop. Save a new revision, review the candidate dates, then explicitly enable it.')}</p>}
+          {trigger.schedule.kind !== "elapsed" && (
+            <p className="automation-notice">
+              {words(
+                locale,
+                "地域の時刻規則が変わった場合は、将来の開始を停止します。新しい版を保存し、候補日時を再確認して有効にしてください。",
+                "If regional time rules change, future starts stop. Save a new revision, review the candidate dates, then explicitly enable it.",
+              )}
+            </p>
+          )}
         </>
       )}
       {trigger.kind === "manual" && (
@@ -496,31 +716,162 @@ export function TriggerEditor({
     </section>
   );
 }
+function TimePrecisionSelect({
+  value,
+  locale,
+  onChange,
+}: {
+  value: "minute" | "second";
+  locale: Locale;
+  onChange: (precision: "minute" | "second") => void;
+}) {
+  return (
+    <label>
+      {words(locale, "時刻の精度", "Time precision")}
+      <select
+        value={value}
+        onChange={(event) =>
+          onChange(event.target.value as "minute" | "second")
+        }
+      >
+        <option value="minute">
+          {words(
+            locale,
+            "分（HH:MM、秒は0）",
+            "Minutes (HH:MM, seconds are zero)",
+          )}
+        </option>
+        <option value="second">
+          {words(locale, "秒（HH:MM:SS）", "Seconds (HH:MM:SS)")}
+        </option>
+      </select>
+      <small>
+        {words(
+          locale,
+          "精度変更時は時刻を入力し直します。自動で丸めません。",
+          "Re-enter the time after changing precision. Values are not automatically rounded.",
+        )}
+      </small>
+    </label>
+  );
+}
 function TimeZoneInput({
   value,
   onChange,
   locale,
+  onValidity,
+  preview,
 }: {
   value: string;
   onChange: (value: string) => void;
   locale: Locale;
+  onValidity?: (valid: boolean) => void;
+  preview?: (zone: string) => string[];
 }) {
+  const [pending, setPending] = useState<string | null>(null);
+  useEffect(() => {
+    setPending(null);
+  }, [value]);
+  let valid = false,
+    before: string[] = [],
+    after: string[] = [];
+  try {
+    if (value) before = preview?.(value) ?? [];
+  } catch {
+    /* Existing incomplete fields remain editable. */
+  }
+  try {
+    if (
+      pending &&
+      pending.length <= 64 &&
+      (pending === "UTC" || pending.includes("/"))
+    ) {
+      new Intl.DateTimeFormat("en", { timeZone: pending }).format(0);
+      valid = true;
+    }
+  } catch {
+    valid = false;
+  }
+  try {
+    if (valid) after = preview?.(pending!) ?? [];
+  } catch {
+    /* The main preview explains incomplete local fields after confirmation. */
+  }
   return (
-    <label>
-      {words(locale, "地域（IANAタイムゾーン）", "Region (IANA time zone)")}
-      <input
-        value={value}
-        list="automation-time-zones"
-        placeholder="Asia/Tokyo"
-        onChange={(event) => onChange(event.target.value)}
-      />
-      <datalist id="automation-time-zones">
-        <option value="UTC" />
-        <option value="Asia/Tokyo" />
-        <option value="America/New_York" />
-        <option value="Europe/London" />
-      </datalist>
-    </label>
+    <div className="automation-zone-review">
+      <label>
+        {words(locale, "地域（IANAタイムゾーン）", "Region (IANA time zone)")}
+        <input
+          value={pending ?? value}
+          list="automation-time-zones"
+          placeholder="Asia/Tokyo"
+          onChange={(event) => {
+            setPending(event.target.value);
+            onValidity?.(false);
+          }}
+        />
+        <datalist id="automation-time-zones">
+          <option value="UTC" />
+          <option value="Asia/Tokyo" />
+          <option value="America/New_York" />
+          <option value="Europe/London" />
+        </datalist>
+      </label>
+      {pending !== null && (
+        <section
+          aria-label={words(locale, "地域変更の確認", "Review region change")}
+        >
+          <p>
+            {words(
+              locale,
+              "現地の日付・時刻を維持し、実行時点を変更します。差分を確認して新しい版として保存してください。",
+              "Keep the local date and time and change the execution instants. Review the difference and save a new revision.",
+            )}
+          </p>
+          <h5>
+            {words(locale, "変更前", "Before")} ·{" "}
+            {value || words(locale, "未設定", "Not set")}
+          </h5>
+          <ul>
+            {before.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+          <h5>
+            {words(locale, "変更後", "After")} · {pending}
+          </h5>
+          <ul>
+            {after.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            disabled={!valid}
+            onClick={() => {
+              onValidity?.(true);
+              onChange(pending);
+              setPending(null);
+            }}
+          >
+            {words(
+              locale,
+              "確認してこの地域を使う",
+              "Confirm and use this region",
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPending(null);
+              onValidity?.(true);
+            }}
+          >
+            {words(locale, "地域変更を取り消す", "Cancel region change")}
+          </button>
+        </section>
+      )}
+    </div>
   );
 }
 export type { FlowDefinition };
@@ -531,8 +882,14 @@ const INPUT_TYPES: ValueType[] = [
   "Duration",
   "DateOnly",
   "LocalTime",
+  localTimeType("minute"),
+  localTimeType("second"),
   "Instant",
   "TimeZone",
+  "ZonedDateTimeSpec",
+  "DateRange",
+  INSTANT_RANGE_V2_TYPE,
+  "LocalTimeWindowSpec",
   "ChannelRef",
   "RoleRef",
   { kind: "List", element: "Number" },
@@ -598,33 +955,21 @@ function TriggerInputs({
                   }
                 />
               </label>
-              <label>
-                {words(locale, "入力の種類", "Input type")}
-                <select
-                  value={JSON.stringify(input.type)}
-                  onChange={(e) => {
-                    const type = INPUT_TYPES.find(
-                      (item) => JSON.stringify(item) === e.target.value,
-                    );
-                    if (type)
-                      onChange({
-                        ...trigger,
-                        inputs: trigger.inputs.map((item) =>
-                          item.id === input.id ? { ...item, type } : item,
-                        ),
-                      });
-                  }}
-                >
-                  {INPUT_TYPES.map((type) => (
-                    <option
-                      key={JSON.stringify(type)}
-                      value={JSON.stringify(type)}
-                    >
-                      {typeName(type)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <TypeSelect
+                locale={locale}
+                value={input.type}
+                allowed={INPUT_TYPES}
+                allowChoices
+                label={words(locale, "入力の種類", "Input type")}
+                onChange={(type) =>
+                  onChange({
+                    ...trigger,
+                    inputs: trigger.inputs.map((item) =>
+                      item.id === input.id ? { ...item, type } : item,
+                    ),
+                  })
+                }
+              />
               <button
                 type="button"
                 onClick={() =>

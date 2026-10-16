@@ -27,7 +27,7 @@ export function plannedCalendarMeaning(definition:FlowDefinition,nextAt:Date|nul
   if(spec.kind==='once')local={...spec.at,date:parseDateOnly(spec.at.date)};
   else {
     const parts=Object.fromEntries(new Intl.DateTimeFormat('en-CA-u-ca-iso8601-nu-latn',{timeZone:spec.timeZone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(nextAt).map(part=>[part.type,part.value]));
-    local={date:`${parts.year!.padStart(4,'0')}-${parts.month}-${parts.day}`,time:spec.time,timeZone:spec.timeZone};
+    local={date:`${parts.year!.padStart(4,'0')}-${parts.month}-${parts.day}`,time:spec.time,timeZone:spec.timeZone,...(spec.timePrecision?{timePrecision:spec.timePrecision}:{})};
   }
   const resolved=currentScheduleMeaningReader().resolve(local);
   assert(resolved.instant===nextAt.toISOString()&&resolved.offset,'TIME_ZONE_MEANING_UNAVAILABLE');
@@ -43,14 +43,14 @@ export function snapshotScheduleMeaning(spec:CalendarSpec,checkedAt:Date,reader=
   if(spec.kind==='once')add(spec.at);
   else {
     const start=parseDateOnly(spec.startDate),end=parseDateOnly(spec.endDate);
-    for(const occurrence of nextScheduleOccurrences(spec,checkedAt,16))add({date:occurrence.localDate,time:spec.time,timeZone});
+    for(const occurrence of nextScheduleOccurrences(spec,checkedAt,16))add({date:occurrence.localDate,time:spec.time,timeZone,...(spec.timePrecision?{timePrecision:spec.timePrecision}:{})});
     // Include endpoints and fixed monthly probes across the finite definition.
     // This stays <= 1,220 probes under the validated 100-year limit.
-    for(const date of [start,end])add({date,time:spec.time,timeZone});
+    for(const date of [start,end])add({date,time:spec.time,timeZone,...(spec.timePrecision?{timePrecision:spec.timePrecision}:{})});
     const first=Number(start.slice(0,4))*12+Number(start.slice(5,7))-1,last=Number(end.slice(0,4))*12+Number(end.slice(5,7))-1;
     for(let month=first;month<=last;month++){
       const date=`${Math.floor(month/12).toString().padStart(4,'0')}-${(month%12+1).toString().padStart(2,'0')}-15`;
-      if(date>=start&&date<=end)add({date,time:spec.time,timeZone});
+      if(date>=start&&date<=end)add({date,time:spec.time,timeZone,...(spec.timePrecision?{timePrecision:spec.timePrecision}:{})});
     }
   }
   return {formatVersion:1,timeZone,databaseVersion:reader.version,probes:[...probes.values()].map(local=>({local,...reader.resolve(local)}))};

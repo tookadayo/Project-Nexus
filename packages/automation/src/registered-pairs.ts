@@ -75,6 +75,7 @@ export function registeredPairSchema(
   return fields
     ? {
         userConstructible: true,
+        equality: { version: 1, fields: ["first", "second"] },
         fields: {
           first: { type: fields.first },
           second: { type: fields.second },

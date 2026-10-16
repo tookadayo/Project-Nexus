@@ -62,11 +62,13 @@ test("draft save is separate, a field can be reverted, and rapid clicks issue on
   await page.goto("/setup-fixture?locale=en");
   const timezone = page.getByRole("combobox", {name: "Time zone", exact: true});
   await timezone.fill("UTC");
+  await page.getByRole("checkbox", {name: "I confirm this region for shared schedules."}).check();
   const save = page.getByRole("button", {name: "Save draft", exact: true});
   await save.dblclick();
   await expect(page.getByRole("status").last()).toContainText("Draft saved");
   expect(requests.length).toBe(1);
   await timezone.fill("Asia/Tokyo");
+  await page.getByRole("checkbox", {name: "I confirm this region for shared schedules."}).check();
   await save.click();
   await expect(page.getByRole("status").last()).toContainText("Draft saved");
   expect(requests[1]?.patch).toEqual({timezone: "Asia/Tokyo"});
@@ -92,6 +94,7 @@ test("version conflict preserves input and offers an explicit reload", async ({p
   await page.route("**/data/setup/draft?*", route => route.fulfill({status: 409, json: {error: "REVISION_CONFLICT"}}));
   await page.goto("/setup-fixture?locale=en");
   await page.getByRole("combobox", {name: "Time zone", exact: true}).fill("UTC");
+  await page.getByRole("checkbox", {name: "I confirm this region for shared schedules."}).check();
   await page.getByRole("button", {name: "Save draft", exact: true}).click();
   await expect(page.getByRole("combobox", {name: "Time zone", exact: true})).toHaveValue("UTC");
   await page.getByRole("button", {name: "Discard unsaved edits and reload", exact: true}).click();
@@ -147,6 +150,7 @@ test("back and cancel preserve edits; Escape returns focus and explicit discard 
   await page.route("**/servers", route => route.fulfill({contentType: "text/html", body: "Synthetic server selection"}));
   await page.goto("/setup-fixture?locale=en");
   await page.getByRole("combobox", {name: "Time zone", exact: true}).fill("UTC");
+  await page.getByRole("checkbox", {name: "I confirm this region for shared schedules."}).check();
   await page.getByRole("button", {name: "Next", exact: true}).click();
   await page.getByRole("button", {name: "Back", exact: true}).click();
   await expect(page.getByRole("combobox", {name: "Time zone", exact: true})).toHaveValue("UTC");

@@ -51,7 +51,8 @@ export class AutomationScheduler {
       const review=await checkScheduleMeaning(tx,s,flow.id,schedule.revision,revision.definition,now,this.service.options.scheduleMeaningReader,false,this.service.storage,plannedMeaning);
       if(review.required)return {state:'REVIEW_REQUIRED',reason:review.reason};
       await betaAccess(tx,s,'work',flow.beta_generation);
-      const run=await this.service.acceptRun(tx,s,flow,revision,'schedule:'+key,{});
+      const occurrence={scheduleId:id,occurrenceKey:key,generation:expectedGeneration,revision:revision.revision,instant:planned.toISOString(),...(schedule.planned_local?{timeZone:schedule.planned_local.timeZone,localDate:schedule.planned_local.date,localTime:schedule.planned_local.time,...(schedule.planned_offset?{offset:schedule.planned_offset}:{})}:{})};
+      const run=await this.service.acceptRun(tx,s,flow,revision,'schedule:'+key,{},occurrence);
       await sql`INSERT INTO automation_occurrences(organization_id,guild_id,schedule_id,generation,occurrence_key,scheduled_at,run_id,state) VALUES(${s.organizationId}::uuid,${s.guildId},${id},${expectedGeneration},${key},${planned},${run.id}::uuid,'STARTED')`.execute(tx);
       const meaning=plannedCalendarMeaning(revision.definition,next);
       await sql`UPDATE automation_schedules SET next_at=${next},planned_local=${meaning?json(meaning.local):null},planned_offset=${meaning?.offset??null} WHERE ${tenant(s)} AND id=${id}`.execute(tx);return {state:'STARTED',id:run.id};

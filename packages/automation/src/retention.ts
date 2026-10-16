@@ -1,5 +1,5 @@
 import {sql,tenant,type Tx,type Database} from '../../db/src/index';
-import type {Scope} from '../../shared/src/index';
+import {assert,type Scope} from '../../shared/src/index';
 import {automationLock} from './quota';
 import {releaseAutomationQuota} from './quota';
 import type {FlowDefinition} from './types';
@@ -26,6 +26,9 @@ export function fenceIterationResults(run:MaintenanceRun,definition:FlowDefiniti
       if(identities.has(identity))noteIterationOperation(context,'UNKNOWN',state);
     }
   }
+  const strict=state.semanticProfile==='scratch.v1'||definition?.semanticProfile==='scratch.v1',version=state.checkpointVersion??0;
+  if(strict)assert(Number.isSafeInteger(version)&&version>=0&&version<Number.MAX_SAFE_INTEGER,'AUTOMATION_CHECKPOINT_CONFLICT',409);
+  if(strict){state.semanticProfile='scratch.v1';state.checkpointVersion=version+1;}
   return boundedTerminalCheckpoint(state,status);
 }
 

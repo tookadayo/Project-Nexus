@@ -11,6 +11,7 @@ import { betaAccess } from "../../security/src/hosted-beta";
 import { operationsAccess } from "../../operations/src/policy";
 import { automationLock } from "./quota";
 import { validateFlowDefinition } from "./definition";
+import { scratchNumericOptions } from "./scratch-math-server";
 import { validateEventTriggerInputs } from "./event-contract";
 import type { AutomationService } from "./service";
 import type { FlowDefinition, EvaluatedValue, JsonValue } from "./types";
@@ -222,7 +223,7 @@ export class AutomationEvents {
           )
         ).rows[0];
         assert(revision, "AUTOMATION_EVENT_STALE", 409);
-        const checked = validateFlowDefinition(revision.definition);
+        const checked = validateFlowDefinition(revision.definition, {...await scratchNumericOptions(revision.definition),temporalResolution:'fixed'});
         assert(checked.plan, "AUTOMATION_DEFINITION_INVALID");
         this.service.requireCapabilities(checked.plan);
         // MemberRef is derived from the freshly verified current identity by the

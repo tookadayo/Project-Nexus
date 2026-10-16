@@ -34,6 +34,7 @@ export type SetupStatus = {
   settingsRevision: number;
   setupVersion: number;
   existing: boolean;
+  timeZoneSource?: "saved" | "legacy" | "missing" | "invalid";
   missing: string[];
   settings: SetupSettings;
   draft?: SetupDraft | null;
@@ -65,6 +66,27 @@ export function problemFor(code: string, status = 0): SetupProblem {
 export function validTimezone(value: string): boolean {
   if (!value || value.length > 64) return false;
   try { new Intl.DateTimeFormat("en", {timeZone: value}); return true; } catch { return false; }
+}
+
+export type SetupTimeZoneSelection = {
+  value: string;
+  source: "draft" | "saved" | "browser" | "required";
+  confirmed: boolean;
+};
+
+/** Browser region is a suggestion only; language never chooses a shared zone. */
+export function initialSetupTimeZone(status: SetupStatus, browserZone: () => unknown = () => new Intl.DateTimeFormat().resolvedOptions().timeZone): SetupTimeZoneSelection {
+  const draft = status.draft?.appliedRevision == null ? status.draft : null;
+  if (draft && validTimezone(draft.settings.timezone)) return {value: draft.settings.timezone, source: "draft", confirmed: true};
+  // Missing metadata supports older status responses without changing saved
+  // settings. Current API responses always distinguish the raw saved field.
+  if ((status.timeZoneSource === "saved" || (status.timeZoneSource === undefined && status.existing)) && validTimezone(status.settings.timezone))
+    return {value: status.settings.timezone, source: "saved", confirmed: true};
+  try {
+    const candidate = browserZone();
+    if (typeof candidate === "string" && validTimezone(candidate)) return {value: candidate, source: "browser", confirmed: false};
+  } catch { /* Region unavailable: require selection instead of assuming UTC. */ }
+  return {value: "", source: "required", confirmed: false};
 }
 
 /** Preserve the original scope, role IDs and goals unless a field was edited. */

@@ -1,0 +1,4 @@
+# Preserve immutable third-party artifacts and recorded reference inputs byte for byte.
+/packages/automation/vendor/** -text
+/tests/fixtures/scratch-math-golden.json -text
+/scripts/generate-scratch-math-golden.mjs -text

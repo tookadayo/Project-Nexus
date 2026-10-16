@@ -60,7 +60,7 @@ export function boundedTerminalCheckpoint(state:ResumeState,status:string,maxByt
   terminateIterationResults(state,status);
   const bytes=(value:ResumeState)=>new TextEncoder().encode(JSON.stringify(value)).byteLength;
   if(bytes(state)<=maxBytes)return state;
-  const minimal:ResumeState={startedAt:state.startedAt,steps:state.steps,evaluations:state.evaluations,externalActions:state.externalActions,frames:[],variables:{},...(state.iterations?{iterations:state.iterations}:{}),...(state.uncertainty?{uncertainty:state.uncertainty}:{})};
+  const minimal:ResumeState={startedAt:state.startedAt,steps:state.steps,evaluations:state.evaluations,externalActions:state.externalActions,frames:[],variables:{},...(state.iterations?{iterations:state.iterations}:{}),...(state.uncertainty?{uncertainty:state.uncertainty}:{}),...(state.semanticProfile?{semanticProfile:state.semanticProfile}:{}),...(state.checkpointVersion!==undefined?{checkpointVersion:state.checkpointVersion}:{}),...(state.loopTermination?{loopTermination:state.loopTermination}:{})};
   if(bytes(minimal)>maxBytes)throw new Error('AUTOMATION_STATE_LIMIT');
   return minimal;
 }

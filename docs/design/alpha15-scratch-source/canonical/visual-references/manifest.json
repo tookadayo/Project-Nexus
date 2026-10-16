@@ -1,0 +1,104 @@
+{
+  "purpose": "Codex visual reference for NEXUS design, not reusable production assets.",
+  "created_on": "2026-10-15",
+  "source": {
+    "title": "Scratch Learning Resource: Conditional Statements / Making Interactive Projects with Conditional Statements",
+    "creator": "Scratch Foundation",
+    "official_landing_page": "https://www.scratchfoundation.org/learn/learning-library/conditional-statements",
+    "pdf_url": "https://cms.scratchfoundation.org/assets/df93e4b9-8cae-4d83-b903-1a18cba3a7f6",
+    "local_original": "scratch-conditional-statements-source.pdf",
+    "sha256": "98e93b3d4ac8cc8d4d40d3ac5e8fc272332ed1df92159a27f5d5114b5e92eb06",
+    "license_label_observed": "Creative Commons Attribution-ShareAlike 4.0 International Public License (CC BY-SA 4.0), printed on every source page.",
+    "license_url": "https://creativecommons.org/licenses/by-sa/4.0/"
+  },
+  "usage_cautions_ja": [
+    "本一式はCodexが構造・差込み・入れ子を理解するための視覚参考。NEXUS製品への画像、ロゴ、キャラクター、配色、形状の素材流用を指示・承認しない。",
+    "出典教材のライセンス表示を確認したが、商標等を含む製品利用の個別権利確認はしていない。製品への利用許諾が確認済みという意味ではない。",
+    "Scratch画像はNEXUSの静的型保証や実行意味の正本ではない。NEXUSの型、unknown経路、短絡評価、保存・承認境界は設計本文を優先する。",
+    "Scratchにはこの資料上で単独elifブロックはない。入れ子if/elseを参考に、NEXUSのelifは別途設計された連鎖UIとして扱う。",
+    "教材のforeverループをNEXUSへ無制限実行として移植しない。NEXUSの予算・期限・明示読取り契約を維持する。"
+  ],
+  "references": [
+    {
+      "file": "01-control-block-shapes.png",
+      "title_ja": "制御ブロック形状と空の条件ソケット",
+      "source_url": "https://cms.scratchfoundation.org/assets/df93e4b9-8cae-4d83-b903-1a18cba3a7f6",
+      "source_page_1_based": 2,
+      "source_page_url": "https://cms.scratchfoundation.org/assets/df93e4b9-8cae-4d83-b903-1a18cba3a7f6#page=2",
+      "creator": "Scratch Foundation",
+      "retrieved_on": "2026-10-15",
+      "retrieved_timezone": "UTC",
+      "what_to_inspect_ja": [
+        "上段：wait untilの縦接続、repeat untilとifのC字、if/elseの二つの本文領域。",
+        "六角形の条件穴と、下段のBooleanブロックを差し込んだ状態。",
+        "下段：開始hat、順次stack、C字コンテナの境界を見分ける。"
+      ],
+      "nexus_design_sections": [
+        "第5章 条件・elif・短絡評価",
+        "第6章 制御ブロック",
+        "第11章 差込みUI"
+      ],
+      "dimensions_px": [
+        1391,
+        1800
+      ],
+      "sha256": "5f78ad94aea50bd01b0f9a9bc81e39c5236e7282f63064076566c50df4609c48",
+      "transformation": "Full PDF page rasterized to PNG using Poppler pdftoppm; longest edge 1800 pixels; no cropping, recoloring, or content edits.",
+      "visually_verified": true
+    },
+    {
+      "file": "02-nested-conditional-branches.png",
+      "title_ja": "if/else入れ子と分岐順序",
+      "source_url": "https://cms.scratchfoundation.org/assets/df93e4b9-8cae-4d83-b903-1a18cba3a7f6",
+      "source_page_1_based": 6,
+      "source_page_url": "https://cms.scratchfoundation.org/assets/df93e4b9-8cae-4d83-b903-1a18cba3a7f6#page=6",
+      "creator": "Scratch Foundation",
+      "retrieved_on": "2026-10-15",
+      "retrieved_timezone": "UTC",
+      "what_to_inspect_ja": [
+        "右上・中央：外側else内に別のif/elseが所属する段差と囲み。",
+        "条件と本文を一組で移動する必要が分かる二つの並べ方。",
+        "分岐順序により結果が変わる。NEXUSで連鎖表示を作る際も所属と順序を保持する。"
+      ],
+      "nexus_design_sections": [
+        "第5.1節 if/elif/else",
+        "第5.2節 保存構造を壊さないelif UI",
+        "第11章 差込みUI"
+      ],
+      "dimensions_px": [
+        1391,
+        1800
+      ],
+      "sha256": "73f2653e0200a0c41a45ada122cf334ed13a7a0ad36375ce02bc84aa922784fd",
+      "transformation": "Full PDF page rasterized to PNG using Poppler pdftoppm; longest edge 1800 pixels; no cropping, recoloring, or content edits.",
+      "visually_verified": true
+    },
+    {
+      "file": "03-reporter-and-boolean-sockets.png",
+      "title_ja": "値reporter・比較Boolean・制御ソケット",
+      "source_url": "https://cms.scratchfoundation.org/assets/df93e4b9-8cae-4d83-b903-1a18cba3a7f6",
+      "source_page_1_based": 7,
+      "source_page_url": "https://cms.scratchfoundation.org/assets/df93e4b9-8cae-4d83-b903-1a18cba3a7f6#page=7",
+      "creator": "Scratch Foundation",
+      "retrieved_on": "2026-10-15",
+      "retrieved_timezone": "UTC",
+      "what_to_inspect_ja": [
+        "右上：丸いdistance reporterと、そのreporterを抱く六角形の比較式。",
+        "同じreporterの数値プレビューと、比較結果trueのプレビューを区別する。",
+        "下段：wait until・if・if/elseの本文所属と差込み先の違い。"
+      ],
+      "nexus_design_sections": [
+        "第3章 共通型",
+        "第4章 演算",
+        "第11章 差込みUI・試運転"
+      ],
+      "dimensions_px": [
+        1391,
+        1800
+      ],
+      "sha256": "197e0cbecccd2ea651bac16fc10016f8ff1db50fbb70a8d66a26756256670c86",
+      "transformation": "Full PDF page rasterized to PNG using Poppler pdftoppm; longest edge 1800 pixels; no cropping, recoloring, or content edits.",
+      "visually_verified": true
+    }
+  ]
+}

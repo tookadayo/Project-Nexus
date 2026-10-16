@@ -6,6 +6,7 @@ import type {
   ScheduleOccurrence,
   ZonedDateTimeSpec,
 } from "./types";
+import { parseLocalTimeForPrecision } from "./temporal-types";
 
 export class DateTimeError extends Error {
   constructor(
@@ -139,7 +140,8 @@ function candidatesWithOffsets(
   timeZone: string,
   offsets: number[],
 ): string[] {
-  const wall = Date.parse(`${date}T${time}:00Z`);
+  const fullTime = time.length === 5 ? `${time}:00` : time;
+  const wall = Date.parse(`${date}T${fullTime}Z`);
   return [
     ...new Set(
       offsets
@@ -147,7 +149,7 @@ function candidatesWithOffsets(
         .filter((at) => {
           const local = parts(at, timeZone);
           return (
-            local.date === date && local.time === time && local.second === 0
+            local.date === date && `${local.time}:${String(local.second).padStart(2, "0")}` === fullTime
           );
         }),
     ),
@@ -158,7 +160,7 @@ function candidatesWithOffsets(
 /** Returns zero (gap), one, or two (fold) instants without silently correcting input. */
 export function zonedDateTimeCandidates(spec: ZonedDateTimeSpec): string[] {
   const date = parseDateOnly(spec.date),
-    time = parseLocalTime(spec.time);
+    time = parseLocalTimeForPrecision(spec.time, spec.timePrecision ?? "minute");
   assertTimeZone(spec.timeZone);
   return candidatesWithOffsets(
     date,
@@ -188,8 +190,9 @@ export function offsetAt(instant: string, timeZone: string): string {
   const seconds = Math.round((parts(at, timeZone).wall - at) / 1000);
   const absolute = Math.abs(seconds),
     hours = Math.floor(absolute / 3600),
-    minutes = Math.floor((absolute % 3600) / 60);
-  return `${seconds < 0 ? "-" : "+"}${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+    minutes = Math.floor((absolute % 3600) / 60),
+    remainingSeconds = absolute % 60;
+  return `${seconds < 0 ? "-" : "+"}${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}${remainingSeconds ? `:${String(remainingSeconds).padStart(2, "0")}` : ""}`;
 }
 /** Date boundaries differ deliberately from explicitly selected, nonexistent local times. */
 export function dateBoundary(date: string, timeZone: string): string {
@@ -204,14 +207,24 @@ export function dateBoundary(date: string, timeZone: string): string {
       timeZone,
       offsets,
     );
-    if (candidates.length) return candidates[0]!;
+    if (candidates.length) {
+      // Historical IANA transitions can end a midnight gap between minute
+      // marks. Refine only the preceding minute, preserving a finite bound of
+      // 1,440 minute probes plus at most 59 second probes per boundary.
+      for (let second = Math.max(0, minute * 60 - 59); second < minute * 60; second++) {
+        const preciseTime = `${String(Math.floor(second / 3600)).padStart(2, "0")}:${String(Math.floor(second % 3600 / 60)).padStart(2, "0")}:${String(second % 60).padStart(2, "0")}`;
+        const precise = candidatesWithOffsets(normalized, preciseTime, timeZone, offsets);
+        if (precise.length) return precise[0]!;
+      }
+      return candidates[0]!;
+    }
   }
   throw new DateTimeError(
     "CALENDAR_DAY_MISSING",
     "This calendar date does not exist in the selected region.",
   );
 }
-export function dateRangeToInstantRange(range: DateRange): InstantRange {
+export function dateRangeToInstantRange(range: DateRange, options: { validateSelectedEnd?: boolean } = {}): InstantRange {
   const start = parseDateOnly(range.start),
     end = parseDateOnly(range.end);
   if (end < start)
@@ -224,15 +237,18 @@ export function dateRangeToInstantRange(range: DateRange): InstantRange {
       "BOUNDARY_RULE",
       "Choose a registered date-boundary rule.",
     );
+  // An inclusive selected end must itself exist, independently of its
+  // exclusive next-day boundary (for example Apia's skipped 2011-12-30).
+  if (options.validateSelectedEnd !== false) dateBoundary(end, range.timeZone);
   return {
     start: dateBoundary(start, range.timeZone),
     end: dateBoundary(addCalendarDays(end, 1), range.timeZone),
   };
 }
-export function validateInstantRange(range: InstantRange): InstantRange {
+export function validateInstantRange(range: InstantRange, options: { allowEmpty?: boolean } = {}): InstantRange {
   const start = parseInstant(range.start),
     end = parseInstant(range.end);
-  if (Date.parse(end) <= Date.parse(start))
+  if (Date.parse(end) < Date.parse(start) || !options.allowEmpty && Date.parse(end) === Date.parse(start))
     throw new DateTimeError(
       "RANGE_EMPTY",
       "The end time must be after the start time.",
@@ -242,9 +258,10 @@ export function validateInstantRange(range: InstantRange): InstantRange {
 export function isWithinInstantRange(
   instant: string,
   range: InstantRange,
+  options: { allowEmpty?: boolean } = {},
 ): boolean {
   const at = Date.parse(parseInstant(instant));
-  const valid = validateInstantRange(range);
+  const valid = validateInstantRange(range, options);
   return at >= Date.parse(valid.start) && at < Date.parse(valid.end);
 }
 export function isWithinLocalTimeWindow(
@@ -253,8 +270,8 @@ export function isWithinLocalTimeWindow(
 ): boolean {
   const at = parseInstant(instant),
     local = parts(Date.parse(at), spec.timeZone);
-  parseLocalTime(spec.start);
-  parseLocalTime(spec.end);
+  parseLocalTimeForPrecision(spec.start, spec.timePrecision ?? "minute");
+  parseLocalTimeForPrecision(spec.end, spec.timePrecision ?? "minute");
   if (
     ![0, 1].includes(spec.endDayOffset) ||
     !spec.weekdays.length ||
@@ -277,11 +294,13 @@ export function isWithinLocalTimeWindow(
         date: startDate,
         time: spec.start,
         timeZone: spec.timeZone,
+        ...(spec.timePrecision ? { timePrecision: spec.timePrecision } : {}),
       }),
       ends = zonedDateTimeCandidates({
         date: endDate,
         time: spec.end,
         timeZone: spec.timeZone,
+        ...(spec.timePrecision ? { timePrecision: spec.timePrecision } : {}),
       });
     if (
       starts[0] &&
@@ -331,13 +350,13 @@ export function elapsedRelativeInstant(
 export function validateRecurrence(spec: RecurrenceSpec): void {
   if (
     spec.kind !== "recurring" ||
-    !["daily", "weekly", "monthly"].includes(spec.frequency)
+    !["daily", "weekly", "monthly", "yearly"].includes(spec.frequency)
   )
     throw new DateTimeError(
       "RECURRENCE_INVALID",
       "Choose a registered recurrence.",
     );
-  parseLocalTime(spec.time);
+  parseLocalTimeForPrecision(spec.time, spec.timePrecision ?? "minute");
   assertTimeZone(spec.timeZone);
   const start = parseDateOnly(spec.startDate),
     end = parseDateOnly(spec.endDate);
@@ -372,7 +391,7 @@ export function validateRecurrence(spec: RecurrenceSpec): void {
       "Choose unique start weekdays.",
     );
   if (
-    spec.frequency === "monthly" &&
+    (spec.frequency === "monthly" || spec.frequency === "yearly") &&
     spec.monthDay !== "last" &&
     (!Number.isInteger(spec.monthDay) ||
       Number(spec.monthDay) < 1 ||
@@ -382,6 +401,13 @@ export function validateRecurrence(spec: RecurrenceSpec): void {
       "RECURRENCE_MONTHDAY",
       "Choose a day of the month or its last day.",
     );
+  if (spec.frequency === "yearly" && (!Number.isInteger(spec.month) || spec.month! < 1 || spec.month! > 12))
+    throw new DateTimeError("RECURRENCE_MONTH", "Choose a month from 1 through 12.");
+  if (spec.frequency === "yearly" && spec.monthDay !== "last") {
+    const possible = new Date(Date.UTC(2000, spec.month! - 1, spec.monthDay));
+    if (possible.getUTCMonth() + 1 !== spec.month)
+      throw new DateTimeError("RECURRENCE_MONTHDAY", "Choose a date that exists in at least one year.");
+  }
 }
 export function nextScheduleOccurrences(
   spec: RecurrenceSpec,
@@ -412,7 +438,8 @@ export function nextScheduleOccurrences(
       day = d.getUTCDate();
     if (spec.frequency === "weekly" && !spec.weekdays!.includes(d.getUTCDay()))
       continue;
-    if (spec.frequency === "monthly") {
+    if (spec.frequency === "yearly" && d.getUTCMonth() + 1 !== spec.month) continue;
+    if (spec.frequency === "monthly" || spec.frequency === "yearly") {
       const last = new Date(
         Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0),
       ).getUTCDate();
@@ -422,6 +449,7 @@ export function nextScheduleOccurrences(
       date,
       time: spec.time,
       timeZone: spec.timeZone,
+      ...(spec.timePrecision ? { timePrecision: spec.timePrecision } : {}),
     })[0];
     if (!instant || Date.parse(instant) <= afterAt) continue;
     result.push({

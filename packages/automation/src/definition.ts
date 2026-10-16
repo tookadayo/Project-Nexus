@@ -10,11 +10,14 @@ import {
   validateValueInput,
 } from "./expression";
 import { resolveZonedDateTime, validateRecurrence } from "./datetime";
+import { isFixedTemporalValue, validateFixedZonedDateTimeSpec } from './temporal-types';
 import {validateElapsedSchedule} from './elapsed-schedule';
 import {iterationList,iterationResultType} from './iteration-results';
 import { validateEventTriggerInputs } from "./event-contract";
 import { RUN_STARTED_AT_ID, runBuiltinDeclarations } from "./builtins";
 import { isUncertaintySafe } from "./results";
+import { isLocalDeadlineSafe, LOOP_FAILURE_REASONS } from "./bounded-loop";
+import {scratchAuthoringSchema,validateScratchAuthoring} from './scratch-authoring';
 import { MAX_WAIT_SECONDS } from "./types";
 import type {
   ActionOperation,
@@ -53,6 +56,7 @@ const atomic = z.enum([
   "ZonedDateTimeSpec",
   "DateRange",
   "InstantRange",
+  "LocalTimeWindowSpec",
   "ConditionResult",
   "ChannelRef",
   "RoleRef",
@@ -65,6 +69,8 @@ const atomic = z.enum([
 const typeSchema: z.ZodType<ValueType> = z.lazy(() =>
   z.union([
     atomic,
+    z.object({kind:z.literal("LocalTime"),schemaId:z.literal("iso8601.local-time.v1"),precision:z.enum(["minute","second"])}).strict(),
+    z.object({kind:z.literal("InstantRange"),schemaId:z.literal("nexus.instant-range.v2")}).strict(),
     z.object({ kind: z.literal("List"), element: typeSchema }).strict(),
     z.object({ kind: z.literal("Optional"), value: typeSchema }).strict(),
     z.object({ kind: z.literal("ParseResult"), value: typeSchema }).strict(),
@@ -72,6 +78,8 @@ const typeSchema: z.ZodType<ValueType> = z.lazy(() =>
     z
       .object({
         kind: z.literal("Enum"),
+        schemaId:id.optional(),
+        schemaRevision:z.number().int().positive().optional(),
         values: z
           .array(z.string().min(1).max(100))
           .min(1)
@@ -136,6 +144,13 @@ const valueSchema: z.ZodType<ValueInput> = z.lazy(() =>
             options: z
               .object({
                 digits: z.number().int().optional(),
+                roundingMode:z.enum(['tiesAwayFromZero','tiesTowardPositiveInfinity']).optional(),
+                mathFunction:z.enum(['abs','floor','ceiling','sqrt','sin','cos','tan','asin','acos','atan','ln','log','exp','exp10']).optional(),
+                replaceMode:z.enum(['first','all']).optional(),
+                keepEmpty:z.boolean().optional(),
+                normalization:z.enum(['NFC','NFD','NFKC','NFKD']).optional(),
+                lineEnding:z.enum(['LF','CRLF']).optional(),
+                orderVersion:z.literal('unicode-scalar.v1').optional(),
                 key: id.optional(),
                 fields: z.array(id).optional(),
                 bindingId: id.optional(),
@@ -216,6 +231,7 @@ const statementSchema: z.ZodType<Statement> = z.lazy(() =>
       .strict(),
     z.object({ ...base, kind: z.literal("resultBranch"), value: valueSchema, output: declaration, reason: declaration.optional(), succeeded: z.array(statementSchema), failed: z.array(statementSchema), notStarted: z.array(statementSchema), unknown: z.array(statementSchema) }).strict(),
     z.object({ ...base, kind: z.literal("optionalBranch"), value: valueSchema, output: declaration, present: z.array(statementSchema), unset: z.array(statementSchema) }).strict(),
+    z.object({...base,kind:z.literal('searchBranch'),value:valueSchema,index:declaration,output:declaration.optional(),found:z.array(statementSchema),notFound:z.array(statementSchema)}).strict(),
     z
       .object({
         ...base,
@@ -230,6 +246,14 @@ const statementSchema: z.ZodType<Statement> = z.lazy(() =>
       .strict(),
     z
       .object({
+        ...base,
+        kind: z.literal("boundedLoop"),
+        semanticVersion:z.literal(1),mode:z.enum(['while','until']),maxBody:valueSchema,condition:valueSchema,until:valueSchema,
+        body:z.array(statementSchema),
+        handlers:z.object({limit:z.array(statementSchema).optional(),conditionUnknown:z.array(statementSchema).optional(),evaluationError:z.array(statementSchema).optional(),localDeadline:z.array(statementSchema).optional()}).strict(),
+        reason:declaration.optional(),
+      }).strict(),
+    z.object({
         ...base,
         kind: z.literal("wait"),
         duration: valueSchema.optional(),
@@ -260,7 +284,7 @@ const statementSchema: z.ZodType<Statement> = z.lazy(() =>
       .object({
         ...base,
         kind: z.literal("random"),
-        mode: z.enum(["integer", "sample", "shuffle"]),
+        mode: z.enum(["integer", "decimal", "sample", "shuffle"]),
         output: declaration,
         min: valueSchema.optional(),
         max: valueSchema.optional(),
@@ -321,6 +345,7 @@ const statementSchema: z.ZodType<Statement> = z.lazy(() =>
       })
       .strict(),
     z.object({ ...base, kind: z.enum(["break", "continue"]) }).strict(),
+    z.object({...base,kind:z.enum(['endBranch','endRun']),semanticVersion:z.literal(1)}).strict(),
     z
       .object({
         ...base,
@@ -334,6 +359,7 @@ const zonedSchema = z
   .object({
     date: z.string(),
     time: z.string(),
+    timePrecision:z.enum(["minute","second"]).optional(),
     timeZone: z.string(),
     occurrence: z.enum(["earlier", "later"]).optional(),
   })
@@ -341,13 +367,15 @@ const zonedSchema = z
 const recurrenceSchema = z
   .object({
     kind: z.literal("recurring"),
-    frequency: z.enum(["daily", "weekly", "monthly"]),
+    frequency: z.enum(["daily", "weekly", "monthly", "yearly"]),
     time: z.string(),
+    timePrecision:z.enum(["minute","second"]).optional(),
     timeZone: z.string(),
     startDate: z.string(),
     endDate: z.string(),
     weekdays: z.array(z.number().int()).optional(),
     monthDay: z.union([z.number().int(), z.literal("last")]).optional(),
+    month:z.number().int().min(1).max(12).optional(),
     missingTime: z.literal("skip"),
     repeatedTime: z.literal("earlier"),
     pastOccurrences: z.literal("skip"),
@@ -390,6 +418,8 @@ const triggerSchema = z.union([
 export const flowDefinitionSchema: z.ZodType<FlowDefinition> = z
   .object({
     schemaVersion: z.literal(1),
+    semanticProfile:z.literal('scratch.v1').optional(),
+    scratchAuthoring:scratchAuthoringSchema.optional(),
     id,
     guildId: snowflake,
     name: label,
@@ -454,6 +484,11 @@ export const flowDefinitionSchema: z.ZodType<FlowDefinition> = z
 export interface ValidateFlowOptions {
   limits?: Partial<AutomationLimits>;
   recordSchemas?: Record<string, RecordSchema>;
+  numericMath?: import("./scratch-numeric").ScratchMathEvaluator;
+  /** Browser authoring can defer constant evaluation to the authoritative server. */
+  deferNumericEngine?: boolean;
+  temporalResolution?: "resolve" | "fixed";
+  fixedTemporalValues?: ReadonlySet<string>;
 }
 export class AutomationDefinitionError extends Error {
   constructor(public readonly issues: ValidationIssue[]) {
@@ -497,6 +532,10 @@ interface WalkState {
   callPath: string[];
   depth: number;
   uncertaintyHandler?: boolean;
+  localDeadlineHandler?: boolean;
+  loopHandler?: boolean;
+  handlerParallelDepth?:number;
+  currentBranch?:{outputs?:Record<string,ValueInput>};
 }
 export function validateFlowDefinition(
   input: unknown,
@@ -552,6 +591,7 @@ export function validateFlowDefinition(
     nodes: CanonicalNode[] = [],
     nodeIds = new Set<string>(),
     variableIds = new Set<string>();
+  issues.push(...validateScratchAuthoring(definition));
   const typeDepth=(type:ValueType,depth=0):boolean=>depth>limits.maxNesting||typeof type==='object'&&(type.kind==='List'?typeDepth(type.element,depth+1):type.kind==='Optional'||type.kind==='ParseResult'||type.kind==='OperationOutcome'?typeDepth(type.value,depth+1):type.kind==='Record'?(type.typeArgs??[]).some(arg=>typeDepth(arg,depth+1)):false);
   const scanTypes=(entry:unknown,path=''):void=>{
     if(Array.isArray(entry)){entry.forEach((item,index)=>scanTypes(item,`${path}.${index}`));return;}
@@ -596,20 +636,29 @@ export function validateFlowDefinition(
     try {
       validateValueInput(inputValue, {
         guildId: definition.guildId,
+        semanticProfile:definition.semanticProfile,
         variables: scopeValues(scope),
         limits,
         pureDefinitions: definition.pureDefinitions,
         recordSchemas: options.recordSchemas,
+        numericMath: options.numericMath,
+        temporalResolution: options.temporalResolution,
+        fixedTemporalValues: options.fixedTemporalValues,
       });
       if (!containsVariableOrMissing(inputValue))
         evaluateValue(inputValue, {
           guildId: definition.guildId,
+          semanticProfile:definition.semanticProfile,
           variables: {},
           limits,
           pureDefinitions: definition.pureDefinitions,
           recordSchemas: options.recordSchemas,
+          numericMath: options.numericMath,
+          temporalResolution: options.temporalResolution,
+          fixedTemporalValues: options.fixedTemporalValues,
         });
     } catch (error) {
+      if (options.deferNumericEngine && !options.numericMath && error instanceof AutomationValueError && error.code === "NumericEngineUnavailable") return;
       issue(
         error instanceof AutomationValueError ? error.code : "VALUE_INVALID",
         path,
@@ -645,10 +694,13 @@ export function validateFlowDefinition(
       try {
         validateValueInput(inputValue, {
           guildId: definition.guildId,
+          semanticProfile:definition.semanticProfile,
           variables,
           limits,
           recordSchemas: options.recordSchemas,
           pureDefinitions: definition.pureDefinitions,
+          temporalResolution: options.temporalResolution,
+          fixedTemporalValues: options.fixedTemporalValues,
         });
       } catch (error) {
         issue(
@@ -728,7 +780,10 @@ export function validateFlowDefinition(
   if (definition.trigger.kind === "schedule")
     try {
       const schedule = definition.trigger.schedule;
-      if (schedule.kind === "once") resolveZonedDateTime(schedule.at);
+      if (schedule.kind === "once") {
+        if(isFixedTemporalValue('ZonedDateTimeSpec',schedule.at as unknown as JsonValue,options))validateFixedZonedDateTimeSpec(schedule.at);
+        else resolveZonedDateTime(schedule.at);
+      }
       else if(schedule.kind==='elapsed')validateElapsedSchedule(schedule);
       else validateRecurrence(schedule);
     } catch (error) {
@@ -773,6 +828,8 @@ export function validateFlowDefinition(
         ? [{label:"succeeded",body:statement.succeeded},{label:"failed",body:statement.failed},{label:"notStarted",body:statement.notStarted},{label:"unknown",body:statement.unknown}]
       : statement.kind === "optionalBranch"
         ? [{label:"present",body:statement.present},{label:"unset",body:statement.unset}]
+      : statement.kind === 'searchBranch'
+        ? [{label:'found',body:statement.found},{label:'notFound',body:statement.notFound}]
       : statement.kind === "approval"
         ? [{label:'approved',body:statement.approved},{label:'rejected',body:statement.rejected},{label:'expired',body:statement.expired}]
       : statement.kind === "switch"
@@ -788,6 +845,8 @@ export function validateFlowDefinition(
             ]
         : statement.kind === "awaitEvent"
           ? [{ label: "matched", body: statement.matched }, { label: "timedOut", body: statement.timedOut }]
+        : statement.kind === 'boundedLoop'
+          ? [{label:'body',body:statement.body},...Object.entries(statement.handlers).map(([key,body])=>({label:'handlers.'+key,body:body!}))]
         : statement.kind === "repeat"
           ? [{ label: "body", body: statement.body }]
           : statement.kind === "parallel"
@@ -892,6 +951,8 @@ export function validateFlowDefinition(
       }
       if (state.uncertaintyHandler && !isUncertaintySafe(statement))
         issue("UNCERTAINTY_EFFECT", p, "An unknown result permits only a bounded pure handler before the Run stops as UNKNOWN.");
+      if(state.localDeadlineHandler&&!isLocalDeadlineSafe(statement))
+        issue('LOCAL_DEADLINE_EFFECT',p,'An expired loop handler permits only pure terminal work; reads, writes, waits, approvals, clock reads and random draws are forbidden.');
       steps++;
       const child = (
         children: Statement[],
@@ -947,6 +1008,20 @@ export function validateFlowDefinition(
           add(child(statement.otherwise, "otherwise"));
           add(child(statement.unknown, "unknown"));
           break;
+        case 'searchBranch': {
+          if(definition.semanticProfile!=='scratch.v1')issue('SEMANTIC_PROFILE',p,'Choose the explicit Scratch v1 profile for a search result branch.');
+          value(statement.value,scope,`${p}.value`);
+          const type=statement.value.type,search=typeof type==='object'&&type.kind==='Record'&&type.schemaId==='nexus.search-result.v1';
+          if(typeof type!=='object'||type.kind!=='Record'||!['nexus.index-result.v1','nexus.search-result.v1'].includes(type.schemaId))issue('SEARCH_RESULT_TYPE',`${p}.value`,'Choose an index or search result.');
+          if(statement.index.type!=='Number')issue('TYPE',`${p}.index`,'A found index is a Number.');
+          const inner=new Map(scope);addVariable(inner,statement.index,`${p}.index`,false);
+          if(search){
+            if(!statement.output||!type.typeArgs?.[0]||!typeEquals(statement.output.type,type.typeArgs[0]))issue('TYPE',`${p}.output`,'Bind the found result payload with its declared type.');
+            else addVariable(inner,statement.output,`${p}.output`,false);
+          }else if(statement.output)issue('SEARCH_RESULT_OUTPUT',`${p}.output`,'An index result does not contain an item value.');
+          add(child(statement.found,'found',inner));add(child(statement.notFound,'notFound'));
+          break;
+        }
         case "switch": {
           value(statement.value, scope, `${p}.value`);
           const type = statement.value.type,
@@ -966,6 +1041,35 @@ export function validateFlowDefinition(
           statement.cases.forEach((branch, i) =>
             add(child(branch.body, `cases.${i}.body`)),
           );
+          break;
+        }
+        case 'boundedLoop': {
+          if(definition.semanticProfile!=='scratch.v1')issue('SEMANTIC_PROFILE',p,'Choose the explicit Scratch v1 profile for a bounded conditional loop.');
+          value(statement.maxBody,scope,`${p}.maxBody`,'Number');
+          value(statement.condition,scope,`${p}.condition`);
+          if(!['Boolean','ConditionResult'].includes(String(statement.condition.type)))issue('CONDITION_TYPE',`${p}.condition`,'Choose a Boolean or condition result.');
+          // Unknown entry values cannot be assigned the whole step budget as a
+          // static iteration count: the extra final guard would reject every
+          // variable/expression. Their structure is checked here; the actual
+          // fixed bound and shared work budget are checked on entry and dispatch.
+          let maximum=0;
+          if(statement.maxBody.kind==='literal'){
+            const n=statement.maxBody.value;
+            if(typeof n!=='number'||!Number.isSafeInteger(n)||n<0)issue('COUNT',`${p}.maxBody`,'Choose a non-negative safe integer.');
+            else maximum=n;
+          }
+          value(statement.until,scope,`${p}.until`,'Instant');
+          add(child(statement.body,'body',new Map(scope),{loopDepth:state.loopDepth+1}),maximum);
+          steps+=maximum+1;
+          const handlerBase=new Map(scope);
+          if(statement.reason){
+            if(!typeEquals(statement.reason.type,{kind:'Enum',values:[...LOOP_FAILURE_REASONS]}))issue('TYPE',`${p}.reason`,'Choose the registered loop failure reason enum.');
+            addVariable(handlerBase,statement.reason,`${p}.reason`,false);
+          }
+          for(const [key,handler] of Object.entries(statement.handlers)){
+            const handlerScope=new Map(handlerBase);
+            add(child(handler!,`handlers.${key}`,handlerScope,{loopDepth:0,procedure:undefined,loopHandler:true,handlerParallelDepth:state.parallelDepth,localDeadlineHandler:state.localDeadlineHandler||key==='localDeadline'}));
+          }
           break;
         }
         case "repeat": {
@@ -1124,7 +1228,8 @@ export function validateFlowDefinition(
           addVariable(scope, statement.output, `${p}.output`, false);
           break;
         case "random": {
-          if (statement.mode === "integer") {
+          if (statement.mode === "integer" || statement.mode === 'decimal') {
+            if(statement.mode==='decimal'&&definition.semanticProfile!=='scratch.v1')issue('SEMANTIC_PROFILE',p,'Decimal draws require the explicit Scratch v1 profile.');
             if (
               !statement.min ||
               !statement.max ||
@@ -1134,14 +1239,14 @@ export function validateFlowDefinition(
               issue(
                 "RANDOM_INPUT",
                 p,
-                "Choose integer lower and upper bounds.",
+                "Choose explicit lower and upper bounds.",
               );
             if (statement.min)
               value(statement.min, scope, `${p}.min`, "Number");
             if (statement.max)
               value(statement.max, scope, `${p}.max`, "Number");
             if (statement.output.type !== "Number")
-              issue("TYPE", p, "Integer draws return a Number.");
+              issue("TYPE", p, "Numeric draws return a Number.");
             if (
               statement.min?.kind === "literal" &&
               statement.max?.kind === "literal"
@@ -1151,15 +1256,18 @@ export function validateFlowDefinition(
               if (
                 typeof min !== "number" ||
                 typeof max !== "number" ||
-                !Number.isSafeInteger(min) ||
-                !Number.isSafeInteger(max) ||
+                !Number.isFinite(min) ||
+                !Number.isFinite(max) ||
+                statement.mode==='integer'&&(!Number.isSafeInteger(min)||!Number.isSafeInteger(max)) ||
                 min > max
               )
                 issue(
                   "RANDOM_RANGE",
                   p,
-                  "Choose ordered finite integer bounds.",
+                  "Choose ordered finite bounds, with safe integers in integer mode.",
                 );
+              else if(statement.mode==='integer'&&definition.semanticProfile!=='scratch.v1'&&max-min>=281474976710655)
+                issue('RANDOM_RANGE',p,'Legacy integer draws require their original bounded width.');
             }
           } else {
             if (!statement.list || statement.min || statement.max)
@@ -1362,6 +1470,7 @@ export function validateFlowDefinition(
                 loopDepth: 0,
                 parallelDepth: state.parallelDepth + 1,
                 procedure: undefined,
+                currentBranch:branch,
               }),
             );
             for (const [outputId, input] of Object.entries(
@@ -1522,8 +1631,16 @@ export function validateFlowDefinition(
               "Only the nearest enclosing finite loop can be controlled.",
             );
           break;
+        case 'endBranch':
+          if(definition.semanticProfile!=='scratch.v1')issue('SEMANTIC_PROFILE',p,'Explicit branch termination requires Scratch v1.');
+          if(!state.currentBranch||state.parallelDepth===0||state.procedure||state.loopHandler&&state.parallelDepth<=(state.handlerParallelDepth??0))issue('END_BRANCH_SCOPE',p,'End only the nearest active parallel branch, without escaping a terminal handler.');
+          else for(const [key,input] of Object.entries(state.currentBranch.outputs??{}))value(input,scope,`${p}.outputs.${key}`);
+          break;
+        case 'endRun':
+          if(definition.semanticProfile!=='scratch.v1')issue('SEMANTIC_PROFILE',p,'Explicit Run termination requires Scratch v1.');
+          break;
         case "end":
-          if (!state.uncertaintyHandler && (state.procedure || state.parallelDepth > 0))
+          if (!state.uncertaintyHandler && !state.loopHandler && (state.procedure || state.parallelDepth > 0))
             issue(
               "END_SCOPE",
               p,
@@ -1534,6 +1651,7 @@ export function validateFlowDefinition(
       if (
         (statement.kind === "return" ||
           statement.kind === "end" ||
+          statement.kind === 'endBranch' || statement.kind === 'endRun' ||
           statement.kind === "break" ||
           statement.kind === "continue") &&
         body.slice(index + 1).some((next) => next.enabled !== false)
@@ -1659,7 +1777,7 @@ function deepFreeze<T>(value: T): T {
 function alwaysReturns(body: Statement[]): boolean {
   for (const statement of body) {
     if (statement.enabled === false) continue;
-    if (statement.kind === "return") return true;
+    if (statement.kind === "return"||statement.kind==='endRun') return true;
     if (
       statement.kind === "branch" &&
       alwaysReturns(statement.then) &&
@@ -1679,6 +1797,7 @@ function alwaysReturns(body: Statement[]): boolean {
     if (statement.kind === "awaitEvent" && alwaysReturns(statement.matched) && alwaysReturns(statement.timedOut))
       return true;
     if (statement.kind === "optionalBranch" && alwaysReturns(statement.present) && alwaysReturns(statement.unset)) return true;
+    if(statement.kind==='searchBranch'&&alwaysReturns(statement.found)&&alwaysReturns(statement.notFound))return true;
     if (statement.kind === "resultBranch" && alwaysReturns(statement.succeeded) && alwaysReturns(statement.failed) && (typeof statement.value.type === "object" && statement.value.type.kind === "ParseResult" || alwaysReturns(statement.notStarted))) return true;
   }
   return false;
@@ -1709,6 +1828,8 @@ function estimateProcedure(
           ? [statement.succeeded,statement.failed,statement.notStarted,statement.unknown]
         : statement.kind === "optionalBranch"
           ? [statement.present,statement.unset]
+        : statement.kind === 'searchBranch'
+          ? [statement.found,statement.notFound]
         : statement.kind === "approval"
           ? [statement.approved,statement.rejected,statement.expired]
         : statement.kind === "switch"
@@ -1719,10 +1840,17 @@ function estimateProcedure(
               ? [statement.matched, statement.timedOut]
           : statement.kind === "parallel"
             ? statement.branches.map((branch) => branch.body)
+            : statement.kind === 'boundedLoop'
+              ? [statement.body,...Object.values(statement.handlers).filter((body):body is Statement[]=>Boolean(body))]
             : statement.kind === "repeat"
               ? [statement.body]
               : [];
     let multiplier = 1;
+    if(statement.kind==='boundedLoop'){
+      const maximum=statement.maxBody.kind==='literal'&&typeof statement.maxBody.value==='number'?statement.maxBody.value:0;
+      const estimated=estimateProcedure(statement.body,definition,limits,path);
+      steps+=maximum+1+estimated.steps*maximum;actions+=estimated.actions*maximum;
+    }
     if (statement.kind === "repeat")
       multiplier =
         statement.count?.kind === "literal" &&
@@ -1733,6 +1861,7 @@ function estimateProcedure(
             ? statement.list.value.length
             : limits.maxListItems;
     for (const child of children) {
+      if(statement.kind==='boundedLoop'&&child===statement.body)continue;
       const estimated = estimateProcedure(child, definition, limits, path);
       steps += estimated.steps * multiplier;
       actions += estimated.actions * multiplier;

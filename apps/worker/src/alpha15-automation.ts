@@ -16,7 +16,7 @@ export async function processAlpha15AutomationSchedules(db:Database,options:Auto
 export async function processAlpha15AutomationRuns(db:Database,adapter:AutomationRuntimeAdapter,options:AutomationServiceOptions={},now?:Date) {
   // A production pass uses a fresh clock at each step. A frozen explicit Date
   // exists only for deterministic tests, never implicitly for an entire batch.
-  const clock=()=>now??new Date(),service=new AutomationService(db,options),runtime=new AutomationRuntime(db,{admission:service.limits,adapter,now:clock}),queriedAt=clock();
+  const clock=()=>now??new Date(),service=new AutomationService(db,options),runtime=new AutomationRuntime(db,{admission:service.limits,adapter,now:clock,scratchRandomAttempts:service.scratchRandomAttempts}),queriedAt=clock();
   const runs=(await sql<{organization_id:string;guild_id:string;id:string}>`SELECT organization_id,guild_id,id FROM automation_runs WHERE ended_at IS NULL AND (status IN ('QUEUED','RUNNING') OR status IN ('WAITING','WAITING_APPROVAL') AND wake_at<=${queriedAt} OR deadline_at<=${queriedAt} OR cancel_requested_at IS NOT NULL) ORDER BY created_at LIMIT 20`.execute(db)).rows;
   for(const run of runs)await runtime.tick({organizationId:run.organization_id,guildId:run.guild_id},run.id);
   return {processed:runs.length};

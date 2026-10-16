@@ -7,6 +7,7 @@ import {assert} from '../../../packages/shared/src/index';
 import {publicApiContext} from '../../../packages/security/src/public-api';
 import {AutomationService,type AutomationServiceOptions} from '../../../packages/automation/src/service';
 import type {EvaluatedValue} from '../../../packages/automation/src/types';
+import {DEFAULT_AUTOMATION_LIMITS} from '../../../packages/automation/src/types';
 import type {AutomationSimulationInput} from '../../../packages/automation/src/simulation';
 import {previewAlpha15RolePolicy} from '../../worker/src/alpha15-discord';
 import {parallelRunStatus} from '../../../packages/automation/src/parallel';
@@ -23,11 +24,13 @@ export function registerAlpha15Automation(app:FastifyInstance,db:Database,key:st
   const mockValue=z.object({type:z.unknown(),value:z.unknown()}).strict();
   const mockOutcome=z.enum(['SUCCEEDED','FAILED','NOT_STARTED','UNKNOWN']);
   const mockAwait=z.discriminatedUnion('state',[z.object({state:z.literal('TIMED_OUT')}).strict(),z.object({state:z.literal('MATCHED'),value:z.object({state:z.enum(['OPEN','ACKNOWLEDGED','IN_PROGRESS','SNOOZED','RESOLVED','DISMISSED']),version:z.number().int().min(0).max(2147483647)}).strict(),occurredAt:z.string().max(30)}).strict()]);
-  const testRevision=z.object({revision:z.number().int().positive(),simulation:z.object({values:z.record(z.string(),mockValue).optional(),outputs:z.record(z.string(),mockValue).optional(),outcomes:z.record(z.string(),mockOutcome).optional(),pollReads:z.record(z.string(),z.array(z.object({outcome:mockOutcome.optional(),output:mockValue.optional()}).strict()).max(100)).optional(),awaitEvents:z.record(z.string(),mockAwait).optional(),approvals:z.record(z.string(),z.enum(["APPROVED","REJECTED","EXPIRED"])).optional(),clock:z.string().max(30).optional()}).strict().optional()}).strict();
+  const testRevision=z.object({revision:z.number().int().positive(),simulation:z.object({values:z.record(z.string(),mockValue).optional(),outputs:z.record(z.string(),mockValue).optional(),outcomes:z.record(z.string(),mockOutcome).optional(),pollReads:z.record(z.string(),z.array(z.object({outcome:mockOutcome.optional(),output:mockValue.optional()}).strict()).max(100)).optional(),awaitEvents:z.record(z.string(),mockAwait).optional(),approvals:z.record(z.string(),z.enum(["APPROVED","REJECTED","EXPIRED"])).optional(),clock:z.string().max(30).optional(),inspectVariables:z.array(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/)).max(DEFAULT_AUTOMATION_LIMITS.maxVariables).refine(ids=>new Set(ids).size===ids.length).optional()}).strict().optional()}).strict();
+  app.get(base+'/time-zone',async(req,reply)=>{reply.header('Cache-Control','no-store');const context=await auth(req);return service.timeZonePreference(context.scope,context.actor);});
   app.get(base+'/overview',async(req,reply)=>{reply.header('Cache-Control','no-store');const context=await auth(req);return service.overview(context.scope,context.actor);});
   app.get(base+'/event-receipts',async(req,reply)=>{reply.header('Cache-Control','no-store');const context=await auth(req),query=z.object({flowId:z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).optional()}).strict().parse(req.query);return service.eventReceipts(context.scope,context.actor,query.flowId);});
   app.get(base+'/flows',async(req,reply)=>{reply.header('Cache-Control','no-store');const context=await auth(req);return service.list(context.scope,context.actor);});
   app.get(base+'/flows/:flowId',async(req,reply)=>{reply.header('Cache-Control','no-store');const context=await auth(req);return service.get(context.scope,context.actor,flowId(req.params));});
+  app.get(base+'/flows/:flowId/revisions/:revision',async(req,reply)=>{reply.header('Cache-Control','no-store');const context=await auth(req);const input=z.object({revision:z.coerce.number().int().positive().max(2147483647)}).parse(req.params);return service.getRevision(context.scope,context.actor,flowId(req.params),input.revision);});
   app.put(base+'/flows/:flowId/draft',async(req,reply)=>{
     reply.header('Cache-Control','no-store');const context=await auth(req,'CONFIGURE');
     const input=z.object({definition:z.unknown(),expectedRevision:z.number().int().nonnegative(),requestId:z.uuid()}).strict().parse(req.body);

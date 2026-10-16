@@ -30,6 +30,60 @@ async function fixture(){
   }
   return {s,app,discord,reference,call,definition,service};
 }
+it('returns only explicitly selected simulation values to the currently authorized configuring user',async()=>{
+  const f=await fixture();try{
+    const definition={...f.definition,semanticProfile:'scratch.v1',body:[
+      {id:'number',kind:'declare',variable:{id:'count',name:'Count',type:'Number'},value:{kind:'literal',type:'Number',value:8}},
+      {id:'private',kind:'declare',variable:{id:'notSelected',name:'Not selected',type:'PlainText'},value:{kind:'literal',type:'PlainText',value:'synthetic unselected inspection value'}},
+    ]};
+    expect((await f.call('PUT','/flows/test/draft',{definition,expectedRevision:0,requestId:randomUUID()})).statusCode).toBe(200);
+    const ordinary=await f.call('POST','/flows/test/test',{revision:1});
+    expect(ordinary.statusCode).toBe(200);expect(ordinary.json().inspection).toBeUndefined();
+    expect(ordinary.body).not.toContain('synthetic unselected inspection value');
+    const selected=await f.call('POST','/flows/test/test',{revision:1,simulation:{inspectVariables:['count']}});
+    expect(selected.statusCode).toBe(200);
+    expect(selected.json().inspection).toMatchObject({mode:'SIMULATION_ONLY',values:[{variableId:'count',type:'Number',value:8}],unavailable:[]});
+    expect(selected.body).not.toContain('synthetic unselected inspection value');
+    expect(selected.headers['cache-control']).toBe('no-store');
+    expect((await sql`SELECT id FROM automation_runs WHERE ${tenant(f.s)}`.execute(db)).rows).toHaveLength(0);
+    f.discord.members.get(user)!.permissions='0';
+    expect((await f.call('POST','/flows/test/test',{revision:1,simulation:{inspectVariables:['count']}})).statusCode).toBe(403);
+    expect((await f.call('POST','/flows/test/test',{revision:1,simulation:{inspectVariables:['count']}},{'x-nexus-user-proof':''})).statusCode).toBe(401);
+  }finally{await f.app.close();}
+});
+it('rejects malformed, duplicate and excessive simulation inspector selections at the API boundary',async()=>{
+  const f=await fixture();try{
+    for(const inspectVariables of [['bad/id'],['same','same'],Array.from({length:129},(_,index)=>'v'+index)]){
+      expect((await f.call('POST','/flows/test/test',{revision:1,simulation:{inspectVariables}})).statusCode).toBe(400);
+    }
+  }finally{await f.app.close();}
+});
+it('reads an explicitly selected saved revision within the current user and tenant boundary',async()=>{
+  const f=await fixture(),other=await fixture();try{
+    expect((await f.call('PUT','/flows/test/draft',{definition:f.definition,expectedRevision:0,requestId:randomUUID()})).statusCode).toBe(200);
+    expect((await f.call('PUT','/flows/test/draft',{definition:{...f.definition,name:'Current revision'},expectedRevision:1,requestId:randomUUID()})).statusCode).toBe(200);
+    const previous=await f.call('GET','/flows/test/revisions/1');
+    expect(previous.statusCode).toBe(200);expect(previous.headers['cache-control']).toBe('no-store');
+    expect(previous.json()).toEqual({id:'test',revision:1,definition:expect.objectContaining({name:'Synthetic',guildId:f.s.guildId})});
+    expect((await f.call('GET','/flows/test/revisions/2')).json().definition.name).toBe('Current revision');
+    expect((await other.call('GET','/flows/test/revisions/1')).statusCode).toBe(404);
+    expect((await f.call('GET','/flows/test/revisions/1',undefined,{'x-nexus-user-proof':''})).statusCode).toBe(401);
+    f.discord.members.get(user)!.permissions='0';
+    expect((await f.call('GET','/flows/test/revisions/1')).statusCode).toBe(403);
+    expect((await sql`SELECT id FROM automation_runs WHERE ${tenant(f.s)}`.execute(db)).rows).toHaveLength(0);
+  }finally{await f.app.close();await other.app.close();}
+});
+it('bounds revision inputs and does not expose a retained revision of a deleted flow',async()=>{
+  const f=await fixture();try{
+    expect((await f.call('PUT','/flows/test/draft',{definition:f.definition,expectedRevision:0,requestId:randomUUID()})).statusCode).toBe(200);
+    for(const revision of ['0','-1','1.5','2147483648','Infinity','not-a-revision'])
+      expect((await f.call('GET','/flows/test/revisions/'+revision)).statusCode).toBe(400);
+    expect((await f.call('GET','/flows/test/revisions/2')).statusCode).toBe(404);
+    await sql`UPDATE automation_flows SET state='DELETED',deleted_at=now() WHERE ${tenant(f.s)} AND id='test'`.execute(db);
+    expect((await sql`SELECT revision FROM automation_revisions WHERE ${tenant(f.s)} AND flow_id='test'`.execute(db)).rows).toHaveLength(1);
+    expect((await f.call('GET','/flows/test/revisions/1')).statusCode).toBe(404);
+  }finally{await f.app.close();}
+});
 it('binds automation save to the live public user instead of a fixed web-admin actor',async()=>{
   const f=await fixture();try{
     const saved=await f.call('PUT','/flows/test/draft',{definition:f.definition,expectedRevision:0,requestId:randomUUID()});expect(saved.statusCode).toBe(200);

@@ -22,6 +22,7 @@ import {
   type AutomationServiceOptions,
 } from "../../../packages/automation/src/service";
 import { validateFlowDefinition } from "../../../packages/automation/src/definition";
+import { scratchNumericOptions } from "../../../packages/automation/src/scratch-math-server";
 import {
   ALPHA15_ADOPTED_ACTIONS,
   ALPHA15_BETA_ADMISSION,
@@ -195,7 +196,7 @@ export async function alpha15AutomationInteraction(
           validateEventTriggerInputs(flow.definition.trigger),
           "AUTOMATION_EVENT_INPUT_INVALID",
         );
-        const checked = validateFlowDefinition(flow.definition);
+        const checked = validateFlowDefinition(flow.definition, {...await scratchNumericOptions(flow.definition),temporalResolution:'fixed'});
         assert(checked.plan, "AUTOMATION_DEFINITION_INVALID");
         service.requireCapabilities(checked.plan);
         const instanceId = randomUUID();

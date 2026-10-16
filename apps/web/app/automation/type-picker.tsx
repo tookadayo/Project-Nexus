@@ -1,11 +1,17 @@
 "use client";
+import { useContext, useState } from "react";
 import type { ValueType } from "../../../../packages/automation/src/types";
 import {
   registeredPairFields,
   registeredPairType,
 } from "../../../../packages/automation/src/registered-pairs";
-import { sameType, typeName, words, type Locale } from "./model";
+import { sameType, typeName, words, uid, type Locale } from "./model";
+import { AutomationSemanticProfile } from "./value-slot";
 import { WEEKDAY_TYPE } from "../../../../packages/automation/src/temporal-values";
+import {
+  localTimeType,
+  INSTANT_RANGE_V2_TYPE,
+} from "../../../../packages/automation/src/temporal-types";
 import {
   groupRecordType,
   findMatchType,
@@ -21,6 +27,8 @@ const atomicTypes: ValueType[] = [
   "Instant",
   "DateOnly",
   "LocalTime",
+  localTimeType("minute"),
+  localTimeType("second"),
   "ChannelRef",
   "RoleRef",
   "MemberRef",
@@ -33,6 +41,8 @@ const atomicTypes: ValueType[] = [
   "ZonedDateTimeSpec",
   "DateRange",
   "InstantRange",
+  INSTANT_RANGE_V2_TYPE,
+  "LocalTimeWindowSpec",
   {
     kind: "Enum",
     values: [
@@ -57,6 +67,7 @@ export function TypeSelect({
   depth = 0,
   label,
   allowed,
+  allowChoices = !allowed,
 }: {
   value: ValueType;
   onChange: (type: ValueType) => void;
@@ -64,7 +75,20 @@ export function TypeSelect({
   depth?: number;
   label?: string;
   allowed?: ValueType[];
+  allowChoices?: boolean;
 }) {
+  const semanticProfile = useContext(AutomationSemanticProfile);
+  const [choiceEdit, setChoiceEdit] = useState<"new" | "revision" | null>(null);
+  const [choiceText, setChoiceText] = useState("");
+  const choices = choiceText.split(/\r?\n/);
+  const validChoices =
+    choices.length >= 1 &&
+    choices.length <= 100 &&
+    choices.every(
+      (choice) =>
+        choice.length >= 1 && choice.length <= 100 && choice.trim().length > 0,
+    ) &&
+    new Set(choices).size === choices.length;
   const pair = registeredPairFields(value);
   const base = allowed ?? atomicTypes;
   const options = base.some((type) => sameType(type, value))
@@ -77,6 +101,12 @@ export function TypeSelect({
         <select
           value={JSON.stringify(value)}
           onChange={(event) => {
+            if (event.target.value === "new-choice") {
+              setChoiceText("");
+              setChoiceEdit("new");
+              return;
+            }
+            setChoiceEdit(null);
             const type = base.find(
               (item) => JSON.stringify(item) === event.target.value,
             );
@@ -105,6 +135,11 @@ export function TypeSelect({
               {typeName(type, locale)}
             </option>
           ))}
+          {allowChoices && semanticProfile === "scratch.v1" && (
+            <option value="new-choice">
+              {words(locale, "選択肢を定義する", "Define choices")}
+            </option>
+          )}
           {!allowed && depth < 5 && (
             <>
               <option value="list-wrapper">
@@ -152,6 +187,85 @@ export function TypeSelect({
           )}
         </select>
       </label>
+      {allowChoices &&
+        semanticProfile === "scratch.v1" &&
+        typeof value === "object" &&
+        value.kind === "Enum" &&
+        !choiceEdit && (
+          <button
+            type="button"
+            onClick={() => {
+              setChoiceText(value.values.join("\n"));
+              setChoiceEdit(value.schemaId ? "revision" : "new");
+            }}
+          >
+            {words(
+              locale,
+              value.schemaId
+                ? "選択肢の次の版を作成"
+                : "新しい選択肢として定義",
+              value.schemaId
+                ? "Create the next choice revision"
+                : "Define as a new choice type",
+            )}
+          </button>
+        )}
+      {choiceEdit && semanticProfile === "scratch.v1" && (
+        <section className="automation-choice-editor">
+          <label>
+            {words(
+              locale,
+              "選択肢を一行に一つ入力",
+              "Enter one choice per line",
+            )}
+            <textarea
+              rows={4}
+              value={choiceText}
+              onChange={(event) => setChoiceText(event.target.value)}
+              placeholder={words(
+                locale,
+                "例: 受付中（例は保存されません）",
+                "e.g. Open (the example is not saved)",
+              )}
+            />
+          </label>
+          <p className="automation-hint">
+            {words(
+              locale,
+              "1〜100項目、各100文字以内。空行と重複は使えません。選択肢を変えると参照する値の型も変わるため、入力と試運転を再確認してください。",
+              "Use 1–100 unique choices, up to 100 characters each, with no blank lines. Changing choices changes the value type; review dependent inputs and simulation.",
+            )}
+          </p>
+          <button
+            type="button"
+            disabled={!validChoices}
+            onClick={() => {
+              const previous =
+                typeof value === "object" && value.kind === "Enum"
+                  ? value
+                  : undefined;
+              onChange({
+                kind: "Enum",
+                values: choices,
+                schemaId:
+                  choiceEdit === "revision" && previous?.schemaId
+                    ? previous.schemaId
+                    : uid(),
+                schemaRevision:
+                  choiceEdit === "revision" && previous?.schemaId
+                    ? (previous.schemaRevision ?? 1) + 1
+                    : 1,
+              });
+              setChoiceEdit(null);
+            }}
+          >
+            {words(locale, "この選択肢を使う", "Use these choices")}
+          </button>
+          <button type="button" onClick={() => setChoiceEdit(null)}>
+            {words(locale, "取消", "Cancel")}
+          </button>
+        </section>
+      )}
       {pair && (
         <fieldset>
           <legend>

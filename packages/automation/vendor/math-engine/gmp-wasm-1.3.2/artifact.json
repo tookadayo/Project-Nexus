@@ -1,0 +1,19 @@
+{
+  "name": "gmp-wasm",
+  "version": "1.3.2",
+  "sourceCommit": "4e372e5a3c4a65f871e1bcaab63c78b29dc80ff8",
+  "mpfrVersion": "4.2.1",
+  "registryUrl": "https://registry.npmjs.org/gmp-wasm",
+  "tarballUrl": "https://registry.npmjs.org/gmp-wasm/-/gmp-wasm-1.3.2.tgz",
+  "tarballSha256": "e417809469b6139e420f31e01a4fe64168c229499e5798ac037f683d6877261a",
+  "tarballIntegrity": "sha512-8Y7qVLLX8/0YzeHYueCHaw9D7sdnGViiGu7KeP9wATmuayoXW/FlGMsV80aBU5ryS2OwKfaCyjCSSPdxoe3E4A==",
+  "bundleOriginalPath": "package/dist/index.umd.js",
+  "bundlePath": "index.cjs",
+  "bundleSha256": "76af404a6521699a9f2a0dd3fc34a48368b470cc5044e1fa8e5e480a3deae55a",
+  "wasmSha256": "ca1f8def552c30d44c67247d0a959bbf17e022d1e5999889ce4b9922f5211909",
+  "wasmBytes": 522561,
+  "license": "LGPL-3.0-only",
+  "runtimeDependencies": [],
+  "modified": false,
+  "note": "Unmodified UMD bundle renamed to .cjs for Node ESM interoperability. Distribution source/license/relink evidence is tracked separately. No lifecycle or build script was executed."
+}

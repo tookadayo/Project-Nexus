@@ -24,9 +24,13 @@ import {
   findMatchType,
   mappingKeyType,
   structuredRecordSchema,
+  indexResultType,
+  searchResultType,
 } from "./structured-values";
+import { scratchMathAvailable } from "./scratch-numeric";
 import { temporalExpressionCards } from "./temporal-cards";
 import { isParseTarget } from "./results";
+import { isLocalTimeDescriptor, isInstantRangeV2Type, localTimeType } from './temporal-types';
 
 export interface ExpressionCardLabel {
   ja: string;
@@ -56,6 +60,7 @@ export interface TypedExpressionCard {
   variadic?: { type: ValueType; minimum: number; maximum: number };
 }
 export interface ExpressionCardsContext {
+  semanticProfile?: "scratch.v1";
   variables?: readonly VariableDeclaration[];
   pureDefinitions?: readonly PureDefinition[];
   recordSchemas?: Readonly<Record<string, RecordSchema>>;
@@ -89,6 +94,7 @@ const localOperators = new Set<ExpressionOperator>([
   "list.all",
   "list.find",
   "list.findResult",
+  "list.search",
 ]);
 // Matches the persisted definition identifier contract, including schema namespaces.
 const identifier = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -125,6 +131,7 @@ function boundedType(type: ValueType, depth = 0): boolean {
   if (depth > EXPRESSION_CARD_LIMITS.typeDepth) return false;
   if (typeof type === "string") return /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(type);
   if (!type || typeof type !== "object") return false;
+  if (isLocalTimeDescriptor(type) || isInstantRangeV2Type(type)) return true;
   if (type.kind === "List") return boundedType(type.element, depth + 1);
   if (
     type.kind === "Optional" ||
@@ -147,6 +154,8 @@ function boundedType(type: ValueType, depth = 0): boolean {
       (value) =>
         typeof value === "string" && value.length > 0 && value.length <= 100,
     ) &&
+    ((type.schemaId === undefined && type.schemaRevision === undefined) ||
+      typeof type.schemaId === "string" && identifier.test(type.schemaId) && Number.isSafeInteger(type.schemaRevision) && type.schemaRevision! > 0) &&
     new Set(type.values).size === type.values.length
   );
 }
@@ -225,6 +234,7 @@ export function expressionCardsFor(
   context: ExpressionCardsContext = {},
 ): TypedExpressionCard[] {
   if (!boundedType(expectedType)) return [];
+  const scratch = context.semanticProfile === "scratch.v1";
   const schemas = { ...context.recordSchemas, ...BUILTIN_RECORD_SCHEMAS };
   const variables = (context.variables ?? []).slice(
     0,
@@ -268,6 +278,8 @@ export function expressionCardsFor(
     "TimeZone",
   ] as const)
     addType(type);
+  addType(localTimeType('minute'));
+  addType(localTimeType('second'));
   // Resolve only pair schemas already present in the expected type or visible
   // variables. Do not enumerate the registry into every unrelated value slot.
   for (const type of types)
@@ -421,18 +433,43 @@ export function expressionCardsFor(
     ["subtract", "引く", "Subtract"],
     ["multiply", "掛ける", "Multiply"],
     ["divide", "割る", "Divide"],
-    ["remainder", "余り", "Remainder"],
+    [scratch ? "modulo" : "remainder", scratch ? "除数の符号に合わせた余り" : "余り", scratch ? "Modulo with the divisor sign" : "Remainder"],
     ["min", "小さい方", "Minimum"],
     ["max", "大きい方", "Maximum"],
   ])
     add(`number.${op}` as ExpressionOperator, ja!, en!, "Number", [n(), n()]);
   for (const [op, ja, en] of [
     ["abs", "絶対値", "Absolute value"],
-    ["round", "四捨五入", "Round"],
+    ...(!scratch ? [["round", "四捨五入", "Round"]] : []),
     ["floor", "切り下げ", "Round down"],
     ["ceil", "切り上げ", "Round up"],
   ])
     add(`number.${op}` as ExpressionOperator, ja!, en!, "Number", [n()]);
+  if (scratch) {
+    add("number.truncate", "0の方向へ切り捨てる", "Truncate toward zero", "Number", [n()]);
+    for (const [roundingMode, ja, en] of [
+      ["tiesAwayFromZero", "半値は0から遠い方", "halfway away from zero"],
+      ["tiesTowardPositiveInfinity", "半値は大きい方", "halfway toward positive infinity"],
+    ] as const) {
+      add("number.roundInteger", `整数へ丸める（${ja}）`, `Round to an integer (${en})`, "Number", [n()], { options: { roundingMode } });
+      add("number.roundDecimal", `小数桁へ丸める（${ja}）`, `Round decimal places (${en})`, "Number", [n(), { ...argument("Number", "桁数（−308〜308）", "Decimal places (−308 to 308)"), integer: true, minimum: -308, maximum: 308 }], { options: { roundingMode } });
+    }
+    for (const [mathFunction, ja, en] of [
+      ["abs", "絶対値", "Absolute value"], ["floor", "整数へ切り下げ", "Floor"], ["ceiling", "整数へ切り上げ", "Ceiling"], ["sqrt", "平方根", "Square root"],
+      ["sin", "サイン（度）", "Sine (degrees)"], ["cos", "コサイン（度）", "Cosine (degrees)"], ["tan", "タンジェント（度）", "Tangent (degrees)"],
+      ["asin", "逆サイン（度）", "Arc sine (degrees)"], ["acos", "逆コサイン（度）", "Arc cosine (degrees)"], ["atan", "逆タンジェント（度）", "Arc tangent (degrees)"],
+      ["ln", "自然対数", "Natural logarithm"], ["log", "常用対数", "Base-10 logarithm"], ["exp", "eの累乗", "e to a power"], ["exp10", "10の累乗", "10 to a power"],
+    ] as const) if (scratchMathAvailable(mathFunction))
+      add("number.math", ja, en, "Number", [n()], { options: { mathFunction } });
+    add("text.letter", "指定した位置の文字", "Letter at a position", "PlainText", [text(), position()]);
+    add("text.find", "文字の位置を探す", "Find text position", indexResultType, [text(), text()]);
+    add("text.caseFold", "大文字小文字の比較用にそろえる", "Unicode case folding", "PlainText", [text()]);
+    for (const normalization of ["NFC", "NFD", "NFKC", "NFKD"] as const)
+      add("text.normalize", `Unicodeを${normalization}へ正規化`, `Normalize Unicode as ${normalization}`, "PlainText", [text()], { options: { normalization } });
+    for (const lineEnding of ["LF", "CRLF"] as const)
+      add("text.lineEndings", `改行を${lineEnding}へそろえる`, `Normalize line endings as ${lineEnding}`, "PlainText", [text()], { options: { lineEnding } });
+    add("condition.fromBoolean", "真偽値を既知の条件値にする", "Promote Boolean to a known condition", "ConditionResult", [argument("Boolean", "真偽値", "Boolean")]);
+  }
   add("number.clamp", "範囲に収める", "Clamp to a range", "Number", [
     n(),
     n(),
@@ -468,15 +505,10 @@ export function expressionCardsFor(
     position(),
     count(),
   ]);
-  add("text.replace", "文字を置き換える", "Replace text", "PlainText", [
-    text(),
-    text(),
-    text(),
-  ]);
-  add("text.split", "文字を区切って一覧に", "Split text", listOf("PlainText"), [
-    text(),
-    text(),
-  ]);
+  for (const replaceMode of scratch ? ["first", "all"] as const : ["all"] as const)
+    add("text.replace", scratch ? replaceMode === "first" ? "最初の一致を置き換える" : "すべての一致を置き換える" : "文字を置き換える", scratch ? replaceMode === "first" ? "Replace the first match" : "Replace all matches" : "Replace text", "PlainText", [text(), text(), text()], scratch ? { options: { replaceMode } } : {});
+  for (const keepEmpty of scratch ? [true, false] : [true])
+    add("text.split", scratch ? keepEmpty ? "空の部分を残して文字を区切る" : "空の部分を除いて文字を区切る" : "文字を区切って一覧に", scratch ? keepEmpty ? "Split and keep empty parts" : "Split and omit empty parts" : "Split text", listOf("PlainText"), [text(), text()], scratch ? { options: { keepEmpty } } : {});
   add("text.joinList", "一覧の文字をつなぐ", "Join a text list", "PlainText", [
     source("PlainText"),
     text(),
@@ -556,7 +588,7 @@ export function expressionCardsFor(
         first(type),
         first(type),
       ]);
-    if (typeof type === "string" && orderedTypes.has(type)) {
+    if (typeof type === "string" && orderedTypes.has(type) || isLocalTimeDescriptor(type)) {
       for (const [op, ja, en] of [
         ["less", "より小さい", "Less than"],
         ["lessOrEqual", "以下", "At most"],
@@ -574,10 +606,18 @@ export function expressionCardsFor(
           descending ? "Sort descending" : "Sort ascending",
           list,
           [source(type)],
-          { options: { descending } },
+          { options: { descending, ...(scratch && type === "PlainText" ? { orderVersion: "unicode-scalar.v1" as const } : {}) } },
         );
     }
     add("list.length", "一覧の件数", "List length", "Number", [source(type)]);
+    if (scratch) {
+      add("list.lastOptional", "最後の項目（空なら値なし）", "Last item (empty means unset)", optionalOf(type), [source(type)]);
+      add("list.lastStrict", "最後の項目（空ならエラー）", "Last item (empty means error)", type, [source(type)]);
+      add("list.clear", "一覧を空にした値", "Create a cleared list", list, [source(type)]);
+      add("list.contains", "一覧に値があるか", "List contains a value", "Boolean", [source(type), first(type)]);
+      add("list.indexOf", "一覧で最初にある位置", "First list index of a value", indexResultType, [source(type), first(type)]);
+      add("list.search", "最初に合う項目と位置を探す", "Find the first item and its index", searchResultType(type), [source(type)], { binding: { type, outputType: "Boolean", label: label("この項目", "This item") } });
+    }
     add(
       "list.build",
       "同じ型の一覧を作る",
@@ -866,7 +906,7 @@ export function expressionCardsFor(
               : `Sort by ${key} ascending`,
             listOf(record),
             [source(record)],
-            { options: { key, descending } },
+            { options: { key, descending, ...(scratch && schema.fields[key]!.type === "PlainText" ? { orderVersion: "unicode-scalar.v1" as const } : {}) } },
           );
     }
   }
@@ -919,6 +959,7 @@ export function expressionCardsFor(
       card,
     );
   const evaluationContext = {
+    semanticProfile: context.semanticProfile,
     guildId: "000000000000000000",
     variables: Object.fromEntries(
       variables.map((variable) => [

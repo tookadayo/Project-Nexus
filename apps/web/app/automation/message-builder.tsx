@@ -15,6 +15,7 @@ import {
   type RichTextNode,
 } from "../../../../packages/automation/src/message";
 import { missing, words, type Locale } from "./model";
+import { UserInstantControl } from "./date-controls";
 
 /** Author registered data parts. Neither HTML nor arbitrary JSON is accepted. */
 export function MessageBuilder({
@@ -41,6 +42,18 @@ export function MessageBuilder({
           : { kind: "legacy", richText: [] };
   const [draft, setDraft] = useState(initial);
   const [error, setError] = useState("");
+  const invalidTimes = useRef(new Set<string>());
+  const regularError = useRef<string | null>(null);
+  const timeError = words(
+    locale,
+    "日時の入力を確認してください。秒まで入力でき、小数秒は使えません。",
+    "Check the date/time input. Minutes or seconds are accepted; fractional seconds are not.",
+  );
+  const temporalValidity = (key: string, valid: boolean) => {
+    if (valid) invalidTimes.current.delete(key);
+    else invalidTimes.current.add(key);
+    onValidity(invalidTimes.current.size ? timeError : regularError.current);
+  };
   const last = useRef(JSON.stringify(value));
   useEffect(() => {
     const next = JSON.stringify(value);
@@ -48,6 +61,8 @@ export function MessageBuilder({
       last.current = next;
       setDraft(initial());
       setError("");
+      regularError.current = null;
+      invalidTimes.current.clear();
       onValidity(null);
     }
   }, [value]); // Parent undo replaces the whole typed value.
@@ -73,7 +88,8 @@ export function MessageBuilder({
       };
       last.current = JSON.stringify(output);
       onChange(output);
-      onValidity(null);
+      regularError.current = null;
+      onValidity(invalidTimes.current.size ? timeError : null);
       setError("");
     } catch {
       const output = missing(value.type);
@@ -85,6 +101,7 @@ export function MessageBuilder({
         "Check missing fields, text limits and HTTPS links. Examples are not execution values.",
       );
       setError(message);
+      regularError.current = message;
       onValidity(message);
     }
   };
@@ -130,6 +147,7 @@ export function MessageBuilder({
               nodes={draft.richText ?? []}
               onChange={(richText) => commit({ ...draft, richText })}
               locale={locale}
+              onTimeValidity={temporalValidity}
             />
           )}
           {draft.content !== undefined && (
@@ -159,6 +177,9 @@ export function MessageBuilder({
               key={index}
               value={embed}
               locale={locale}
+              onTimeValidity={(valid) =>
+                temporalValidity(`embed-${index}`, valid)
+              }
               onChange={(next) =>
                 commit({
                   ...draft,
@@ -286,11 +307,15 @@ function RichParts({
   onChange,
   locale,
   depth = 0,
+  onTimeValidity,
+  path = "rich",
 }: {
   nodes: RichTextNode[];
   onChange: (nodes: RichTextNode[]) => void;
   locale: Locale;
   depth?: number;
+  onTimeValidity: (key: string, valid: boolean) => void;
+  path?: string;
 }) {
   const [choice, setChoice] = useState<RichTextNode["kind"]>("text");
   const patch = (index: number, node: RichTextNode) =>
@@ -365,26 +390,17 @@ function RichParts({
           )}
           {node.kind === "timestamp" && (
             <>
-              <label>
-                {words(locale, "日時（UTC）", "Date and time (UTC)")}
-                <input
-                  type="datetime-local"
-                  value={
-                    node.instant.endsWith("Z")
-                      ? node.instant.slice(0, 16)
-                      : node.instant
-                  }
-                  onChange={(e) => {
-                    const entered = e.target.value;
-                    patch(index, {
-                      ...node,
-                      instant: entered
-                        ? new Date(entered + "Z").toISOString()
-                        : "",
-                    });
-                  }}
-                />
-              </label>
+              <UserInstantControl
+                locale={locale}
+                label={words(locale, "日時（UTC）", "Date and time (UTC)")}
+                value={node.instant}
+                onValidity={(valid) =>
+                  onTimeValidity(`${path}.${index}`, valid)
+                }
+                onChange={(instant) =>
+                  patch(index, { ...node, instant: instant ?? "" })
+                }
+              />
               <label>
                 {words(locale, "日時の表示方法", "Time display format")}
                 <select
@@ -433,6 +449,8 @@ function RichParts({
               onChange={(children) => patch(index, { ...node, children })}
               locale={locale}
               depth={depth + 1}
+              onTimeValidity={onTimeValidity}
+              path={`${path}.${index}.children`}
             />
           )}
           {node.kind === "list" && (
@@ -461,6 +479,8 @@ function RichParts({
                     }
                     locale={locale}
                     depth={depth + 1}
+                    onTimeValidity={onTimeValidity}
+                    path={`${path}.${index}.items.${i}`}
                   />
                   <button
                     type="button"
@@ -565,11 +585,13 @@ function EmbedEditor({
   onChange,
   onDelete,
   locale,
+  onTimeValidity,
 }: {
   value: EmbedSpec;
   onChange: (value: EmbedSpec) => void;
   onDelete?: () => void;
   locale: Locale;
+  onTimeValidity: (valid: boolean) => void;
 }) {
   const text = (
     key: "title" | "description" | "url",
@@ -616,21 +638,13 @@ function EmbedEditor({
           }
         />
       </label>
-      <label>
-        {words(locale, "日時（UTC・任意）", "Timestamp (UTC, optional)")}
-        <input
-          type="datetime-local"
-          value={value.timestamp?.slice(0, 16) ?? ""}
-          onChange={(e) =>
-            onChange({
-              ...value,
-              timestamp: e.target.value
-                ? new Date(e.target.value + "Z").toISOString()
-                : undefined,
-            })
-          }
-        />
-      </label>
+      <UserInstantControl
+        locale={locale}
+        label={words(locale, "日時（UTC・任意）", "Timestamp (UTC, optional)")}
+        value={value.timestamp}
+        onValidity={onTimeValidity}
+        onChange={(timestamp) => onChange({ ...value, timestamp })}
+      />
       <label>
         {words(
           locale,

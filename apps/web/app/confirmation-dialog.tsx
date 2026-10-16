@@ -38,13 +38,19 @@ export function ConfirmationDialog({
       }}
       onKeyDown={(event) => {
         if (event.key !== "Tab") return;
-        const buttons = Array.from(
+        const controls = Array.from(
           event.currentTarget.querySelectorAll<HTMLElement>(
-            "button:not(:disabled),a[href],input:not(:disabled)",
+            "button,a[href],input,select,textarea,summary,[tabindex]",
           ),
-        ).filter((item) => item.getClientRects().length > 0);
-        const first = buttons[0],
-          last = buttons.at(-1);
+        ).filter(
+          (item) =>
+            item.tabIndex >= 0 &&
+            !item.matches(":disabled") &&
+            !item.closest("[hidden],[inert]") &&
+            item.getClientRects().length > 0,
+        );
+        const first = controls[0],
+          last = controls.at(-1);
         if (event.shiftKey && document.activeElement === first) {
           event.preventDefault();
           last?.focus();

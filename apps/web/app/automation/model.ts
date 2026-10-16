@@ -10,6 +10,7 @@ import type {
 import { runBuiltinDeclarations } from "../../../../packages/automation/src/builtins";
 import { registeredPairFields } from "../../../../packages/automation/src/registered-pairs";
 import { ACTION_DEFINITIONS } from "../../../../packages/automation/src/catalog";
+import { typeEquals } from "../../../../packages/automation/src/expression";
 
 export type Locale = "ja" | "en";
 export const words = (locale: Locale, ja: string, en: string) =>
@@ -19,32 +20,125 @@ export const missing = (type: ValueType): ValueInput => ({
   type,
 });
 export const uid = () => crypto.randomUUID();
-export const typeName = (type: ValueType,locale?:Locale): string => {
-  if (typeof type === "string") return type;
-  if (type.kind === "List") return `List<${typeName(type.element,locale)}>`;
-  if (type.kind === "Optional" || type.kind === "ParseResult" || type.kind === "OperationOutcome")
-    return `${type.kind==="ParseResult"?(locale==="ja"?"読み取り結果":"Parsed result"):type.kind==="OperationOutcome"?(locale==="ja"?"操作の結果":"Operation result"):type.kind}<${typeName(type.value,locale)}>`;
+/** Saved configuration only. Callers must not pass simulation or run values. */
+export function flowDefinitionDifferences(
+  before: FlowDefinition,
+  after: FlowDefinition,
+): {
+  changes: { path: string; before: string; after: string }[];
+  omitted: boolean;
+} {
+  const changes: { path: string; before: string; after: string }[] = [];
+  let omitted = false;
+  const label = (value: unknown) =>
+    value === undefined ? "—" : (JSON.stringify(value) ?? "—").slice(0, 300);
+  const compare = (a: unknown, b: unknown, path: string) => {
+    if (omitted || JSON.stringify(a) === JSON.stringify(b)) return;
+    if (
+      a &&
+      b &&
+      typeof a === "object" &&
+      typeof b === "object" &&
+      Array.isArray(a) === Array.isArray(b)
+    ) {
+      for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+        compare(
+          (a as Record<string, unknown>)[key],
+          (b as Record<string, unknown>)[key],
+          path ? `${path}.${key}` : key,
+        );
+        if (omitted) break;
+      }
+    } else if (changes.length < 100) {
+      changes.push({ path, before: label(a), after: label(b) });
+    } else omitted = true;
+  };
+  compare(before, after, "");
+  return { changes, omitted };
+}
+export const typeName = (type: ValueType, locale?: Locale): string => {
+  if (typeof type === "string") {
+    if (!locale) return type;
+    if (type === "DateOnly")
+      return words(locale, "日付（ISOカレンダー）", "Date (ISO calendar)");
+    if (type === "LocalTime")
+      return words(
+        locale,
+        "現地時刻・分（従来型）",
+        "Local time · minutes (legacy)",
+      );
+    if (type === "Instant")
+      return words(locale, "時点（UTC）", "Instant (UTC)");
+    if (type === "InstantRange")
+      return words(
+        locale,
+        "時点の範囲（従来型・空不可）",
+        "Instant range (legacy, nonempty)",
+      );
+    if (type === "LocalTimeWindowSpec")
+      return words(
+        locale,
+        "地域の時間窓（翌日を明示）",
+        "Local time window (explicit end day)",
+      );
+    return type;
+  }
+  if (type.kind === "LocalTime")
+    return locale === "ja"
+      ? `現地時刻・${type.precision === "second" ? "秒" : "分"}（精度指定）`
+      : `Local time · ${type.precision === "second" ? "seconds" : "minutes"} (explicit precision)`;
+  if (type.kind === "InstantRange")
+    return locale === "ja"
+      ? "時点の範囲（空区間も表現）"
+      : "Instant range (empty allowed)";
+  if (type.kind === "List") return `List<${typeName(type.element, locale)}>`;
+  if (
+    type.kind === "Optional" ||
+    type.kind === "ParseResult" ||
+    type.kind === "OperationOutcome"
+  )
+    return `${type.kind === "ParseResult" ? (locale === "ja" ? "読み取り結果" : "Parsed result") : type.kind === "OperationOutcome" ? (locale === "ja" ? "操作の結果" : "Operation result") : type.kind}<${typeName(type.value, locale)}>`;
   if (type.kind === "Record") {
     const pair = registeredPairFields(type);
-    if (pair) return `${locale==="ja"?"組":"Pair"}<${typeName(pair.first,locale)},${typeName(pair.second,locale)}>`;
-    const names:Record<string,[string,string]>={"nexus.group.v1":["グループ","Group"],"nexus.find-match.v1":["見つかった項目と位置","Found item and position"],"nexus.iteration-result.v1":["各回の結果","Iteration result"],"nexus.ticket.status.v1":["受付の状態","Ticket state"],MinMaxValue:["最小値と最大値","Minimum and maximum"]};
-    const name=names[type.schemaId]?.[locale==="ja"?0:1]??(locale==="ja"?"登録された記録":"Registered record");
-    return type.typeArgs?.length ? `${name}<${type.typeArgs.map(item=>typeName(item,locale)).join(",")}>` : name;
+    if (pair)
+      return `${locale === "ja" ? "組" : "Pair"}<${typeName(pair.first, locale)},${typeName(pair.second, locale)}>`;
+    const names: Record<string, [string, string]> = {
+      "nexus.group.v1": ["グループ", "Group"],
+      "nexus.find-match.v1": [
+        "見つかった項目と位置",
+        "Found item and position",
+      ],
+      "nexus.iteration-result.v1": ["各回の結果", "Iteration result"],
+      "nexus.ticket.status.v1": ["受付の状態", "Ticket state"],
+      MinMaxValue: ["最小値と最大値", "Minimum and maximum"],
+    };
+    const name =
+      names[type.schemaId]?.[locale === "ja" ? 0 : 1] ??
+      (locale === "ja" ? "登録された記録" : "Registered record");
+    return type.typeArgs?.length
+      ? `${name}<${type.typeArgs.map((item) => typeName(item, locale)).join(",")}>`
+      : name;
   }
-  return "Enum";
+  return locale
+    ? `${words(locale, "選択値", "Choice")}${type.schemaRevision ? words(locale, ` · 版${type.schemaRevision}`, ` · revision ${type.schemaRevision}`) : ""}`
+    : "Enum";
 };
-export const procedureArea = (id: string, revision: number) => `procedure:${id}@${revision}`;
-export const matchesProcedureArea = (area: string, procedure: { id: string; revision: number }) =>
-  area === procedureArea(procedure.id, procedure.revision) || area === `procedure:${procedure.id}`;
-export const sameType = (a: ValueType, b: ValueType) =>
-  JSON.stringify(a) === JSON.stringify(b);
+export const procedureArea = (id: string, revision: number) =>
+  `procedure:${id}@${revision}`;
+export const matchesProcedureArea = (
+  area: string,
+  procedure: { id: string; revision: number },
+) =>
+  area === procedureArea(procedure.id, procedure.revision) ||
+  area === `procedure:${procedure.id}`;
+export const sameType = (a: ValueType, b: ValueType) => typeEquals(a, b);
 
 export type StatementKind = Statement["kind"];
 export interface PaletteCard {
   id: string;
   ja: string;
   en: string;
-  category: "control" | "value" | "discord" | "time";
+  category: "control" | "value" | "discord" | "time" | "reuse";
   kind: StatementKind;
   operation?: ActionOperation;
   mode?: "integer" | "sample" | "shuffle";
@@ -52,7 +146,54 @@ export interface PaletteCard {
   unavailable?: boolean;
 }
 export const PALETTE: PaletteCard[] = [
-  { id:"approval", ja:"後続のロール操作の正式な承認を待つ", en:"Await formal approval for a later role action", category:"control", kind:"approval", aliases:"承認 待機 ロール formal approval role" },
+  {
+    id: "endBranch",
+    ja: "この並列の枝を終える",
+    en: "End this parallel branch",
+    category: "control",
+    kind: "endBranch",
+    aliases: "stop branch 終了 並列 枝",
+  },
+  {
+    id: "endRun",
+    ja: "子手順と並列を含め、この実行を終える",
+    en: "End this run, including child and parallel steps",
+    category: "control",
+    kind: "endRun",
+    aliases: "stop run all 終了 実行 全体",
+  },
+  {
+    id: "searchBranch",
+    ja: "検索で見つかったときだけ位置を使う",
+    en: "Use a position only when a search finds it",
+    category: "control",
+    kind: "searchBranch",
+    aliases: "find index search 検索 位置 見つかった not_found",
+  },
+  {
+    id: "while",
+    ja: "条件が成立する間、上限つきで繰り返す",
+    en: "Repeat while true, with bounds",
+    category: "control",
+    kind: "boundedLoop",
+    aliases: "while 条件 反復 ループ 上限",
+  },
+  {
+    id: "until",
+    ja: "条件が成立するまで、上限つきで繰り返す",
+    en: "Repeat until true, with bounds",
+    category: "control",
+    kind: "boundedLoop",
+    aliases: "until 条件 反復 ループ 上限",
+  },
+  {
+    id: "approval",
+    ja: "後続のロール操作の正式な承認を待つ",
+    en: "Await formal approval for a later role action",
+    category: "control",
+    kind: "approval",
+    aliases: "承認 待機 ロール formal approval role",
+  },
   {
     id: "resultBranch",
     ja: "読み取り・操作の結果で分ける",
@@ -75,7 +216,7 @@ export const PALETTE: PaletteCard[] = [
     en: "Branch by condition",
     category: "control",
     kind: "branch",
-    aliases: "もし if 条件 不明",
+    aliases: "もし if elif else それ以外でもし 条件 不明",
   },
   {
     id: "repeat",
@@ -259,7 +400,7 @@ export const PALETTE: PaletteCard[] = [
     id: "call",
     ja: "共通手順を呼ぶ",
     en: "Call a procedure",
-    category: "control",
+    category: "reuse",
     kind: "call",
     aliases: "共通 再利用 procedure call",
   },
@@ -267,7 +408,7 @@ export const PALETTE: PaletteCard[] = [
     id: "return",
     ja: "手順の結果を返す",
     en: "Return procedure results",
-    category: "control",
+    category: "reuse",
     kind: "return",
     aliases: "戻り値 return 結果",
   },
@@ -284,6 +425,7 @@ export const PALETTE: PaletteCard[] = [
 export function createDraft(guildId: string, locale: Locale): FlowDefinition {
   return {
     schemaVersion: 1,
+    semanticProfile: "scratch.v1",
     id: uid(),
     guildId,
     name: words(locale, "新しい自動化", "New automation"),
@@ -301,6 +443,34 @@ const variable = (name: string, type: ValueType): VariableDeclaration => ({
 export function createStatement(card: PaletteCard, locale: Locale): Statement {
   const id = uid();
   switch (card.kind) {
+    case "endBranch":
+      return { id, kind: "endBranch", semanticVersion: 1 };
+    case "endRun":
+      return { id, kind: "endRun", semanticVersion: 1 };
+    case "searchBranch":
+      return {
+        id,
+        kind: "searchBranch",
+        value: missing({ kind: "Record", schemaId: "nexus.index-result.v1" }),
+        index: variable(
+          words(locale, "見つかった位置", "Found position"),
+          "Number",
+        ),
+        found: [],
+        notFound: [],
+      };
+    case "boundedLoop":
+      return {
+        id,
+        kind: "boundedLoop",
+        semanticVersion: 1,
+        mode: card.id === "until" ? "until" : "while",
+        maxBody: missing("Number"),
+        until: missing("Instant"),
+        condition: missing("Boolean"),
+        body: [],
+        handlers: {},
+      };
     case "branch":
       return {
         id,
@@ -312,18 +482,33 @@ export function createStatement(card: PaletteCard, locale: Locale): Statement {
       };
     case "resultBranch":
       return {
-        id, kind: "resultBranch",
+        id,
+        kind: "resultBranch",
         value: missing({ kind: "ParseResult", value: "Number" }),
-        output: variable(words(locale, "成功した値", "Successful value"), "Number"),
-        reason: variable(words(locale, "確認した終了理由", "Verified reason"), "PlainText"),
-        succeeded: [], failed: [], notStarted: [], unknown: [],
+        output: variable(
+          words(locale, "成功した値", "Successful value"),
+          "Number",
+        ),
+        reason: variable(
+          words(locale, "確認した終了理由", "Verified reason"),
+          "PlainText",
+        ),
+        succeeded: [],
+        failed: [],
+        notStarted: [],
+        unknown: [],
       };
     case "optionalBranch":
       return {
-        id, kind: "optionalBranch",
+        id,
+        kind: "optionalBranch",
         value: missing({ kind: "Optional", value: "Number" }),
-        output: variable(words(locale, "見つかった値", "Present value"), "Number"),
-        present: [], unset: [],
+        output: variable(
+          words(locale, "見つかった値", "Present value"),
+          "Number",
+        ),
+        present: [],
+        unset: [],
       };
     case "repeat":
       return {
@@ -350,7 +535,15 @@ export function createStatement(card: PaletteCard, locale: Locale): Statement {
     case "wait":
       return { id, kind: "wait", duration: missing("Duration") };
     case "approval":
-      return {id,kind:"approval",actionId:"",until:missing("Instant"),approved:[],rejected:[],expired:[]};
+      return {
+        id,
+        kind: "approval",
+        actionId: "",
+        until: missing("Instant"),
+        approved: [],
+        rejected: [],
+        expired: [],
+      };
     case "poll":
       return {
         id,
@@ -483,24 +676,140 @@ export interface TreeBranch {
   body: Statement[];
 }
 export function branches(statement: Statement): TreeBranch[] {
-  if(statement.kind==="approval") return [
-    {key:"approved",ja:"正式に承認されたとき",en:"When formally approved",body:statement.approved},
-    {key:"rejected",ja:"拒否されたとき",en:"When rejected",body:statement.rejected},
-    {key:"expired",ja:"承認の期限を迎えたとき",en:"When approval expires",body:statement.expired},
-  ];
-  if (statement.kind === "resultBranch") {
-    const isOperation = typeof statement.value.type === "object" && statement.value.type.kind === "OperationOutcome";
+  if (statement.kind === "searchBranch")
     return [
-      { key: "succeeded", ja: "確認済み成功のとき", en: "When success is confirmed", body: statement.succeeded },
-      { key: "failed", ja: "確認済み失敗のとき", en: "When failure is confirmed", body: statement.failed },
-      ...(isOperation || statement.notStarted.length ? [{ key: "notStarted", ja: "未開始のとき", en: "When not started", body: statement.notStarted }] : []),
-      ...(isOperation || statement.unknown.length ? [{ key: "unknown", ja: "結果を確認できないとき", en: "When the result is unknown", body: statement.unknown }] : []),
+      {
+        key: "found",
+        ja: "見つかったとき（位置を使用可能）",
+        en: "When found (position available)",
+        body: statement.found,
+      },
+      {
+        key: "notFound",
+        ja: "見つからなかったとき",
+        en: "When not found",
+        body: statement.notFound,
+      },
+    ];
+  if (statement.kind === "boundedLoop")
+    return [
+      {
+        key: "body",
+        ja: "条件が継続するときの本文",
+        en: "Body while the condition continues",
+        body: statement.body,
+      },
+      ...(
+        [
+          [
+            "limit",
+            "上限到達 → この実行を非成功で終える",
+            "Limit reached → end this run without success",
+          ],
+          [
+            "conditionUnknown",
+            "条件不明 → この実行を非成功で終える",
+            "Condition unknown → end this run without success",
+          ],
+          [
+            "evaluationError",
+            "評価失敗 → この実行を非成功で終える",
+            "Evaluation failed → end this run without success",
+          ],
+          [
+            "localDeadline",
+            "局所期限 → 純粋な処理で実行を終える",
+            "Local deadline → end this run with pure steps",
+          ],
+        ] as const
+      ).flatMap(([reason, ja, en]) =>
+        statement.handlers[reason]
+          ? [
+              {
+                key: `handler:${reason}`,
+                ja,
+                en,
+                body: statement.handlers[reason]!,
+              },
+            ]
+          : [],
+      ),
+    ];
+  if (statement.kind === "approval")
+    return [
+      {
+        key: "approved",
+        ja: "正式に承認されたとき",
+        en: "When formally approved",
+        body: statement.approved,
+      },
+      {
+        key: "rejected",
+        ja: "拒否されたとき",
+        en: "When rejected",
+        body: statement.rejected,
+      },
+      {
+        key: "expired",
+        ja: "承認の期限を迎えたとき",
+        en: "When approval expires",
+        body: statement.expired,
+      },
+    ];
+  if (statement.kind === "resultBranch") {
+    const isOperation =
+      typeof statement.value.type === "object" &&
+      statement.value.type.kind === "OperationOutcome";
+    return [
+      {
+        key: "succeeded",
+        ja: "確認済み成功のとき",
+        en: "When success is confirmed",
+        body: statement.succeeded,
+      },
+      {
+        key: "failed",
+        ja: "確認済み失敗のとき",
+        en: "When failure is confirmed",
+        body: statement.failed,
+      },
+      ...(isOperation || statement.notStarted.length
+        ? [
+            {
+              key: "notStarted",
+              ja: "未開始のとき",
+              en: "When not started",
+              body: statement.notStarted,
+            },
+          ]
+        : []),
+      ...(isOperation || statement.unknown.length
+        ? [
+            {
+              key: "unknown",
+              ja: "結果を確認できないとき",
+              en: "When the result is unknown",
+              body: statement.unknown,
+            },
+          ]
+        : []),
     ];
   }
-  if (statement.kind === "optionalBranch") return [
-    { key: "present", ja: "値があるとき", en: "When a value is present", body: statement.present },
-    { key: "unset", ja: "値がないとき", en: "When no value is present", body: statement.unset },
-  ];
+  if (statement.kind === "optionalBranch")
+    return [
+      {
+        key: "present",
+        ja: "値があるとき",
+        en: "When a value is present",
+        body: statement.present,
+      },
+      {
+        key: "unset",
+        ja: "値がないとき",
+        en: "When no value is present",
+        body: statement.unset,
+      },
+    ];
   if (statement.kind === "poll" || statement.kind === "awaitEvent")
     return [
       {
@@ -586,6 +895,71 @@ export interface NodeLocation {
   branch: string;
   ancestors: Statement[];
 }
+
+export type ConditionClause = Extract<Statement, { kind: "branch" }>;
+/** A view over the existing tree. Reading it never rewrites unknown branches or IDs. */
+export function conditionChain(first: ConditionClause): ConditionClause[] {
+  const clauses = [first];
+  let current = first;
+  while (
+    current.otherwise.length === 1 &&
+    current.otherwise[0]?.kind === "branch"
+  ) {
+    current = current.otherwise[0];
+    clauses.push(current);
+  }
+  return clauses;
+}
+export function conditionChainRoot(
+  definition: FlowDefinition,
+  id: string,
+): ConditionClause | undefined {
+  const found = locate(definition, id);
+  if (found?.statement.kind !== "branch") return undefined;
+  let root = found.statement;
+  for (const ancestor of [...found.ancestors].reverse()) {
+    if (
+      ancestor.kind !== "branch" ||
+      ancestor.otherwise.length !== 1 ||
+      ancestor.otherwise[0]?.id !== root.id
+    )
+      break;
+    root = ancestor;
+  }
+  return root;
+}
+/** Reordering moves each condition, true body and its own unknown body together. */
+export function editConditionChain(
+  definition: FlowDefinition,
+  rootId: string,
+  action:
+    | { kind: "add"; clause: ConditionClause }
+    | { kind: "move"; index: number; direction: -1 | 1 }
+    | { kind: "remove"; index: number },
+): FlowDefinition {
+  return updateDefinition(definition, (next) => {
+    const location = locate(next, rootId);
+    if (location?.statement.kind !== "branch") return;
+    const clauses = conditionChain(location.statement);
+    const finalElse = clauses.at(-1)!.otherwise;
+    if (action.kind === "add") clauses.push(action.clause);
+    else if (action.kind === "remove") {
+      if (clauses.length <= 1 || !clauses[action.index]) return;
+      clauses.splice(action.index, 1);
+    } else {
+      const target = action.index + action.direction;
+      if (!clauses[action.index] || !clauses[target]) return;
+      [clauses[action.index], clauses[target]] = [
+        clauses[target]!,
+        clauses[action.index]!,
+      ];
+    }
+    for (let index = clauses.length - 1; index >= 0; index--)
+      clauses[index]!.otherwise =
+        index === clauses.length - 1 ? finalElse : [clauses[index + 1]!];
+    location.siblings[location.index] = clauses[0]!;
+  });
+}
 export function locate(
   definition: FlowDefinition,
   id: string,
@@ -614,7 +988,12 @@ export function locate(
     visit(definition.detached ?? [], undefined, "detached", []) ??
     definition.procedures
       ?.map((procedure) =>
-        visit(procedure.body, undefined, procedureArea(procedure.id, procedure.revision), []),
+        visit(
+          procedure.body,
+          undefined,
+          procedureArea(procedure.id, procedure.revision),
+          [],
+        ),
       )
       .find(Boolean)
   );
@@ -628,8 +1007,8 @@ export function childList(
     return branch === "detached"
       ? (definition.detached ??= [])
       : branch.startsWith("procedure:")
-        ? definition.procedures?.find(
-            (procedure) => matchesProcedureArea(branch, procedure),
+        ? definition.procedures?.find((procedure) =>
+            matchesProcedureArea(branch, procedure),
           )?.body
         : definition.body;
   const parent = locate(definition, parentId)?.statement;
@@ -646,21 +1025,49 @@ export function updateDefinition(
   return next;
 }
 export function cloneStatement(statement: Statement): Statement {
-  const cloned = structuredClone(statement),
-    ids = new Map<string, string>();
+  const cloned = structuredClone(statement);
+  const nodeIds = new Map<string, string>(),
+    variableIds = new Map<string, string>();
+  // Branch IDs belong to their own parallel block; equal names in another block are legal.
+  const branchIds = new Map<string, Map<string, string>>();
+  const usedVariables = new Set<string>();
+  const allocate = (
+    ids: Map<string, string>,
+    source: string,
+    namespace: string,
+  ) => {
+    if (ids.has(source)) throw new Error(`CLONE_DUPLICATE_${namespace}_ID`);
+    const next = uid();
+    if ([...ids.values()].includes(next))
+      throw new Error(`CLONE_DUPLICATE_${namespace}_ID`);
+    ids.set(source, next);
+    return next;
+  };
+  const declaration = (value: VariableDeclaration) => {
+    const id = allocate(variableIds, value.id, "VARIABLE");
+    usedVariables.add(id);
+  };
   const collect = (node: Statement) => {
-    ids.set(node.id, uid());
-    if (node.kind === "parallel")
-      for (const branch of node.branches) ids.set(branch.id, uid());
-    if (node.kind === "declare") ids.set(node.variable.id, uid());
-    if (node.kind === "resultBranch") {
-      ids.set(node.output.id, uid());
-      if (node.reason) ids.set(node.reason.id, uid());
+    allocate(nodeIds, node.id, "NODE");
+    if (node.kind === "parallel") {
+      const ids = new Map<string, string>();
+      for (const branch of node.branches) allocate(ids, branch.id, "BRANCH");
+      branchIds.set(node.id, ids);
     }
-    if (node.kind === "optionalBranch") ids.set(node.output.id, uid());
+    if (node.kind === "declare") declaration(node.variable);
+    if (node.kind === "resultBranch") {
+      declaration(node.output);
+      if (node.reason) declaration(node.reason);
+    }
+    if (node.kind === "optionalBranch") declaration(node.output);
+    if (node.kind === "searchBranch") {
+      declaration(node.index);
+      if (node.output) declaration(node.output);
+    }
+    if (node.kind === "boundedLoop" && node.reason) declaration(node.reason);
     if (node.kind === "action") {
-      if (node.output) ids.set(node.output.id, uid());
-      if (node.outcome) ids.set(node.outcome.id, uid());
+      if (node.output) declaration(node.output);
+      if (node.outcome) declaration(node.outcome);
     }
     if (
       node.kind === "random" ||
@@ -668,48 +1075,108 @@ export function cloneStatement(statement: Statement): Statement {
       node.kind === "poll" ||
       node.kind === "awaitEvent"
     )
-      ids.set(node.output.id, uid());
+      declaration(node.output);
     if (node.kind === "repeat") {
-      ids.set(node.itemVariable.id, uid());
-      if (node.indexVariable) ids.set(node.indexVariable.id, uid());
-      for(const result of node.results??[]) ids.set(result.output.id,uid());
+      declaration(node.itemVariable);
+      if (node.indexVariable) declaration(node.indexVariable);
+      for (const result of node.results ?? []) declaration(result.output);
     }
-    if(node.kind==="call") for(const output of Object.values(node.outputs)) ids.set(output.id,uid());
-    for (const branch of branches(node))
-      for (const child of branch.body) collect(child);
+    if (node.kind === "call") Object.values(node.outputs).forEach(declaration);
+    for (const branch of branches(node)) branch.body.forEach(collect);
   };
   collect(cloned);
-  const collectBindings=(value:unknown):void=>{
-    if(Array.isArray(value)){value.forEach(collectBindings);return;}
-    if(!value||typeof value!=="object")return;
-    const object=value as Record<string,unknown>;
-    if(object.kind==="literal")return;
-    if(object.kind==="expression"){
-      const expression=object.expression as {options?:{bindingId?:string}}|undefined;
-      const binding=expression?.options?.bindingId;
-      if(binding&&!ids.has(binding))ids.set(binding,uid());
-    }
-    Object.values(object).forEach(collectBindings);
+
+  const input = (
+    value: ValueInput,
+    bindings: ReadonlyMap<string, string>,
+  ): ValueInput => {
+    if (value.kind === "literal" || value.kind === "missing") return value;
+    if (value.kind === "variable")
+      return {
+        ...value,
+        variableId:
+          bindings.get(value.variableId) ??
+          variableIds.get(value.variableId) ??
+          value.variableId,
+      };
+    const expression = value.expression;
+    const options = expression.options ? { ...expression.options } : undefined;
+    if (options?.bindingId) {
+      if (bindings.has(options.bindingId))
+        throw new Error("CLONE_DUPLICATE_BINDING_ID");
+      const fresh = uid();
+      if (usedVariables.has(fresh))
+        throw new Error("CLONE_DUPLICATE_BINDING_ID");
+      usedVariables.add(fresh);
+      const bodyBindings = new Map(bindings).set(options.bindingId, fresh);
+      options.bindingId = fresh;
+      if (options.body) options.body = input(options.body, bodyBindings);
+    } else if (options?.body) options.body = input(options.body, bindings);
+    // A list binding starts in the expression body, never in its source arguments.
+    return {
+      ...value,
+      expression: {
+        ...expression,
+        args: expression.args.map((arg) => input(arg, bindings)),
+        ...(options ? { options } : {}),
+      },
+    };
   };
-  collectBindings(cloned);
   const rewrite = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(rewrite);
-    if (value && typeof value === "object") {
-      const object=value as Record<string,unknown>;
-      if(object.kind==="literal")return value;
-      return Object.fromEntries(
-        Object.entries(value).map(([key, item]) => [
-          key,
-          typeof item === "string" &&
-          ["id", "variableId", "branchId", "actionId", "bindingId"].includes(key)
-            ? (ids.get(item) ?? item)
-            : object.kind==="parallel"&&key==="outputs"&&item&&typeof item==="object"&&!Array.isArray(item)
-              ? Object.fromEntries(Object.entries(item).map(([id,mapping])=>[ids.get(id)??id,rewrite(mapping)]))
-            : rewrite(item),
-        ]),
-      );
+    if (!value || typeof value !== "object") return value;
+    const object = value as Record<string, unknown>;
+    if (
+      ["literal", "missing", "variable", "expression"].includes(
+        String(object.kind),
+      )
+    )
+      return input(value as ValueInput, new Map());
+    if (object.kind === "parallel") {
+      const node = object as unknown as Extract<
+        Statement,
+        { kind: "parallel" }
+      >;
+      const ids = branchIds.get(node.id)!;
+      return {
+        ...node,
+        id: nodeIds.get(node.id)!,
+        branches: node.branches.map((branch) => ({
+          ...branch,
+          id: ids.get(branch.id)!,
+          body: branch.body.map(rewrite),
+          ...(branch.outputs ? { outputs: rewrite(branch.outputs) } : {}),
+        })),
+        ...(node.outputs
+          ? {
+              outputs: Object.fromEntries(
+                Object.entries(node.outputs).map(([id, mapping]) => [
+                  variableIds.get(id) ?? id,
+                  {
+                    ...mapping,
+                    branchId: ids.get(mapping.branchId) ?? mapping.branchId,
+                  },
+                ]),
+              ),
+            }
+          : {}),
+      };
     }
-    return value;
+    const result = Object.fromEntries(
+      Object.entries(object).map(([key, child]) => [key, rewrite(child)]),
+    );
+    if (typeof object.id === "string") {
+      if (typeof object.kind === "string" && nodeIds.has(object.id))
+        result.id = nodeIds.get(object.id);
+      else if ("type" in object && "name" in object)
+        result.id = variableIds.get(object.id) ?? object.id;
+    }
+    if (object.kind === "assign" && typeof object.variableId === "string")
+      result.variableId =
+        variableIds.get(object.variableId) ?? object.variableId;
+    if (object.kind === "approval" && typeof object.actionId === "string")
+      result.actionId = nodeIds.get(object.actionId) ?? object.actionId;
+    return result;
   };
   return rewrite(cloned) as Statement;
 }
@@ -768,14 +1235,15 @@ export function availableVariables(
         ...("inputs" in definition.trigger ? definition.trigger.inputs : []),
       ];
   const append = (node: Statement) => {
-    if(node.enabled===false)return;
+    if (node.enabled === false) return;
     if (node.kind === "declare") result.push(node.variable);
     if (node.kind === "readClock" || node.kind === "random")
       result.push(node.output);
     if (node.kind === "action" && node.output) result.push(node.output);
     if (node.kind === "action" && node.outcome) result.push(node.outcome);
     if (node.kind === "call") result.push(...Object.values(node.outputs));
-    if(node.kind==="repeat") result.push(...(node.results??[]).map(item=>item.output));
+    if (node.kind === "repeat")
+      result.push(...(node.results ?? []).map((item) => item.output));
   };
   if (found) {
     let list = procedure?.body ?? definition.body;
@@ -796,6 +1264,16 @@ export function availableVariables(
           ),
       );
       if (
+        ancestor.kind === "boundedLoop" &&
+        enteredBranch?.key.startsWith("handler:") &&
+        ancestor.reason
+      )
+        result.push(ancestor.reason);
+      if (ancestor.kind === "searchBranch" && enteredBranch?.key === "found") {
+        result.push(ancestor.index);
+        if (ancestor.output) result.push(ancestor.output);
+      }
+      if (
         (ancestor.kind === "poll" &&
           ["matched", "exhausted"].includes(enteredBranch?.key ?? "")) ||
         (ancestor.kind === "awaitEvent" && enteredBranch?.key === "matched")
@@ -805,7 +1283,11 @@ export function availableVariables(
         if (enteredBranch?.key === "succeeded") result.push(ancestor.output);
         else if (ancestor.reason && enteredBranch) result.push(ancestor.reason);
       }
-      if (ancestor.kind === "optionalBranch" && enteredBranch?.key === "present") result.push(ancestor.output);
+      if (
+        ancestor.kind === "optionalBranch" &&
+        enteredBranch?.key === "present"
+      )
+        result.push(ancestor.output);
       list = enteredBranch?.body ?? [];
     }
     for (const node of found.siblings) {
@@ -820,20 +1302,43 @@ export function availableVariables(
 }
 
 /** Add the required adjacent result consumer as one reversible editor change. */
-export function captureActionOutcome(definition:FlowDefinition,actionId:string,locale:Locale):FlowDefinition {
-  return updateDefinition(definition,next=>{
-    const location=locate(next,actionId);
-    const action=location?.statement;
-    if(!location||action?.kind!=="action"||action.outcome)return;
-    const successType=ACTION_DEFINITIONS[action.operation].outputType??"Boolean";
-    const output=action.output??{id:uid(),name:words(locale,"成功した値","Successful value"),type:successType};
-    const outcome:VariableDeclaration={id:uid(),name:words(locale,"確認した操作結果","Verified operation outcome"),type:{kind:"OperationOutcome",value:successType}};
+export function captureActionOutcome(
+  definition: FlowDefinition,
+  actionId: string,
+  locale: Locale,
+): FlowDefinition {
+  return updateDefinition(definition, (next) => {
+    const location = locate(next, actionId);
+    const action = location?.statement;
+    if (!location || action?.kind !== "action" || action.outcome) return;
+    const successType =
+      ACTION_DEFINITIONS[action.operation].outputType ?? "Boolean";
+    const output = action.output ?? {
+      id: uid(),
+      name: words(locale, "成功した値", "Successful value"),
+      type: successType,
+    };
+    const outcome: VariableDeclaration = {
+      id: uid(),
+      name: words(locale, "確認した操作結果", "Verified operation outcome"),
+      type: { kind: "OperationOutcome", value: successType },
+    };
     delete action.output;
-    action.outcome=outcome;
-    location.siblings.splice(location.index+1,0,{
-      id:uid(),kind:"resultBranch",value:{kind:"variable",type:outcome.type,variableId:outcome.id},output,
-      reason:{id:uid(),name:words(locale,"操作の終了理由","Operation reason"),type:"PlainText"},
-      succeeded:[],failed:[],notStarted:[],unknown:[],
+    action.outcome = outcome;
+    location.siblings.splice(location.index + 1, 0, {
+      id: uid(),
+      kind: "resultBranch",
+      value: { kind: "variable", type: outcome.type, variableId: outcome.id },
+      output,
+      reason: {
+        id: uid(),
+        name: words(locale, "操作の終了理由", "Operation reason"),
+        type: "PlainText",
+      },
+      succeeded: [],
+      failed: [],
+      notStarted: [],
+      unknown: [],
     });
   });
 }

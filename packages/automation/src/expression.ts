@@ -17,7 +17,11 @@ import {
   validateTemporalValue,
 } from "./temporal-values";
 import { structuredRecordSchema, reservedStructuredSchema, validStructuredRecordValue,
-  groupRecordType, findMatchType, mappingKeyType, stableListKey } from "./structured-values";
+  groupRecordType, findMatchType, mappingKeyType, stableListKey, indexResultType, searchResultType, INDEX_RESULT_SCHEMA, SEARCH_RESULT_SCHEMA } from "./structured-values";
+import { assertScratchComparable, assertScratchOrdered, scratchEqualityKey, scratchOrder } from "./scratch-comparison";
+import { isLocalTimeDescriptor, isInstantRangeV2Type, parseLocalTimeForPrecision } from "./temporal-types";
+import { assertUnicodeScalarText, splitGraphemes, transformPinnedText, findGraphemeText } from "./scratch-unicode";
+import { scratchRound, scratchDecimalRound, scratchModulo, scratchMath, scratchMathAvailable, SCRATCH_TRANSCENDENTAL_WORK } from "./scratch-numeric";
 import {
   renderRichText,
   escapeMarkdown,
@@ -97,6 +101,9 @@ export function automationLimits(
 export function typeEquals(a: ValueType, b: ValueType): boolean {
   if (typeof a === "string" || typeof b === "string") return a === b;
   if (a.kind !== b.kind) return false;
+  if (a.kind === "LocalTime" && b.kind === "LocalTime")
+    return isLocalTimeDescriptor(a) && isLocalTimeDescriptor(b) && a.schemaId === b.schemaId && a.precision === b.precision;
+  if (a.kind === "InstantRange" && b.kind === "InstantRange") return isInstantRangeV2Type(a) && isInstantRangeV2Type(b);
   if (a.kind === "List" && b.kind === "List")
     return typeEquals(a.element, b.element);
   if (a.kind === "Optional" && b.kind === "Optional")
@@ -109,11 +116,15 @@ export function typeEquals(a: ValueType, b: ValueType): boolean {
   return (
     a.kind === "Enum" &&
     b.kind === "Enum" &&
+    a.schemaId === b.schemaId &&
+    a.schemaRevision === b.schemaRevision &&
     a.values.length === b.values.length &&
     a.values.every((v, i) => v === b.values[i])
   );
 }
 export function typeLabel(type: ValueType): string {
+  if (isLocalTimeDescriptor(type)) return `LocalTime<${type.precision};${type.schemaId}>`;
+  if (isInstantRangeV2Type(type)) return "InstantRange<v2>";
   return typeof type === "string"
     ? type
     : type.kind === "List"
@@ -128,6 +139,14 @@ export function typeLabel(type: ValueType): string {
 }
 function fail(code: string, message: string): never {
   throw new AutomationValueError(code, message);
+}
+function scratchOperation<T>(operation: () => T): T {
+  try { return operation(); }
+  catch (error) {
+    if (error instanceof Error && "code" in error && typeof error.code === "string")
+      return fail(error.code, error.message);
+    throw error;
+  }
 }
 function assertResultEvidence(type: ValueType, value: JsonValue, provenance: Provenance[], context: EvaluationContext): void {
   if (typeof type === "string") return;
@@ -215,13 +234,21 @@ function assertConstructible(
 export function assertValueMatchesType(
   type: ValueType,
   value: JsonValue,
-  context: Pick<EvaluationContext, "guildId" | "recordSchemas" | "limits">,
+  context: Pick<EvaluationContext, "guildId" | "recordSchemas" | "limits" | "semanticProfile" | "temporalResolution" | "fixedTemporalValues">,
   depth = 0,
 ): void {
   const limits = automationLimits(context.limits);
   if (depth > limits.maxNesting)
     fail("VALUE_DEPTH", "The value is too deeply nested.");
   if (typeof type === "object") {
+    if (type.kind === "LocalTime") {
+      if (!isLocalTimeDescriptor(type) || typeof value !== "string") fail("TIME_SCHEMA", "Choose a registered local-time schema and precision.");
+      parseLocalTimeForPrecision(value as string, type.precision); return;
+    }
+    if (type.kind === "InstantRange") {
+      if (!isInstantRangeV2Type(type)) fail("TEMPORAL_SCHEMA", "Choose the registered instant-range schema.");
+      validateTemporalValue(type, value, context); return;
+    }
     if (type.kind === "ParseResult" || type.kind === "OperationOutcome") {
       if (type.kind === "ParseResult" && !isParseTarget(type.value)) fail("PARSE_TYPE", "Choose a registered strict conversion target.");
       if (!plainObject(value) || !["SUCCEEDED", "FAILED", ...(type.kind === "OperationOutcome" ? ["NOT_STARTED", "UNKNOWN"] : [])].includes(String(value.state)))
@@ -261,6 +288,9 @@ export function assertValueMatchesType(
       return;
     }
     if (type.kind === "Enum") {
+      if ((type.schemaId === undefined) !== (type.schemaRevision === undefined) ||
+          type.schemaId !== undefined && (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(type.schemaId) || !Number.isSafeInteger(type.schemaRevision) || type.schemaRevision! < 1))
+        fail("ENUM_SCHEMA", "A choice domain needs a stable schema identifier and positive fixed revision together.");
       if (typeof value !== "string" || !type.values.includes(value))
         fail("ENUM", "Choose a registered choice.");
       return;
@@ -286,7 +316,8 @@ export function assertValueMatchesType(
     case "ZonedDateTimeSpec":
     case "DateRange":
     case "InstantRange":
-      validateTemporalValue(type, value);
+    case "LocalTimeWindowSpec":
+      validateTemporalValue(type, value, context);
       break;
     case "Number":
       assertFiniteNumber(value);
@@ -322,6 +353,8 @@ export function assertValueMatchesType(
         Array.from(value).length > limits.maxTextLength
       )
         fail("TEXT_SIZE", "The text exceeds the permitted size.");
+      if (type === "PlainText" && context.semanticProfile === "scratch.v1")
+        scratchOperation(() => assertUnicodeScalarText(value as string));
       break;
     case "DateOnly":
       if (typeof value !== "string" || parseDateOnly(value) !== value)
@@ -485,6 +518,14 @@ const pureOperators = new Set([
   "instant.difference",
   "duration.build",
   "pure.call",
+  "number.modulo", "number.roundInteger", "number.roundDecimal", "number.math", "number.truncate",
+  "condition.fromBoolean", "text.letter", "text.find", "text.normalize", "text.caseFold", "text.lineEndings",
+  "list.clear", "list.contains", "list.indexOf", "list.search", "list.lastOptional", "list.lastStrict",
+]);
+const scratchOperators = new Set([
+  "number.modulo", "number.roundInteger", "number.roundDecimal", "number.math", "number.truncate",
+  "condition.fromBoolean", "text.letter", "text.find", "text.normalize", "text.caseFold", "text.lineEndings",
+  "list.clear", "list.contains", "list.indexOf", "list.search", "list.lastOptional", "list.lastStrict",
 ]);
 export const EXPRESSION_OPERATORS = [...pureOperators];
 export interface ExpressionValidationContext extends EvaluationContext {
@@ -529,6 +570,9 @@ export function validateValueInput(
   }
   const exp = input.expression,
     args = exp.args;
+  const scratch = context.semanticProfile === "scratch.v1";
+  if (!scratch && scratchOperators.has(exp.operator))
+    fail("SEMANTIC_PROFILE", "Choose the Scratch semantic profile in a new revision before using this operation.");
   if (!pureOperators.has(exp.operator))
     fail(
       "PURE_EFFECT",
@@ -536,7 +580,19 @@ export function validateValueInput(
     );
   if (exp.options) {
     const allowed =
-      exp.operator === "rich.wrap"
+      exp.operator === "number.roundInteger" || exp.operator === "number.roundDecimal"
+        ? ["roundingMode"]
+        : exp.operator === "number.math"
+          ? ["mathFunction"]
+        : exp.operator === "text.replace" && scratch
+          ? ["replaceMode"]
+        : exp.operator === "text.split" && scratch
+          ? ["keepEmpty"]
+        : exp.operator === "text.normalize"
+          ? ["normalization"]
+        : exp.operator === "text.lineEndings"
+          ? ["lineEnding"]
+        : exp.operator === "rich.wrap"
         ? ["format"]
         : exp.operator === "value.parse"
           ? ["conversion"]
@@ -551,6 +607,7 @@ export function validateValueInput(
                   "list.all",
                   "list.find",
                   "list.findResult",
+                  "list.search",
                 ].includes(exp.operator)
               ? ["bindingId", "body"]
               : exp.operator === "duration.build"
@@ -565,7 +622,7 @@ export function validateValueInput(
                         "list.union",
                         "list.group",
                       ].includes(exp.operator)
-                    ? ["key", "descending"]
+                    ? ["key", "descending", ...(scratch && exp.operator === "list.sort" ? ["orderVersion"] : [])]
                     : [];
     if (Object.keys(exp.options).some((key) => !allowed.includes(key)))
       fail(
@@ -579,7 +636,7 @@ export function validateValueInput(
     second = args[1]?.type;
   let output: ValueType;
   if (isTemporalOperator(exp.operator)) {
-    output = temporalSignature(exp.operator, args.map((argument) => argument.type)).output;
+    output = temporalSignature(exp.operator, args.map((argument) => argument.type), input.type).output;
   } else if (exp.operator === "rich.text") {
     arity(args, 1);
     requireType(first!, "PlainText");
@@ -615,6 +672,21 @@ export function validateValueInput(
     requireType(first!, "RichTextSpec");
     requireType(second!, { kind: "List", element: "EmbedSpec" });
     output = "LegacyMessageSpec";
+  } else if (["number.modulo", "number.roundInteger", "number.roundDecimal", "number.math", "number.truncate"].includes(exp.operator)) {
+    arity(args, exp.operator === "number.modulo" || exp.operator === "number.roundDecimal" ? 2 : 1);
+    args.forEach(argument => requireType(argument.type, "Number"));
+    if (exp.operator === "number.roundInteger" || exp.operator === "number.roundDecimal") {
+      if (!["tiesAwayFromZero", "tiesTowardPositiveInfinity"].includes(exp.options?.roundingMode ?? ""))
+        fail("ROUND_MODE", "Choose an explicit halfway rounding rule.");
+      if (exp.operator === "number.roundDecimal" && args[1]?.kind === "literal" &&
+          (!Number.isSafeInteger(args[1].value) || Math.abs(args[1].value as number) > 308))
+        fail("PrecisionRangeError", "Choose an integer decimal precision between -308 and 308.");
+    }
+    if (exp.operator === "number.math" && (!exp.options?.mathFunction || !scratchMathAvailable(exp.options.mathFunction)))
+      fail("NumericCertificationUnavailable", "This mathematical function has not passed its numeric certification gate.");
+    if (exp.operator === "number.modulo" && args[1]?.kind === "literal" && args[1].value === 0)
+      fail("DIVIDE_BY_ZERO", "You cannot divide by zero.");
+    output = "Number";
   } else if (numberBinary.has(exp.operator)) {
     arity(args, 2);
     args.forEach((arg) => requireType(arg.type, "Number"));
@@ -635,7 +707,11 @@ export function validateValueInput(
   } else if (comparisons.has(exp.operator)) {
     arity(args, 2);
     requireType(first!, second!);
-    if (
+    if (scratch) {
+      scratchOperation(() => assertScratchComparable(first!, type => schemaFor(type, context), limits.maxNesting));
+      if (!["compare.equal", "compare.notEqual"].includes(exp.operator))
+        scratchOperation(() => assertScratchOrdered(first!));
+    } else if (
       !["compare.equal", "compare.notEqual"].includes(exp.operator) &&
       ![
         "Number",
@@ -644,10 +720,12 @@ export function validateValueInput(
         "Instant",
         "LocalTime",
         "PlainText",
-      ].includes(String(first))
+      ].includes(String(first)) && !isLocalTimeDescriptor(first!)
     )
       fail("COMPARISON", "These values do not have a registered ordering.");
     output = "Boolean";
+  } else if (exp.operator === "condition.fromBoolean") {
+    arity(args, 1); requireType(first!, "Boolean"); output = "ConditionResult";
   } else if (exp.operator.startsWith("condition.")) {
     arity(args, exp.operator === "condition.not" ? 1 : 2);
     if (first !== "Boolean" && first !== "ConditionResult")
@@ -656,6 +734,7 @@ export function validateValueInput(
       if (arg.type !== "Boolean" && arg.type !== "ConditionResult")
         fail("CONDITION_TYPE", "A Boolean or condition result is required.");
     });
+    if (scratch) args.forEach(argument => requireType(argument.type, first!));
     output = args.some((arg) => arg.type === "ConditionResult")
       ? "ConditionResult"
       : "Boolean";
@@ -668,6 +747,7 @@ export function validateValueInput(
   } else if (exp.operator === "value.lookup") {
     arity(args, 3, 103);
     if (!mappingKeyType(first!)) fail("LOOKUP_KEY_TYPE", "Choose a registered comparable lookup key type.");
+    if (scratch) scratchOperation(() => assertScratchComparable(first!, type => schemaFor(type, context), limits.maxNesting));
     requireType(second!, { kind: "List", element: first! });
     output = args[2]!.type;
     args.slice(3).forEach(arg => requireType(arg.type, output));
@@ -677,7 +757,7 @@ export function validateValueInput(
         fail("LOOKUP_FIXED_KEYS", "Mapping keys must be an explicit fixed typed list.");
       if (keys.value.length !== args.length - 3)
         fail("LOOKUP_ROWS", "Every fixed key must have one typed mapped value.");
-      if (new Set(keys.value.map(stableListKey)).size !== keys.value.length)
+      if (new Set(keys.value.map(value => scratch ? scratchOperation(() => scratchEqualityKey(first!, value, type => schemaFor(type, context), limits.maxNesting)) : stableListKey(value))).size !== keys.value.length)
         fail("LOOKUP_DUPLICATE", "Mapping keys must be unique.");
     }
   } else if (exp.operator === "value.parse") {
@@ -691,7 +771,7 @@ export function validateValueInput(
     output = optionalType(first!);
     requireType(second!, output);
   } else if (exp.operator.startsWith("text.")) {
-    output = validateTextExpression(exp);
+    output = validateTextExpression(exp, scratch);
   } else if (exp.operator.startsWith("list.")) {
     output = validateListExpression(exp, context, depth, counter, purePath);
   } else if (exp.operator.startsWith("record.")) {
@@ -766,46 +846,35 @@ export function validateValueInput(
     return fail("OPERATOR", "This expression operation is not registered.");
   requireType(input.type, output);
 }
-function validateTextExpression(exp: Expression): ValueType {
+function validateTextExpression(exp: Expression, scratch = false): ValueType {
   const args = exp.args,
     op = exp.operator;
-  arity(
-    args,
-    op === "text.join"
-      ? 0
-      : op === "text.replace" || op === "text.slice"
-        ? 3
-        : op === "text.contains" ||
-            op === "text.startsWith" ||
-            op === "text.endsWith" ||
-            op === "text.split" ||
-            op === "text.joinList" ||
-            op === "text.repeat"
-          ? 2
-          : 1,
-    op === "text.join"
-      ? 100
-      : op === "text.replace" || op === "text.slice"
-        ? 3
-        : op === "text.contains" ||
-            op === "text.startsWith" ||
-            op === "text.endsWith" ||
-            op === "text.split" ||
-            op === "text.joinList" ||
-            op === "text.repeat"
-          ? 2
-          : 1,
-  );
+  const count = op === "text.replace" || op === "text.slice" ? 3
+    : ["text.contains", "text.startsWith", "text.endsWith", "text.split", "text.joinList", "text.repeat", "text.letter", "text.find"].includes(op) ? 2 : 1;
+  arity(args, op === "text.join" ? 0 : count, op === "text.join" ? 100 : count);
   args.forEach((arg, i) =>
     requireType(
       arg.type,
       op === "text.joinList" && i === 0
         ? { kind: "List", element: "PlainText" }
-        : (op === "text.slice" && i > 0) || (op === "text.repeat" && i === 1)
+        : (op === "text.slice" && i > 0) || (["text.repeat", "text.letter"].includes(op) && i === 1)
           ? "Number"
           : "PlainText",
     ),
   );
+  if (scratch) {
+    if (op === "text.replace" && !["first", "all"].includes(exp.options?.replaceMode ?? ""))
+      fail("TEXT_REPLACE_MODE", "Choose whether to replace the first match or every match.");
+    if (op === "text.split" && typeof exp.options?.keepEmpty !== "boolean")
+      fail("TEXT_SPLIT_MODE", "Choose whether to keep empty parts.");
+    if (op === "text.normalize" && !["NFC", "NFD", "NFKC", "NFKD"].includes(exp.options?.normalization ?? ""))
+      fail("TEXT_NORMALIZATION", "Choose an explicit Unicode normalization form.");
+    if (op === "text.lineEndings" && !["LF", "CRLF"].includes(exp.options?.lineEnding ?? ""))
+      fail("TEXT_LINE_ENDING", "Choose an explicit line-ending mode.");
+  }
+  if (scratch && ["text.replace", "text.split"].includes(op) && args[1]?.kind === "literal" && args[1].value === "")
+    fail(op === "text.split" ? "EMPTY_SEPARATOR" : "EMPTY_SEARCH", "Choose non-empty search or separator text.");
+  if (op === "text.find") return indexResultType;
   return op === "text.length"
     ? "Number"
     : ["text.contains", "text.startsWith", "text.endsWith"].includes(op)
@@ -842,6 +911,8 @@ function validateListExpression(
     list = { kind: "List" as const, element };
   const one = [
     "list.length",
+    "list.lastOptional",
+    "list.lastStrict",
     "list.unique",
     "list.sort",
     "list.sum",
@@ -854,6 +925,8 @@ function validateListExpression(
     "list.all",
     "list.find",
     "list.findResult",
+    "list.search",
+    "list.clear",
     "list.group",
     "list.minMax",
   ];
@@ -866,6 +939,8 @@ function validateListExpression(
         : 2,
   );
   if (op === "list.length") return "Number";
+  if (op === "list.lastOptional") return { kind: "Optional", value: element };
+  if (op === "list.lastStrict") return element;
   if (["list.sum", "list.average", "list.min", "list.max", "list.minMax"].includes(op)) {
     requireType(element, "Number");
     return op === "list.sum"
@@ -877,7 +952,7 @@ function validateListExpression(
         : { kind: "Optional", value: "Number" };
   }
   if (
-    ["list.map", "list.filter", "list.any", "list.all", "list.find", "list.findResult"].includes(
+    ["list.map", "list.filter", "list.any", "list.all", "list.find", "list.findResult", "list.search"].includes(
       op,
     )
   ) {
@@ -910,6 +985,8 @@ function validateListExpression(
           ? { kind: "Optional", value: element }
           : op === "list.findResult"
             ? { kind: "Optional", value: findMatchType(element) }
+          : op === "list.search"
+            ? searchResultType(element)
           : list;
   }
   if (
@@ -923,6 +1000,11 @@ function validateListExpression(
     requireType(args[1]!.type, "Number");
   if (op === "list.slice") requireType(args[2]!.type, "Number");
   if (op === "list.append") requireType(args[1]!.type, element);
+  if (op === "list.contains" || op === "list.indexOf") {
+    requireType(args[1]!.type, element);
+    scratchOperation(() => assertScratchComparable(element, type => schemaFor(type, context), automationLimits(context.limits).maxNesting));
+    return op === "list.contains" ? "Boolean" : indexResultType;
+  }
   if (op === "list.insert" || op === "list.replace")
     requireType(args[2]!.type, element);
   if (
@@ -952,9 +1034,15 @@ function validateListExpression(
     if (typeof element === "object" && element.kind === "Record" && !exp.options?.key)
       fail("GROUP_KEY", "Choose a registered grouping field.");
     const keyType = exp.options?.key ? schemaFor(element, context).fields[exp.options.key]!.type : element;
+    if (context.semanticProfile === "scratch.v1")
+      scratchOperation(() => assertScratchComparable(keyType, type => schemaFor(type, context), automationLimits(context.limits).maxNesting));
     return { kind: "List", element: groupRecordType(keyType, element) };
   }
-  if (
+  if (context.semanticProfile === "scratch.v1" && ["list.unique", "list.intersection", "list.difference", "list.union", "list.sort"].includes(op)) {
+    const keyType = exp.options?.key ? schemaFor(element, context).fields[exp.options.key]!.type : element;
+    if (op === "list.sort") scratchOperation(() => assertScratchOrdered(keyType, exp.options?.orderVersion));
+    else scratchOperation(() => assertScratchComparable(keyType, type => schemaFor(type, context), automationLimits(context.limits).maxNesting));
+  } else if (
     op === "list.sort" &&
     !exp.options?.key &&
     ![
@@ -964,7 +1052,7 @@ function validateListExpression(
       "Instant",
       "LocalTime",
       "PlainText",
-    ].includes(String(element))
+    ].includes(String(element)) && !isLocalTimeDescriptor(element)
   )
     fail("COMPARISON_KEY", "Choose a registered ordered comparison field.");
   return op === "list.item"
@@ -980,6 +1068,9 @@ function validateRecordExpression(
   const exp = input.expression;
   if (exp.operator === "record.field") {
     arity(exp.args, 1);
+    const sourceType = exp.args[0]!.type;
+    if (typeof sourceType === "object" && sourceType.kind === "Record" && [INDEX_RESULT_SCHEMA, SEARCH_RESULT_SCHEMA].includes(sourceType.schemaId) && exp.options?.key !== "state")
+      fail("SEARCH_RESULT_SCOPE", "Branch on the search result and use the found branch's typed index and value.");
     const schema = schemaFor(exp.args[0]!.type, context),
       field = schema.fields[exp.options?.key ?? ""];
     if (!field) fail("RECORD_FIELD", "Choose a registered field.");
@@ -1021,6 +1112,12 @@ function validateRecordExpression(
 }
 function clone(value: JsonValue): JsonValue {
   return structuredClone(value);
+}
+function normalizedScratchValue(value: JsonValue): JsonValue {
+  if (typeof value === "number") return value === 0 ? 0 : value;
+  if (Array.isArray(value)) return value.map(normalizedScratchValue);
+  if (plainObject(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, normalizedScratchValue(item)]));
+  return value;
 }
 function mergeProvenance(values: EvaluatedValue[]): Provenance[] {
   const seen = new Set<string>();
@@ -1104,7 +1201,7 @@ export function evaluateValue(
     if (current.kind === "literal")
       return {
         type: current.type,
-        value: clone(current.value),
+        value: context.semanticProfile === "scratch.v1" ? normalizedScratchValue(current.value) : clone(current.value),
         provenance: [{ source: "literal", resumable: true }],
       };
     if (current.kind === "variable") {
@@ -1113,7 +1210,7 @@ export function evaluateValue(
         fail("UNINITIALIZED", "This variable has not been initialized.");
       assertValueMatchesType(value.type, value.value, env);
       assertResultEvidence(value.type, value.value, value.provenance, env);
-      return { ...value, value: clone(value.value) };
+      return { ...value, value: context.semanticProfile === "scratch.v1" ? normalizedScratchValue(value.value) : clone(value.value) };
     }
     const exp = current.expression,
       used: EvaluatedValue[] = [];
@@ -1126,7 +1223,9 @@ export function evaluateValue(
     };
     const all = () => exp.args.map((_arg, i) => get(i));
     let result: JsonValue;
-    if (
+    if (exp.operator === "condition.fromBoolean") {
+      result = get(0) === true ? "true" : "false";
+    } else if (
       exp.operator === "condition.and" ||
       exp.operator === "condition.or" ||
       exp.operator === "condition.not"
@@ -1146,11 +1245,12 @@ export function evaluateValue(
       const value = condition(get(0));
       result = get(value === "true" ? 1 : value === "false" ? 2 : 3);
     } else if (exp.operator === "value.lookup") {
-      const sought = stableListKey(get(0)), keys = list(get(1));
+      const key = (value: JsonValue) => context.semanticProfile === "scratch.v1" ? scratchOperation(() => scratchEqualityKey(exp.args[0]!.type, value, type => schemaFor(type, env), limits.maxNesting)) : stableListKey(value);
+      const sought = key(get(0)), keys = list(get(1));
       budget.evaluations += keys.length;
       if (budget.evaluations > limits.maxEvaluations)
         fail("EVALUATION_BUDGET", "The expression evaluation budget is exhausted.");
-      const index = keys.findIndex(key => stableListKey(key) === sought);
+      const index = keys.findIndex(value => key(value) === sought);
       result = get(index < 0 ? 2 : index + 3);
     } else if (exp.operator === "value.parse") {
       const type = current.type as Extract<ValueType, {kind:"ParseResult"}>;
@@ -1183,7 +1283,7 @@ export function evaluateValue(
       used.push(returned);
       result = returned.value;
     } else if (
-      ["list.map", "list.filter", "list.any", "list.all", "list.find", "list.findResult"].includes(
+      ["list.map", "list.filter", "list.any", "list.all", "list.find", "list.findResult", "list.search"].includes(
         exp.operator,
       )
     ) {
@@ -1214,8 +1314,8 @@ export function evaluateValue(
         if (exp.operator === "list.map") outputs.push(value.value);
         else if (value.value === true) {
           outputs.push(item);
-          if (exp.operator === "list.find" || exp.operator === "list.findResult") {
-            matched = exp.operator === "list.findResult" ? { item, position: index + 1 } : item;
+          if (exp.operator === "list.find" || exp.operator === "list.findResult" || exp.operator === "list.search") {
+            matched = exp.operator === "list.search" ? { state: "found", value: item, index: index + 1 } : exp.operator === "list.findResult" ? { item, position: index + 1 } : item;
             break;
           }
           if (exp.operator === "list.any") break;
@@ -1231,10 +1331,13 @@ export function evaluateValue(
             ? outputs.length > 0
             : exp.operator === "list.all"
               ? allMatch
+              : exp.operator === "list.search"
+                ? matched ?? { state: "not_found" }
               : matched === undefined
                 ? { state: "unset" }
                 : { state: "set", value: matched };
-    } else result = evaluateOperation(exp, all(), env, limits);
+    } else result = context.semanticProfile === "scratch.v1" ? scratchOperation(() => evaluateOperation(exp, all(), env, limits, current.type)) : evaluateOperation(exp, all(), env, limits, current.type);
+    if (context.semanticProfile === "scratch.v1") result = normalizedScratchValue(result);
     assertValueMatchesType(current.type, result, env);
     if (
       new TextEncoder().encode(JSON.stringify(result)).byteLength >
@@ -1253,18 +1356,106 @@ export function evaluateValue(
   };
   return evaluate(input, { ...context, budget });
 }
-function evaluateOperation(
+function evaluateScratchText(
   exp: Expression,
   args: JsonValue[],
   context: EvaluationContext,
   limits: AutomationLimits,
 ): JsonValue {
+  const op = exp.operator, source = op === "text.joinList" ? "" : args.length ? text(args[0]!) : "";
+  const charge = (units: number) => {
+    context.budget!.evaluations += units;
+    if (context.budget!.evaluations > limits.maxEvaluations)
+      fail("EVALUATION_BUDGET", "The expression evaluation budget is exhausted.");
+  };
+  const checkOutputLength = (length: number) => {
+    if (length > limits.maxTextLength * 2) fail("TEXT_SIZE", "The text result exceeds its budget.");
+  };
+  const join = (parts: string[], separator: string) => {
+    const length = parts.reduce((total, part) => total + part.length, 0) + Math.max(0, parts.length - 1) * separator.length;
+    checkOutputLength(length); charge(length); return parts.join(separator);
+  };
+  if (op === "text.join") return join(args.map(text), "");
+  if (op === "text.joinList") return join(list(args[0]!).map(text), text(args[1]!));
+  charge(source.length);
+  const second = args[1];
+  if (op === "text.contains") return source.includes(text(second!));
+  if (op === "text.startsWith") return source.startsWith(text(second!));
+  if (op === "text.endsWith") return source.endsWith(text(second!));
+  if (["text.trim", "text.upper", "text.lower", "text.caseFold", "text.normalize", "text.lineEndings"].includes(op))
+    return transformPinnedText(source, op.slice(5) as "trim" | "upper" | "lower" | "caseFold" | "normalize" | "lineEndings", {
+      form: exp.options?.normalization,
+      lineEnding: exp.options?.lineEnding,
+      maxOutputCodeUnits: limits.maxTextLength * 2,
+      maxIntermediateCodePoints: Math.floor(limits.maxValueBytes / 4),
+      charge,
+    });
+  if (op === "text.repeat") {
+    const count = assertCount(second!, Number.MAX_SAFE_INTEGER);
+    checkOutputLength(source.length * count);
+    if (new TextEncoder().encode(source).byteLength * count > limits.maxValueBytes)
+      fail("VALUE_BYTES", "The repeated text exceeds its value-size budget.");
+    if (Array.from(source).length * count > limits.maxTextLength)
+      fail("TEXT_SIZE", "The repeated text exceeds its text-size budget.");
+    charge(source.length * count);
+    return !source || !count ? "" : source.repeat(count);
+  }
+  if (op === "text.replace" || op === "text.split") {
+    const sought = text(second!);
+    if (!sought) fail(op === "text.split" ? "EMPTY_SEPARATOR" : "EMPTY_SEARCH", "Choose non-empty search or separator text.");
+    const replacement = op === "text.replace" ? text(args[2]!) : "", parts: string[] = [];
+    let cursor = 0, outputLength = 0;
+    const push = (part: string) => {
+      if (op === "text.split" && !exp.options!.keepEmpty && !part) return;
+      outputLength += part.length;
+      if (op === "text.split") {
+        if (parts.length >= limits.maxListItems) fail("LIST_SIZE", "The split result exceeds its list-size budget.");
+      } else checkOutputLength(outputLength);
+      parts.push(part);
+    };
+    while (cursor <= source.length) {
+      const index = source.indexOf(sought, cursor);
+      if (index < 0) { push(source.slice(cursor)); break; }
+      charge(1); push(source.slice(cursor, index));
+      cursor = index + sought.length;
+      if (op === "text.replace") {
+        push(replacement);
+        if (exp.options!.replaceMode === "first") { push(source.slice(cursor)); break; }
+      }
+    }
+    return op === "text.split" ? parts : parts.join("");
+  }
+  if (op === "text.find") {
+    const index = findGraphemeText(source, text(second!), { charge, maxIntermediateCodePoints: Math.floor(limits.maxValueBytes / 4) });
+    return index === null ? { state: "not_found" } : { state: "found", index };
+  }
+  const graphemes = splitGraphemes(source, { charge, maxIntermediateCodePoints: Math.floor(limits.maxValueBytes / 4) });
+  if (op === "text.length") return graphemes.length;
+  if (op === "text.letter") return graphemes[assertCount(second!, graphemes.length, false) - 1]!;
+  if (op === "text.slice") {
+    const start = assertCount(second!, graphemes.length + 1, false), count = assertCount(args[2]!, graphemes.length);
+    if (start - 1 + count > graphemes.length) fail("TEXT_RANGE", "The selected text range is outside the text.");
+    return graphemes.slice(start - 1, start - 1 + count).join("");
+  }
+  return fail("OPERATOR", "This text operation is not registered.");
+}
+
+function evaluateOperation(
+  exp: Expression,
+  args: JsonValue[],
+  context: EvaluationContext,
+  limits: AutomationLimits,
+  outputType: ValueType,
+): JsonValue {
   const a = args[0]!,
     b = args[1]!,
     c = args[2]!,
-    op = exp.operator;
+    op = exp.operator,
+    scratch = context.semanticProfile === "scratch.v1";
+  if (scratch && op === "text.clean" && (b === "trim" || b === "lineFeed"))
+    return evaluateScratchText({ operator: b === "trim" ? "text.trim" : "text.lineEndings", args: [exp.args[0]!], ...(b === "lineFeed" ? { options: { lineEnding: "LF" as const } } : {}) }, [a], context, limits);
   if (isTemporalOperator(op))
-    return evaluateTemporalOperator(op, args, exp.args.map((argument) => argument.type));
+    return evaluateTemporalOperator(op, args, exp.args.map((argument) => argument.type), outputType, context);
   if (op === "rich.text") return [{ kind: "text", text: text(a) }];
   if (op === "rich.join") return args.flatMap(list);
   if (op === "rich.wrap") {
@@ -1284,6 +1475,18 @@ function evaluateOperation(
   if (op.startsWith("number.")) {
     const x = assertFiniteNumber(a),
       y = args.length > 1 ? assertFiniteNumber(b) : 0;
+    if (op === "number.modulo") return scratchModulo(x, y);
+    if (op === "number.truncate") return Math.trunc(x);
+    if (op === "number.roundInteger") return scratchRound(x, exp.options!.roundingMode!);
+    if (op === "number.roundDecimal") return scratchDecimalRound(x, y, exp.options!.roundingMode!);
+    if (op === "number.math") {
+      if (!["abs", "floor", "ceiling", "sqrt"].includes(exp.options!.mathFunction!)) {
+        context.budget!.evaluations += SCRATCH_TRANSCENDENTAL_WORK;
+        if (context.budget!.evaluations > limits.maxEvaluations)
+          fail("EVALUATION_BUDGET", "The expression evaluation budget is exhausted.");
+      }
+      return scratchMath(exp.options!.mathFunction!, x, context.numericMath);
+    }
     let value: number;
     switch (op) {
       case "number.add":
@@ -1332,9 +1535,21 @@ function evaluateOperation(
           factor;
       }
     }
+    if (scratch && ["number.multiply", "number.divide"].includes(op) && value === 0 && x !== 0 && y !== 0)
+      fail("NumericUnderflow", "A mathematically nonzero result cannot be represented as a nonzero number.");
+    if (scratch && !Number.isFinite(value)) fail("NumericOverflow", "The numeric result is outside the finite number range.");
     return assertFiniteNumber(value);
   }
   if (comparisons.has(op)) {
+    if (scratch) {
+      const type = exp.args[0]!.type, resolve = (value: ValueType) => schemaFor(value, context);
+      if (op === "compare.equal" || op === "compare.notEqual") {
+        const equal = scratchEqualityKey(type, a, resolve, limits.maxNesting) === scratchEqualityKey(type, b, resolve, limits.maxNesting);
+        return op === "compare.equal" ? equal : !equal;
+      }
+      const order = scratchOrder(type, a, b);
+      return op === "compare.less" ? order < 0 : op === "compare.lessOrEqual" ? order <= 0 : op === "compare.greater" ? order > 0 : order >= 0;
+    }
     const equal = canonicalKey(a) === canonicalKey(b);
     if (op === "compare.equal") return equal;
     if (op === "compare.notEqual") return !equal;
@@ -1349,6 +1564,7 @@ function evaluateOperation(
           : x >= y;
   }
   if (op.startsWith("text.")) {
+    if (scratch) return evaluateScratchText(exp, args, context, limits);
     if (op === "text.join") return args.map(text).join("");
     if (op === "text.joinList") return list(a).map(text).join(text(b));
     const source = text(a);
@@ -1406,6 +1622,17 @@ function evaluateOperation(
         "INTEGER_RANGE",
         "Choose finite integers and a nonzero step toward the end.",
       );
+    if (scratch) {
+      const first = BigInt(start), last = BigInt(end), stride = BigInt(step), count = (last - first) / stride + 1n;
+      if (count > BigInt(limits.maxListItems)) fail("LIST_SIZE", "The integer range exceeds its list-size budget.");
+      context.budget!.evaluations += Number(count);
+      if (context.budget!.evaluations > limits.maxEvaluations) fail("EVALUATION_BUDGET", "The expression evaluation budget is exhausted.");
+      return Array.from({ length: Number(count) }, (_, index) => {
+        const value = Number(first + BigInt(index) * stride);
+        if (!Number.isSafeInteger(value)) fail("INTEGER_RANGE", "Every generated value must be a safe integer.");
+        return value;
+      });
+    }
     const count = Math.floor((end - start) / step) + 1;
     assertCount(count, limits.maxListItems);
     return Array.from({ length: count }, (_, i) => start + i * step);
@@ -1420,19 +1647,48 @@ function evaluateOperation(
           return item[exp.options.key]!;
         }
         return item;
-      };
+      },
+      element = listType(exp.args[0]!.type),
+      keyType = exp.options?.key ? schemaFor(element, context).fields[exp.options.key]!.type : element,
+      keyOf = (item: JsonValue) => scratch ? scratchEqualityKey(keyType, key(item), type => schemaFor(type, context), limits.maxNesting) : canonicalKey(key(item));
     const unique = (values: JsonValue[]) => {
       const keys = new Set<string>();
       return values.filter((item) => {
-        const id = canonicalKey(key(item));
+        const id = keyOf(item);
         if (keys.has(id)) return false;
         keys.add(id);
         return true;
       });
     };
+    if (scratch && ["list.unique", "list.intersection", "list.difference", "list.union", "list.sum", "list.average", "list.min", "list.max"].includes(op)) {
+      context.budget!.evaluations += items.length + (["list.intersection", "list.difference", "list.union"].includes(op) ? list(b).length : 0);
+      if (context.budget!.evaluations > limits.maxEvaluations) fail("EVALUATION_BUDGET", "The expression evaluation budget is exhausted.");
+    }
+    const numericSum = () => items.reduce<number>((sum, item) => {
+      const result = sum + assertFiniteNumber(item);
+      if (scratch && !Number.isFinite(result)) fail("NumericOverflow", "A partial sum is outside the finite number range.");
+      return assertFiniteNumber(result);
+    }, 0);
     switch (op) {
+      case "list.clear": return [];
+      case "list.contains":
+      case "list.indexOf": {
+        const sought = scratchEqualityKey(element, b, type => schemaFor(type, context), limits.maxNesting);
+        let index = -1;
+        for (let current = 0; current < items.length; current++) {
+          context.budget!.evaluations++;
+          if (context.budget!.evaluations > limits.maxEvaluations) fail("EVALUATION_BUDGET", "The expression evaluation budget is exhausted.");
+          if (keyOf(items[current]!) === sought) { index = current; break; }
+        }
+        return op === "list.contains" ? index >= 0 : index < 0 ? { state: "not_found" } : { state: "found", index: index + 1 };
+      }
       case "list.length":
         return items.length;
+      case "list.lastOptional":
+        return items.length ? { state: "set", value: clone(items[items.length - 1]!) } : { state: "unset" };
+      case "list.lastStrict":
+        if (!items.length) fail("IndexError", "The list is empty; there is no last item.");
+        return clone(items[items.length - 1]!);
       case "list.append":
         return [...items, b];
       case "list.item":
@@ -1467,6 +1723,11 @@ function evaluateOperation(
           .sort((x, y) => {
             const first = key(x.item),
               second = key(y.item);
+            if (scratch) {
+              context.budget!.evaluations++;
+              if (context.budget!.evaluations > limits.maxEvaluations) fail("EVALUATION_BUDGET", "The expression evaluation budget is exhausted.");
+              return scratchOrder(keyType, first, second, exp.options?.orderVersion) * descending || x.index - y.index;
+            }
             if (
               (typeof first !== "number" && typeof first !== "string") ||
               typeof first !== typeof second
@@ -1492,28 +1753,21 @@ function evaluateOperation(
           .map((item) => item.item);
       }
       case "list.sum":
-        return assertFiniteNumber(
-          items.reduce<number>(
-            (sum, item) => assertFiniteNumber(sum + assertFiniteNumber(item)),
-            0,
-          ),
-        );
-      case "list.average":
+        return numericSum();
+      case "list.average": {
+        const sum = items.length ? numericSum() : 0, average = sum / items.length;
+        if (scratch && items.length && sum !== 0 && average === 0)
+          fail("NumericUnderflow", "A mathematically nonzero average cannot be represented as a nonzero number.");
         return {
           value: items.length
             ? {
                 state: "set",
-                value: assertFiniteNumber(
-                  items.reduce<number>(
-                    (sum, item) =>
-                      assertFiniteNumber(sum + assertFiniteNumber(item)),
-                    0,
-                  ) / items.length,
-                ),
+                value: assertFiniteNumber(average),
               }
             : { state: "unset" },
           count: items.length,
         };
+      }
       case "list.minMax": {
         context.budget!.evaluations += items.length;
         if (context.budget!.evaluations > limits.maxEvaluations)
@@ -1536,11 +1790,11 @@ function evaluateOperation(
           : { state: "unset" };
       case "list.intersection":
       case "list.difference": {
-        const other = new Set(list(b).map((item) => canonicalKey(key(item))));
+        const other = new Set(list(b).map(keyOf));
         return unique(
           items.filter(
             (item) =>
-              other.has(canonicalKey(key(item))) ===
+              other.has(keyOf(item)) ===
               (op === "list.intersection"),
           ),
         );
@@ -1553,7 +1807,7 @@ function evaluateOperation(
         if (context.budget!.evaluations > limits.maxEvaluations)
           fail("EVALUATION_BUDGET", "The expression evaluation budget is exhausted.");
         for (const item of items) {
-          const groupingKey = key(item), stable = stableListKey(groupingKey), index = indices.get(stable);
+          const groupingKey = key(item), stable = scratch ? keyOf(item) : stableListKey(groupingKey), index = indices.get(stable);
           if (index === undefined) { indices.set(stable, groups.length); groups.push({ key: groupingKey, items: [item] }); }
           else groups[index]!.items.push(item);
         }

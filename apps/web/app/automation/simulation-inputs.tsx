@@ -11,12 +11,14 @@ import type {
 import type { EditorTargets } from "./client";
 import { branches, PALETTE, words, uid, type Locale } from "./model";
 import { ValueSlot } from "./value-slot";
+import { UserInstantControl } from "./date-controls";
 export interface SimulationInputs {
+  inspectVariables?: string[];
   values: Record<string, { type: ValueType; value: JsonValue }>;
   outputs: Record<string, { type: ValueType; value: JsonValue }>;
   outcomes: Record<string, "SUCCEEDED" | "FAILED" | "UNKNOWN" | "NOT_STARTED">;
   clock?: string;
-  approvals?:Record<string,"APPROVED"|"REJECTED"|"EXPIRED">;
+  approvals?: Record<string, "APPROVED" | "REJECTED" | "EXPIRED">;
   awaitEvents?: Record<
     string,
     | {
@@ -34,6 +36,7 @@ export function SimulationInputPanel({
   value,
   onChange,
   disabled,
+  onValidity,
 }: {
   definition: FlowDefinition;
   locale: Locale;
@@ -41,33 +44,56 @@ export function SimulationInputPanel({
   value: SimulationInputs;
   onChange: (next: SimulationInputs) => void;
   disabled: boolean;
+  onValidity?: (valid: boolean) => void;
 }) {
+  const invalidTimes = useRef(new Set<string>());
+  const validityCallback = useRef(onValidity);
+  validityCallback.current = onValidity;
+  const temporalValidity = useCallback((key: string, valid: boolean) => {
+    if (valid) invalidTimes.current.delete(key);
+    else invalidTimes.current.add(key);
+    validityCallback.current?.(invalidTimes.current.size === 0);
+  }, []);
+  const slotValidity = useCallback(
+    (key: string, message: string | null) => {
+      temporalValidity(key, message === null);
+    },
+    [temporalValidity],
+  );
   const inputs =
     "inputs" in definition.trigger ? definition.trigger.inputs : [];
   const actions: Extract<Statement, { kind: "action" | "poll" }>[] = [];
   const eventWaits: Extract<Statement, { kind: "awaitEvent" }>[] = [];
-  const approvalWaits: Extract<Statement,{kind:"approval"}>[]=[];
+  const approvalWaits: Extract<Statement, { kind: "approval" }>[] = [];
   const visit = (list: Statement[]) => {
     for (const node of list) {
       if (node.kind === "action" || node.kind === "poll") actions.push(node);
       if (node.kind === "awaitEvent") eventWaits.push(node);
-      if(node.kind==="approval")approvalWaits.push(node);
+      if (node.kind === "approval") approvalWaits.push(node);
       for (const branch of branches(node)) visit(branch.body);
     }
   };
   visit(definition.body);
   for (const procedure of definition.procedures ?? []) visit(procedure.body);
-  const noopValidity = useCallback(() => {}, []);
-  const mockOutput=(node:Extract<Statement,{kind:"action"|"poll"}>)=>node.output??(node.kind==="action"&&node.outcome&&typeof node.outcome.type==="object"&&node.outcome.type.kind==="OperationOutcome"?{...node.outcome,type:node.outcome.type.value}:undefined);
+  const mockOutput = (node: Extract<Statement, { kind: "action" | "poll" }>) =>
+    node.output ??
+    (node.kind === "action" &&
+    node.outcome &&
+    typeof node.outcome.type === "object" &&
+    node.outcome.type.kind === "OperationOutcome"
+      ? { ...node.outcome, type: node.outcome.type.value }
+      : undefined);
   const field = (
     key: string,
     type: ValueInput["type"],
     label: string,
     group: "values" | "outputs",
   ) =>
-    typeof type==="string"&&type.endsWith("Ref") ? (
+    typeof type === "string" && type.endsWith("Ref") ? (
       <fieldset key={key} className="automation-slot">
-        <legend>{label} · {type}</legend>
+        <legend>
+          {label} · {type}
+        </legend>
         <p className="automation-hint">
           {words(
             locale,
@@ -84,7 +110,17 @@ export function SimulationInputPanel({
                 ...value[group],
                 [key]: {
                   type,
-                  value: { id: type==="TicketRef"?`intake:${uid()}`:String(900000000000000000n+BigInt(`0x${uid().replaceAll("-","")}`)%100000000000000000n), guildId: definition.guildId },
+                  value: {
+                    id:
+                      type === "TicketRef"
+                        ? `intake:${uid()}`
+                        : String(
+                            900000000000000000n +
+                              (BigInt(`0x${uid().replaceAll("-", "")}`) %
+                                100000000000000000n),
+                          ),
+                    guildId: definition.guildId,
+                  },
                 },
               },
             })
@@ -92,8 +128,12 @@ export function SimulationInputPanel({
         >
           {words(
             locale,
-            type==="TicketRef"?"仮の受付参照を使う":`合成の${type}参照を使う`,
-            type==="TicketRef"?"Use a synthetic ticket reference":`Use a synthetic ${type} reference`,
+            type === "TicketRef"
+              ? "仮の受付参照を使う"
+              : `合成の${type}参照を使う`,
+            type === "TicketRef"
+              ? "Use a synthetic ticket reference"
+              : `Use a synthetic ${type} reference`,
           )}
         </button>
         {value[group][key] && (
@@ -101,8 +141,8 @@ export function SimulationInputPanel({
             <small>
               {words(
                 locale,
-              "試運転専用の合成参照を設定済み",
-              "A simulation-only synthetic reference is supplied",
+                "試運転専用の合成参照を設定済み",
+                "A simulation-only synthetic reference is supplied",
               )}
             </small>
             <button
@@ -134,7 +174,7 @@ export function SimulationInputPanel({
             ? { kind: "literal", type, value: value[group][key]!.value }
             : { kind: "missing", type }
         }
-        onValidity={noopValidity}
+        onValidity={slotValidity}
         onChange={(input) => {
           const entries = { ...value[group] };
           if (input.kind === "literal")
@@ -160,26 +200,18 @@ export function SimulationInputPanel({
           "These fields never change production definitions, production draws or formal approval. Supply mock outcomes for external reads and actions; omitted results remain undetermined.",
         )}
       </p>
-      <label>
-        {words(
+      <UserInstantControl
+        locale={locale}
+        label={words(
           locale,
           "試運転の時刻（UTC・任意）",
           "Simulation clock (UTC, optional)",
         )}
-        <input
-          type="datetime-local"
-          disabled={disabled}
-          value={value.clock?.slice(0, 16) ?? ""}
-          onChange={(event) =>
-            onChange({
-              ...value,
-              clock: event.target.value
-                ? new Date(event.target.value + "Z").toISOString()
-                : undefined,
-            })
-          }
-        />
-      </label>
+        disabled={disabled}
+        value={value.clock}
+        onValidity={(valid) => temporalValidity("clock", valid)}
+        onChange={(clock) => onChange({ ...value, clock })}
+      />
       <fieldset disabled={disabled}>
         {inputs.map((input) =>
           field(input.id, input.type, input.name, "values"),
@@ -258,23 +290,59 @@ export function SimulationInputPanel({
               )}
           </section>
         ))}
-        {approvalWaits.map(statement=><section key={statement.id}>
-          <h3>{words(locale,"正式な承認待機（試運転用）","Formal approval wait (simulation only)")}</h3>
-          <label>{words(locale,"模擬する正式承認の結果","Mock formal approval result")}
-            <select value={value.approvals?.[statement.id]??""} onChange={event=>{
-              const approvals={...value.approvals};
-              if(event.target.value)approvals[statement.id]=event.target.value as "APPROVED"|"REJECTED"|"EXPIRED";
-              else delete approvals[statement.id];
-              onChange({...value,approvals});
-            }}>
-              <option value="">{words(locale,"未指定（未確認）","Not supplied (undetermined)")}</option>
-              <option value="APPROVED">{words(locale,"承認を模擬","Simulate approval")}</option>
-              <option value="REJECTED">{words(locale,"拒否を模擬","Simulate rejection")}</option>
-              <option value="EXPIRED">{words(locale,"期限切れを模擬","Simulate expiry")}</option>
-            </select>
-          </label>
-          <p>{words(locale,"模擬結果は正式承認や権限の証明には使えず、本番の承認を消費しません。","A mock cannot prove real approval or authority and consumes no production approval.")}</p>
-        </section>)}
+        {approvalWaits.map((statement) => (
+          <section key={statement.id}>
+            <h3>
+              {words(
+                locale,
+                "正式な承認待機（試運転用）",
+                "Formal approval wait (simulation only)",
+              )}
+            </h3>
+            <label>
+              {words(
+                locale,
+                "模擬する正式承認の結果",
+                "Mock formal approval result",
+              )}
+              <select
+                value={value.approvals?.[statement.id] ?? ""}
+                onChange={(event) => {
+                  const approvals = { ...value.approvals };
+                  if (event.target.value)
+                    approvals[statement.id] = event.target.value as
+                      "APPROVED" | "REJECTED" | "EXPIRED";
+                  else delete approvals[statement.id];
+                  onChange({ ...value, approvals });
+                }}
+              >
+                <option value="">
+                  {words(
+                    locale,
+                    "未指定（未確認）",
+                    "Not supplied (undetermined)",
+                  )}
+                </option>
+                <option value="APPROVED">
+                  {words(locale, "承認を模擬", "Simulate approval")}
+                </option>
+                <option value="REJECTED">
+                  {words(locale, "拒否を模擬", "Simulate rejection")}
+                </option>
+                <option value="EXPIRED">
+                  {words(locale, "期限切れを模擬", "Simulate expiry")}
+                </option>
+              </select>
+            </label>
+            <p>
+              {words(
+                locale,
+                "模擬結果は正式承認や権限の証明には使えず、本番の承認を消費しません。",
+                "A mock cannot prove real approval or authority and consumes no production approval.",
+              )}
+            </p>
+          </section>
+        ))}
         {eventWaits.map((statement) => (
           <AwaitEventMock
             key={`${definition.id}:${statement.id}`}
@@ -282,6 +350,7 @@ export function SimulationInputPanel({
             locale={locale}
             guildId={definition.guildId}
             targets={targets}
+            onValidity={(valid) => temporalValidity(statement.id, valid)}
             value={value.awaitEvents?.[statement.id]}
             onChange={(mock) => {
               const awaitEvents = { ...value.awaitEvents };
@@ -303,6 +372,7 @@ function AwaitEventMock({
   targets,
   value,
   onChange,
+  onValidity,
 }: {
   statement: Extract<Statement, { kind: "awaitEvent" }>;
   locale: Locale;
@@ -312,7 +382,9 @@ function AwaitEventMock({
   onChange: (
     value: NonNullable<SimulationInputs["awaitEvents"]>[string] | undefined,
   ) => void;
+  onValidity: (valid: boolean) => void;
 }) {
+  const timeValid = useRef(true);
   const [mode, setMode] = useState(value?.state ?? ""),
     [result, setResult] = useState<ValueInput>(
       value?.state === "MATCHED"
@@ -359,6 +431,7 @@ function AwaitEventMock({
       Number.isSafeInteger(record.version) &&
       record.version >= 0 &&
       nextAt &&
+      timeValid.current &&
       Number.isFinite(Date.parse(nextAt))
     )
       emit({
@@ -426,24 +499,25 @@ function AwaitEventMock({
             simulation
             onValidity={validity}
           />
-          <label>
-            {words(
+          <UserInstantControl
+            locale={locale}
+            label={words(
               locale,
               "模擬更新の発生日時（UTC）",
               "Mock event time (UTC)",
             )}
-            <input
-              type="datetime-local"
-              value={occurredAt.slice(0, 16)}
-              onChange={(event) => {
-                const at = event.target.value
-                  ? new Date(event.target.value + "Z").toISOString()
-                  : "";
-                setOccurredAt(at);
-                publish(mode, result, at);
-              }}
-            />
-          </label>
+            value={occurredAt}
+            onValidity={(valid) => {
+              timeValid.current = valid;
+              onValidity(valid);
+              if (!valid) emit(undefined);
+            }}
+            onChange={(next) => {
+              const at = next ?? "";
+              setOccurredAt(at);
+              publish(mode, result, at);
+            }}
+          />
         </>
       )}
     </section>

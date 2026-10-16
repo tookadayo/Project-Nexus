@@ -1,16 +1,27 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type {
   ExpressionOperator,
   JsonValue,
   ValueInput,
   VariableDeclaration,
   PureDefinition,
+  ValueType,
 } from "../../../../packages/automation/src/types";
 import type { EditorTargets } from "./client";
 import { MessageBuilder } from "./message-builder";
 import { TemporalValueInput } from "./temporal-value-input";
+import {
+  DateOnlyControl,
+  LocalTimeControl,
+  UserInstantControl,
+} from "./date-controls";
+import {
+  isInstantRangeV2Type,
+  isLocalTimeType,
+  localTimePrecision,
+} from "../../../../packages/automation/src/temporal-types";
 import { FixedLookupEditor } from "./fixed-lookup-editor";
 import { temporalChoiceLabel } from "../../../../packages/automation/src/temporal-values";
 import { missing, sameType, typeName, words, type Locale, uid } from "./model";
@@ -21,6 +32,13 @@ import {
   supportsFixedMappingKeyEditor,
 } from "../../../../packages/automation/src/expression-cards";
 import { registeredRecordSchema } from "../../../../packages/automation/src/expression";
+import { assertUnicodeScalarText } from "../../../../packages/automation/src/scratch-unicode";
+
+const isStateValue = (type: ValueType): boolean =>
+  type === "ConditionResult" ||
+  (typeof type === "object" &&
+    (["Optional", "ParseResult", "OperationOutcome"].includes(type.kind) ||
+      (type.kind === "List" && isStateValue(type.element))));
 
 interface SlotProps {
   value: ValueInput;
@@ -40,12 +58,16 @@ interface SlotProps {
   modes?: ("literal" | "variable" | "expression")[];
   onValidity: (path: string, message: string | null) => void;
 }
+export const AutomationSemanticProfile = createContext<
+  "scratch.v1" | undefined
+>(undefined);
 const displayLiteral = (value: ValueInput): string =>
   value.kind === "literal" &&
   (typeof value.value === "string" || typeof value.value === "number")
     ? String(value.value)
     : "";
 export function ValueSlot(props: SlotProps) {
+  const semanticProfile = useContext(AutomationSemanticProfile);
   const {
     value,
     onChange,
@@ -63,7 +85,24 @@ export function ValueSlot(props: SlotProps) {
     [unit, setUnit] = useState(1),
     [error, setError] = useState<string | null>(null),
     [search, setSearch] = useState("");
+  const [inputReset, setInputReset] = useState(0);
   const last = useRef(JSON.stringify(value));
+  const focusValue = useRef<ValueInput | undefined>(undefined);
+  const unicodeMessage = words(
+    locale,
+    "文字に不正なサロゲートがあります。文字を入力し直してください。置換文字へ自動では変更しません。",
+    "Text contains an unpaired surrogate. Re-enter the text. It is not automatically changed to a replacement character.",
+  );
+  const stateMessage = words(
+    locale,
+    "状態を持つ値は汎用比較できません。値あり/なし・条件の不明・読み取りや操作の結果を、それぞれの型付き分岐で確認してください。",
+    "State-bearing values cannot use generic comparisons. Use the matching typed branch for optional presence, unknown conditions, or parsed and operation results.",
+  );
+  const joinMessage = words(
+    locale,
+    "文字をつなぐ欄にはPlainTextが必要です。文章を明示入力するか、PlainTextを返す登録済みの値ブロックを選び直してください。数値や参照を自動で文字に変換しません。",
+    "Joining text requires PlainText. Enter the text explicitly or choose a registered value block returning PlainText. Numbers and references are not automatically converted to text.",
+  );
   useEffect(() => () => onValidity(path, null), [onValidity, path]);
   useEffect(() => {
     const serialized = JSON.stringify(value);
@@ -74,7 +113,52 @@ export function ValueSlot(props: SlotProps) {
       setUnit(1);
       onValidity(path, null);
     }
-  }, [value, path, onValidity]);
+    let message: string | null = null;
+    if (
+      semanticProfile === "scratch.v1" &&
+      value.kind === "literal" &&
+      value.type === "PlainText" &&
+      typeof value.value === "string"
+    ) {
+      try {
+        assertUnicodeScalarText(value.value);
+      } catch {
+        message = unicodeMessage;
+      }
+    }
+    if (semanticProfile === "scratch.v1" && value.kind === "expression") {
+      if (
+        value.expression.operator.startsWith("compare.") &&
+        value.expression.args.some((arg) => isStateValue(arg.type))
+      )
+        message = stateMessage;
+      if (
+        value.expression.operator === "text.join" &&
+        value.expression.args.some((arg) => arg.type !== "PlainText")
+      )
+        message = joinMessage;
+    }
+    if (message) {
+      setError(message);
+      onValidity(path, message);
+    } else if (
+      error === unicodeMessage ||
+      error === stateMessage ||
+      error === joinMessage
+    ) {
+      setError(null);
+      onValidity(path, null);
+    }
+  }, [
+    value,
+    path,
+    onValidity,
+    semanticProfile,
+    unicodeMessage,
+    stateMessage,
+    joinMessage,
+    error,
+  ]);
   const change = (next: ValueInput) => {
     last.current = JSON.stringify(next);
     onChange(next);
@@ -83,16 +167,22 @@ export function ValueSlot(props: SlotProps) {
     setError(message);
     onValidity(path, message);
   };
-  const mode = value.kind === "missing" ? "literal" : value.kind;
+  const mode =
+    value.kind === "missing"
+      ? "literal"
+      : value.kind === "expression" && value.expression.operator === "pure.call"
+        ? "custom"
+        : value.kind;
   const compatible = variables.filter((item) =>
     sameType(item.type, value.type),
   );
   const matchingExpressions = expressionCardsFor(value.type, {
     variables,
     pureDefinitions: props.pureDefinitions,
+    semanticProfile,
   });
   const expressionCards = matchingExpressions.filter((item) =>
-    `${item.label.ja} ${item.label.en}`
+    `${item.label.ja} ${item.label.en} ${item.operator} ${item.operator.includes("modulo") || item.operator.includes("remainder") ? "mod 余り" : ""} ${item.operator.includes("sqrt") ? "sqrt 平方根" : ""}`
       .toLowerCase()
       .includes(search.toLowerCase()),
   );
@@ -117,10 +207,23 @@ export function ValueSlot(props: SlotProps) {
             ),
         )
       : undefined;
-  const fixedMappingReadOnly=value.kind==="expression"&&value.expression.operator==="value.lookup"&&!supportsFixedMappingKeyEditor(value.expression.args[0]?.type??"PlainText");
+  const fixedMappingReadOnly =
+    value.kind === "expression" &&
+    value.expression.operator === "value.lookup" &&
+    !supportsFixedMappingKeyEditor(
+      value.expression.args[0]?.type ?? "PlainText",
+    );
   const commitText = (text: string) => {
     setRaw(text);
-    fail(null);
+    let message: string | null = null;
+    if (semanticProfile === "scratch.v1" && value.type === "PlainText") {
+      try {
+        assertUnicodeScalarText(text);
+      } catch {
+        message = unicodeMessage;
+      }
+    }
+    fail(message);
     change(
       text === ""
         ? missing(value.type)
@@ -181,8 +284,25 @@ export function ValueSlot(props: SlotProps) {
     });
   };
   const renderFixed = () => {
-    if(["ZonedDateTimeSpec","DateRange","InstantRange"].includes(String(value.type)))
-      return <TemporalValueInput value={value} onChange={change} locale={locale} label={label} onValidity={fail}/>;
+    if (
+      isInstantRangeV2Type(value.type) ||
+      [
+        "ZonedDateTimeSpec",
+        "DateRange",
+        "InstantRange",
+        "LocalTimeWindowSpec",
+      ].includes(String(value.type))
+    )
+      return (
+        <TemporalValueInput
+          key={inputReset}
+          value={value}
+          onChange={change}
+          locale={locale}
+          label={label}
+          onValidity={fail}
+        />
+      );
     if (
       value.type === "LegacyMessageSpec" ||
       value.type === "EmbedSpec" ||
@@ -194,6 +314,29 @@ export function ValueSlot(props: SlotProps) {
           onChange={change}
           locale={locale}
           onValidity={fail}
+        />
+      );
+    if (isLocalTimeType(value.type))
+      return (
+        <LocalTimeControl
+          key={inputReset}
+          id={labelId}
+          value={raw}
+          onChange={commitText}
+          precision={localTimePrecision(value.type)!}
+          locale={locale}
+          label={label}
+          onValidity={(valid) =>
+            fail(
+              valid
+                ? null
+                : words(
+                    locale,
+                    "時刻の形式と精度を確認してください。",
+                    "Review the time format and precision.",
+                  ),
+            )
+          }
         />
       );
     if (typeof value.type === "object") {
@@ -209,16 +352,29 @@ export function ValueSlot(props: SlotProps) {
               {words(locale, "選択してください", "Choose a value")}
             </option>
             {value.type.values.map((item) => (
-              <option key={item} value={item}>{temporalChoiceLabel(value.type,item,locale)}</option>
+              <option key={item} value={item}>
+                {temporalChoiceLabel(value.type, item, locale)}
+              </option>
             ))}
           </select>
         );
       if (value.type.kind === "List")
         return <FixedListInput {...props} onChange={change} />;
-      if(value.type.kind==="Optional")return <OptionalLiteralInput {...props} onChange={change}/>;
-      if(value.type.kind==="ParseResult"||value.type.kind==="OperationOutcome")return <p className="automation-hint">{words(locale,
-        "この結果は文字の読み取りか登録操作から受け取ります。状態ラベルや成功した値を固定入力で作ることはできません。",
-        "Receive this result from a text parser or a registered operation. A fixed status label or successful value cannot fabricate it.")}</p>;
+      if (value.type.kind === "Optional")
+        return <OptionalLiteralInput {...props} onChange={change} />;
+      if (
+        value.type.kind === "ParseResult" ||
+        value.type.kind === "OperationOutcome"
+      )
+        return (
+          <p className="automation-hint">
+            {words(
+              locale,
+              "この結果は文字の読み取りか登録操作から受け取ります。状態ラベルや成功した値を固定入力で作ることはできません。",
+              "Receive this result from a text parser or a registered operation. A fixed status label or successful value cannot fabricate it.",
+            )}
+          </p>
+        );
       if (value.type.kind === "Record" && props.simulation)
         return <MockRecordInput {...props} onChange={change} />;
       return (
@@ -277,10 +433,14 @@ export function ValueSlot(props: SlotProps) {
               : words(
                   locale,
                   integer
-                    ? props.minimum!==undefined||props.maximum!==undefined?`範囲: ${props.minimum??0}〜${props.maximum??"上限まで"} の整数。空欄は未設定です。`:"0以上の整数。空欄は未設定です。"
+                    ? props.minimum !== undefined || props.maximum !== undefined
+                      ? `範囲: ${props.minimum ?? 0}〜${props.maximum ?? "上限まで"} の整数。空欄は未設定です。`
+                      : "0以上の整数。空欄は未設定です。"
                     : "有限数値。暗黙の型変換はしません。",
                   integer
-                    ? props.minimum!==undefined||props.maximum!==undefined?`Whole-number range: ${props.minimum??0}–${props.maximum??"the upper limit"}. Blank means unset.`:"Non-negative whole number. Blank means unset."
+                    ? props.minimum !== undefined || props.maximum !== undefined
+                      ? `Whole-number range: ${props.minimum ?? 0}–${props.maximum ?? "the upper limit"}. Blank means unset.`
+                      : "Non-negative whole number. Blank means unset."
                     : "Finite number. No implicit conversion.",
                 )}
           </small>
@@ -321,59 +481,56 @@ export function ValueSlot(props: SlotProps) {
           )}
         </select>
       );
-    if (value.type === "DateOnly" || value.type === "LocalTime")
+    if (value.type === "DateOnly")
       return (
-        <input
+        <DateOnlyControl
+          key={inputReset}
           id={labelId}
-          aria-label={label}
-          type={value.type === "DateOnly" ? "date" : "time"}
           value={raw}
-          onChange={(event) => commitText(event.target.value)}
+          onChange={commitText}
+          locale={locale}
+          label={label}
+          onValidity={(valid) =>
+            fail(
+              valid
+                ? null
+                : words(
+                    locale,
+                    "ISO形式の存在する日付を入力してください。",
+                    "Enter an existing ISO calendar date.",
+                  ),
+            )
+          }
         />
       );
     if (value.type === "Instant")
       return (
-        <div>
-          <input
-            id={labelId}
-            aria-label={label}
-            type="datetime-local"
-            value={raw.endsWith("Z") ? raw.slice(0, 16) : raw}
-            onChange={(event) => {
-              const entered = event.target.value;
-              setRaw(entered);
-              if (!entered) {
-                change(missing("Instant"));
-                return;
-              }
-              const stamp = new Date(entered + "Z");
-              if (Number.isNaN(stamp.getTime())) {
-                fail(
-                  words(
+        <UserInstantControl
+          key={inputReset}
+          id={labelId}
+          value={raw}
+          onChange={(text) => {
+            setRaw(text ?? "");
+            change(
+              text
+                ? { kind: "literal", type: "Instant", value: text }
+                : missing("Instant"),
+            );
+          }}
+          locale={locale}
+          label={label}
+          onValidity={(valid) =>
+            fail(
+              valid
+                ? null
+                : words(
                     locale,
-                    "日時を選択してください。",
-                    "Choose a date and time.",
+                    "UTC日時を秒までで入力してください。既存の小数秒は明示置換まで保持します。",
+                    "Enter a UTC date/time with at most second precision. Saved fractional seconds remain until explicitly replaced.",
                   ),
-                );
-                change(missing("Instant"));
-                return;
-              }
-              fail(null);
-              change({
-                kind: "literal",
-                type: "Instant",
-                value: stamp.toISOString(),
-              });
-            }}
-          />
-          <small>
-            {words(
-              locale,
-              "この値欄はUTCの一意な時点です。地域の予定は開始ブロックで設定します。",
-              "This slot uses an exact UTC instant. Configure local schedules in the start block.",
-            )}
-          </small>
-        </div>
+            )
+          }
+        />
       );
     if (value.type === "ChannelRef" || value.type === "RoleRef") {
       const choices =
@@ -493,7 +650,18 @@ export function ValueSlot(props: SlotProps) {
           )}
           onChange={(event) => commitText(event.target.value)}
         />
-        {value.type==="PlainText"&&<button type="button" onClick={()=>{setRaw("");fail(null);change({kind:"literal",type:"PlainText",value:""});}}>{words(locale,"空文字を明示して使う","Explicitly use empty text")}</button>}
+        {value.type === "PlainText" && (
+          <button
+            type="button"
+            onClick={() => {
+              setRaw("");
+              fail(null);
+              change({ kind: "literal", type: "PlainText", value: "" });
+            }}
+          >
+            {words(locale, "空文字を明示して使う", "Explicitly use empty text")}
+          </button>
+        )}
         {value.type === "PlainText" && (
           <small>
             {words(
@@ -510,52 +678,126 @@ export function ValueSlot(props: SlotProps) {
     <fieldset
       className={`automation-slot ${value.type === "Boolean" || value.type === "ConditionResult" ? "is-condition" : "is-value"}`}
       aria-describedby={error ? `${labelId}-error` : undefined}
+      data-value-type={typeName(value.type, locale)}
+      data-value-source={mode}
+      onFocusCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+          focusValue.current = structuredClone(value);
+      }}
+      onKeyDown={(event) => {
+        if (
+          event.key !== "Escape" ||
+          !focusValue.current ||
+          (event.target as HTMLElement).closest(".automation-slot") !==
+            event.currentTarget
+        )
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        const previous = structuredClone(focusValue.current);
+        change(previous);
+        setRaw(displayLiteral(previous));
+        setSearch("");
+        setInputReset((version) => version + 1);
+        fail(null);
+        event.currentTarget
+          .querySelector<HTMLButtonElement>(".automation-slot-mode button")
+          ?.focus();
+      }}
     >
       <legend>
-        <span>{label}</span> <small>{typeName(value.type,locale)}</small>
+        <span
+          className={`automation-socket-symbol ${value.type === "Boolean" || value.type === "ConditionResult" ? "is-condition" : "is-value"}`}
+          aria-hidden="true"
+        />
+        <span>{label}</span>{" "}
+        <small>
+          {typeName(value.type, locale)}
+          {value.type === "ConditionResult"
+            ? words(
+                locale,
+                " · 不明を含む条件",
+                " · condition including unknown",
+              )
+            : ""}
+        </small>
       </legend>
+      <p className="automation-slot-hint">
+        {words(
+          locale,
+          `必要な型: ${typeName(value.type, locale)}。型と使用範囲が合う値だけを挿入します。`,
+          `Expected type: ${typeName(value.type, locale)}. Insert a value with a matching type and scope.`,
+        )}
+      </p>
       <div
         className="automation-slot-mode"
         role="group"
         aria-label={words(locale, "値の入力方法", "Value source")}
       >
-        {(props.modes ?? (["literal", "variable", "expression"] as const)).map(
-          (choice) => (
-            <button
-              key={choice}
-              type="button"
-              aria-pressed={mode === choice}
-              disabled={
-                choice === "expression" &&
-                (depth >= 7 || matchingExpressions.length === 0)
-              }
-              onClick={() => {
-                if (mode === choice) return;
-                fail(null);
-                setRaw("");
-                setUnit(1);
-                change(
-                  choice === "literal"
-                    ? missing(value.type)
-                    : choice === "variable"
-                      ? { kind: "variable", type: value.type, variableId: "" }
-                      : matchingExpressions[0]
-                        ? instantiateExpressionCard(matchingExpressions[0], uid)
-                        : missing(value.type),
-                );
-              }}
-            >
-              {words(
-                locale,
-                ...({
-                  literal: ["固定値", "Fixed value"],
-                  variable: ["変数", "Variable"],
-                  expression: ["計算ブロック", "Calculation"],
-                }[choice] as [string, string]),
-              )}
-            </button>
-          ),
-        )}
+        {(
+          props.modes ??
+          (["literal", "variable", "expression", "custom"] as const)
+        ).map((choice) => (
+          <button
+            key={choice}
+            type="button"
+            aria-pressed={mode === choice}
+            title={
+              choice === "custom" &&
+              !matchingExpressions.some((card) => card.operator === "pure.call")
+                ? words(
+                    locale,
+                    "この型を返す純粋な自作値を先に定義してください。",
+                    "First define a pure custom value returning this type.",
+                  )
+                : undefined
+            }
+            disabled={
+              (choice === "expression" || choice === "custom") &&
+              (depth >= 7 ||
+                !matchingExpressions.some(
+                  (card) =>
+                    (card.operator === "pure.call") === (choice === "custom"),
+                ))
+            }
+            onClick={() => {
+              if (mode === choice) return;
+              fail(null);
+              setRaw("");
+              setUnit(1);
+              change(
+                choice === "literal"
+                  ? missing(value.type)
+                  : choice === "variable"
+                    ? { kind: "variable", type: value.type, variableId: "" }
+                    : matchingExpressions.find(
+                          (card) =>
+                            (card.operator === "pure.call") ===
+                            (choice === "custom"),
+                        )
+                      ? instantiateExpressionCard(
+                          matchingExpressions.find(
+                            (card) =>
+                              (card.operator === "pure.call") ===
+                              (choice === "custom"),
+                          )!,
+                          uid,
+                        )
+                      : missing(value.type),
+              );
+            }}
+          >
+            {words(
+              locale,
+              ...({
+                literal: ["固定値", "Fixed value"],
+                variable: ["変数", "Variable"],
+                expression: ["計算ブロック", "Calculation"],
+                custom: ["自作の値", "Custom value"],
+              }[choice] as [string, string]),
+            )}
+          </button>
+        ))}
       </div>
       {mode === "literal" ? (
         renderFixed()
@@ -582,7 +824,7 @@ export function ValueSlot(props: SlotProps) {
             </option>
             {compatible.map((item) => (
               <option key={item.id} value={item.id}>
-                {item.name} · {typeName(item.type,locale)}
+                {item.name} · {typeName(item.type, locale)}
               </option>
             ))}
           </select>
@@ -618,7 +860,26 @@ export function ValueSlot(props: SlotProps) {
               if (card) change(instantiateExpressionCard(card, uid));
             }}
           >
-            {fixedMappingReadOnly&&<option value="">{words(locale,"保存済み対応表（キーを変更せず保持）","Saved mapping (keys preserved unchanged)")}</option>}
+            {value.kind === "expression" &&
+              !selectedCard &&
+              !fixedMappingReadOnly && (
+                <option value="" disabled>
+                  {words(
+                    locale,
+                    "保存した値ブロックの型を確認し、登録済みの形を選び直してください",
+                    "Review the saved value block type and choose a registered form",
+                  )}
+                </option>
+              )}
+            {fixedMappingReadOnly && (
+              <option value="">
+                {words(
+                  locale,
+                  "保存済み対応表（キーを変更せず保持）",
+                  "Saved mapping (keys preserved unchanged)",
+                )}
+              </option>
+            )}
             {expressionCards.length === 0 && (
               <option value="">
                 {words(
@@ -628,12 +889,19 @@ export function ValueSlot(props: SlotProps) {
                 )}
               </option>
             )}
-            {expressionCards.map((card) => (
-              <option key={card.id} value={card.id}>
-                {card.label[locale]}
-                {card.inputs[0] ? ` · ${typeName(card.inputs[0].type,locale)}` : ""}
-              </option>
-            ))}
+            {expressionCards
+              .filter(
+                (card) =>
+                  (card.operator === "pure.call") === (mode === "custom"),
+              )
+              .map((card) => (
+                <option key={card.id} value={card.id}>
+                  {card.label[locale]}
+                  {card.inputs[0]
+                    ? ` · ${typeName(card.inputs[0].type, locale)}`
+                    : ""}
+                </option>
+              ))}
           </select>
           {value.kind === "expression" &&
             ["number.round", "number.floor", "number.ceil"].includes(
@@ -717,14 +985,21 @@ export function ValueSlot(props: SlotProps) {
                 </select>
               </label>
             )}
-          {value.kind==="expression"&&value.expression.operator==="value.lookup"&&<FixedLookupEditor {...props} value={value} onChange={change}/>}
-          {value.kind === "expression" && value.expression.operator!=="value.lookup" &&
+          {value.kind === "expression" &&
+            value.expression.operator === "value.lookup" && (
+              <FixedLookupEditor {...props} value={value} onChange={change} />
+            )}
+          {value.kind === "expression" &&
+            value.expression.operator !== "value.lookup" &&
             value.expression.args.map((arg, index) => (
               <ValueSlot
                 {...props}
                 key={`${value.expression.operator}-${index}`}
                 value={arg}
-                label={words(locale, `入力 ${index + 1}`, `Input ${index + 1}`)}
+                label={
+                  selectedCard?.inputs[index]?.label[locale] ??
+                  words(locale, `入力 ${index + 1}`, `Input ${index + 1}`)
+                }
                 integer={selectedCard?.inputs[index]?.integer ?? false}
                 minimum={selectedCard?.inputs[index]?.minimum}
                 maximum={selectedCard?.inputs[index]?.maximum}
@@ -829,6 +1104,121 @@ export function ValueSlot(props: SlotProps) {
           )}
         </small>
       )}
+      {(value.kind === "variable" || value.kind === "expression") && (
+        <small className="automation-runtime-value">
+          {words(
+            locale,
+            "実行時に決まります。試運転の値はこの欄の固定値に保存しません。",
+            "Determined at run time. Simulation values are not saved here as fixed values.",
+          )}
+        </small>
+      )}
+      {semanticProfile === "scratch.v1" && value.type === "PlainText" && (
+        <p className="automation-typed-text-guidance">{joinMessage}</p>
+      )}
+      {semanticProfile === "scratch.v1" &&
+        (isStateValue(value.type) || value.type === "Boolean") && (
+          <p className="automation-state-comparison-guidance">
+            {words(
+              locale,
+              "Optionalは「値があるときとないときで分ける」、ConditionResultは「条件で分ける」の成立・不成立・不明、ParseResultとOperationOutcomeは「読み取り・操作の結果で分ける」を使います。これらの値に汎用の等しい/大小比較は使えません。",
+              "For Optional use Branch on an optional value; for ConditionResult use the true, false and unknown paths of Branch on a condition; for ParseResult and OperationOutcome use Branch on a typed result. Generic equality and ordering are unavailable for these values.",
+            )}
+          </p>
+        )}
+      {semanticProfile === "scratch.v1" &&
+        value.kind === "expression" &&
+        [
+          "list.item",
+          "list.insert",
+          "list.remove",
+          "list.replace",
+          "list.slice",
+          "list.lastOptional",
+          "list.lastStrict",
+        ].includes(value.expression.operator) && (
+          <p className="automation-list-position-guidance">
+            {words(
+              locale,
+              "位置は1から始まる整数です。random・last・allという文字は入力できません。無作為の位置は抽選ブロックで一度確定した数値を使います。最後の項目は専用の形で、値あり/なしを分ける形か、空の一覧ならエラーにする形を選びます。すべて削除は「一覧を空にした値」を使い、空にした値を明示して代入します。",
+              "Positions are integers starting at 1. The words random, last and all are not valid numbers. Use a number fixed once by the random-draw block for a random position. For the last item choose its dedicated optional form or the strict form that errors on an empty list. To clear all items, use Create a cleared list and explicitly assign that value.",
+            )}
+          </p>
+        )}
+      {semanticProfile === "scratch.v1" && value.type === "Number" && (
+        <details className="automation-number-semantics">
+          <summary>
+            {words(
+              locale,
+              "数値の精度と丸め方",
+              "Number precision and rounding",
+            )}
+          </summary>
+          <p>
+            {words(
+              locale,
+              "小数の計算には誤差が出る場合があります。0.1 + 0.2 は 0.30000000000000004 となり、0.3 との厳密比較は false です。数値は binary64 で扱い、表示だけで同値とは判断しません。",
+              "Decimal arithmetic can have precision differences. 0.1 + 0.2 is 0.30000000000000004, so an exact comparison with 0.3 is false. Numbers use binary64; equal-looking displays do not establish equality.",
+            )}
+          </p>
+          <p>
+            {words(
+              locale,
+              "切り下げ floor(-1.2) = -2。切り上げ ceil(-1.2) = -1。0の方向へ切り捨てる truncate(-1.2) = -1。負の数では切り下げと0方向の切り捨てが異なります。",
+              "Floor(-1.2) = -2. Ceil(-1.2) = -1. Truncate(-1.2) = -1, toward zero. For negative numbers, flooring and truncating toward zero differ.",
+            )}
+          </p>
+          <p>
+            {words(
+              locale,
+              "半値は0から遠い方: 1.5 → 2、-1.5 → -2、-0.5 → -1。半値は大きい方（Scratch方式）: 1.5 → 2、-1.5 → -1、-0.5 → 0。丸めるブロックで方式を明示して選びます。",
+              "Halfway away from zero: 1.5 → 2, -1.5 → -2, -0.5 → -1. Halfway toward positive infinity (Scratch style): 1.5 → 2, -1.5 → -1, -0.5 → 0. Choose an explicit mode in the rounding block.",
+            )}
+          </p>
+          <p>
+            {words(
+              locale,
+              "丸め方を変えたら新しい版として保存し、構造の確認・送信しない試運転・影響確認をやり直します。開始済みの実行は元の版を使います。",
+              "After changing rounding mode, save a new revision, validate, test without sending and review impact again. Runs already started keep their original revision.",
+            )}
+          </p>
+          {value.kind === "expression" &&
+            value.expression.operator === "number.math" && (
+              <p>
+                {words(
+                  locale,
+                  "数学関数はサーバーの固定版MPFRを使います。三角関数は度数で入力し、逆三角関数も度数を返します。誤差は最大4 ulp、表現できる微小値（subnormal）を保持します。範囲外や未定義の計算はエラーになり、ブラウザの近似値では代用しません。",
+                  "Math functions use fixed MPFR on the server. Trigonometric inputs and inverse-trigonometric results use degrees. Error is at most 4 ulp, and representable subnormals are preserved. Out-of-range or undefined calculations fail; browser approximations are not substituted.",
+                )}
+              </p>
+            )}
+        </details>
+      )}
+      {value.kind === "expression" &&
+        value.expression.operator.startsWith("text.") && (
+          <details className="automation-text-semantics">
+            <summary>
+              {words(
+                locale,
+                "文字の数え方と一致の規則",
+                "How text positions and matching work",
+              )}
+            </summary>
+            <p>
+              {semanticProfile === "scratch.v1"
+                ? words(
+                    locale,
+                    "文字数・一文字・切り出し・検索の位置はUnicode 16.0の見た目の文字のまとまり（EGC）です。含む・置換・分割・先頭/末尾一致はUnicode scalar列の完全一致です。結合記号や絵文字の途中にも一致し、置換や分割で見た目が変わる場合があります。連結後は文字のまとまりを数え直します。例: e＋結合アクセントの中にアクセントを「含む」は true ですが、文字の位置を「探す」は文字のまとまりの途中を選べず not_found です。",
+                    "Length, letter, slice and find positions use Unicode 16.0 extended grapheme clusters (EGCs). Contains, replace, split, starts-with and ends-with match exact Unicode scalar sequences. They may match inside combining text or emoji and change its appearance. Joined text is segmented again. Example: contains finds the combining accent inside e + accent (true), while find cannot select part of that cluster (not_found).",
+                  )
+                : words(
+                    locale,
+                    "この保存版の文字位置は従来のUnicode scalar単位です。新しい見た目の文字単位へ自動では変更しません。",
+                    "This saved profile keeps legacy Unicode scalar positions. It is not automatically changed to grapheme-cluster positions.",
+                  )}
+            </p>
+          </details>
+        )}
     </fieldset>
   );
 }
@@ -854,7 +1244,16 @@ function MockRecordInput(props: SlotProps) {
   const type = props.value.type;
   if (typeof type !== "object" || type.kind !== "Record")
     throw new Error("MOCK_RECORD_TYPE");
-  const schema = (()=>{try{return registeredRecordSchema(type,{guildId:props.guildId,variables:{}});}catch{return undefined;}})();
+  const schema = (() => {
+    try {
+      return registeredRecordSchema(type, {
+        guildId: props.guildId,
+        variables: {},
+      });
+    } catch {
+      return undefined;
+    }
+  })();
   const source = (input: ValueInput): Record<string, ValueInput> =>
     Object.fromEntries(
       Object.entries(schema?.fields ?? {}).map(([key, field]) => [
@@ -906,13 +1305,35 @@ function MockRecordInput(props: SlotProps) {
               ? words(props.locale, "模擬の受付状態", "Mock ticket state")
               : key === "version"
                 ? words(props.locale, "模擬の受付版", "Mock ticket version")
-                  : key === "first" ? words(props.locale,"模擬の一つ目の値","Mock first value")
-                  : key === "second" ? words(props.locale,"模擬の二つ目の値","Mock second value")
-                  : key === "key" ? words(props.locale,"模擬のグループキー","Mock group key")
-                  : key === "items" ? words(props.locale,"模擬の項目一覧","Mock items")
-                  : key === "item" ? words(props.locale,"模擬の見つかった項目","Mock found item")
-                  : key === "position" ? words(props.locale,"模擬の見つかった位置","Mock found position")
-                : key
+                : key === "first"
+                  ? words(props.locale, "模擬の一つ目の値", "Mock first value")
+                  : key === "second"
+                    ? words(
+                        props.locale,
+                        "模擬の二つ目の値",
+                        "Mock second value",
+                      )
+                    : key === "key"
+                      ? words(
+                          props.locale,
+                          "模擬のグループキー",
+                          "Mock group key",
+                        )
+                      : key === "items"
+                        ? words(props.locale, "模擬の項目一覧", "Mock items")
+                        : key === "item"
+                          ? words(
+                              props.locale,
+                              "模擬の見つかった項目",
+                              "Mock found item",
+                            )
+                          : key === "position"
+                            ? words(
+                                props.locale,
+                                "模擬の見つかった位置",
+                                "Mock found position",
+                              )
+                            : key
           }
           integer={key === "version"}
           minimum={key === "version" ? 0 : undefined}
@@ -947,36 +1368,96 @@ function MockRecordInput(props: SlotProps) {
   );
 }
 
-function OptionalLiteralInput(props:SlotProps) {
-  const type=props.value.type;
-  if(typeof type==="string"||type.kind!=="Optional")throw Error("OPTIONAL_TYPE");
-  const data=props.value.kind==="literal"&&props.value.value&&typeof props.value.value==="object"&&!Array.isArray(props.value.value)?props.value.value:undefined;
-  const [choice,setChoice]=useState(data?.state==="set"?"set":data?.state==="unset"?"unset":""),
-    [inner,setInner]=useState<ValueInput>(data?.state==="set"?{kind:"literal",type:type.value,value:data.value!}:missing(type.value));
-  const last=useRef(JSON.stringify(props.value));
-  useEffect(()=>{
-    const next=JSON.stringify(props.value);
-    if(next===last.current)return;
-    last.current=next;
-    const data=props.value.kind==="literal"&&props.value.value&&typeof props.value.value==="object"&&!Array.isArray(props.value.value)?props.value.value:undefined;
-    setChoice(data?.state==="set"?"set":data?.state==="unset"?"unset":"");
-    setInner(data?.state==="set"?{kind:"literal",type:type.value,value:data.value!}:missing(type.value));
-  },[props.value,type.value]);
-  const emit=(mode:string,input=inner)=>{
-    const next:ValueInput=mode==="unset"?{kind:"literal",type,value:{state:"unset"}}:mode==="set"&&input.kind==="literal"?{kind:"literal",type,value:{state:"set",value:input.value}}:missing(type);
-    last.current=JSON.stringify(next);props.onChange(next);
+function OptionalLiteralInput(props: SlotProps) {
+  const type = props.value.type;
+  if (typeof type === "string" || type.kind !== "Optional")
+    throw Error("OPTIONAL_TYPE");
+  const data =
+    props.value.kind === "literal" &&
+    props.value.value &&
+    typeof props.value.value === "object" &&
+    !Array.isArray(props.value.value)
+      ? props.value.value
+      : undefined;
+  const [choice, setChoice] = useState(
+      data?.state === "set" ? "set" : data?.state === "unset" ? "unset" : "",
+    ),
+    [inner, setInner] = useState<ValueInput>(
+      data?.state === "set"
+        ? { kind: "literal", type: type.value, value: data.value! }
+        : missing(type.value),
+    );
+  const last = useRef(JSON.stringify(props.value));
+  useEffect(() => {
+    const next = JSON.stringify(props.value);
+    if (next === last.current) return;
+    last.current = next;
+    const data =
+      props.value.kind === "literal" &&
+      props.value.value &&
+      typeof props.value.value === "object" &&
+      !Array.isArray(props.value.value)
+        ? props.value.value
+        : undefined;
+    setChoice(
+      data?.state === "set" ? "set" : data?.state === "unset" ? "unset" : "",
+    );
+    setInner(
+      data?.state === "set"
+        ? { kind: "literal", type: type.value, value: data.value! }
+        : missing(type.value),
+    );
+  }, [props.value, type.value]);
+  const emit = (mode: string, input = inner) => {
+    const next: ValueInput =
+      mode === "unset"
+        ? { kind: "literal", type, value: { state: "unset" } }
+        : mode === "set" && input.kind === "literal"
+          ? {
+              kind: "literal",
+              type,
+              value: { state: "set", value: input.value },
+            }
+          : missing(type);
+    last.current = JSON.stringify(next);
+    props.onChange(next);
   };
-  return <div className="automation-optional-literal">
-    <label>{words(props.locale,"値の有無を明示","Explicit presence")}
-      <select value={choice} onChange={event=>{setChoice(event.target.value);emit(event.target.value);}}>
-        <option value="">{words(props.locale,"未設定","Not set")}</option>
-        <option value="set">{words(props.locale,"値がある","A value is present")}</option>
-        <option value="unset">{words(props.locale,"値がない","No value is present")}</option>
-      </select>
-    </label>
-    {choice==="set"&&<ValueSlot {...props} value={inner} modes={["literal"]} path={`${props.path}.present-value`} label={words(props.locale,"中の値","Contained value")} depth={(props.depth??0)+1}
-      onChange={value=>{setInner(value);emit("set",value);}}/>}
-  </div>;
+  return (
+    <div className="automation-optional-literal">
+      <label>
+        {words(props.locale, "値の有無を明示", "Explicit presence")}
+        <select
+          value={choice}
+          onChange={(event) => {
+            setChoice(event.target.value);
+            emit(event.target.value);
+          }}
+        >
+          <option value="">{words(props.locale, "未設定", "Not set")}</option>
+          <option value="set">
+            {words(props.locale, "値がある", "A value is present")}
+          </option>
+          <option value="unset">
+            {words(props.locale, "値がない", "No value is present")}
+          </option>
+        </select>
+      </label>
+      {choice === "set" && (
+        <ValueSlot
+          {...props}
+          value={inner}
+          modes={["literal"]}
+          path={`${props.path}.present-value`}
+          label={words(props.locale, "中の値", "Contained value")}
+          depth={(props.depth ?? 0) + 1}
+          onChange={(value) => {
+            setInner(value);
+            emit("set", value);
+          }}
+        />
+      )}
+    </div>
+  );
 }
 
 function FixedListInput(props: SlotProps) {

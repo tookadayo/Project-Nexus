@@ -9,6 +9,8 @@ export default ts.config(
       ".local/**",
       "playwright-report/**",
       "test-results/**",
+      "packages/automation/vendor/math-engine/**",
+      "packages/automation/vendor/math-oracle/**",
     ],
   },
   js.configs.recommended,

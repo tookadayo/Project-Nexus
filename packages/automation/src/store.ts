@@ -5,12 +5,14 @@ import type {EvaluatedValue,JsonValue} from './types';
 import {automationLock,releaseAutomationQuota} from './quota';
 import {boundedTerminalCheckpoint} from './iteration-results';
 import {DEFAULT_AUTOMATION_LIMITS} from './types';
+import {assertLoopDeadlineCommit,isAutomationBudgetStop} from './bounded-loop';
 
 export const RETENTION_MILLISECONDS=7*86400000;
 export type RunStatus='QUEUED'|'RUNNING'|'WAITING'|'WAITING_APPROVAL'|'COMPLETED'|'FAILED'|'CANCELLED'|'EXPIRED'|'UNKNOWN';
 export type OperationOutcome={state:'SUCCEEDED';value?:EvaluatedValue}|{state:'FAILED'|'NOT_STARTED'|'UNKNOWN';code:string};
 export interface RuntimeFrame {
   path:string;index:number;locals:string[];
+  boundedLoop?:{version:1;nodePath:string;identity:string;maxBody:number;completed:number;phase:'guard'|'body';deadline?:string};
   loop?:{nodePath:string;items:EvaluatedValue[];iteration:number;resultIds?:string[];resultIdentity?:string;outcome?:'FAILED'|'NOT_STARTED'|'UNKNOWN';skipped?:boolean;completed?:boolean};
   call?:{parentVariables:Record<string,EvaluatedValue>;parentReadonlyVariables?:string[];outputs:Record<string,string>};
   branch?:{nodePath:string};
@@ -42,7 +44,13 @@ export interface RuntimeParallelGroup {
   identity:string;nodePath:string;cursor:number;
   branches:{id:string;context:RuntimeContext}[];
 }
-export interface ResumeState extends RuntimeContext {formatVersion?:2;startedAt:string;steps:number;evaluations:number;externalActions:number;pendingAwaitAcknowledgements?:string[];iterations?:IterationCheckpoint[];uncertainty?:{operationIdentity:string;contextIdentity?:string;handlerPath:string;reason:string;phase:'CAPTURED'|'HANDLING'};}
+/** Minimal accepted occurrence meaning, retained with the existing Run lifetime.
+ * Optional calendar fields are never inferred for old or elapsed Runs. */
+export interface ScheduleOccurrenceSnapshot {
+  scheduleId:string;occurrenceKey:string;generation:number;revision:number;
+  timeZone?:string;localDate?:string;localTime?:string;instant:string;offset?:string;
+}
+export interface ResumeState extends RuntimeContext {formatVersion?:2;semanticProfile?:'scratch.v1';checkpointVersion?:number;startedAt:string;scheduleOccurrence?:ScheduleOccurrenceSnapshot;steps:number;evaluations:number;externalActions:number;pendingAwaitAcknowledgements?:string[];iterations?:IterationCheckpoint[];loopTermination?:{version:1;contextIdentity?:string;reason:import('./bounded-loop').LoopFailureReason;handlerPath:string;pure:boolean;dischargedOwners?:{nodePath:string;contextIdentity?:string}[];diagnostics?:string[]};uncertainty?:{operationIdentity:string;contextIdentity?:string;handlerPath:string;reason:string;phase:'CAPTURED'|'HANDLING'};}
 export interface RunRecord {
   organization_id:string;guild_id:string;id:string;flow_id:string;revision:number;semantic_hash:string;
   actor_hash:string;actor_ciphertext:string;beta_generation:number|null;status:RunStatus;
@@ -63,11 +71,12 @@ function stableJson(value:unknown):unknown {
   return value;
 }
 export const fingerprint=(value:unknown)=>createHash('sha256').update(JSON.stringify(stableJson(value))).digest('hex');
+export function automationDispatchCheckpoint(state:ResumeState){const terminal=state.loopTermination;return {version:state.checkpointVersion??0,terminationIdentity:terminal?fingerprint({version:terminal.version,contextIdentity:terminal.contextIdentity,handlerPath:terminal.handlerPath,reason:terminal.reason}):null};}
 const terminal=(status:RunStatus)=>['COMPLETED','FAILED','CANCELLED','EXPIRED','UNKNOWN'].includes(status);
 
 /** Stores only resumable execution state; diagnostic events never contain values. */
 export class AutomationStore {
-  constructor(readonly db:Database) {}
+  constructor(readonly db:Database,readonly clock?:()=>Date) {}
   async run(s:Scope,id:string,tx:Tx=this.db) {
     return (await sql<RunRecord>`SELECT * FROM automation_runs WHERE ${tenant(s)} AND id=${id}::uuid`.execute(tx)).rows[0]??null;
   }
@@ -82,6 +91,7 @@ export class AutomationStore {
   }
   async save(s:Scope,id:string,state:ResumeState,status:RunStatus,wakeAt:Date|null=null,reason:string|null=null,now=new Date()) {
     let checkpoint={...state};delete checkpoint.pendingAwaitAcknowledgements;
+    let committedVersion:number|undefined;
     await this.db.transaction().execute(async tx=>{
       await automationLock(tx,s);
       const row=(await sql<RunRecord>`SELECT * FROM automation_runs WHERE ${tenant(s)} AND id=${id}::uuid FOR UPDATE`.execute(tx)).rows[0];
@@ -89,7 +99,22 @@ export class AutomationStore {
       if(row.ended_at)return;
       assert(!wakeAt||wakeAt<=row.deadline_at,'AUTOMATION_DEADLINE_EXCEEDED');
       // A concurrent cancellation cannot be overwritten by a normal checkpoint.
-      const result=state.uncertainty&&(row.cancel_requested_at||['COMPLETED','FAILED','CANCELLED','EXPIRED'].includes(status))?'UNKNOWN':row.cancel_requested_at&&status!=='UNKNOWN'?'CANCELLED':status;
+      let result:RunStatus=state.uncertainty&&(row.cancel_requested_at||['COMPLETED','FAILED','CANCELLED','EXPIRED'].includes(status))?'UNKNOWN':row.cancel_requested_at&&status!=='UNKNOWN'?'CANCELLED':status;
+      const strict=state.semanticProfile==='scratch.v1'||row.resume.semanticProfile==='scratch.v1';
+      const version=row.resume.checkpointVersion??0;
+      if(strict)assert(Number.isSafeInteger(version)&&version>=0&&Number.isSafeInteger(state.checkpointVersion??0)&&(state.checkpointVersion??0)===version&&version<Number.MAX_SAFE_INTEGER,'AUTOMATION_CHECKPOINT_CONFLICT',409);
+      const decisionAt=strict?(this.clock?.()??now):now;
+      let decisionReason=reason;
+      if(strict&&(terminal(result)||row.cancel_requested_at||decisionAt>=row.deadline_at||state.loopTermination&&!row.resume.loopTermination)){
+        const unresolved=(await sql`SELECT identity FROM automation_operations WHERE ${tenant(s)} AND run_id=${id}::uuid AND state IN ('STARTED','UNKNOWN')`.execute(tx)).rows.length>0;
+        if(unresolved||state.uncertainty){result='UNKNOWN';decisionReason=reason??'UNRESOLVED_EXTERNAL_RESULT';}
+        else if(row.cancel_requested_at){result='CANCELLED';decisionReason='CANCEL_REQUESTED';}
+        else if(decisionAt>=row.deadline_at){result='EXPIRED';decisionReason='RUN_DEADLINE';}
+        if(checkpoint.loopTermination&&decisionReason!==reason)
+          checkpoint.loopTermination={...checkpoint.loopTermination,diagnostics:[...new Set([...(checkpoint.loopTermination.diagnostics??[]),decisionReason!])]};
+      }
+      if(strict&&!['UNKNOWN','CANCELLED','EXPIRED'].includes(result)&&!(result==='FAILED'&&reason&&isAutomationBudgetStop(reason)))assertLoopDeadlineCommit(row.resume,checkpoint,decisionAt);
+      if(strict)checkpoint.checkpointVersion=version+1;
       if(terminal(result))checkpoint=boundedTerminalCheckpoint(checkpoint,result);
       assert(Buffer.byteLength(JSON.stringify(checkpoint))<=DEFAULT_AUTOMATION_LIMITS.maxValueBytes,'AUTOMATION_STATE_LIMIT');
       if(terminal(result))await releaseAutomationQuota(tx,s,id);
@@ -97,9 +122,11 @@ export class AutomationStore {
         assert(/^[a-f0-9]{64}$/.test(identity),'AUTOMATION_AWAIT_INVALID');
         await sql`UPDATE automation_event_waits SET consumed_at=COALESCE(consumed_at,${now}) WHERE ${tenant(s)} AND run_id=${id}::uuid AND identity=${identity} AND state='MATCHED'`.execute(tx);
       }
-      await sql`UPDATE automation_runs SET resume=${json(checkpoint)},status=${result},wake_at=${terminal(result)?null:wakeAt},steps=${state.steps},evaluations=${state.evaluations},external_actions=${state.externalActions},reason=${reason},ended_at=${terminal(result)?now:null},updated_at=${now} WHERE ${tenant(s)} AND id=${id}::uuid`.execute(tx);
+      await sql`UPDATE automation_runs SET resume=${json(checkpoint)},status=${result},wake_at=${terminal(result)?null:wakeAt},steps=${state.steps},evaluations=${state.evaluations},external_actions=${state.externalActions},reason=${decisionReason},ended_at=${terminal(result)?decisionAt:null},updated_at=${decisionAt} WHERE ${tenant(s)} AND id=${id}::uuid`.execute(tx);
+      if(strict)committedVersion=version+1;
     });
     delete state.pendingAwaitAcknowledgements;
+    if(committedVersion!==undefined)state.checkpointVersion=committedVersion;
   }
   async cancel(s:Scope,id:string,now=new Date()) {
     return this.db.transaction().execute(tx=>this.cancelInTransaction(tx,s,id,now));
@@ -115,6 +142,10 @@ export class AutomationStore {
       // cancellation cannot turn an UNKNOWN write into a terminal cancellation.
       const inFlight=(await sql`SELECT identity FROM automation_operations WHERE ${tenant(s)} AND run_id=${id}::uuid AND state IN ('STARTED','UNKNOWN')`.execute(tx)).rows.length;
       if(!inFlight){
+        const checkpointVersion=row.resume.checkpointVersion??0;
+        const strict=row.resume.semanticProfile==='scratch.v1';
+        if(strict)assert(Number.isSafeInteger(checkpointVersion)&&checkpointVersion>=0&&checkpointVersion<Number.MAX_SAFE_INTEGER,'AUTOMATION_CHECKPOINT_CONFLICT',409);
+        if(strict)row.resume.checkpointVersion=checkpointVersion+1;
         row.resume=boundedTerminalCheckpoint(row.resume,'CANCELLED');
         await releaseAutomationQuota(tx,s,id);
         await sql`UPDATE automation_runs SET resume=${json(row.resume)},status='CANCELLED',ended_at=${now},wake_at=NULL,reason='CANCEL_REQUESTED' WHERE ${tenant(s)} AND id=${id}::uuid`.execute(tx);
@@ -163,14 +194,17 @@ export class AutomationStore {
       return (await sql<AutomationApproval>`SELECT * FROM automation_approvals WHERE ${tenant(s)} AND run_id=${run.id}::uuid AND identity=${identity}`.execute(tx)).rows[0]!;
     });
   }
-  async beginOperation(s:Scope,runId:string,identity:string,operation:string,inputHash:string) {
+  async beginOperation(s:Scope,runId:string,identity:string,operation:string,inputHash:string,effectiveDeadline?:Date,now=new Date(),expectedCheckpoint?:ReturnType<typeof automationDispatchCheckpoint>) {
     return this.db.transaction().execute(async tx=>{
       const row=(await sql<RunRecord>`SELECT * FROM automation_runs WHERE ${tenant(s)} AND id=${runId}::uuid FOR UPDATE`.execute(tx)).rows[0];
-      assert(row&&!row.ended_at&&!row.cancel_requested_at&&row.deadline_at>new Date(),'AUTOMATION_STOPPED');
+      const decisionAt=row?.resume.semanticProfile==='scratch.v1'?(this.clock?.()??new Date()):now;
+      if(row?.resume.semanticProfile==='scratch.v1')assert(expectedCheckpoint&&Number.isSafeInteger(expectedCheckpoint.version)&&expectedCheckpoint.version>=0&&expectedCheckpoint.version===(row.resume.checkpointVersion??0)&&expectedCheckpoint.terminationIdentity===automationDispatchCheckpoint(row.resume).terminationIdentity,'AUTOMATION_CHECKPOINT_CONFLICT',409);
+      assert(row&&!row.ended_at&&!row.cancel_requested_at&&row.deadline_at>decisionAt,'AUTOMATION_STOPPED');
+      assert(!effectiveDeadline||Number.isFinite(effectiveDeadline.getTime())&&effectiveDeadline>decisionAt,'AUTOMATION_LOCAL_DEADLINE');
       const unknown=(await sql`SELECT identity FROM automation_operations WHERE ${tenant(s)} AND run_id=${runId}::uuid AND state IN ('UNKNOWN','STARTED')`.execute(tx)).rows;
       assert(!unknown.length,'AUTOMATION_RESULT_UNKNOWN',409);
       const inserted=await sql`INSERT INTO automation_operations(organization_id,guild_id,run_id,identity,operation,fingerprint,state) VALUES(${s.organizationId}::uuid,${s.guildId},${runId}::uuid,${identity},${operation},${inputHash},'STARTED') ON CONFLICT DO NOTHING RETURNING identity`.execute(tx);
-      assert(inserted.rows.length,'AUTOMATION_OPERATION_EXISTS',409);
+      assert(inserted.rows.length,row.resume.semanticProfile==='scratch.v1'?'AUTOMATION_CHECKPOINT_CONFLICT':'AUTOMATION_OPERATION_EXISTS',409);
     });
   }
   async finishOperation(s:Scope,runId:string,identity:string,outcome:OperationOutcome) {

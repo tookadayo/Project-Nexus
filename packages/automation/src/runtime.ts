@@ -1,12 +1,13 @@
-import {randomInt} from 'node:crypto';
+import {randomInt,randomBytes} from 'node:crypto';
 import {sql,tenant,privacyReadLock,type Database,type Tx} from '../../db/src/index';
 import {assert,isDomainError,type Scope} from '../../shared/src/index';
 import {betaWork,betaAccess} from '../../security/src/hosted-beta';
 import {compileFlowDefinition} from './definition';
+import {scratchNumericOptions} from './scratch-math-server';
 import {evaluateValue,assertValueMatchesType,AutomationValueError} from './expression';
 import type {ActionOperation,EvaluatedValue,ExecutionPlan,FlowDefinition,JsonValue,Statement,ValueInput,VariableDeclaration} from './types';
 import {MAX_WAIT_SECONDS} from './types';
-import {AutomationStore,fingerprint,type OperationOutcome,type ResumeState,type RunRecord,type RuntimeFrame,type RuntimeContext} from './store';
+import {AutomationStore,automationDispatchCheckpoint,fingerprint,type OperationOutcome,type ResumeState,type RunRecord,type RuntimeFrame,type RuntimeContext} from './store';
 import {automationLock,consumeAutomationQuota,type AutomationAdmissionLimits} from './quota';
 import {assertParallelCheckpoint,forkParallel,nextRuntimeContext,parallelPause,runtimeContexts} from './parallel';
 import {ACTION_DEFINITIONS} from './catalog';
@@ -15,6 +16,9 @@ import {fixedPollBounds} from './poll';
 import {AutomationAwaits} from './await';
 import {iterationList,markIteration,noteIterationOperation} from './iteration-results';
 import {isUncertaintySafe,safeResultReason} from './results';
+import {boundedLoopDecision,effectiveLoopDeadline,expiredLoopOwner,isLocalDeadlineSafe,isAutomationBudgetStop,LOOP_HANDLER_KEYS,nearestBoundedLoopOwner,LoopDeadlineConflict,type BoundedLoop,type LoopFailureReason} from './bounded-loop';
+import {RandomTapeStore,type StoredRandomTapeInput,type RandomTapeRecord} from './random-tape-store';
+import {planRandomTape,prepareRandomTape,evaluateRandomTape,type RandomTapeInput} from './scratch-random';
 
 export interface AutomationOperationContext {scope:Scope;runId:string;identity:string;operation:ActionOperation;inputs:Record<string,EvaluatedValue>;targets:NonNullable<FlowDefinition['targets']>;approvalRequired:boolean;approval?:{id:string;fingerprint:string;expiresAt:string};}
 export interface AutomationRuntimeAdapter {
@@ -26,7 +30,7 @@ export interface AutomationRuntimeAdapter {
   authorizeAwait?(tx:Tx,scope:Scope,run:RunRecord,ticketId:string):Promise<{allowedChannelIds:string[]}>;
   execute(context:AutomationOperationContext):Promise<OperationOutcome>;
 }
-export interface AutomationRuntimeOptions {admission:AutomationAdmissionLimits;adapter:AutomationRuntimeAdapter;now?:()=>Date;}
+export interface AutomationRuntimeOptions {admission:AutomationAdmissionLimits;adapter:AutomationRuntimeAdapter;now?:()=>Date;scratchRandomAttempts?:number;}
 function valueAtPath(definition:FlowDefinition,path:string):unknown {
   let value:unknown=definition;
   for(const part of path.split('/')){
@@ -39,7 +43,7 @@ function statements(definition:FlowDefinition,path:string):Statement[] {
   const value=valueAtPath(definition,path);assert(Array.isArray(value),'AUTOMATION_CURSOR_INVALID');return value as Statement[];
 }
 export function dynamicExecutionIdentity(run:Pick<RunRecord,'id'|'revision'|'semantic_hash'>,frames:RuntimeFrame[],blockId:string,branchIdentity?:string) {
-  return fingerprint({runId:run.id,revision:run.revision,hash:run.semantic_hash,blockId,...(branchIdentity?{branchIdentity}:{}),path:frames.map(frame=>({path:frame.path,index:frame.index,iteration:frame.loop?.iteration??null}))});
+  return fingerprint({runId:run.id,revision:run.revision,hash:run.semantic_hash,blockId,...(branchIdentity?{branchIdentity}:{}),path:frames.map(frame=>({path:frame.path,index:frame.index,iteration:frame.loop?.iteration??frame.boundedLoop?.completed??null}))});
 }
 function count(value:EvaluatedValue,max:number) {assert(value.type==='Number'&&typeof value.value==='number'&&Number.isSafeInteger(value.value)&&value.value>=0&&value.value<=max,'AUTOMATION_COUNT_INVALID');return value.value;}
 function clearLocals(state:RuntimeContext,frame:RuntimeFrame) {for(const id of frame.locals)delete state.variables[id];if(state.readonlyVariables)state.readonlyVariables=state.readonlyVariables.filter(id=>!frame.locals.includes(id));frame.locals=[];}
@@ -52,21 +56,34 @@ export class AutomationRuntime {
   readonly store:AutomationStore;
   readonly awaits:AutomationAwaits;
   private readonly now:()=>Date;
-  constructor(readonly db:Database,readonly options:AutomationRuntimeOptions) {this.store=new AutomationStore(db);this.now=options.now??(()=>new Date());this.awaits=new AutomationAwaits(db,{now:this.now,authorize:async(tx,s,run,ticketId)=>{assert(this.options.adapter.authorizeAwait,'AUTOMATION_AWAIT_UNAVAILABLE',503);return this.options.adapter.authorizeAwait(tx,s,run,ticketId);}});}
+  constructor(readonly db:Database,readonly options:AutomationRuntimeOptions) {this.now=options.now??(()=>new Date());this.store=new AutomationStore(db,this.now);this.awaits=new AutomationAwaits(db,{now:this.now,authorize:async(tx,s,run,ticketId)=>{assert(this.options.adapter.authorizeAwait,'AUTOMATION_AWAIT_UNAVAILABLE',503);return this.options.adapter.authorizeAwait(tx,s,run,ticketId);}});}
   async tick(s:Scope,runId:string,maxSteps=100) {
     assert(Number.isSafeInteger(maxSteps)&&maxSteps>0&&maxSteps<=1000,'AUTOMATION_TICK_LIMIT');
     return this.store.withRunLock(s,runId,async()=>{
       let run=await this.store.run(s,runId);assert(run,'AUTOMATION_RUN_NOT_FOUND',404);
       if(run.ended_at)return {id:runId,state:run.status};
-      if(!run.cancel_requested_at&&run.deadline_at>this.now()&&run.wake_at&&run.wake_at>this.now())return {id:runId,state:run.status};
+      const waitingTermination=run.resume.loopTermination;
+      if(!run.cancel_requested_at&&run.deadline_at>this.now()&&run.wake_at&&run.wake_at>this.now()&&!expiredLoopOwner(run.resume,this.now(),waitingTermination?runtimeContexts(run.resume).find(candidate=>candidate.identity===waitingTermination.contextIdentity):undefined))return {id:runId,state:run.status};
       const source=(await sql<{definition:FlowDefinition}>`SELECT definition FROM automation_revisions WHERE ${tenant(s)} AND flow_id=${run.flow_id} AND revision=${run.revision}`.execute(this.db)).rows[0];
       assert(source,'AUTOMATION_REVISION_NOT_FOUND',404);
-      const plan=compileFlowDefinition(source.definition);assert(plan.semanticHash===run.semantic_hash,'AUTOMATION_REVISION_CORRUPT');
+      let numeric:Awaited<ReturnType<typeof scratchNumericOptions>>;
+      try{numeric=await scratchNumericOptions(source.definition);}
+      catch{
+        // Initialization needs no external dispatch. Resolve a fresh row through
+        // the usual checkpoint fence, which gives UNKNOWN, cancellation and the
+        // run deadline precedence over a numerical-engine failure.
+        const current=await this.store.run(s,runId);
+        if(!current)return {id:runId,state:'DELETED'};
+        if(!current.ended_at)await this.store.save(s,runId,structuredClone(current.resume),'FAILED',null,'AUTOMATION_NUMERIC_ENGINE_UNAVAILABLE',this.now());
+        return {id:runId,state:(await this.store.run(s,runId))?.status??'DELETED'};
+      }
+      const plan=compileFlowDefinition(source.definition,{...numeric,temporalResolution:'fixed'});assert(plan.semanticHash===run.semantic_hash,'AUTOMATION_REVISION_CORRUPT');
       const state=structuredClone(run.resume);
+      if(plan.definition.semanticProfile==='scratch.v1'){assert(state.semanticProfile===undefined||state.semanticProfile==='scratch.v1','AUTOMATION_SEMANTIC_PROFILE');state.semanticProfile='scratch.v1';}
       let context:RuntimeContext=state;
       const evaluate=(input:ValueInput)=>{
         const budget={evaluations:state.evaluations};
-        try{return evaluateValue(input,{guildId:s.guildId,variables:{...context.variables,...runBuiltinValues(s.guildId,run!.started_at.toISOString())},limits:plan.limits,budget,pureDefinitions:plan.definition.pureDefinitions});}
+        try{return evaluateValue(input,{guildId:s.guildId,semanticProfile:plan.definition.semanticProfile,numericMath:numeric.numericMath,temporalResolution:'fixed',variables:{...context.variables,...runBuiltinValues(s.guildId,run!.started_at.toISOString())},limits:plan.limits,budget,pureDefinitions:plan.definition.pureDefinitions});}
         finally{state.evaluations=budget.evaluations;}
       };
       try {
@@ -89,10 +106,17 @@ export class AutomationRuntime {
           if(run.ended_at)return {id:runId,state:run.status};
           if(run.cancel_requested_at){await this.store.save(s,runId,state,'CANCELLED',null,'CANCEL_REQUESTED',this.now());break;}
           if(this.now()>=run.deadline_at){await this.store.save(s,runId,state,'EXPIRED',null,'RUN_DEADLINE',this.now());break;}
+          const terminalContext=state.loopTermination?runtimeContexts(state).find(candidate=>candidate.identity===state.loopTermination!.contextIdentity):undefined;
+          const expiredOwner=expiredLoopOwner(state,this.now(),terminalContext);
+          if(expiredOwner){
+            context=expiredOwner.context;
+            if(!await this.enterLoopHandler(s,run,plan,state,context,expiredOwner.index,'local_deadline'))return {id:runId,state:(await this.store.run(s,runId))!.status};
+            this.resumable(state,plan);await this.store.save(s,runId,state,'RUNNING');continue;
+          }
           if(!state.uncertainty){await this.options.adapter.authorize(s,run);
             const flow=(await sql<{state:string}>`SELECT state FROM automation_flows WHERE ${tenant(s)} AND id=${run.flow_id}`.execute(this.db)).rows[0];
             assert(flow?.state==='ACTIVE','AUTOMATION_STOPPED');}
-          const selected=state.uncertainty?runtimeContexts(state).find(candidate=>candidate.identity===state.uncertainty!.contextIdentity):await nextRuntimeContext(state,this.now(),async identity=>{const approval=await this.store.approval(s,runId,identity);return !approval||approval.state!=='PENDING'||approval.expires_at<=this.now();},(parent,group)=>{
+          const selected=state.uncertainty?runtimeContexts(state).find(candidate=>candidate.identity===state.uncertainty!.contextIdentity):await nextRuntimeContext(terminalContext??state,this.now(),async identity=>{const approval=await this.store.approval(s,runId,identity);return !approval||approval.state!=='PENDING'||approval.expires_at<=this.now();},(parent,group)=>{
             const statement=valueAtPath(plan.definition,group.nodePath) as Extract<Statement,{kind:'parallel'}>;
             assert(statement?.kind==='parallel','AUTOMATION_PARALLEL_CURSOR_INVALID');
             const updates:Record<string,EvaluatedValue>={};
@@ -107,15 +131,37 @@ export class AutomationRuntime {
           if(!selected){
             if(state.uncertainty){await this.store.save(s,runId,state,'UNKNOWN',null,state.uncertainty.reason,this.now());return {id:runId,state:'UNKNOWN'};}
             this.resumable(state,plan);
-            const pause=parallelPause(state,this.now()),status=!state.frames.length&&!state.parallel?'COMPLETED':pause.state;
+            if(state.loopTermination&&terminalContext&&!terminalContext.frames.length&&!terminalContext.parallel){await this.store.save(s,runId,state,'FAILED',null,'LOOP_'+state.loopTermination.reason.toUpperCase(),this.now());return {id:runId,state:(await this.store.run(s,runId))!.status};}
+            const pause=parallelPause(terminalContext??state,this.now());
+            const deadlines=runtimeContexts(terminalContext??state).flatMap(candidate=>candidate.frames.flatMap(frame=>frame.boundedLoop?.deadline?[Date.parse(frame.boundedLoop.deadline)]:[]));
+            if(state.loopTermination&&terminalContext)deadlines.push(effectiveLoopDeadline(state,terminalContext,run.deadline_at).getTime());
+            if(deadlines.length){const earliest=Math.min(...deadlines,...(pause.wakeAt?[pause.wakeAt.getTime()]:[]));pause.wakeAt=new Date(earliest);}
+            const status=!state.frames.length&&!state.parallel?'COMPLETED':pause.state;
             await this.store.save(s,runId,state,status,status==='COMPLETED'?null:pause.wakeAt,null,this.now());
             const stored=(await this.store.run(s,runId))!;return {id:runId,state:stored.status,...(stored.wake_at?{dueAt:stored.wake_at.toISOString()}:{})};
           }
           context=selected;
           if(state.uncertainty&&!context.frames.length){await this.store.save(s,runId,state,'UNKNOWN',null,state.uncertainty.reason,this.now());return {id:runId,state:'UNKNOWN'};}
           const frame=context.frames.at(-1)!;
+          if(frame.boundedLoop){
+            const loop=frame.boundedLoop,loopStatement=valueAtPath(plan.definition,loop.nodePath) as BoundedLoop;
+            assert(loop.version===1&&loopStatement.kind==='boundedLoop'&&loopStatement.semanticVersion===1,'AUTOMATION_LOOP_CURSOR_INVALID');
+            if(loop.phase==='guard'){
+              state.steps++;assert(state.steps<=plan.limits.maxExpandedSteps,'AUTOMATION_STEP_LIMIT');
+              let decision:ReturnType<typeof boundedLoopDecision>;
+              try{const condition=evaluate(loopStatement.condition);assert(condition.type==='Boolean'||condition.type==='ConditionResult','AUTOMATION_CONDITION_INVALID');decision=boundedLoopDecision(loopStatement.mode,loop.completed,loop.maxBody,condition.value as boolean|'true'|'false'|'unknown');}
+              catch(error){if(state.loopTermination||error instanceof AutomationValueError&&/LIMIT|BUDGET/.test(error.code)||!(error instanceof AutomationValueError)&&!(isDomainError(error)&&error.code==='AUTOMATION_CONDITION_INVALID'))throw error;
+                if(!await this.enterLoopHandler(s,run,plan,state,context,context.frames.length-1,'evaluation_failed'))return {id:runId,state:(await this.store.run(s,runId))!.status};
+                this.resumable(state,plan);await this.store.save(s,runId,state,'RUNNING');continue;}
+              if(decision==='complete'){clearLocals(context,frame);context.frames.pop();}
+              else if(decision==='body'){loop.phase='body';frame.index=0;}
+              else if(!await this.enterLoopHandler(s,run,plan,state,context,context.frames.length-1,decision))return {id:runId,state:(await this.store.run(s,runId))!.status};
+              this.resumable(state,plan);await this.store.save(s,runId,state,'RUNNING');continue;
+            }
+          }
           const body=statements(plan.definition,frame.path),statement=body[frame.index];
           if(!statement){
+            if(frame.boundedLoop){clearLocals(context,frame);frame.boundedLoop.completed++;frame.boundedLoop.phase='guard';frame.index=0;this.resumable(state,plan);await this.store.save(s,runId,state,'RUNNING');continue;}
             if(frame.loop&&!frame.loop.completed){
               const loopStatement=valueAtPath(plan.definition,frame.loop.nodePath) as Extract<Statement,{kind:'repeat'}>;
               const values=frame.loop.skipped?{}:Object.fromEntries((loopStatement.results??[]).map(result=>[result.output.id,evaluate(result.value)]));
@@ -147,6 +193,7 @@ export class AutomationRuntime {
           if(statement.enabled===false){frame.index++;continue;}
           const path=frame.path+'/'+frame.index,baseIdentity=dynamicExecutionIdentity(run,context.frames,statement.id,context.identity),identity=statement.kind==='poll'?fingerprint({poll:baseIdentity,attempt:frame.poll?.attempts??0}):baseIdentity;
           if(state.uncertainty)assert(state.uncertainty.phase==='CAPTURED'?statement.kind==='resultBranch'&&path+'/unknown'===state.uncertainty.handlerPath:isUncertaintySafe(statement),'AUTOMATION_UNCERTAINTY_EFFECT');
+          if(state.loopTermination?.pure)assert(isLocalDeadlineSafe(statement),'AUTOMATION_LOCAL_DEADLINE_EFFECT');
           if(context.chargedStepIdentity!==identity){state.steps++;context.chargedStepIdentity=identity;}
           assert(state.steps<=plan.limits.maxExpandedSteps,'AUTOMATION_STEP_LIMIT');
           switch(statement.kind){
@@ -170,6 +217,19 @@ export class AutomationRuntime {
               const present=optional.value.state==='set',child:RuntimeFrame={path:path+'/'+(present?'present':'unset'),index:0,locals:[]};frame.index++;context.frames.push(child);
               if(present){assignLocal(context,child,statement.output,{type:optional.type.value,value:optional.value.value!,provenance:optional.provenance});context.readonlyVariables=[...new Set([...(context.readonlyVariables??[]),statement.output.id])];}break;
             }
+            case 'searchBranch':{
+              const result=evaluate(statement.value);
+              assert(typeof result.type==='object'&&result.type.kind==='Record'&&['nexus.index-result.v1','nexus.search-result.v1'].includes(result.type.schemaId)&&result.value!==null&&typeof result.value==='object'&&!Array.isArray(result.value),'AUTOMATION_SEARCH_RESULT_INVALID');
+              const found=result.value.state==='found';assert(found||result.value.state==='not_found','AUTOMATION_SEARCH_RESULT_INVALID');
+              const child:RuntimeFrame={path:path+'/'+(found?'found':'notFound'),index:0,locals:[]};frame.index++;context.frames.push(child);
+              if(found){
+                assert(typeof result.value.index==='number'&&Number.isSafeInteger(result.value.index)&&result.value.index>0,'AUTOMATION_SEARCH_RESULT_INVALID');
+                assignLocal(context,child,statement.index,{type:'Number',value:result.value.index,provenance:result.provenance});
+                const ids=[statement.index.id];
+                if(statement.output){assert(result.type.schemaId==='nexus.search-result.v1'&&result.type.typeArgs?.[0]&&Object.hasOwn(result.value,'value'),'AUTOMATION_SEARCH_RESULT_INVALID');assignLocal(context,child,statement.output,{type:result.type.typeArgs[0],value:result.value.value!,provenance:result.provenance});ids.push(statement.output.id);}
+                context.readonlyVariables=[...new Set([...(context.readonlyVariables??[]),...ids])];
+              }break;
+            }
             case 'resultBranch':{
               const result=evaluate(statement.value);assert(typeof result.type==='object'&&(result.type.kind==='ParseResult'||result.type.kind==='OperationOutcome')&&typeof result.value==='object'&&result.value!==null&&!Array.isArray(result.value),'AUTOMATION_RESULT_INVALID');
               const outcome=result.value,branch=outcome.state==='SUCCEEDED'?'succeeded':outcome.state==='FAILED'?'failed':outcome.state==='NOT_STARTED'?'notStarted':'unknown';
@@ -177,6 +237,13 @@ export class AutomationRuntime {
               const child:RuntimeFrame={path:path+'/'+branch,index:0,locals:[],...(branch==='unknown'?{uncertaintyBoundary:true}:{})};frame.index++;context.frames.push(child);
               if(branch==='succeeded'){assignLocal(context,child,statement.output,{type:result.type.value,value:outcome.value!,provenance:result.provenance});context.readonlyVariables=[...new Set([...(context.readonlyVariables??[]),statement.output.id])];}
               else if(statement.reason){assignLocal(context,child,statement.reason,{type:'PlainText',value:outcome.reason!,provenance:result.provenance});context.readonlyVariables=[...new Set([...(context.readonlyVariables??[]),statement.reason.id])];}break;
+            }
+            case 'boundedLoop':{
+              assert(plan.definition.semanticProfile==='scratch.v1'&&statement.semanticVersion===1,'AUTOMATION_SEMANTIC_PROFILE');
+              const maximum=count(evaluate(statement.maxBody),plan.limits.maxExpandedSteps);
+              const until=evaluate(statement.until);assert(until.type==='Instant'&&typeof until.value==='string'&&Number.isFinite(Date.parse(until.value)),'AUTOMATION_INSTANT_INVALID');
+              const deadline=new Date(until.value);assert(deadline<=run.deadline_at,'AUTOMATION_DEADLINE_EXCEEDED');
+              frame.index++;context.frames.push({path:path+'/body',index:0,locals:[],boundedLoop:{version:1,nodePath:path,identity,maxBody:maximum,completed:0,phase:'guard',deadline:deadline.toISOString()}});break;
             }
             case 'repeat':{
               let items:EvaluatedValue[];
@@ -198,12 +265,12 @@ export class AutomationRuntime {
               if(statement.duration){const duration=evaluate(statement.duration);assert(duration.type==='Duration'&&typeof duration.value==='number','AUTOMATION_DURATION_INVALID');milliseconds=duration.value*1000;}
               else{assert(statement.until,'AUTOMATION_INPUT_MISSING');const instant=evaluate(statement.until);assert(instant.type==='Instant'&&typeof instant.value==='string','AUTOMATION_INSTANT_INVALID');milliseconds=new Date(instant.value).getTime()-start.getTime();}
               assert(Number.isFinite(milliseconds)&&milliseconds>=0&&milliseconds<=MAX_WAIT_SECONDS*1000,'AUTOMATION_WAIT_LIMIT');
-              const wake=new Date(start.getTime()+milliseconds);assert(wake<=run.deadline_at,'AUTOMATION_DEADLINE_EXCEEDED');frame.index++;
+              const wake=new Date(start.getTime()+milliseconds);assert(wake<=effectiveLoopDeadline(state,context,run.deadline_at),'AUTOMATION_DEADLINE_EXCEEDED');frame.index++;
               if(milliseconds>0)context.waitUntil=wake.toISOString();break;
             }
             case 'poll':{
               if(!frame.poll){
-                const ticket=evaluate(statement.ticket),bounds=fixedPollBounds({maxAttempts:evaluate(statement.maxAttempts),interval:evaluate(statement.interval),until:evaluate(statement.until)},run.deadline_at,plan.limits.maxListItems);
+                const ticket=evaluate(statement.ticket),bounds=fixedPollBounds({maxAttempts:evaluate(statement.maxAttempts),interval:evaluate(statement.interval),until:evaluate(statement.until)},effectiveLoopDeadline(state,context,run.deadline_at),plan.limits.maxListItems);
                 assert(ticket.type==='TicketRef'&&!ticket.provenance.some(source=>source.sensitive||source.resumable===false),'AUTOMATION_INPUT_SENSITIVE');
                 frame.poll={nodePath:path,ticket,...bounds,attempts:0};
               }
@@ -224,7 +291,7 @@ export class AutomationRuntime {
                 outcome=await betaWork(this.db,s,async()=>{
                   const current=await this.store.run(s,runId);assert(current,'AUTOMATION_RUN_NOT_FOUND',404);await this.options.adapter.authorize(s,current);
                   assert(this.now()<new Date(polling.deadline),'AUTOMATION_POLL_DEADLINE');
-                  await this.store.beginOperation(s,runId,identity,'nexus.readTicket',fingerprint(inputs));
+                  await this.store.beginOperation(s,runId,identity,'nexus.readTicket',fingerprint(inputs),effectiveLoopDeadline(state,context,current.deadline_at),this.now(),automationDispatchCheckpoint(state));
                   let result:OperationOutcome;
                   try{result=await this.options.adapter.execute({scope:s,runId,identity,operation:'nexus.readTicket',inputs,targets:plan.definition.targets??{channelIds:[],roleIds:[],parentCategoryIds:[]},approvalRequired:false});}
                   catch{result={state:'UNKNOWN',code:'CONNECTOR_RESULT_UNKNOWN'};}
@@ -237,7 +304,7 @@ export class AutomationRuntime {
                 await this.store.save(s,runId,state,outcome.state==='UNKNOWN'?'UNKNOWN':'FAILED',null,outcome.code,this.now());return {id:runId,state:(await this.store.run(s,runId))!.status};
               }
               const value=outcome.value;assert(value&&JSON.stringify(value.type)===JSON.stringify(ACTION_DEFINITIONS['nexus.readTicket'].outputType)&&value.provenance.some(source=>source.source==='service'&&source.guildId===s.guildId)&&!value.provenance.some(source=>source.sensitive||source.resumable===false),'AUTOMATION_ACTION_OUTPUT_INVALID');
-              assertValueMatchesType(value.type,value.value,{guildId:s.guildId,limits:plan.limits});
+              assertValueMatchesType(value.type,value.value,{guildId:s.guildId,limits:plan.limits,temporalResolution:'fixed'});
               const current=await this.store.run(s,runId);assert(current&&!current.ended_at&&!current.cancel_requested_at,'AUTOMATION_STOPPED');await this.options.adapter.authorize(s,current);
               if(old){
                 const authorization=await this.db.transaction().execute(async tx=>{await privacyReadLock(tx,s);await betaAccess(tx,s,'work',current.beta_generation);assert(this.options.adapter.authorizeAwait,'AUTOMATION_POLL_AUTHORIZATION_UNAVAILABLE',503);const target=polling.ticket.value as {id:string};return this.options.adapter.authorizeAwait(tx,s,current,target.id);});
@@ -261,7 +328,7 @@ export class AutomationRuntime {
                 assert(![ticket,until].some(value=>value.provenance.some(source=>source.sensitive||source.resumable===false)),'AUTOMATION_STATE_NOT_RESUMABLE');
                 assert(ticket.type==='TicketRef'&&typeof ticket.value==='object'&&ticket.value!==null&&!Array.isArray(ticket.value)&&typeof ticket.value.id==='string','AUTOMATION_REFERENCE_INVALID');
                 assert(until.type==='Instant'&&typeof until.value==='string'&&Number.isFinite(Date.parse(until.value)),'AUTOMATION_INSTANT_INVALID');
-                assert(new Date(until.value)<=run.deadline_at,'AUTOMATION_DEADLINE_EXCEEDED');
+                assert(new Date(until.value)<=effectiveLoopDeadline(state,context,run.deadline_at),'AUTOMATION_DEADLINE_EXCEEDED');
                 frame.await={identity,ticket,deadline:new Date(until.value).toISOString()};
               }
               const awaiting=frame.await;assert(awaiting.identity===identity,'AUTOMATION_AWAIT_CURSOR_INVALID');
@@ -284,9 +351,58 @@ export class AutomationRuntime {
               if(receipt.state==='TIMED_OUT'){enter('timedOut');break;}
               assert(receipt.state==='MATCHED','AUTOMATION_AWAIT_CORRUPT');
               const value:EvaluatedValue={type:statement.output.type,value:receipt.value,provenance:[{source:'service',guildId:s.guildId,resumable:true,allowedChannelIds:receipt.allowedChannelIds}]};
-              assertValueMatchesType(value.type,value.value,{guildId:s.guildId,limits:plan.limits});enter('matched',value);break;
+              assertValueMatchesType(value.type,value.value,{guildId:s.guildId,limits:plan.limits,temporalResolution:'fixed'});enter('matched',value);break;
             }
             case 'random':{
+              if(plan.definition.semanticProfile==='scratch.v1'){
+                const attempts=this.options.scratchRandomAttempts;
+                assert(attempts&&Number.isSafeInteger(attempts)&&attempts>0,'AUTOMATION_RANDOM_CAPACITY_UNMEASURED');
+                const tapes=new RandomTapeStore(this.db,this.now);
+                this.resumable(state,plan);
+                let record:RandomTapeRecord;
+                try{record=await tapes.prepare(s,runId,identity,state,fingerprint(run.resume),plan.limits.maxValueBytes,available=>{
+                  let input:RandomTapeInput,provenance:EvaluatedValue['provenance'];
+                  if(statement.mode==='integer'||statement.mode==='decimal'){
+                    assert(statement.min&&statement.max,'AUTOMATION_INPUT_MISSING');
+                    const lower=evaluate(statement.min),upper=evaluate(statement.max);
+                    assert(lower.type==='Number'&&upper.type==='Number'&&typeof lower.value==='number'&&typeof upper.value==='number','AUTOMATION_RANDOM_RANGE');
+                    input={mode:statement.mode,lower:lower.value,upper:upper.value};provenance=[...lower.provenance,...upper.provenance];
+                  }else{
+                    assert(statement.list,'AUTOMATION_INPUT_MISSING');const list=evaluate(statement.list);assert(Array.isArray(list.value),'AUTOMATION_LIST_INVALID');
+                    const requested=statement.mode==='sample'?evaluate(statement.count!):undefined;
+                    input=statement.mode==='sample'?{mode:'sample',candidates:list.value,count:count(requested!,plan.limits.maxListItems)}:{mode:'shuffle',candidates:list.value};
+                    provenance=[...list.provenance,...(requested?.provenance??[])];
+                  }
+                  assert(!provenance.some(source=>source.sensitive||source.resumable===false),'AUTOMATION_RANDOM_NOT_RESUMABLE');
+                  const planned=planRandomTape(input,attempts),remaining=plan.limits.maxEvaluations-state.evaluations;
+                  assert(planned.reservedTrials<=remaining,'AUTOMATION_EVALUATION_LIMIT');
+                  // Reserve trial and material capacity before calling the bit source.
+                  const shell:Omit<StoredRandomTapeInput,'material'>={version:1,type:statement.output.type,provenance:[...provenance,{source:'service',guildId:s.guildId,resumable:true}]};
+                  const overhead=Buffer.byteLength(JSON.stringify({...shell,material:null}))+Buffer.byteLength(JSON.stringify({state:'SUCCEEDED',value:null,consumedTrials:planned.reservedTrials}));
+                  const material=prepareRandomTape(planned,{id:identity,maxMaterialBytes:available-overhead,maxCandidateTrials:Math.max(1,remaining)},bytes=>randomBytes(bytes));
+                  state.evaluations+=planned.reservedTrials;
+                  return {...shell,material};
+                },this.now(),effectiveLoopDeadline(state,context,run.deadline_at));}
+                catch(error){if(isDomainError(error)||error instanceof AutomationValueError)throw error;const known=await tapes.reconcile(s,runId,identity);if(!known)throw error;return {id:runId,state:known.run.status};}
+                if(record.result.state==='PREPARED'){
+                  try{record=await tapes.reserveEvaluation(s,runId,identity,record.fingerprint,state,plan.limits.maxEvaluations,plan.limits.maxValueBytes,this.now(),effectiveLoopDeadline(state,context,run.deadline_at));}
+                  catch(error){if(isDomainError(error)||error instanceof AutomationValueError)throw error;const known=await tapes.reconcile(s,runId,identity,record.fingerprint);if(!known)throw error;return {id:runId,state:known.run.status};}
+                }
+                const outcome=record.result.state==='PREPARED'?evaluateRandomTape(record.input.material):record.result;
+                if(outcome.state==='SUCCEEDED'){
+                  const result:EvaluatedValue={type:record.input.type,value:outcome.value,provenance:record.input.provenance};
+                  assertValueMatchesType(statement.output.type,result.value,{guildId:s.guildId,limits:plan.limits,semanticProfile:plan.definition.semanticProfile,temporalResolution:'fixed'});
+                  assignLocal(context,frame,statement.output,result);frame.index++;delete context.chargedStepIdentity;
+                  this.resumable(state,plan);
+                  try{await tapes.complete(s,runId,identity,record.fingerprint,outcome,state,plan.limits.maxValueBytes,this.now(),effectiveLoopDeadline(state,context,run.deadline_at));}
+                  catch(error){if(isDomainError(error)||error instanceof AutomationValueError)throw error;const known=await tapes.reconcile(s,runId,identity,record.fingerprint);if(!known)throw error;return {id:runId,state:known.run.status};}
+                }else{
+                  try{await tapes.complete(s,runId,identity,record.fingerprint,outcome,state,plan.limits.maxValueBytes,this.now(),effectiveLoopDeadline(state,context,run.deadline_at));}
+                  catch(error){if(isDomainError(error)||error instanceof AutomationValueError)throw error;const known=await tapes.reconcile(s,runId,identity,record.fingerprint);if(!known)throw error;return {id:runId,state:known.run.status};}
+                  throw new AutomationValueError('RANDOM_SAMPLING_EXHAUSTED','The fixed random trial budget was exhausted.');
+                }
+                break;
+              }
               const committed=await this.store.randomOnce(s,runId,identity,()=>{
                 let input:JsonValue,result:JsonValue;let provenance:EvaluatedValue['provenance'];
                 if(statement.mode==='integer'){
@@ -317,7 +433,7 @@ export class AutomationRuntime {
                 const targetIndex=body.findIndex(candidate=>candidate.id===statement.actionId),target=body[targetIndex];
                 assert(targetIndex>frame.index&&target?.kind==='action'&&target.enabled!==false&&(target.operation==='discord.addRole'||target.operation==='discord.removeRole'),'AUTOMATION_APPROVAL_TARGET');
                 const until=evaluate(statement.until);assert(until.type==='Instant'&&typeof until.value==='string','AUTOMATION_APPROVAL_DEADLINE_INVALID');
-                const expires=new Date(until.value);assert(Number.isFinite(expires.getTime())&&expires<=run.deadline_at,'AUTOMATION_APPROVAL_DEADLINE_INVALID');
+                const expires=new Date(until.value);assert(Number.isFinite(expires.getTime())&&expires<=effectiveLoopDeadline(state,context,run.deadline_at),'AUTOMATION_APPROVAL_DEADLINE_INVALID');
                 const targetFrames=structuredClone(context.frames);targetFrames.at(-1)!.index=targetIndex;
                 const approvalIdentity=dynamicExecutionIdentity(run,targetFrames,target.id,context.identity),inputs=Object.fromEntries(Object.entries(target.inputs).map(([key,input])=>[key,evaluate(input)]));
                 assert(!Object.values(inputs).some(value=>value.provenance.some(source=>source.sensitive||source.resumable===false)),'AUTOMATION_INPUT_SENSITIVE');
@@ -354,7 +470,8 @@ export class AutomationRuntime {
                 this.resumable(state,plan);await this.store.save(s,runId,state,'RUNNING');
                 outcome=await betaWork(this.db,s,async()=>{
                   const current=await this.store.run(s,runId);assert(current,'AUTOMATION_RUN_NOT_FOUND',404);await this.options.adapter.authorize(s,current);
-                  await this.store.beginOperation(s,runId,identity,statement.operation,fingerprint(inputs));
+                  assert(this.now()<effectiveLoopDeadline(state,context,current.deadline_at),'AUTOMATION_LOCAL_DEADLINE');
+                  await this.store.beginOperation(s,runId,identity,statement.operation,fingerprint(inputs),effectiveLoopDeadline(state,context,current.deadline_at),this.now(),automationDispatchCheckpoint(state));
                   let result:OperationOutcome;
                   try {result=await this.options.adapter.execute({scope:s,runId,identity,operation:statement.operation,inputs,targets:plan.definition.targets??{channelIds:[],roleIds:[],parentCategoryIds:[]},approvalRequired:needsApproval,...(approved?{approval:{id:approved.id,fingerprint:approved.fingerprint,expiresAt:approved.expires_at.toISOString()}}:{})});}
                   catch {result={state:'UNKNOWN',code:'CONNECTOR_RESULT_UNKNOWN'};}
@@ -395,7 +512,7 @@ export class AutomationRuntime {
               for(const [key,id] of Object.entries(call.outputs)){const value=values[key];assert(value,'AUTOMATION_RETURN_REQUIRED');assert(!Object.hasOwn(context.variables,id),'AUTOMATION_VARIABLE_DUPLICATE');context.variables[id]=value;parent.locals.push(id);}break;
             }
             case 'break':case 'continue':{
-              let at=context.frames.length-1;while(at>=0&&!context.frames[at]!.loop){assert(!context.frames[at]!.call,'AUTOMATION_LOOP_BOUNDARY');at--;}
+              let at=context.frames.length-1;while(at>=0&&!context.frames[at]!.loop&&!context.frames[at]!.boundedLoop){assert(!context.frames[at]!.call,'AUTOMATION_LOOP_BOUNDARY');at--;}
               assert(at>=0,'AUTOMATION_LOOP_BOUNDARY');
               const terminal=context.frames.slice(at+1).findLast(candidate=>candidate.terminalAfter)?.terminalAfter;
               if(terminal){await this.store.save(s,runId,state,terminal.status,null,terminal.reason,this.now());return {id:runId,state:(await this.store.run(s,runId))!.status};}
@@ -403,17 +520,38 @@ export class AutomationRuntime {
               if(failedIteration){await this.store.save(s,runId,state,failedIteration==='UNKNOWN'?'UNKNOWN':'FAILED',null,'ITERATION_'+failedIteration,this.now());return {id:runId,state:(await this.store.run(s,runId))!.status};}
               while(context.frames.length>at+1)clearLocals(context,context.frames.pop()!);
               const loop=context.frames[at]!;
+              if(loop.boundedLoop){
+                clearLocals(context,loop);
+                if(statement.kind==='break')context.frames.pop();
+                else {loop.boundedLoop.completed++;loop.boundedLoop.phase='guard';loop.index=0;}
+                break;
+              }
               loop.loop!.skipped=true;markIteration(state,context,loop,'SKIPPED');
               if(statement.kind==='break'){clearLocals(context,loop);context.frames.pop();}else loop.index=statements(plan.definition,loop.path).length;
               break;
             }
-            case 'end':{
+            case 'endBranch':{
+              assert(plan.definition.semanticProfile==='scratch.v1'&&statement.semanticVersion===1,'AUTOMATION_SEMANTIC_PROFILE');
+              const at=context.frames.findLastIndex(candidate=>Boolean(candidate.branch));assert(at>=0,'AUTOMATION_END_BRANCH_SCOPE');
+              const boundary=context.frames.slice(at).findLast(candidate=>candidate.terminalAfter)?.terminalAfter;
+              if(boundary){await this.store.save(s,runId,state,boundary.status,null,boundary.reason,this.now());return {id:runId,state:(await this.store.run(s,runId))!.status};}
+              const branch=valueAtPath(plan.definition,context.frames[at]!.branch!.nodePath) as Extract<Statement,{kind:'parallel'}>['branches'][number];
+              context.outputs=Object.fromEntries(Object.entries(branch.outputs??{}).map(([key,input])=>[key,evaluate(input)]));
+              for(const exited of context.frames.slice(at))if(exited.loop)markIteration(state,context,exited,'SKIPPED');
+              while(context.frames.length>at)clearLocals(context,context.frames.pop()!);
+              delete context.parallel;break;
+            }
+            case 'endRun':case 'end':{
+              if(statement.kind==='endRun')assert(plan.definition.semanticProfile==='scratch.v1'&&statement.semanticVersion===1,'AUTOMATION_SEMANTIC_PROFILE');
               if(state.uncertainty){await this.store.save(s,runId,state,'UNKNOWN',null,state.uncertainty.reason,this.now());return {id:runId,state:'UNKNOWN'};}
+              if(state.loopTermination){await this.store.save(s,runId,state,'FAILED',null,'LOOP_'+state.loopTermination.reason.toUpperCase(),this.now());return {id:runId,state:(await this.store.run(s,runId))!.status};}
               const terminal=context.frames.findLast(candidate=>candidate.terminalAfter)?.terminalAfter;
               if(terminal){await this.store.save(s,runId,state,terminal.status,null,terminal.reason,this.now());return {id:runId,state:(await this.store.run(s,runId))!.status};}
               const failedIteration=context.frames.findLast(candidate=>candidate.loop?.outcome)?.loop?.outcome;
               if(failedIteration){await this.store.save(s,runId,state,failedIteration==='UNKNOWN'?'UNKNOWN':'FAILED',null,'ITERATION_'+failedIteration,this.now());return {id:runId,state:(await this.store.run(s,runId))!.status};}
-              assert(context===state,'AUTOMATION_END_SCOPE');for(const candidate of context.frames)if(candidate.loop)markIteration(state,context,candidate,'SKIPPED');context.frames=[];break;
+              if(statement.kind==='end')assert(context===state,'AUTOMATION_END_SCOPE');
+              for(const active of statement.kind==='endRun'?runtimeContexts(state):[context])for(const candidate of active.frames)if(candidate.loop)markIteration(state,active,candidate,'SKIPPED');
+              if(statement.kind==='endRun'){state.frames=[];delete state.parallel;}else context.frames=[];break;
             }
             case 'parallel':context.parallel=forkParallel(context,identity,path,statement.branches);state.formatVersion=2;frame.index++;break;
           }
@@ -422,13 +560,16 @@ export class AutomationRuntime {
         }
         this.resumable(state,plan);await this.store.save(s,runId,state,'RUNNING');
       } catch(error) {
-        const code=isDomainError(error)?error.code:error instanceof AutomationValueError&&/^[A-Z_]{1,80}$/.test(error.code)?'AUTOMATION_'+error.code:error instanceof Error&&/^AUTOMATION_[A-Z_]+$/.test(error.message)?error.message:'AUTOMATION_EXECUTION_FAILED';
+          const expressionCodes:Readonly<Record<string,string>>={NumericOverflow:'AUTOMATION_NUMERIC_OVERFLOW',NumericUnderflow:'AUTOMATION_NUMERIC_UNDERFLOW',DomainError:'AUTOMATION_DOMAIN_ERROR',ZeroDivision:'AUTOMATION_ZERO_DIVISION',NumericEngineUnavailable:'AUTOMATION_NUMERIC_ENGINE_UNAVAILABLE',NumericCertificationUnavailable:'AUTOMATION_NUMERIC_CERTIFICATION_UNAVAILABLE',IndexError:'AUTOMATION_INDEX_ERROR'};
+          const code=isDomainError(error)?error.code:error instanceof AutomationValueError?(expressionCodes[error.code]??(/^[A-Z_]{1,80}$/.test(error.code)?'AUTOMATION_'+error.code:'AUTOMATION_EXECUTION_FAILED')):error instanceof Error&&/^AUTOMATION_[A-Z_]+$/.test(error.message)?error.message:'AUTOMATION_EXECUTION_FAILED';
         const current=await this.store.run(s,runId);
+        if(code==='AUTOMATION_CHECKPOINT_CONFLICT')return {id:runId,state:current?.status??'DELETED'};
         if(current&&!current.ended_at){
           // A worker may die after its durable dispatch claim. Neither a later
           // permission failure nor cancellation makes that operation unsent.
           const pending=(await sql`SELECT identity FROM automation_operations WHERE ${tenant(s)} AND run_id=${runId}::uuid AND state IN ('STARTED','UNKNOWN')`.execute(this.db)).rows.length;
-          let checkpoint=state;
+          let checkpoint=error instanceof LoopDeadlineConflict?structuredClone(error.resume):state;
+          if(error instanceof LoopDeadlineConflict){checkpoint.steps=state.steps;checkpoint.evaluations=state.evaluations;checkpoint.externalActions=state.externalActions;}
           try{this.resumable(checkpoint,plan);}catch{
             // Never persist the over-budget or non-resumable value which caused
             // this failure. Durable operation evidence remains in its ledger.
@@ -436,6 +577,29 @@ export class AutomationRuntime {
             checkpoint.steps=state.steps;checkpoint.evaluations=state.evaluations;checkpoint.externalActions=state.externalActions;
           }
           const failedContext=runtimeContexts(checkpoint).find(item=>item.identity===context.identity)??checkpoint;
+          if(checkpoint.loopTermination){checkpoint.loopTermination.diagnostics=[...new Set([...(checkpoint.loopTermination.diagnostics??[]),code,'HANDLER_FAILED'])];}
+          const expiredOwner=expiredLoopOwner(checkpoint,this.now(),checkpoint.loopTermination?failedContext:undefined);
+          const nearest=nearestBoundedLoopOwner(checkpoint,failedContext);
+          const localFailure=error instanceof LoopDeadlineConflict||error instanceof AutomationValueError&&!/LIMIT|BUDGET/.test(error.code)||isDomainError(error)&&['AUTOMATION_CONDITION_INVALID','AUTOMATION_COUNT_INVALID','AUTOMATION_DURATION_INVALID','AUTOMATION_WAIT_LIMIT','AUTOMATION_LIST_INVALID','AUTOMATION_INSTANT_INVALID','AUTOMATION_DEADLINE_EXCEEDED','AUTOMATION_LOCAL_DEADLINE'].includes(error.code);
+          if(!pending&&!current.cancel_requested_at&&this.now()<current.deadline_at&&!isAutomationBudgetStop(code)&&(expiredOwner||!checkpoint.loopTermination&&nearest&&localFailure)){
+            let owner=expiredOwner?{context:expiredOwner.context,index:expiredOwner.index}:nearest!,reason:LoopFailureReason=expiredOwner?'local_deadline':'evaluation_failed';
+            for(let retry=0;retry<plan.limits.maxNesting+plan.limits.maxCallDepth+2;retry++){
+              checkpoint.steps++;
+              if(checkpoint.steps>plan.limits.maxExpandedSteps){await this.store.save(s,runId,checkpoint,'FAILED',null,'AUTOMATION_STEP_LIMIT',this.now());return {id:runId,state:(await this.store.run(s,runId))!.status};}
+              try{
+                if(await this.enterLoopHandler(s,current,plan,checkpoint,owner.context,owner.index,reason)){this.resumable(checkpoint,plan);await this.store.save(s,runId,checkpoint,'RUNNING');}
+                return {id:runId,state:(await this.store.run(s,runId))!.status};
+              }catch(conflict){
+                if(isDomainError(conflict)&&conflict.code==='AUTOMATION_CHECKPOINT_CONFLICT')return {id:runId,state:(await this.store.run(s,runId))?.status??'DELETED'};
+                if(!(conflict instanceof LoopDeadlineConflict))throw conflict;
+                const steps=checkpoint.steps,evaluations=checkpoint.evaluations,externalActions=checkpoint.externalActions;
+                checkpoint=structuredClone(conflict.resume);Object.assign(checkpoint,{steps,evaluations,externalActions});
+                const selected=checkpoint.loopTermination?runtimeContexts(checkpoint).find(item=>item.identity===checkpoint.loopTermination!.contextIdentity):undefined;
+                const expired=expiredLoopOwner(checkpoint,this.now(),selected);assert(expired,'AUTOMATION_LOOP_CURSOR_INVALID');owner={context:expired.context,index:expired.index};reason='local_deadline';
+              }
+            }
+            await this.store.save(s,runId,checkpoint,'FAILED',null,'AUTOMATION_NESTING_LIMIT',this.now());return {id:runId,state:(await this.store.run(s,runId))!.status};
+          }
           if(pending)noteIterationOperation(failedContext,'UNKNOWN',checkpoint);
           else if(!current.cancel_requested_at&&this.now()<current.deadline_at)noteIterationOperation(failedContext,'FAILED',checkpoint);
           const terminalStatus=pending?'UNKNOWN':this.now()>=current.deadline_at?'EXPIRED':'FAILED';
@@ -445,12 +609,41 @@ export class AutomationRuntime {
       const final=await this.store.run(s,runId);return {id:runId,state:final?.status??'DELETED'};
     });
   }
+  private async enterLoopHandler(s:Scope,run:RunRecord,plan:ExecutionPlan,state:ResumeState,context:RuntimeContext,index:number,reason:LoopFailureReason):Promise<boolean> {
+    const owner=context.frames[index],loop=owner?.boundedLoop;
+    assert(owner&&loop,'AUTOMATION_LOOP_CURSOR_INVALID');
+    const statement=valueAtPath(plan.definition,loop.nodePath) as BoundedLoop;
+    assert(statement.kind==='boundedLoop'&&statement.semanticVersion===1,'AUTOMATION_LOOP_CURSOR_INVALID');
+    const pending=(await sql`SELECT identity FROM automation_operations WHERE ${tenant(s)} AND run_id=${run.id}::uuid AND state IN ('STARTED','UNKNOWN')`.execute(this.db)).rows.length;
+    if(pending||state.uncertainty){await this.store.save(s,run.id,state,'UNKNOWN',null,'UNRESOLVED_EXTERNAL_RESULT',this.now());return false;}
+    const current=await this.store.run(s,run.id);
+    assert(current,'AUTOMATION_RUN_NOT_FOUND',404);
+    if(current.ended_at)return false;
+    if(current.cancel_requested_at||this.now()>=current.deadline_at){await this.store.save(s,run.id,state,current.cancel_requested_at?'CANCELLED':'EXPIRED',null,current.cancel_requested_at?'CANCEL_REQUESTED':'RUN_DEADLINE',this.now());return false;}
+    if(state.loopTermination&&reason!=='local_deadline'){
+      state.loopTermination.diagnostics=[...new Set([...(state.loopTermination.diagnostics??[]),'HANDLER_FAILED','LOOP_'+reason.toUpperCase()])];
+      await this.store.save(s,run.id,state,'FAILED',null,'LOOP_'+state.loopTermination.reason.toUpperCase(),this.now());return false;
+    }
+    for(let at=context.frames.length-1;at>index;at--){const exited=context.frames.pop()!;clearLocals(context,exited);if(exited.call){context.variables=exited.call.parentVariables;context.readonlyVariables=exited.call.parentReadonlyVariables;}}
+    clearLocals(context,owner);
+    delete context.parallel;delete context.waitUntil;delete context.approvalIdentity;delete context.approvalDeadline;delete context.awaitIdentity;delete context.awaitDeadline;delete context.chargedStepIdentity;
+    const key=LOOP_HANDLER_KEYS[reason],handlerPath=loop.nodePath+'/handlers/'+key;
+    const prior=state.loopTermination;
+    const dischargedOwners=prior?[...(prior.dischargedOwners??[]),...(prior.reason==='local_deadline'?[{nodePath:prior.handlerPath.replace(/\/handlers\/localDeadline$/,''),...(prior.contextIdentity?{contextIdentity:prior.contextIdentity}:{})}]:[])]:[];
+    state.loopTermination={version:1,...(context.identity?{contextIdentity:context.identity}:{}),reason,handlerPath,pure:reason==='local_deadline',...(dischargedOwners.length?{dischargedOwners}:{}),...(prior?{diagnostics:[...new Set([...(prior.diagnostics??[]),'LOOP_'+prior.reason.toUpperCase()])]}:{})};
+    if(!statement.handlers[key]){await this.store.save(s,run.id,state,'FAILED',null,'LOOP_'+reason.toUpperCase(),this.now());return false;}
+    owner.path=handlerPath;owner.index=0;delete owner.boundedLoop;
+    owner.terminalAfter={status:'FAILED',reason:'LOOP_'+reason.toUpperCase()};
+    if(statement.reason){assignLocal(context,owner,statement.reason,{type:statement.reason.type,value:reason,provenance:[{source:'service',guildId:s.guildId,resumable:true}]});context.readonlyVariables=[...new Set([...(context.readonlyVariables??[]),statement.reason.id])];}
+    await this.store.event(s,run.id,statement.id,'LOOP_HANDLER',reason.toUpperCase());
+    return true;
+  }
   private captureOutcome(s:Scope,plan:ExecutionPlan,state:ResumeState,context:RuntimeContext,frame:RuntimeFrame,statement:Extract<Statement,{kind:'action'}>,outcome:OperationOutcome,identity:string,path:string) {
     assert(statement.outcome,'AUTOMATION_ACTION_OUTCOME_REQUIRED');
     const action=ACTION_DEFINITIONS[statement.operation];
     if(outcome.state==='SUCCEEDED'&&action.outputType)assert(outcome.value&&outcome.value.provenance.some(source=>source.source==='service'&&source.guildId===s.guildId),'AUTOMATION_ACTION_OUTPUT_MISSING');
     const value:EvaluatedValue={type:{kind:'OperationOutcome',value:action.outputType??'Boolean'},value:outcome.state==='SUCCEEDED'?{state:'SUCCEEDED',value:action.outputType?outcome.value!.value:true}:{state:outcome.state,reason:safeResultReason(outcome.code)},provenance:[...(outcome.state==='SUCCEEDED'?outcome.value?.provenance??[]:[]),{source:'service',guildId:s.guildId,resumable:true,evidence:'operation'}]};
-    assertValueMatchesType(value.type,value.value,{guildId:s.guildId,limits:plan.limits});
+    assertValueMatchesType(value.type,value.value,{guildId:s.guildId,limits:plan.limits,temporalResolution:'fixed'});
     assignLocal(context,frame,statement.outcome,value);context.readonlyVariables=[...new Set([...(context.readonlyVariables??[]),statement.outcome.id])];frame.index++;
     if(outcome.state==='UNKNOWN'){
       const body=statements(plan.definition,frame.path),index=body.findIndex((node,index)=>index>=frame.index&&node.enabled!==false),handler=body[index];

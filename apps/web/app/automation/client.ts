@@ -1,6 +1,8 @@
 import type {
   FlowDefinition,
   ValidationIssue,
+  ValueType,
+  JsonValue,
 } from "../../../../packages/automation/src/types";
 
 export interface FlowSummary {
@@ -12,7 +14,7 @@ export interface FlowSummary {
   updatedAt: string;
 }
 export interface FlowDetail extends FlowSummary {
-  scheduleReview?: {required:boolean;reason:string|null};
+  scheduleReview?: { required: boolean; reason: string | null };
   definition: FlowDefinition;
   validation: {
     valid: boolean;
@@ -22,6 +24,11 @@ export interface FlowDetail extends FlowSummary {
   };
   requestId?: string;
 }
+export interface FlowRevision {
+  id: string;
+  revision: number;
+  definition: FlowDefinition;
+}
 export interface CheckResult {
   revision: number;
   semanticHash: string;
@@ -30,6 +37,16 @@ export interface CheckResult {
   issues: ValidationIssue[];
 }
 export interface SimulationResult extends CheckResult {
+  inspection?: {
+    mode: "SIMULATION_ONLY";
+    values: {
+      variableId: string;
+      type: ValueType;
+      value: JsonValue;
+      blockId: string;
+    }[];
+    unavailable: string[];
+  };
   mode: "SIMULATION";
   status?: "COMPLETED" | "FAILED" | "UNDETERMINED" | "UNKNOWN";
   externalChanges: 0;
@@ -102,12 +119,13 @@ export interface AutomationRunDetail {
   parallel?: ParallelRunStatus;
   iterations?: IterationResultSummary[];
 }
-export type IterationState="SUCCEEDED"|"FAILED"|"NOT_STARTED"|"SKIPPED"|"CANCELLED"|"UNKNOWN";
+export type IterationState =
+  "SUCCEEDED" | "FAILED" | "NOT_STARTED" | "SKIPPED" | "CANCELLED" | "UNKNOWN";
 export interface IterationResultSummary {
-  blockId:string;
-  identity:string;
-  states:IterationState[];
-  counts:Record<IterationState,number>;
+  blockId: string;
+  identity: string;
+  states: IterationState[];
+  counts: Record<IterationState, number>;
 }
 export class AutomationRequestError extends Error {
   constructor(
@@ -152,7 +170,12 @@ export function automationClient(base = "/api/automation", guildId = "") {
     }
   }
   return {
+    timeZone: () => request<{timeZone:string|null;source:"saved"|"missing"|"legacy"|"invalid";revision:number}>("/time-zone"),
     list: () => request<{ items: FlowSummary[]; limits?: unknown }>("/flows"),
+    revision: (id: string, revision: number) =>
+      request<FlowRevision>(
+        `/flows/${encodeURIComponent(id)}/revisions/${revision}`,
+      ),
     targets: (kind: "ChannelRef" | "RoleRef") =>
       request<{ state: "AVAILABLE" | "UNAVAILABLE"; items: TargetChoice[] }>(
         `/targets?kind=${kind}`,

@@ -168,10 +168,10 @@ async function fixture(
     "event.ticket": { id: "884555555555555555", guildId: s.guildId },
     "event.state": "OPEN",
     "event.version": 0,
-    "event.occurredAt": new Date().toISOString(),
+    "event.occurredAt": new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
     "interaction.member": { id: other, guildId: s.guildId },
     "interaction.channel": { id: channel, guildId: s.guildId },
-    "interaction.occurredAt": new Date().toISOString(),
+    "interaction.occurredAt": new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
   };
   const simulation={
       outcomes: mockSuccessfulActionOutcomes(definition),

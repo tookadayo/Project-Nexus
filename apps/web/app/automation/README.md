@@ -157,3 +157,25 @@ The definition manager creates and clones procedure/Pure versions, compares
 their contents and reviews explicit caller updates. Procedure editing and manual
 calls address `id@revision`; adding a new version never repins existing callers.
 The same registered DOM tree remains the editing and Steps representation.
+
+New Scratch definitions explicitly select `scratch.v1`; a missing profile keeps
+the legacy evaluator. Saved revisions can be compared by content through the
+existing authenticated, tenant-bound read permission. This comparison uses saved
+definitions and does not read execution values or include unsaved edits.
+
+The fourteen mathematical forms include exact binary64 helpers and a pinned
+MPFR 4.2.1 WASM server engine for the ten transcendental functions. Angles use
+degrees, nonzero subnormal results are retained, and a nonzero value rounded to
+zero is an underflow error. The server supplies an ephemeral evaluator to
+validation, simulation and execution; the browser, saved definition and resume
+checkpoint contain no WASM engine or evaluator function. New transcendental
+calls reserve 32 units from the existing shared evaluation budget before any
+engine call. This is a host safety setting, not a commercial plan allowance.
+See `docs/design/alpha15-scratch-mpfr-engine.md` and
+`docs/design/alpha15-math-engine-distribution.md` for precision, artifacts,
+independent verification, source material and remaining distribution checks.
+
+Last-item access has two separate one-input forms: `list.lastOptional` returns
+unset for an empty list, while `list.lastStrict` stops with `IndexError`. Numeric
+index inputs still require an actual integer position. Random selection uses
+the explicit draw block, and clearing a list uses its own expression form.

@@ -9,6 +9,11 @@ export const ALPHA15_BETA_ADMISSION: Readonly<AutomationAdmissionLimits> = Objec
   guildPending: 20, globalPending: 100,
   measurementId: "alpha15-local-synthetic-20261015",
 });
+/** Windows 11 synthetic probe; see the Scratch numerical feasibility record.
+ * This is host safety configuration, not a paid-plan entitlement or SLA. */
+export const ALPHA15_SCRATCH_RANDOM = Object.freeze({
+  attemptLimit: 32, measurementId: "alpha15-scratch-random-local-20261015",
+});
 export const ALPHA15_ADOPTED_ACTIONS: ReadonlySet<string> = new Set([
   "discord.sendMessage",
   "discord.editOwnMessage", "nexus.readTicket",

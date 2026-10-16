@@ -18,6 +18,7 @@ export type AtomicType =
   | "ZonedDateTimeSpec"
   | "DateRange"
   | "InstantRange"
+  | "LocalTimeWindowSpec"
   | "ConditionResult"
   | "ChannelRef"
   | "RoleRef"
@@ -28,12 +29,24 @@ export type AtomicType =
   | "EventRef";
 export type ValueType =
   | AtomicType
+  | LocalTimeType
+  | InstantRangeV2Type
   | { kind: "List"; element: ValueType }
   | { kind: "Optional"; value: ValueType }
   | { kind: "ParseResult"; value: ValueType }
   | { kind: "OperationOutcome"; value: ValueType }
-  | { kind: "Enum"; values: string[] }
+  | { kind: "Enum"; values: string[]; schemaId?: string; schemaRevision?: number }
   | { kind: "Record"; schemaId: string; typeArgs?: ValueType[] };
+export type TemporalPrecision = "minute" | "second";
+export interface LocalTimeType {
+  kind: "LocalTime";
+  schemaId: "iso8601.local-time.v1";
+  precision: TemporalPrecision;
+}
+export interface InstantRangeV2Type {
+  kind: "InstantRange";
+  schemaId: "nexus.instant-range.v2";
+}
 export interface TargetRef {
   id: string;
   guildId: string;
@@ -64,12 +77,17 @@ export type ExpressionOperator =
   | "number.multiply"
   | "number.divide"
   | "number.remainder"
+  | "number.modulo"
+  | "number.roundInteger"
+  | "number.roundDecimal"
+  | "number.math"
   | "number.min"
   | "number.max"
   | "number.abs"
   | "number.clamp"
   | "number.round"
   | "number.floor"
+  | "number.truncate"
   | "number.ceil"
   | "compare.equal"
   | "compare.notEqual"
@@ -80,12 +98,18 @@ export type ExpressionOperator =
   | "condition.and"
   | "condition.or"
   | "condition.not"
+  | "condition.fromBoolean"
   | "value.choose"
   | "optional.default"
   | "value.parse"
   | "value.lookup"
   | "text.join"
   | "text.length"
+  | "text.letter"
+  | "text.find"
+  | "text.normalize"
+  | "text.caseFold"
+  | "text.lineEndings"
   | "text.contains"
   | "text.startsWith"
   | "text.endsWith"
@@ -103,8 +127,14 @@ export type ExpressionOperator =
   | "embed.build"
   | "message.legacy"
   | "list.build"
+  | "list.clear"
+  | "list.contains"
+  | "list.indexOf"
+  | "list.search"
   | "list.length"
   | "list.item"
+  | "list.lastOptional"
+  | "list.lastStrict"
   | "list.append"
   | "list.remove"
   | "list.insert"
@@ -154,6 +184,9 @@ export type ExpressionOperator =
   | "instant.add"
   | "instant.difference"
   | "duration.build"
+  | "time.convertPrecision"
+  | "window.build"
+  | "window.contains"
   | "pure.call";
 export interface Expression {
   operator: ExpressionOperator;
@@ -161,6 +194,13 @@ export interface Expression {
   /** Only registered fields/options are permitted; this is never executable source. */
   options?: {
     digits?: number;
+    roundingMode?: "tiesAwayFromZero" | "tiesTowardPositiveInfinity";
+    mathFunction?: "abs" | "floor" | "ceiling" | "sqrt" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "ln" | "log" | "exp" | "exp10";
+    replaceMode?: "first" | "all";
+    keepEmpty?: boolean;
+    normalization?: "NFC" | "NFD" | "NFKC" | "NFKD";
+    lineEnding?: "LF" | "CRLF";
+    orderVersion?: "unicode-scalar.v1";
     key?: string;
     fields?: string[];
     bindingId?: string;
@@ -229,6 +269,14 @@ export type Statement =
       unset: Statement[];
     })
   | (StatementBase & {
+      kind: "searchBranch";
+      value: ValueInput;
+      index: VariableDeclaration;
+      output?: VariableDeclaration;
+      found: Statement[];
+      notFound: Statement[];
+    })
+  | (StatementBase & {
       kind: "repeat";
       count?: ValueInput;
       list?: ValueInput;
@@ -236,6 +284,23 @@ export type Statement =
       indexVariable?: VariableDeclaration;
       body: Statement[];
       results?: {output:VariableDeclaration;value:ValueInput}[];
+    })
+  | (StatementBase & {
+      /** Explicit v1 control semantics; legacy repeat/branch are unchanged. */
+      kind: "boundedLoop";
+      semanticVersion: 1;
+      mode: "while" | "until";
+      maxBody: ValueInput;
+      condition: ValueInput;
+      until: ValueInput;
+      body: Statement[];
+      handlers: {
+        limit?: Statement[];
+        conditionUnknown?: Statement[];
+        evaluationError?: Statement[];
+        localDeadline?: Statement[];
+      };
+      reason?: VariableDeclaration;
     })
   | (StatementBase & {
       kind: "wait";
@@ -267,7 +332,7 @@ export type Statement =
     })
   | (StatementBase & {
       kind: "random";
-      mode: "integer" | "sample" | "shuffle";
+      mode: "integer" | "decimal" | "sample" | "shuffle";
       output: VariableDeclaration;
       min?: ValueInput;
       max?: ValueInput;
@@ -308,6 +373,7 @@ export type Statement =
       outputs?: Record<string, { branchId: string; outputId: string }>;
     })
   | (StatementBase & { kind: "break" | "continue" })
+  | (StatementBase & { kind: "endBranch" | "endRun"; semanticVersion: 1 })
   | (StatementBase & { kind: "end"; reason?: string });
 export type ActionOperation =
   | "discord.sendMessage"
@@ -353,6 +419,9 @@ export interface PureDefinition {
 }
 export interface FlowDefinition {
   schemaVersion: 1;
+  /** Missing means the immutable legacy evaluator, never the latest profile. */
+  semanticProfile?: "scratch.v1";
+  scratchAuthoring?: import('./scratch-authoring').ScratchAuthoringMetadata;
   id: string;
   guildId: string;
   name: string;
@@ -459,6 +528,13 @@ export interface EvaluationBudget {
 }
 export interface EvaluationContext {
   guildId: string;
+  semanticProfile?: "scratch.v1";
+  /** Only trusted persisted definitions may bypass current time-zone resolution. */
+  temporalResolution?: "resolve" | "fixed";
+  /** Same-scope, already validated literals retained during a user edit. */
+  fixedTemporalValues?: ReadonlySet<string>;
+  /** Ephemeral server capability; omitted from all serialized language values. */
+  numericMath?: import("./scratch-numeric").ScratchMathEvaluator;
   variables: Readonly<Record<string, EvaluatedValue>>;
   limits?: Partial<AutomationLimits>;
   budget?: EvaluationBudget;
@@ -466,6 +542,7 @@ export interface EvaluationContext {
   recordSchemas?: Record<string, RecordSchema>;
 }
 export interface RecordSchema {
+  equality?: {version:1;fields:string[]};
   fields: Record<
     string,
     { type: ValueType; optional?: boolean; writable?: boolean }
@@ -475,6 +552,7 @@ export interface RecordSchema {
 export interface ZonedDateTimeSpec {
   date: string;
   time: string;
+  timePrecision?: TemporalPrecision;
   timeZone: string;
   occurrence?: "earlier" | "later";
 }
@@ -494,16 +572,19 @@ export interface LocalTimeWindowSpec {
   endDayOffset: 0 | 1;
   weekdays: number[];
   timeZone: string;
+  timePrecision?: TemporalPrecision;
 }
 export interface RecurrenceSpec {
   kind: "recurring";
-  frequency: "daily" | "weekly" | "monthly";
+  frequency: "daily" | "weekly" | "monthly" | "yearly";
   time: string;
+  timePrecision?: TemporalPrecision;
   timeZone: string;
   startDate: string;
   endDate: string;
   weekdays?: number[];
   monthDay?: number | "last";
+  month?: number;
   missingTime: "skip";
   repeatedTime: "earlier";
   pastOccurrences: "skip";

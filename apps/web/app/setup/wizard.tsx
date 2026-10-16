@@ -3,7 +3,7 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import {
   changedSettings, participationGoals, pollDelay, problemFor, selectedScope,
-  setupPatch, setupReturnUrl, validTimezone,
+  initialSetupTimeZone, setupPatch, setupReturnUrl, validTimezone,
   type ParticipationGoal, type SetupCandidates, type SetupDraft, type SetupLocale,
   type SetupProblem, type SetupSettings, type SetupStatus,
 } from "./model";
@@ -39,6 +39,7 @@ export function SetupWizard({locale, guildId, installUrl, editing = false}: {loc
   const t = useCallback((ja: string, en: string) => locale === "ja" ? ja : en, [locale]);
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [values, setValues] = useState<SetupSettings | null>(null);
+  const [timeZoneSelection, setTimeZoneSelection] = useState<{source: "draft" | "saved" | "browser" | "required"; confirmed: boolean}>({source: "required", confirmed: false});
   const [draft, setDraft] = useState<SetupDraft | null>(null);
   const [candidates, setCandidates] = useState<SetupCandidates | null>(null);
   const [candidateFailure, setCandidateFailure] = useState(false);
@@ -83,7 +84,9 @@ export function SetupWizard({locale, guildId, installUrl, editing = false}: {loc
       setProblem(null);
       if (body.settings && (!initialized.current || replace)) {
         const savedValues = body.draft?.appliedRevision == null && body.draft ? body.draft.settings : body.settings;
-        setValues(!body.existing && !body.draft ? {...savedValues, analysisScope: {mode: "include", channelIds: []}} : savedValues);
+        const selectedZone = initialSetupTimeZone(body);
+        setValues({...savedValues, timezone: selectedZone.value, ...(!body.existing && !body.draft ? {analysisScope: {mode: "include" as const, channelIds: []}} : {})});
+        setTimeZoneSelection({source: selectedZone.source, confirmed: selectedZone.confirmed});
         setDraft(body.draft ?? null);
         setScopeEditing(!body.existing);
         initialized.current = true;
@@ -111,6 +114,7 @@ export function SetupWizard({locale, guildId, installUrl, editing = false}: {loc
     if (kind === "draft" && "id" in result && "settings" in result) {
       setDraft(result);
       setValues(result.settings);
+      setTimeZoneSelection({source: "draft", confirmed: true});
       setSaved(true);
       setReviewed(false);
     }
@@ -219,7 +223,7 @@ export function SetupWizard({locale, guildId, installUrl, editing = false}: {loc
     return () => window.removeEventListener("beforeunload", beforeUnload);
   }, [dirty]);
 
-  const update = (patch: Partial<SetupSettings>) => { setValues(current => current ? {...current, ...patch} : current); setSaved(false); setReviewed(false); setScopeConsent(false); };
+  const update = (patch: Partial<SetupSettings>) => { setValues(current => current ? {...current, ...patch} : current); if (Object.hasOwn(patch, "timezone")) setTimeZoneSelection({source: "required", confirmed: false}); setSaved(false); setReviewed(false); setScopeConsent(false); };
   const changeStep = (next: number) => { setStep(next); setQuery(""); requestAnimationFrame(() => heading.current?.focus()); };
   const retry = () => { started.current = Date.now(); setPollEnded(false); verifyStarted.current = false; void readStatus(); };
   async function beginInstall() {
@@ -245,6 +249,7 @@ export function SetupWizard({locale, guildId, installUrl, editing = false}: {loc
     finally { requestLock.current = false; setBusy(false); }
   }
   const timezoneValid = values ? validTimezone(values.timezone) : true;
+  const timezoneReady = timezoneValid && timeZoneSelection.confirmed;
   const scopeChanged = Boolean(status?.settings && values && JSON.stringify(status.settings.analysisScope) !== JSON.stringify(values.analysisScope));
   const disabled = busy || Boolean(pending) || Boolean(problem);
   const stepLabels = [t("言語と日時", "Language & time"), t("確認する範囲", "Observation scope"), t("通知・ロール・目標", "Notifications, roles & goals"), t("確認して適用", "Review & apply")];
@@ -313,6 +318,8 @@ export function SetupWizard({locale, guildId, installUrl, editing = false}: {loc
             <label className="setup-field"><span>{t("表示言語", "Display language")}</span><select value={values.uiLanguage} disabled={disabled} onChange={e => update({uiLanguage: e.target.value as SetupSettings["uiLanguage"]})}><option value="auto">{t("自動", "Automatic")}</option><option value="ja">日本語</option><option value="en">English</option><option value="bilingual">{t("日本語と英語", "Japanese & English")}</option></select></label>
             <label className="setup-field"><span>{t("タイムゾーン", "Time zone")}</span><input value={values.timezone} maxLength={64} list="setup-timezones" aria-invalid={!timezoneValid} aria-describedby="setup-timezone-help setup-timezone-error" disabled={disabled} onChange={e => update({timezone: e.target.value})} autoCapitalize="none" spellCheck={false}/></label><datalist id="setup-timezones">{["UTC", "Asia/Tokyo", "America/New_York", "America/Los_Angeles", "Europe/London", "Europe/Paris", "Australia/Sydney"].map(zone => <option key={zone} value={zone}/>)}</datalist>
             <p className="setup-help" id="setup-timezone-help">{t("Asia/Tokyoなどの地域名を指定します。端末の地域が変わっても保存した設定は変わりません。", "Enter a region such as Asia/Tokyo. Changing your device’s region does not change the saved setting.")}</p>
+            <p className="setup-help">{timeZoneSelection.source === "draft" ? t("保存済みの下書きの地域を使用しています。端末の候補より優先します。", "Using the saved draft’s region, ahead of the device suggestion.") : timeZoneSelection.source === "saved" ? t("サーバーに保存済みの地域を使用しています。端末や表示言語が変わっても維持します。", "Using the server’s saved region. Device and display language changes do not replace it.") : timeZoneSelection.source === "browser" ? t("端末の地域を候補として表示しています。共有予定に使う地域を確認してください。", "The device’s region is a suggestion. Confirm the region for shared schedules.") : t("共有予定に使う地域を選択して確認してください。地域不明のままUTCにはしません。", "Choose and confirm the region for shared schedules. An unknown region does not become UTC.")}</p>
+            <label className="setup-check setup-confirm"><input type="checkbox" checked={timeZoneSelection.confirmed} disabled={disabled || !timezoneValid} onChange={e => { setTimeZoneSelection(current => ({...current, confirmed: e.target.checked})); setReviewed(false); }}/><span>{t("この地域を共有予定に使うことを確認しました。", "I confirm this region for shared schedules.")}</span></label>
             {!timezoneValid && <p className="setup-inline-error" id="setup-timezone-error" role="alert">{t("有効なタイムゾーンを入力してください。例: Asia/Tokyo", "Enter a valid time zone, for example Asia/Tokyo.")}</p>}
             {timezoneValid && <p className="setup-tz-preview">{t("表示例: ", "Example: ")}{new Intl.DateTimeFormat(locale, {timeZone: values.timezone, dateStyle: "medium", timeStyle: "short"}).format(new Date("2026-10-15T09:00:00Z"))} ({values.timezone})</p>}
           </>}
@@ -339,14 +346,14 @@ export function SetupWizard({locale, guildId, installUrl, editing = false}: {loc
             <p>{t("変更する項目: ", "Fields to change: ")}{changedSettings(status.settings, values).map(key => fieldLabels[key]).join("、") || t("変更なし（不足確認のみ）", "No field changes (complete the review only)")}</p>
             {scopeChanged && <label className="setup-check setup-confirm"><input type="checkbox" checked={scopeConsent} disabled={disabled} onChange={e => setScopeConsent(e.target.checked)}/><span>{t("分析の範囲を変更する影響を確認しました。選択した範囲を適用します。", "I reviewed the observation scope change and want to apply the selected scope.")}</span></label>}
             {draft && !dirty && <label className="setup-check setup-confirm"><input type="checkbox" checked={reviewed} disabled={disabled} onChange={e => setReviewed(e.target.checked)}/><span>{t("この下書きの内容を確認しました。現在の設定へ適用します。", "I reviewed this saved draft and want to apply it to the current settings.")}</span></label>}
-            {!timezoneValid && <p className="setup-inline-error" role="alert">{t("言語と日時の画面でタイムゾーンを修正してください。", "Correct the time zone in Language & time.")}</p>}
+            {!timezoneReady && <p className="setup-inline-error" role="alert">{t("言語と日時の画面で有効な地域を選択し、共有予定への使用を確認してください。", "Choose a valid region and confirm its use for shared schedules in Language & time.")}</p>}
           </>}
           <div className="setup-actions">
             <button type="button" disabled={busy} onClick={() => dirty ? setLeaveDialog(true) : window.location.assign("/servers")}>{t("取消", "Cancel")}</button>
             {step > 0 && <button type="button" disabled={busy} onClick={() => changeStep(step - 1)}>{t("戻る", "Back")}</button>}
-            <button type="button" disabled={disabled || !timezoneValid} onClick={() => void mutate("draft", {draftId: draft?.id, expectedDraftRevision: draft?.version, patch: setupPatch(draft?.settings ?? status.settings, values)})}>{busy ? t("処理中…", "Working…") : t("下書きを保存", "Save draft")}</button>
-            {step < 3 ? <button className="setup-primary setup-next" type="button" disabled={!timezoneValid || busy} onClick={() => changeStep(step + 1)}>{t("次へ", "Next")}</button>
-              : <button className="setup-primary setup-next" type="button" disabled={disabled || !draft || dirty || !reviewed || !timezoneValid || (scopeChanged && !scopeConsent)} onClick={() => draft && void mutate("apply", {draftId: draft.id, expectedDraftRevision: draft.version, expectedSettingsRevision: draft.settingsRevision, ...(scopeChanged ? {confirmScopeChange: true} : {})})}>{t("確認した設定を適用", "Apply reviewed settings")}</button>}
+            <button type="button" disabled={disabled || !timezoneReady} onClick={() => void mutate("draft", {draftId: draft?.id, expectedDraftRevision: draft?.version, patch: {...setupPatch(draft?.settings ?? status.settings, values), ...(!draft && status.timeZoneSource !== undefined && status.timeZoneSource !== "saved" ? {timezone: values.timezone} : {})}})}>{busy ? t("処理中…", "Working…") : t("下書きを保存", "Save draft")}</button>
+            {step < 3 ? <button className="setup-primary setup-next" type="button" disabled={!timezoneReady || busy} onClick={() => changeStep(step + 1)}>{t("次へ", "Next")}</button>
+              : <button className="setup-primary setup-next" type="button" disabled={disabled || !draft || dirty || !reviewed || !timezoneReady || (scopeChanged && !scopeConsent)} onClick={() => draft && void mutate("apply", {draftId: draft.id, expectedDraftRevision: draft.version, expectedSettingsRevision: draft.settingsRevision, ...(scopeChanged ? {confirmScopeChange: true} : {})})}>{t("確認した設定を適用", "Apply reviewed settings")}</button>}
           </div>
           <p className="setup-live" role="status" aria-live="polite">{busy ? t("結果を確認しています。しばらくお待ちください。", "Checking the result. Please wait.") : saved ? t("下書きを保存しました。現在の設定はまだ変わっていません。", "Draft saved. Current settings have not changed yet.") : draft && !dirty ? t("保存済みの下書きです。確認後に適用できます。", "This draft is saved. Review it before applying.") : t("下書き保存と設定への適用は別の操作です。", "Saving a draft and applying settings are separate actions.")}</p>
         </section></div>
