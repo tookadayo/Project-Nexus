@@ -1,30 +1,29 @@
-import { Icon } from "./primitives";
 import { text, type Locale } from "./content";
 
 export function CommunityWorkflow({ locale }: { locale: Locale }) {
   const jobs = [
     {
-      icon: "activity",
-      title: text(locale, "Understand the change", "活動の変化を知る"),
+      screen: "analysis",
+      title: text(locale, "Review activity trends", "活動の推移を確認する"),
       body: text(
         locale,
-        "Explore activity by period and channel. See the available data and its limits before deciding where to look closer.",
-        "期間やチャンネルごとに活動を確認。取得できた値と不足しているデータを見ながら、詳しく見る場所を選べます。",
+        "Review activity by period and scope, and compare earlier periods when conditions are compatible. Read each value alongside its collection coverage.",
+        "期間や対象ごとに活動を確認し、条件が合う場合は以前の期間と比較できます。取得範囲と不足しているデータを、値と一緒に確認できます。",
       ),
       detail: text(
         locale,
-        "One use: follow how new members begin to participate and connect.",
-        "たとえば、新規メンバーの最初の活動や交流を確認。",
+        "The chart keeps missing observations distinct from zero. New-member activity is also available in the product.",
+        "グラフでは欠測と0を区別。新規メンバーの最初の活動も製品画面で確認できます。",
       ),
       destination: text(locale, "Analysis", "分析"),
       tag: "01",
     },
     {
-      icon: "message",
+      screen: "attention",
       title: text(
         locale,
-        "Check eligible posts for replies",
-        "対象投稿の返信を確認する",
+        "Find posts to check for replies",
+        "返信を確認したい投稿を探す",
       ),
       body: text(
         locale,
@@ -40,7 +39,7 @@ export function CommunityWorkflow({ locale }: { locale: Locale }) {
       tag: "02",
     },
     {
-      icon: "layers",
+      screen: "history",
       title: text(
         locale,
         "Revisit follow-up records",
@@ -48,13 +47,13 @@ export function CommunityWorkflow({ locale }: { locale: Locale }) {
       ),
       body: text(
         locale,
-        "Revisit permitted records and reports. Compare compatible results with their periods and data coverage in view.",
-        "閲覧できる対応記録やレポートを振り返ります。条件が合う結果は、対象期間とデータの取得範囲を確かめながら比較できます。",
+        "Review saved response records and their start dates. Check the state of later observations separately from what staff recorded.",
+        "保存された対応記録と開始日時を確認できます。スタッフが記録した対応と、その後の活動の観測状態を分けて振り返ります。",
       ),
       detail: text(
         locale,
-        "Missing data stays unavailable. A change alone does not show that an action caused it.",
-        "不足するデータは不明のまま表示。変化だけで対応の効果を断定しません。",
+        "A saved record is not proof of resolution. This excerpt shows the product’s recent-records view.",
+        "記録の保存は、問題の解決の証明ではありません。画面は製品の「最近の対応記録」の抜粋です。",
       ),
       destination: text(locale, "History & reports", "履歴・レポート"),
       tag: "03",
@@ -66,14 +65,57 @@ export function CommunityWorkflow({ locale }: { locale: Locale }) {
         {jobs.map((job) => (
           <li key={job.tag}>
             <div className="nx-workflow-main">
-              <p className="nx-workflow-destination">
-                <Icon name={job.icon} size={19} />
-                {job.destination}
-              </p>
               <h3>{job.title}</h3>
               <p>{job.body}</p>
+              <p className="nx-workflow-detail">{job.detail}</p>
             </div>
-            <p className="nx-workflow-detail">{job.detail}</p>
+            <figure className="nx-feature-screen">
+              <div
+                className="nx-feature-screen-scroll"
+                tabIndex={0}
+                role="region"
+                aria-label={text(
+                  locale,
+                  `${job.destination} screenshot; scroll horizontally on small screens`,
+                  `${job.destination}の画像。小さな画面では横にスクロールできます`,
+                )}
+              >
+                <img
+                  src={`/nexus/screens/feature-${job.screen}-${locale}.png`}
+                  width={768}
+                  height={
+                    job.screen === "analysis"
+                      ? locale === "ja"
+                        ? 870
+                        : 900
+                      : job.screen === "attention"
+                        ? locale === "ja"
+                          ? 472
+                          : 467
+                        : 279
+                  }
+                  loading="lazy"
+                  decoding="async"
+                  alt={text(
+                    locale,
+                    `${job.destination}: actual product display with synthetic data. ${job.detail}`,
+                    `${job.destination}：合成データによる実製品の表示。${job.detail}`,
+                  )}
+                />
+              </div>
+              <figcaption>
+                <span>
+                  {text(
+                    locale,
+                    "Actual product UI · Synthetic data · Excerpt",
+                    "実製品UI・合成データ・抜粋",
+                  )}
+                </span>
+                <a href={`/nexus/screens/feature-${job.screen}-${locale}.png`}>
+                  {text(locale, "View full-size image", "画像を大きく見る")}
+                </a>
+              </figcaption>
+            </figure>
           </li>
         ))}
       </ol>

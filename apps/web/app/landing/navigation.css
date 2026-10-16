@@ -109,17 +109,25 @@
   border-radius: 4px;
 }
 .nexus-site .nx-navigation .nx-nav-panels {
+  position: absolute;
+  top: 100%;
+  left: max(32px, calc((100vw - 1200px) / 2 + 160px));
+  width: min(620px, calc(100vw - 64px));
+  background: #fff;
+  border: 1px solid #dbe1e8;
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 12px 24px #17212b0d;
   border-top: 1px solid #eef0f3;
   max-height: calc(100dvh - 64px);
   overflow-y: auto;
 }
 .nexus-site .nx-navigation .nx-nav-panel {
-  width: min(1200px, calc(100% - 64px));
+  width: 100%;
   margin-inline: auto;
-  padding-block: 32px 40px;
+  padding: 24px;
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
-  gap: 80px;
+  gap: 24px;
 }
 .nexus-site .nx-navigation .nx-nav-primary-links,
 .nexus-site .nx-navigation .nx-nav-secondary-links {
@@ -131,7 +139,7 @@
 .nexus-site .nx-navigation .nx-nav-primary-links a {
   padding-block: 6px;
   min-height: 44px;
-  font-size: 27px;
+  font-size: 18px;
   font-weight: 500;
   line-height: 1.45;
   letter-spacing: -0.025em;

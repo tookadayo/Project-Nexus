@@ -1,0 +1,578 @@
+/* Clear Product Phase B. Opt-in presentation for Console and Explore only.
+   Data, permissions, statuses and interactions remain in their existing components. */
+.nx-workspace .workspace-skip {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 100;
+  transform: translateY(calc(-100% - 24px));
+  padding: 12px 20px;
+  background: white;
+  color: var(--nx-accent);
+  border: 1px solid var(--nx-control-border);
+  border-radius: 6px;
+}
+.nx-workspace .workspace-skip:focus {
+  transform: none;
+}
+body:has(.nx-workspace .product-menu dialog[open]) {
+  overflow: hidden;
+}
+.nx-workspace {
+  --nx-chart-comparison: #536484;
+  color: var(--nx-text);
+  background: var(--nx-background);
+  font-family:
+    var(--nx-font-sans, "Geist"), "Noto Sans JP", system-ui, sans-serif;
+  line-height: 1.75;
+}
+.product.nx-workspace {
+  grid-template-columns: 232px minmax(0, 1fr);
+}
+.product.nx-workspace .content {
+  max-width: 1440px;
+  padding: 32px;
+  background: var(--nx-background);
+}
+.product.nx-workspace .sidebar {
+  padding: 28px 16px 20px;
+  gap: 28px;
+  background: var(--nx-surface);
+  backdrop-filter: none;
+  height: 100dvh;
+}
+.product.nx-workspace .sidebar > .brand {
+  padding-inline: 12px;
+}
+.product.nx-workspace :is(.sidebar, .menu-sheet) nav button {
+  min-height: 46px;
+  border-radius: 6px;
+  font-size: 15px;
+  gap: 12px;
+}
+.product.nx-workspace
+  :is(.sidebar, .menu-sheet)
+  nav
+  button[aria-current="page"] {
+  background: #eaf0fd;
+  box-shadow: inset 3px 0 var(--nx-accent);
+}
+.product.nx-workspace .sidebar-bottom {
+  border-top: 1px solid var(--nx-border);
+}
+.nx-workspace :is(h1, h2, h3) {
+  font-family: inherit;
+  letter-spacing: -0.02em;
+  line-height: 1.4;
+  font-weight: 600;
+}
+[lang="ja"] .nx-workspace :is(h1, h2, h3) {
+  letter-spacing: 0;
+  line-break: strict;
+  line-height: 1.55;
+}
+.product.nx-workspace h1,
+.operations-page.nx-workspace h1 {
+  font-size: clamp(28px, 2.5vw, 34px);
+}
+.product.nx-workspace h2,
+.operations-page.nx-workspace h2 {
+  font-size: 22px;
+}
+.product.nx-workspace h3,
+.operations-page.nx-workspace h3 {
+  font-size: 18px;
+}
+.product.nx-workspace :is(.page-head, .home-heading) {
+  margin-block: 0 28px;
+  gap: 24px;
+}
+.product.nx-workspace :is(.orientation, .page-head p, .home-heading p) {
+  max-width: 72ch;
+  color: var(--nx-secondary);
+  font-size: 16px;
+  line-height: 1.75;
+}
+.product.nx-workspace :is(.eyebrow, .breadcrumb, .inline-note, small) {
+  font-size: 14px;
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1.7;
+}
+.product.nx-workspace .eyebrow {
+  color: var(--nx-secondary);
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+.nx-workspace :is(button, input, select, textarea) {
+  font: inherit;
+  accent-color: var(--nx-accent);
+}
+.product.nx-workspace :is(button, input, select, textarea) {
+  border-radius: 7px;
+  font-size: 14px;
+  line-height: 1.6;
+  min-height: 44px;
+}
+.nx-workspace :is(button, a, summary) {
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+.nx-workspace :focus-visible {
+  outline: 3px solid var(--nx-accent);
+  outline-offset: 3px;
+}
+.product.nx-workspace .primary {
+  min-height: 48px;
+  padding: 11px 20px;
+  font-size: 15px;
+}
+.product.nx-workspace
+  :is(.surface, .metric-card, .chart-card, .setup-card, .builder-v3) {
+  background: white;
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+  padding: 24px;
+  box-shadow: none;
+}
+.product.nx-workspace .dashboard-topbar {
+  padding: 0 0 24px;
+  margin-bottom: 32px;
+  border: 0;
+  border-bottom: 1px solid var(--nx-border);
+  border-radius: 0;
+  background: white;
+  align-items: center;
+}
+.product.nx-workspace .dashboard-topbar small {
+  max-width: 48ch;
+  color: var(--nx-secondary);
+}
+.product.nx-workspace .server-picker label {
+  font-size: 14px;
+  gap: 6px;
+}
+.product.nx-workspace .server-picker select {
+  width: 260px;
+  font-size: 15px;
+}
+.product.nx-workspace .server-picker a {
+  min-height: 44px;
+  align-content: center;
+}
+.product.nx-workspace :is(.home-overview, .results-list) {
+  gap: 24px;
+}
+.product.nx-workspace .home-overview .home-heading {
+  margin: 0;
+}
+.product.nx-workspace .home-overview .home-update p {
+  font-size: 14px;
+}
+.product.nx-workspace .home-overview .home-state {
+  background: var(--nx-surface);
+  border-radius: 8px;
+  padding: 20px 24px;
+}
+.product.nx-workspace .home-overview .home-state--partial {
+  border-left: 3px solid var(--nx-warning);
+}
+.product.nx-workspace .home-overview .home-state p {
+  font-size: 14px;
+}
+.product.nx-workspace .home-overview .home-focus {
+  border-radius: 8px;
+  padding: 28px;
+  background: white;
+}
+.product.nx-workspace .home-overview .home-focus--attention {
+  border-color: var(--nx-border);
+  border-left: 3px solid var(--nx-accent);
+}
+.product.nx-workspace .home-overview .home-section-label {
+  font-size: 14px;
+  letter-spacing: 0;
+  font-weight: 500;
+  color: var(--nx-secondary);
+}
+.product.nx-workspace .home-overview .home-attention-count {
+  font-size: 52px;
+  font-weight: 550;
+  letter-spacing: -0.02em;
+}
+.product.nx-workspace .home-overview .home-focus-description {
+  font-size: 16px;
+}
+.product.nx-workspace
+  .home-overview
+  :is(
+    .home-scope-note,
+    .home-history-note,
+    .home-footnote p,
+    .home-activity p,
+    .home-activity dt,
+    .home-record-state,
+    .home-record-time
+  ) {
+  font-size: 14px;
+}
+.product.nx-workspace .home-overview .home-recent {
+  padding: 24px;
+  background: var(--nx-surface);
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+}
+.product.nx-workspace .home-overview .home-section-heading {
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.product.nx-workspace .home-overview .home-section-heading h2 {
+  font-size: 20px;
+}
+.product.nx-workspace .home-overview .home-records li {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding-block: 20px;
+}
+.product.nx-workspace .home-overview .home-records strong {
+  font-size: 16px;
+  font-weight: 550;
+}
+.product.nx-workspace .home-overview .home-record-state {
+  background: #eaf0f8;
+  color: #365581;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-align: left;
+}
+.product.nx-workspace .home-overview .home-activity {
+  border-radius: 8px;
+  padding: 24px;
+}
+.product.nx-workspace .home-overview .home-activity-values dd span {
+  font-size: 14px;
+}
+.product.nx-workspace .home-overview .home-footnote {
+  border-top: 1px solid var(--nx-border);
+  padding-top: 20px;
+}
+.product.nx-workspace
+  .attention-view
+  :is(
+    .attention-scope summary,
+    .attention-filters label,
+    .attention-summary p,
+    .attention-summary span,
+    .attention-post-meta,
+    .attention-readonly,
+    .attention-record p,
+    .attention-record label,
+    .attention-record select,
+    .attention-record button,
+    .attention-record summary,
+    .badge
+  ) {
+  font-size: 14px;
+  line-height: 1.7;
+}
+.product.nx-workspace
+  .attention-view
+  :is(.attention-post > p, .attention-scope p) {
+  font-size: 16px;
+  color: var(--nx-secondary);
+}
+.product.nx-workspace .attention-view .attention-item-heading h2 {
+  font-size: 18px;
+}
+.product.nx-workspace .attention-view .attention-scope {
+  border-left: 3px solid var(--nx-border);
+  padding: 12px 20px;
+  background: var(--nx-surface);
+  border-radius: 0 6px 6px 0;
+}
+.product.nx-workspace .attention-view .attention-card {
+  padding-block: 28px;
+  grid-template-columns: minmax(0, 1fr) 224px;
+  gap: 32px;
+}
+.product.nx-workspace .attention-view .attention-summary {
+  align-items: baseline;
+  padding-bottom: 20px;
+}
+.product.nx-workspace .attention-view .attention-summary strong {
+  font-size: 24px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+.product.nx-workspace .attention-view .attention-record > div {
+  padding: 16px;
+  gap: 12px;
+  border-radius: 6px;
+  background: var(--nx-surface);
+}
+.product.nx-workspace .attention-view .attention-record :is(button, select) {
+  min-height: 44px;
+}
+.product.nx-workspace .attention-view .attention-post-meta {
+  gap: 8px 16px;
+  color: var(--nx-secondary);
+}
+.product.nx-workspace .results-list {
+  margin-block: 24px;
+}
+.product.nx-workspace .result-card {
+  padding: 28px;
+}
+.product.nx-workspace .result-card :is(p, summary) {
+  font-size: 16px;
+  line-height: 1.75;
+}
+.product.nx-workspace .result-card :is(.inline-note, small) {
+  font-size: 14px;
+}
+.product.nx-workspace :is(.test-summary, .result-grid) {
+  gap: 20px;
+  margin-block: 24px;
+}
+.product.nx-workspace .test-summary > div {
+  background: var(--nx-surface);
+  padding: 20px;
+  border-radius: 6px;
+}
+.product.nx-workspace .test-summary span {
+  font-size: 14px;
+  color: var(--nx-secondary);
+  line-height: 1.7;
+}
+.product.nx-workspace .result-card .test-summary strong {
+  font-size: 30px;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+.product.nx-workspace .result-card details {
+  padding-top: 16px;
+}
+.product.nx-workspace :is(.result-card, .learning) :is(.evidence, dt, dd) {
+  font-size: 14px;
+}
+.product.nx-workspace .surface[role="tablist"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 0 16px;
+  border: 0;
+  border-bottom: 1px solid var(--nx-border);
+  border-radius: 0;
+  margin-bottom: 28px;
+}
+.product.nx-workspace [role="tab"][aria-selected="true"] {
+  color: var(--nx-accent);
+  background: #eaf0fd;
+  border-color: #b4c6ed;
+  font-weight: 600;
+}
+.product.nx-workspace .legacy-chart :is(table, small) {
+  font-size: 14px;
+}
+.nx-workspace .observation-chart {
+  padding: 28px;
+  border-radius: 8px;
+  font-size: 16px;
+}
+.nx-workspace .observation-chart h2 {
+  font-size: 26px;
+  margin-bottom: 16px;
+}
+.nx-workspace .chart-purpose {
+  font-size: 14px;
+  letter-spacing: 0;
+  font-weight: 500;
+  color: var(--nx-secondary);
+}
+.nx-workspace .chart-total {
+  background: var(--nx-surface);
+  border: 1px solid var(--nx-border);
+  border-radius: 6px;
+  padding: 16px 20px;
+  margin-block: 24px;
+}
+.nx-workspace .chart-total strong {
+  font-size: 32px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 550;
+}
+.nx-workspace .chart-legend {
+  font-size: 14px;
+  gap: 8px 24px;
+  line-height: 1.8;
+}
+.nx-workspace .chart-previous {
+  color: var(--nx-chart-comparison);
+}
+.nx-workspace .chart-line-previous {
+  stroke: var(--nx-chart-comparison);
+}
+.nx-workspace .chart-dot {
+  fill: var(--nx-chart-comparison);
+}
+.nx-workspace .chart-note {
+  color: var(--nx-secondary);
+}
+.nx-workspace .chart-plot-scroll {
+  margin-block: 24px;
+}
+.nx-workspace .observation-plot {
+  font-size: 14px;
+}
+.nx-workspace .observation-plot g[role="button"]:focus-visible {
+  outline: none;
+}
+.nx-workspace .observation-plot g[role="button"]:focus-visible .chart-hit {
+  fill: #2758ca0d;
+  stroke: var(--nx-accent);
+  stroke-width: 2;
+}
+.nx-workspace .observation-chart :is(.chart-values, .chart-evidence) {
+  border-top: 1px solid var(--nx-border);
+}
+.nx-workspace .observation-chart summary {
+  padding-block: 12px;
+  font-size: 15px;
+}
+.nx-workspace .observation-chart :is(th, td) {
+  font-size: 14px;
+  padding: 12px;
+}
+.nx-workspace .heatmap td {
+  padding: 2px;
+}
+.operations-page.nx-workspace {
+  max-width: 1264px;
+  margin-inline: auto;
+  padding: 32px;
+}
+.nx-workspace .explore-workspace .page-head {
+  margin-block: 32px;
+}
+.nx-workspace .explore-workspace .explore-controls {
+  background: var(--nx-surface);
+  padding: 24px;
+  border-radius: 8px;
+}
+.nx-workspace .explore-primary-controls > label,
+.nx-workspace .explore-filter-grid label {
+  font-size: 14px;
+  gap: 8px;
+}
+.nx-workspace .explore-primary-controls :is(input, select),
+.nx-workspace .explore-filter-grid :is(input, select) {
+  background: white;
+  border: 1px solid var(--nx-control-border);
+  border-radius: 6px;
+  font-size: 16px;
+  padding: 8px 12px;
+}
+.nx-workspace .explore-primary-controls input[type="checkbox"] {
+  min-height: 18px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+}
+@media (max-width: 1199px) {
+  .product.nx-workspace {
+    display: block;
+  }
+  .product.nx-workspace .content {
+    padding: 24px 32px;
+  }
+  .product.nx-workspace .mobile-head {
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--nx-border);
+    margin-bottom: 24px;
+  }
+}
+@media (max-width: 850px) {
+  .product.nx-workspace .home-overview .home-recent {
+    padding: 24px;
+  }
+  .nx-workspace .explore-primary-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  .product.nx-workspace .attention-view .attention-card {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+}
+@media (max-width: 600px) {
+  .product.nx-workspace .content,
+  .operations-page.nx-workspace {
+    padding: 20px 16px;
+  }
+  .product.nx-workspace .dashboard-topbar {
+    margin-bottom: 28px;
+    gap: 16px;
+  }
+  .product.nx-workspace .server-picker select {
+    width: 100%;
+  }
+  .product.nx-workspace :is(.page-head, .home-heading) {
+    gap: 16px;
+  }
+  .product.nx-workspace
+    :is(.surface, .chart-card, .setup-card, .builder-v3, .result-card) {
+    padding: 20px;
+  }
+  .product.nx-workspace
+    .home-overview
+    :is(.home-focus, .home-state, .home-recent, .home-activity) {
+    padding: 20px;
+  }
+  .product.nx-workspace .home-overview .home-attention-count {
+    font-size: 44px;
+  }
+  .product.nx-workspace .home-overview .home-activity-values {
+    flex-wrap: wrap;
+    gap: 20px 32px;
+  }
+  .product.nx-workspace :is(.test-summary, .result-grid) {
+    grid-template-columns: 1fr;
+  }
+  .product.nx-workspace .attention-view .attention-scope {
+    padding: 12px 16px;
+  }
+  .nx-workspace .observation-chart {
+    padding: 20px 16px;
+  }
+  .nx-workspace .observation-chart h2 {
+    font-size: 22px;
+  }
+  .nx-workspace .chart-total {
+    padding: 16px;
+  }
+  .nx-workspace .chart-legend {
+    gap: 8px 16px;
+  }
+  .nx-workspace .chart-plot-scroll {
+    margin-block: 20px;
+  }
+  .nx-workspace .explore-workspace .explore-controls {
+    padding: 20px 16px;
+  }
+  .nx-workspace .explore-primary-controls {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nx-workspace *,
+  .nx-workspace *::before,
+  .nx-workspace *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

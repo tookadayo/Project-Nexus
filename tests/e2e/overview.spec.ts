@@ -34,7 +34,7 @@ test("public product and pricing are readable without dashboard credentials", as
     ).toBe(200);
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(
-    "Review activity and reply status in your Discord community.",
+    "Review Discord activity and posts to check for replies.",
   );
   await page.keyboard.press("Tab");
   await expect(page.locator(":focus-visible")).toHaveCount(1);

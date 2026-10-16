@@ -19,12 +19,10 @@ test("public value, sample data and participation conditions are readable withou
     const page = await context.newPage();
     await page.goto(baseURL!);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-      "Review activity and reply status in your Discord community.",
+      "Review Discord activity and posts to check for replies.",
     );
     await expect(
-      page
-        .getByRole("link", { name: "Explore the product", exact: true })
-        .first(),
+      page.getByRole("link", { name: "Explore features", exact: true }).first(),
     ).toHaveAttribute("href", "/product");
     await expect(
       page.getByRole("tabpanel", { name: "Overview" }),
@@ -85,30 +83,22 @@ test("public routes, metadata and unchanged original brand files are accessible"
     /Intelligence Layer|AI Workspace|Agents|Revenue growth|Qualified pipeline|Connect everything|SOC ?2|SSO|SAML/,
   );
   await expect(page.locator(".nx-hero-example")).toContainText(
-    "Actual UI · Synthetic data · Still image",
+    "Synthetic data · Read only",
   );
   await expect(page.locator(".nx-hero .nx-button-primary")).toHaveAttribute(
     "href",
-    "/support",
+    "/#demo",
   );
   await expect(page.locator(".nx-hero")).not.toContainText("Sample period");
-  await expect(page.locator(".nx-hero-example img")).toHaveAttribute(
-    "src",
-    "/nexus/screens/attention-en.png",
-  );
-  await expect
-    .poll(() =>
-      page
-        .locator(".nx-hero-example img")
-        .evaluate(
-          (image) =>
-            image instanceof HTMLImageElement &&
-            image.complete &&
-            image.naturalWidth > 0 &&
-            image.naturalHeight > 0,
-        ),
-    )
-    .toBe(true);
+  await expect(
+    page.locator(
+      ".nx-hero-example button, .nx-hero-example select, .nx-hero-example a",
+    ),
+  ).toHaveCount(0);
+  await expect(page.locator(".nx-preview-count strong")).toHaveText(["2", "1"]);
+  await expect(page.locator(".nx-preview-recent li")).toHaveCount(1);
+  await expect(page.locator(".nx-preview-state")).toHaveText("Partial");
+  await expect(page.locator("#features .nx-feature-screen img")).toHaveCount(3);
   await expect(
     page.locator("#demo [data-testid=interactive-demo]"),
   ).toBeVisible();
@@ -223,7 +213,7 @@ test("mobile menu contains focus and restores it on Escape", async ({
 });
 
 for (const locale of ["en", "ja"] as const) {
-  test(`community product layout and screenshots at six widths (${locale})`, async ({
+  test(`community product layout and screenshots at seven widths (${locale})`, async ({
     page,
     context,
     baseURL,
@@ -234,15 +224,24 @@ for (const locale of ["en", "ja"] as const) {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.emulateMedia({ reducedMotion: "reduce" });
-    mkdirSync(".local/nexus-alpha14-lp-qa", { recursive: true });
-    for (const width of [1440, 1280, 1024, 768, 390, 360]) {
+    mkdirSync(".local/clear-product-phase-a/after", { recursive: true });
+    for (const width of [1440, 1280, 1024, 768, 390, 375, 320]) {
       await page.setViewportSize({ width, height: width >= 768 ? 900 : 844 });
       await page.goto("/");
       await page.evaluate(() => document.fonts.ready);
+      for (const image of await page.locator(".nx-feature-screen img").all()) {
+        await image.scrollIntoViewIfNeeded();
+        await expect
+          .poll(() =>
+            image.evaluate((node) => (node as HTMLImageElement).naturalWidth),
+          )
+          .toBeGreaterThan(0);
+      }
+      await page.evaluate(() => window.scrollTo(0, 0));
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(
         locale === "en"
-          ? "Review activity and reply status in your Discord community."
-          : "Discordの活動と、投稿への返信状況を確認する。",
+          ? "Review Discord activity and posts to check for replies."
+          : "Discordの活動状況と、返信を確認したい投稿をまとめて確認。",
       );
       expect(
         await page.evaluate(
@@ -266,9 +265,7 @@ for (const locale of ["en", "ja"] as const) {
       expect(demo!.y).toBeGreaterThanOrEqual(hero!.y + hero!.height - 1);
       if (width === 1440) {
         const example = await page.locator(".nx-hero-example").boundingBox();
-        // R3 places a full actual UI screenshot below the centered hero copy.
-        // The primary CTA remains in the first viewport; the screenshot must
-        // follow the copy and fit inside the hero instead of being clipped to it.
+        // The initial HTML preview follows the hero copy without clipping.
         const copy = await page.locator(".nx-hero-copy").boundingBox();
         expect(example!.y).toBeGreaterThanOrEqual(copy!.y + copy!.height);
         expect(example!.y + example!.height).toBeLessThanOrEqual(
@@ -283,12 +280,28 @@ for (const locale of ["en", "ja"] as const) {
         ).toBeGreaterThan(1000);
       }
       await page.screenshot({
-        path: `.local/nexus-alpha14-lp-qa/${locale}-${width}.png`,
+        path: `.local/clear-product-phase-a/after/${locale}-${width}.png`,
       });
       await page.screenshot({
-        path: `.local/nexus-alpha14-lp-qa/${locale}-${width}-full.png`,
+        path: `.local/clear-product-phase-a/after/${locale}-${width}-full.png`,
         fullPage: true,
       });
+      if ([1440, 390].includes(width)) {
+        for (const [name, selector] of [
+          ["hero-preview", ".nx-hero-example"],
+          ["features", "#features"],
+          ["demo", "#demo"],
+        ] as const) {
+          // Capture document coordinates from the top so the sticky header does
+          // not obscure a tall section when locator.screenshot scrolls it.
+          const clip = (await page.locator(selector).boundingBox())!;
+          await page.screenshot({
+            path: `.local/clear-product-phase-a/after/${locale}-${name}-${width}.png`,
+            fullPage: true,
+            clip,
+          });
+        }
+      }
     }
     expect(errors).toEqual([]);
   });

@@ -57,6 +57,7 @@ import {
   ResponseDistributionChart,
   TrendChart,
 } from "./charts";
+import "./workspace.css";
 
 type Locale = "en" | "ja";
 const navPages = [
@@ -1673,7 +1674,7 @@ export default function Console({
       <div className="page-head">
         <div>
           <p className="eyebrow">{t(locale, "web.measure_what_worked")}</p>
-          <h1>{c.results}</h1>
+          <h2>{c.results}</h2>
           <p className="orientation">
             {t(locale, "web.compare_usual_operation_with_the_improvement")}
           </p>
@@ -2869,14 +2870,17 @@ export default function Console({
       </main>
     );
   return (
-    <div className="product">
+    <div className="product nx-workspace">
+      <a className="workspace-skip" href="#workspace-content">
+        {locale === "ja" ? "本文へ移動" : "Skip to content"}
+      </a>
       <aside className="sidebar">
         <a className="brand" href="/">
           <BrandAsset />
         </a>
         {navigation}
       </aside>
-      <main className="content">
+      <main className="content" id="workspace-content" tabIndex={-1}>
         <div className="mobile-head">
           <a className="brand" href="/">
             <BrandAsset variant="blue" />

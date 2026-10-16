@@ -415,6 +415,7 @@ for (const locale of ["ja", "en"] as const) {
           "product.css",
           "brand.css",
           "home-summary.css",
+          "workspace.css",
         ].map((file) => readFile("apps/web/app/" + file, "utf8")),
       )
     )
