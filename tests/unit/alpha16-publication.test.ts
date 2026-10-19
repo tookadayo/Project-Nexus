@@ -57,6 +57,32 @@ describe("alpha16 public-only static publication", () => {
     expect(result.files["index.html"]).toContain("https://app.nexus.example/auth/login");
     expect(result.files["index.html"]).toContain("公開の承認待ち");
   });
+  it("switches announcement language to the same immutable article", () => {
+    const data = bundle(), manifest = data.announcements[0]!.manifest;
+    const articlePath = `announcements/${id}-${manifest.generation}-${manifest.artifactHash.slice(0,16)}`;
+    const result = buildOfficialStatic(data, Date.parse(now));
+    expect(result.files[`${articlePath}/index.html`]).toContain(`lang="en" hreflang="en" href="/${articlePath}/en/"`);
+    expect(result.files[`${articlePath}/en/index.html`]).toContain(`lang="ja" hreflang="ja" href="/${articlePath}/"`);
+  });
+  it("switches legal language to the approved counterpart of the same document", () => {
+    const legal = (["ja", "en"] as const).map(locale => ({ document: "terms", locale, version: "1", effectiveDate: "2026-10-16", approval: "APPROVED_PUBLIC", title: `Terms ${locale}`, body: "Synthetic approved terms." }));
+    const result = buildOfficialStatic({ ...bundle(), legal }, Date.parse(now));
+    expect(result.files["legal/terms/ja/index.html"]).toContain('lang="en" hreflang="en" href="/legal/terms/en/"');
+    expect(result.files["legal/terms/en/index.html"]).toContain('lang="ja" hreflang="ja" href="/legal/terms/ja/"');
+  });
+  it("preserves the existing language-home fallback when no counterpart is published", () => {
+    const untranslated = { ...source, en: null }, prepared = prepareAnnouncement(untranslated, 1, now);
+    const legal = [
+      { document: "terms", locale: "ja", version: "1", effectiveDate: "2026-10-16", approval: "APPROVED_PUBLIC", title: "Japanese-only terms", body: "Synthetic approved terms." },
+      { document: "privacy", locale: "en", version: "1", effectiveDate: "2026-10-16", approval: "APPROVED_PUBLIC", title: "English-only privacy", body: "Synthetic approved privacy." },
+    ];
+    const result = buildOfficialStatic({ ...bundle(), announcements: [{ source: untranslated, manifest: { ...prepared.manifest, state: "ACTIVE", publishedAt: now } }], legal }, Date.parse(now));
+    const articlePath = `announcements/${id}-1-${prepared.manifest.artifactHash.slice(0,16)}`;
+    expect(result.files[`${articlePath}/index.html`]).toContain('lang="en" hreflang="en" href="/en/"');
+    expect(result.files[`${articlePath}/en/index.html`]).toBeUndefined();
+    expect(result.files["legal/terms/ja/index.html"]).toContain('lang="en" hreflang="en" href="/en/"');
+    expect(result.files["legal/privacy/en/index.html"]).toContain('lang="ja" hreflang="ja" href="/"');
+  });
   it("omits withdrawn routes and canonical index entries", () => {
     const data = bundle(); data.announcements[0]!.manifest = { ...data.announcements[0]!.manifest, state: "RETRACTED" };
     const result = buildOfficialStatic(data, Date.parse(now));

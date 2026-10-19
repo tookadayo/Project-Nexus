@@ -1,4 +1,7 @@
 import Fastify from "fastify";
+import { authorizeOperator, type OperatorPermission } from "../../../packages/security/src/alpha16-operator";
+import { startAlpha17OperatorMaintenance } from "./alpha17-maintenance";
+import type { Alpha17OperatorMaintenance } from "../../../packages/security/src/alpha17-operator-config";
 import { readLegalCandidate } from "./legal-candidates";
 import {
   readConfirmedLegalContacts,
@@ -20,6 +23,7 @@ import {
   type LegalCandidateLoader,
 } from "../../../packages/operations/src/publication";
 import { Alpha16Operator, type Alpha16OperatorOptions } from "../../../packages/security/src/alpha16-operator";
+import type { StaticPublications } from "../../../packages/operations/src/alpha16-publication";
 import { operatorDigest } from "../../../packages/security/src/operator-auth";
 
 export function operatorBoundary(
@@ -62,6 +66,8 @@ export function createOperatorServer(
     readLegalCandidate?: LegalCandidateLoader;
     readConfirmedLegalContacts?: LegalContactsLoader;
     alpha16?: Alpha16OperatorOptions;
+    alpha17Maintenance?: Alpha17OperatorMaintenance;
+    staticPublications?: StaticPublications;
   } = {},
 ) {
   const url = new URL(origin);
@@ -123,7 +129,18 @@ export function createOperatorServer(
       write,
     );
   const publications = new OfficialPublications(db, options.readLegalCandidate ?? readLegalCandidate);
-  const alpha16 = new Alpha16Operator(db, auth, { ...options.alpha16, beta, publications });
+  const alpha16 = new Alpha16Operator(db, auth, { ...options.alpha16, beta, publications, staticPublications: options.staticPublications });
+  if (options.alpha17Maintenance) {
+    const maintenance = options.alpha17Maintenance;
+    let lifecycle: Awaited<ReturnType<typeof startAlpha17OperatorMaintenance>> | undefined;
+    app.addHook("onReady", async () => {
+      lifecycle = await startAlpha17OperatorMaintenance(alpha16, maintenance);
+    });
+    app.addHook("onClose", async () => {
+      maintenance.invalidate();
+      await lifecycle?.stop();
+    });
+  }
   const operationKey = (req: { headers: Record<string, unknown> }) => {
     const value = req.headers["idempotency-key"];
     assert(typeof value === "string", "PRECONDITION_REQUIRED", 428);
@@ -133,8 +150,18 @@ export function createOperatorServer(
     await authorize(req, write);
     return operatorDigest(sid(req)!);
   };
-  // The old API remains readable for compatibility. Dangerous commands cannot
-  // bypass the new preview/step-up contract through their historical route.
+  const authorizeLegacyRead = async (
+    req: { headers: { cookie?: string; "x-csrf-token"?: string | string[] } },
+    permission: OperatorPermission, guildId?: string, global = false,
+  ) => {
+    const session = await localSession(req);
+    const grant = await options.alpha16?.grant?.(session, db)
+      ?? { permissions: [], guildIds: [], global: false };
+    authorizeOperator(grant, permission, guildId, global);
+    return grant;
+  };
+  // Compatibility reads use the same current grant/scope as the new API.
+  // Historical mutations cannot bypass reviewed preview/step-up commands.
   const requireReviewedCommand = () => {
     assert(false, "PRECONDITION_REQUIRED", 428);
   };
@@ -161,6 +188,10 @@ export function createOperatorServer(
   app.get<{ Params: { id: string } }>("/operator/v1/announcements/:id", async (req) => alpha16.announcementDetail(await localSession(req), req.params.id));
   app.post("/operator/v1/announcements/preview", { bodyLimit: 262144 }, async (req) => alpha16.previewAnnouncement(await localSession(req, true), req.body));
   app.post<{ Params: { id: string } }>("/operator/v1/announcements/:id/change", async (req) => alpha16.confirm(await localSession(req, true), req.body, operationKey(req), "ANNOUNCEMENT", req.params.id));
+  app.post<{ Params: { id: string } }>("/operator/v1/announcements/:id/reconcile", async (req) => {
+    const body = z.object({ generation: z.number().safe().int().positive() }).strict().parse(req.body);
+    return alpha16.reconcileAnnouncement(await localSession(req, true), req.params.id, body.generation);
+  });
   app.post("/operator/v1/privacy/deletions/preview", async (req) => alpha16.previewDeletion(await localSession(req, true), req.body));
   app.post("/operator/v1/privacy/deletions/confirm", async (req) => alpha16.confirm(await localSession(req, true), req.body, operationKey(req), "PRIVACY_DELETE"));
   app.post("/operator/v1/step-up/challenge", async (req) => alpha16.challenge(await localSession(req, true), z.object({ previewId: z.uuid() }).strict().parse(req.body).previewId));
@@ -252,19 +283,16 @@ export function createOperatorServer(
     return { ok: true };
   });
   app.get("/operator/guilds", async (req) => {
-    await authorize(req);
-    return { guilds: await beta.list(), maximum: BETA_ACTIVE_MAX };
+    const grant = await authorizeLegacyRead(req, "OPERATOR_ADMISSION_READ");
+    const guilds = (await beta.list()).filter((row) => grant.global || grant.guildIds.includes(row.guild_id));
+    return { guilds, maximum: BETA_ACTIVE_MAX };
   });
   app.get<{ Params: { guildId: string } }>(
     "/operator/guilds/:guildId",
     async (req) => {
-      await authorize(req);
-      return beta.detail(
-        z
-          .string()
-          .regex(/^\d{17,20}$/)
-          .parse(req.params.guildId),
-      );
+      const guildId = z.string().regex(/^\d{17,20}$/).parse(req.params.guildId);
+      await authorizeLegacyRead(req, "OPERATOR_ADMISSION_READ", guildId);
+      return beta.detail(guildId);
     },
   );
   app.post("/operator/guilds", async (req) => {
@@ -272,7 +300,8 @@ export function createOperatorServer(
     return requireReviewedCommand();
   });
   app.get("/operator/overview", async (req) => {
-    await authorize(req);
+    // These counts are genuinely global. Do not fabricate scoped statistics.
+    await authorizeLegacyRead(req, "OPERATOR_STATUS_READ", undefined, true);
     return {
       work: (
         await sql`SELECT count(*) FILTER(WHERE status='QUEUED')::int AS waiting,count(*) FILTER(WHERE status IN ('RUNNING','PREPARING','FINALIZING'))::int AS running FROM analysis_runs`.execute(
@@ -292,17 +321,17 @@ export function createOperatorServer(
     };
   });
   app.get("/operator/audit", async (req) => {
-    await authorize(req);
+    const grant = await authorizeLegacyRead(req, "OPERATOR_AUDIT_READ");
     return {
       events: (
-        await sql`SELECT request_id,action,guild_id,result,reason,occurred_at FROM operator_audit ORDER BY occurred_at DESC LIMIT 100`.execute(
+        await sql`SELECT request_id,action,guild_id,result,reason,occurred_at FROM operator_audit WHERE ${grant.global ? sql`true` : sql`guild_id=ANY(${[...grant.guildIds]}::text[])`} ORDER BY occurred_at DESC LIMIT 100`.execute(
           db,
         )
       ).rows,
     };
   });
   app.get("/operator/sessions", async (req) => {
-    await authorize(req);
+    await authorizeLegacyRead(req, "OPERATOR_CONFIG_READ", undefined, true);
     return {
       sessions: (
         await sql`SELECT created_at,last_used_at,expires_at,revoked_at FROM operator_sessions ORDER BY created_at DESC LIMIT 30`.execute(
@@ -325,13 +354,13 @@ export function createOperatorServer(
       ),
   );
   app.get("/operator/publications", async (req) => {
-    await authorize(req);
+    await authorizeLegacyRead(req, "OPERATOR_PUBLICATION_READ", undefined, true);
     return { items: await publications.list() };
   });
   app.get<{ Params: { id: string } }>(
     "/operator/publications/:id",
     async (req) => {
-      await authorize(req);
+      await authorizeLegacyRead(req, "OPERATOR_PUBLICATION_READ", undefined, true);
       return publications.detail(req.params.id);
     },
   );
@@ -339,7 +368,7 @@ export function createOperatorServer(
     Params: { id: string };
     Querystring: { revision?: string; locale?: string };
   }>("/operator/publications/:id/preview", async (req) => {
-    await authorize(req);
+    await authorizeLegacyRead(req, "OPERATOR_PUBLICATION_READ", undefined, true);
     const query = z
       .object({
         revision: z.coerce.number().int().nonnegative(),
@@ -354,7 +383,7 @@ export function createOperatorServer(
     return requireReviewedCommand();
   });
   app.get("/operator/legal", async (req) => {
-    await authorize(req);
+    await authorizeLegacyRead(req, "OPERATOR_LEGAL_READ", undefined, true);
     return {
       ...(await publications.legal()),
       confirmedContacts: await (
@@ -370,7 +399,7 @@ export function createOperatorServer(
     Params: { document: string; locale: string };
     Querystring: { revision?: string };
   }>("/operator/legal/:document/:locale", async (req) => {
-    await authorize(req);
+    await authorizeLegacyRead(req, "OPERATOR_LEGAL_READ", undefined, true);
     const revision = z.coerce
       .number()
       .int()

@@ -216,10 +216,11 @@ const css = "body{font-family:system-ui,sans-serif;line-height:1.65;max-width:68
 export function buildOfficialStatic(input: unknown, now: number): { files: Record<string, string>; manifest: { schemaVersion: 1; generation: number; generatedAt: string; files: { path: string; sha256: string }[] }; readiness: ReturnType<typeof unconfiguredPublicationReadiness> } {
   const data = officialStaticInputSchema.parse(input), files: Record<string, string> = {};
   const cssPath = `assets/site-${createHash("sha256").update(css).digest("hex").slice(0,16)}.css`;
-  const page = (title: string, content: string, language: "ja" | "en" = "ja", section = "") => {
+  const page = (title: string, content: string, language: "ja" | "en" = "ja", section = "", languageSwitchHref?: string) => {
     const prefix = language === "en" ? "/en" : "", here = section ? `/${section}/` : "/";
     const label = (ja: string, en: string) => language === "ja" ? ja : en;
-    return `<!doctype html><html lang="${language}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="same-origin"><title>${escapeHtml(title)} · NEXUS</title><link rel="stylesheet" href="/${cssPath}"></head><body><nav aria-label="${label("サイト案内", "Site navigation")}"><a href="${prefix}/">NEXUS</a><a href="${prefix}/product/">${label("製品", "Product")}</a><a href="${prefix}/demo/">${label("デモ", "Demo")}</a><a href="${prefix}/pricing/">${label("価格", "Pricing")}</a><a href="/announcements/">${label("お知らせ", "Announcements")}</a><a href="/status/">${label("稼働状況", "Status")}</a><a href="${escapeHtml(data.appOrigin)}/auth/login">${label("ダッシュボード", "Dashboard")}</a><a lang="${language === "ja" ? "en" : "ja"}" hreflang="${language === "ja" ? "en" : "ja"}" href="${language === "ja" ? "/en" : ""}${here}">${label("English", "日本語")}</a></nav><main>${content}</main><footer>${label("生成", "Generated")}: <time>${escapeHtml(data.generatedAt)}</time> · generation ${data.generation}<br>${label("公開説明の版", "Public copy revision")}: ${PUBLIC_SITE_CONTENT_VERSION}<br>${data.release ? `${label("製品の公開版", "Published product release")}: ${escapeHtml(data.release.version)} · <time>${escapeHtml(data.release.publishedAt)}</time>` : label("製品の公開版は未確認です。", "The published product release is unverified.")}</footer></body></html>`;
+    const languageHref = languageSwitchHref ?? `${language === "ja" ? "/en" : ""}${here}`;
+    return `<!doctype html><html lang="${language}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="same-origin"><title>${escapeHtml(title)} · NEXUS</title><link rel="stylesheet" href="/${cssPath}"></head><body><nav aria-label="${label("サイト案内", "Site navigation")}"><a href="${prefix}/">NEXUS</a><a href="${prefix}/product/">${label("製品", "Product")}</a><a href="${prefix}/demo/">${label("デモ", "Demo")}</a><a href="${prefix}/pricing/">${label("価格", "Pricing")}</a><a href="/announcements/">${label("お知らせ", "Announcements")}</a><a href="/status/">${label("稼働状況", "Status")}</a><a href="${escapeHtml(data.appOrigin)}/auth/login">${label("ダッシュボード", "Dashboard")}</a><a lang="${language === "ja" ? "en" : "ja"}" hreflang="${language === "ja" ? "en" : "ja"}" href="${escapeHtml(languageHref)}">${label("English", "日本語")}</a></nav><main>${content}</main><footer>${label("生成", "Generated")}: <time>${escapeHtml(data.generatedAt)}</time> · generation ${data.generation}<br>${label("公開説明の版", "Public copy revision")}: ${PUBLIC_SITE_CONTENT_VERSION}<br>${data.release ? `${label("製品の公開版", "Published product release")}: ${escapeHtml(data.release.version)} · <time>${escapeHtml(data.release.publishedAt)}</time>` : label("製品の公開版は未確認です。", "The published product release is unverified.")}</footer></body></html>`;
   };
   files[cssPath] = css;
   const entries: string[] = [];
@@ -232,8 +233,8 @@ export function buildOfficialStatic(input: unknown, now: number): { files: Recor
     invariant(manifest.publishedAt !== null, "PUBLICATION_NOT_CONFIRMED");
     const slug = `${source.id}-${manifest.generation}-${manifest.artifactHash.slice(0,16)}`;
     const body = `<article><h1>${escapeHtml(source.ja.title)}</h1><p>${escapeHtml(source.ja.summary)}</p><time>${escapeHtml(source.updatedAt)}</time>${renderPublicationMarkdown(source.ja.body).html}</article>`;
-    files[`announcements/${slug}/index.html`] = page(source.ja.title, body);
-    if (source.en) files[`announcements/${slug}/en/index.html`] = page(source.en.title, `<article><h1>${escapeHtml(source.en.title)}</h1><p>${escapeHtml(source.en.summary)}</p>${renderPublicationMarkdown(source.en.body).html}</article>`, "en");
+    files[`announcements/${slug}/index.html`] = page(source.ja.title, body, "ja", "", source.en ? `/announcements/${slug}/en/` : undefined);
+    if (source.en) files[`announcements/${slug}/en/index.html`] = page(source.en.title, `<article><h1>${escapeHtml(source.en.title)}</h1><p>${escapeHtml(source.en.summary)}</p>${renderPublicationMarkdown(source.en.body).html}</article>`, "en", "", `/announcements/${slug}/`);
     entries.push(`<li><a href="/announcements/${slug}/">${escapeHtml(source.ja.title)}</a> <time>${escapeHtml(source.updatedAt)}</time></li>`);
   }
   files["announcements/index.html"] = page("お知らせ / Announcements", `<h1>お知らせ / Announcements</h1>${entries.length ? `<ul>${entries.join("")}</ul>` : "<p>公開中のお知らせはありません。 / No published announcements.</p>"}`);
@@ -248,7 +249,10 @@ export function buildOfficialStatic(input: unknown, now: number): { files: Recor
   const legalLinks: string[] = [];
   for (const document of data.legal) {
     const target = `legal/${document.document}/${document.locale}/index.html`;
-    files[target] = page(document.title, `<article><h1>${escapeHtml(document.title)}</h1><p>Version: ${escapeHtml(document.version)} · ${escapeHtml(document.effectiveDate)}</p>${renderPublicationMarkdown(document.body).html}</article>`, document.locale);
+    const translatedLocale = document.locale === "ja" ? "en" : "ja";
+    const languageSwitchHref = data.legal.some(item => item.document === document.document && item.locale === translatedLocale)
+      ? `/legal/${document.document}/${translatedLocale}/` : undefined;
+    files[target] = page(document.title, `<article><h1>${escapeHtml(document.title)}</h1><p>Version: ${escapeHtml(document.version)} · ${escapeHtml(document.effectiveDate)}</p>${renderPublicationMarkdown(document.body).html}</article>`, document.locale, "", languageSwitchHref);
     legalLinks.push(`<li><a href="/${target.replace("index.html", "")}">${escapeHtml(document.title)} (${document.locale})</a></li>`);
   }
   files["index.html"] = page("NEXUS", `<h1>NEXUS</h1><p>Discordコミュニティの運営を支えるサービス。 / Tools for Discord community operations.</p><section><h2>公開文書 / Public documents</h2>${legalLinks.length ? `<ul>${legalLinks.join("")}</ul>` : "<p>公開の承認待ちです。 / Public documents await approval.</p>"}</section><section><h2>お問い合わせ / Contact</h2><p>受付体制の準備中です。現在このサイトから送信できません。 / Contact operations are not ready. This site does not accept submissions.</p></section>`);

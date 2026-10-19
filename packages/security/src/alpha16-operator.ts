@@ -9,6 +9,7 @@ import { operatorDigest, type OperatorAuth } from "./operator-auth";
 import { betaChangeSchema, type BetaOperator } from "./beta-operator";
 import { scopeForGuild } from "./scoping";
 import { publicationChangeSchema, legalSettingsSchema, type OfficialPublications } from "../../operations/src/publication";
+import type { StaticPublications } from "../../operations/src/alpha16-publication";
 import { unconfiguredPublicationReadiness } from "../../presentation/src/alpha16-publication";
 import { acquireRuleScopeLocks, ruleScopeLockSet } from "../../rules/src/locks";
 import {
@@ -19,7 +20,7 @@ import {
 export const OPERATOR_PERMISSIONS = [
   "OPERATOR_STATUS_READ", "OPERATOR_ADMISSION_READ", "OPERATOR_ADMISSION_MANAGE", "OPERATOR_BETA_LIFECYCLE_MANAGE", "OPERATOR_PRIVACY_ERASE_GUILD",
   "OPERATOR_AUTOMATION_CONTROL", "OPERATOR_PRIVACY_DELETE_GUILD", "OPERATOR_PRIVACY_DELETE_GLOBAL",
-  "OPERATOR_ANNOUNCEMENT_PUBLISH", "OPERATOR_LEGAL_MANAGE", "OPERATOR_RECOVERY_READ", "OPERATOR_AUDIT_READ", "OPERATOR_CONFIG_READ",
+  "OPERATOR_ANNOUNCEMENT_PUBLISH", "OPERATOR_LEGAL_MANAGE", "OPERATOR_PUBLICATION_READ", "OPERATOR_LEGAL_READ", "OPERATOR_RECOVERY_READ", "OPERATOR_AUDIT_READ", "OPERATOR_CONFIG_READ",
 ] as const;
 export type OperatorPermission = typeof OPERATOR_PERMISSIONS[number];
 export type OperatorGrant = { permissions: readonly OperatorPermission[]; guildIds: readonly string[]; global: boolean };
@@ -60,7 +61,7 @@ const previewPayloadSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("ADMISSION"), input: betaChangeSchema }).strict(),
   z.object({ kind: z.literal("BETA_LIFECYCLE"), input: betaChangeSchema, deletionState: z.enum(["PENDING", "ERASED", "DONE"]).nullable(),
     targetType: z.literal("GUILD_SAVED_DATA") }).strict(),
-  z.object({ kind: z.literal("ANNOUNCEMENT"), input: publicationChangeSchema, reason: reasonSchema }).strict(),
+  z.object({ kind: z.literal("ANNOUNCEMENT"), input: publicationChangeSchema, reason: reasonSchema, expectedGeneration: z.number().safe().int().nonnegative().optional(), publicContentHash: digestSchema.optional() }).strict(),
   z.object({ kind: z.literal("LEGAL_SETTINGS"), input: legalChangeSchema, reason: reasonSchema }).strict(),
 ]);
 type PreviewPayload = z.infer<typeof previewPayloadSchema>;
@@ -87,6 +88,8 @@ export type Alpha16OperatorOptions = {
   privacy?: PrivacyService;
   beta?: BetaOperator;
   publications?: OfficialPublications;
+  /** Trusted server object only; no policy/config booleans confer publication. */
+  staticPublications?: StaticPublications;
   health?: () => Promise<readonly OperatorHealthObservation[]>;
   recovery?: () => Promise<Alpha16RestoreEvidence>;
   configHealth?: () => Promise<readonly OperatorConfigHealth[]>;
@@ -149,7 +152,7 @@ export class Alpha16Operator {
       globalDeletionBlockingReasons: ["GLOBAL_WRITER_COVERAGE_UNVERIFIED"],
       admissionBlockingReasons: [...operatorMutationBlockers(policy), ...(!this.options.beta ? ["ADMISSION_STATE_ADAPTER_REQUIRED"] : [])],
       betaLifecycleBlockingReasons: [...operatorMutationBlockers(policy), ...(!policy.betaLifecycleScopeVerified ? ["BETA_LIFECYCLE_CODE_SCOPE_UNVERIFIED"] : []), ...(!policy.guildErasureScopeVerified ? ["GUILD_ERASURE_CODE_SCOPE_UNVERIFIED"] : [])],
-      publicationBlockingReasons: unconfiguredPublicationReadiness().blockers,
+      publicationBlockingReasons: this.publicationReadiness().blockers,
       publicationDraftBlockingReasons: [...operatorMutationBlockers(policy), ...(!this.options.publications ? ["ANNOUNCEMENT_ADAPTER_REQUIRED"] : [])] };
   }
   async status(session: string) {
@@ -187,21 +190,31 @@ export class Alpha16Operator {
       allowedLifecycleActions: !canLifecycle ? [] : ["PENDING", "ERASED"].includes(row.deletion_state ?? "") ? ["retryDeletion"] : !["REVOKED", "DELETING", "DELETED"].includes(row.status) ? ["revoke", "unlink", "delete"] : [] })),
       blockingReasons: [...operatorMutationBlockers(policy), ...(!this.options.beta ? ["ADMISSION_STATE_ADAPTER_REQUIRED"] : [])] };
   }
+  private publicationReadiness() { return this.options.staticPublications?.readiness() ?? unconfiguredPublicationReadiness(); }
   async announcements(session: string) {
-    await this.permission(session, "OPERATOR_ANNOUNCEMENT_PUBLISH");
+    await this.permission(session, "OPERATOR_PUBLICATION_READ", undefined, true);
     const source = await this.options.publications?.list() ?? [];
-    return { items: source.map((item) => ({ ...item, announcementId: item.id, draftRevision: item.editRevision,
-      sourcePublicationState: item.status, publicationState: item.status === "DRAFT" ? "DRAFT" : "UNKNOWN",
-      artifactVersion: null, artifactHash: null, syncState: "UNVERIFIED" })), blockingReasons: unconfiguredPublicationReadiness().blockers,
-      draftBlockingReasons: operatorMutationBlockers(await this.policy()) };
+    const items = await Promise.all(source.map(async item => {
+      const state = await this.options.staticPublications?.status(item.id);
+      return { ...item, announcementId: item.id, draftRevision: item.editRevision,
+        sourcePublicationState: item.status, publicationState: state?.syncState === "CONFIRMED" ? state.activeGeneration === null ? "WITHDRAWN" : "PUBLISHED" : item.status === "DRAFT" ? "DRAFT" : "UNKNOWN",
+        artifactVersion: state?.generation ?? null, pendingGeneration: state?.pendingGeneration ?? null, syncState: state?.syncState ?? "UNVERIFIED" };
+    }));
+    return { items, blockingReasons: this.publicationReadiness().blockers, draftBlockingReasons: operatorMutationBlockers(await this.policy()) };
+  }
+  /** Read-only remote reconciliation, never publication retry or a new effect. */
+  async reconcileAnnouncement(session: string, id: string, generation: number) {
+    await this.permission(session, "OPERATOR_ANNOUNCEMENT_PUBLISH", undefined, true);
+    assert(this.options.staticPublications, "PUBLIC_PUBLISH_UNAVAILABLE", 503);
+    return this.options.staticPublications.reconcile(z.uuid().parse(id), z.number().safe().int().positive().parse(generation));
   }
   async announcementDetail(session: string, id: string) {
-    await this.permission(session, "OPERATOR_ANNOUNCEMENT_PUBLISH");
+    await this.permission(session, "OPERATOR_PUBLICATION_READ", undefined, true);
     assert(this.options.publications, "ANNOUNCEMENT_ADAPTER_REQUIRED", 503);
     return this.options.publications.detail(z.uuid().parse(id));
   }
   async legal(session: string) {
-    await this.permission(session, "OPERATOR_LEGAL_MANAGE", undefined, true);
+    await this.permission(session, "OPERATOR_LEGAL_READ", undefined, true);
     assert(this.options.publications, "ANNOUNCEMENT_ADAPTER_REQUIRED", 503);
     return { ...await this.options.publications.legal(), draftBlockingReasons: operatorMutationBlockers(await this.policy()) };
   }
@@ -296,11 +309,15 @@ export class Alpha16Operator {
     const data = z.object({ input: publicationChangeSchema, reason: reasonSchema }).strict().parse(raw), policy = await this.policy();
     await this.permission(session, "OPERATOR_ANNOUNCEMENT_PUBLISH", undefined, true);
     assert(!operatorMutationBlockers(policy).length && this.options.publications, "OPERATOR_POLICY_REQUIRED", 503);
-    assert(!["publish", "withdraw"].includes(data.input.action) || unconfiguredPublicationReadiness().enabled, "PUBLIC_PUBLISH_UNAVAILABLE", 503);
+    const publicEffect = data.input.action === "publish" || data.input.action === "withdraw";
+    assert(!publicEffect || this.publicationReadiness().enabled && this.options.staticPublications, "PUBLIC_PUBLISH_UNAVAILABLE", 503);
+    assert(!publicEffect || data.input.confirmed === true && data.input.translationsReviewed === true && data.input.target === "public-site" && data.input.content === undefined, "PUBLICATION_CONFIRMATION_REQUIRED", 400);
+    const publicPreview = publicEffect ? await this.options.staticPublications!.previewSource(data.input.id, data.input.expectedRevision, data.input.action === "publish" ? "PUBLISH" : "WITHDRAW") : undefined;
+    const expectedGeneration = publicPreview?.expectedGeneration;
     const prepared = this.options.publications.prepareChange(data.input);
-    return { ...await this.savePreview(session, { kind: "ANNOUNCEMENT", input: prepared.input, reason: data.reason }, policy),
-      target: { announcementId: data.input.id, action: data.input.action, revision: data.input.expectedRevision, contentHash: hash("publication-content", canonical(data.input.content ?? null)), reason: data.reason },
-      publicationBlockingReasons: unconfiguredPublicationReadiness().blockers, publicSiteChanged: false };
+    return { ...await this.savePreview(session, { kind: "ANNOUNCEMENT", input: prepared.input, reason: data.reason, ...(expectedGeneration === undefined ? {} : { expectedGeneration, publicContentHash: publicPreview!.contentHash }) }, policy),
+      target: { announcementId: data.input.id, action: data.input.action, revision: data.input.expectedRevision, contentHash: publicPreview?.contentHash ?? hash("publication-content", canonical(data.input.content ?? null)), ...(publicPreview ? { publicContent: publicPreview.source, expectedGeneration } : {}), reason: data.reason },
+      publicationBlockingReasons: this.publicationReadiness().blockers, publicSiteChanged: false };
   }
   async previewLegal(session: string, raw: unknown) {
     const data = z.object({ input: legalChangeSchema, reason: reasonSchema }).strict().parse(raw), policy = await this.policy();
@@ -355,7 +372,9 @@ export class Alpha16Operator {
     return { keyHash, previous };
   }
   async confirm(session: string, raw: unknown, idempotencyKey: string, expectedKind?: PreviewPayload["kind"], routeTarget?: string): Promise<Record<string, unknown>> {
-    const input = confirmSchema.parse(raw), key = z.string().min(8).max(200).parse(idempotencyKey), policy = await this.policy();
+    const input = confirmSchema.parse(raw), key = z.string().min(8).max(200).parse(idempotencyKey);
+    let policy = await this.policy();
+    const initialPolicyRevision = policy.revision;
     assert(!operatorMutationBlockers(policy).length, "OPERATOR_POLICY_REQUIRED", 503);
     // Read outside the transaction only to prepare the complete scope lock set.
     const initial = (await sql<PreviewRow>`SELECT * FROM alpha16_operator_previews WHERE id=${input.previewId}::uuid AND session_digest=${session}`.execute(this.db)).rows[0];
@@ -365,14 +384,39 @@ export class Alpha16Operator {
     if ((payload.kind === "ADMISSION" || payload.kind === "BETA_LIFECYCLE") && routeTarget) assert(routeTarget === payload.input.guildId, "SCOPE_MISMATCH", 422);
     if (payload.kind === "ANNOUNCEMENT" && routeTarget) assert(routeTarget === payload.input.id, "SCOPE_MISMATCH", 422);
     assert(initial.expires_at.getTime() > Date.now(), "PREVIEW_EXPIRED", 410);
+    const refreshPolicy = async () => {
+      const current = await this.policy();
+      assert(current.revision === initialPolicyRevision, "VERSION_MISMATCH", 412);
+      assert(!operatorMutationBlockers(current, payload.kind === "PRIVACY_DELETE").length,
+        "OPERATOR_POLICY_REQUIRED", 503);
+      if (payload.kind === "BETA_LIFECYCLE")
+        assert(current.betaLifecycleScopeVerified && current.guildErasureScopeVerified, "GUILD_ERASURE_CODE_SCOPE_UNVERIFIED", 503);
+      if (payload.kind === "CONTROL")
+        assert(approvedRetention(current.retention, "OPERATOR_CONTROL"), "RETENTION_POLICY_REQUIRED", 503);
+      policy = current;
+    };
     const admission = payload.kind === "ADMISSION" || payload.kind === "BETA_LIFECYCLE" ? await this.options.beta?.prepareChange(payload.input) : null;
     if (payload.kind === "ADMISSION" || payload.kind === "BETA_LIFECYCLE") assert(admission, "ADMISSION_STATE_ADAPTER_REQUIRED", 503);
+    const publicationCommand = payload.kind === "ANNOUNCEMENT" && (payload.input.action === "publish" || payload.input.action === "withdraw") ? {
+      publicationId: payload.input.id, expectedSourceRevision: payload.input.expectedRevision, expectedGeneration: payload.expectedGeneration, expectedContentHash: payload.publicContentHash,
+      operation: payload.input.action === "publish" ? "PUBLISH" as const : "WITHDRAW" as const, confirmed: true as const, translationsReviewed: true as const, target: "public-site" as const,
+    } : null;
+    if (publicationCommand) {
+      await this.permission(session, "OPERATOR_ANNOUNCEMENT_PUBLISH", undefined, true);
+      assert(publicationCommand.expectedContentHash, "PUBLICATION_REVIEW_CONFLICT", 409);
+    }
+    // Avoid network reads for an existing idempotent operation. This unlocked
+    // hint only skips preflight; commandReplay rechecks identity under locks.
+    const alreadyRecorded = publicationCommand && (await sql`SELECT operation_id FROM alpha16_operator_commands WHERE idempotency_hash=${hash("command-key", session + ":" + key)} AND fingerprint=${initial.fingerprint} AND expires_at>clock_timestamp()`.execute(this.db)).rows.length > 0;
+    const publicationStage = publicationCommand && !alreadyRecorded ? await this.options.staticPublications?.prepareStage(publicationCommand) : undefined;
     const locks = payload.kind === "PRIVACY_DELETE" ? ruleScopeLockSet(payload.scope, { subjectHashes: [payload.subjectHash] })
       : payload.kind === "ADMISSION" || payload.kind === "BETA_LIFECYCLE" ? ruleScopeLockSet(scopeForGuild(payload.input.guildId))
       : payload.kind === "ANNOUNCEMENT" || payload.kind === "LEGAL_SETTINGS" ? [{ kind: "GLOBAL" as const, mode: "exclusive" as const }]
       : payload.input.scope ? ruleScopeLockSet(payload.input.scope) : [{ kind: "GLOBAL" as const, mode: "exclusive" as const }];
-    return this.db.transaction().execute(async (tx) => {
+    const committed = await this.db.transaction().execute(async (tx): Promise<Record<string, unknown>> => {
       await acquireRuleScopeLocks(tx, locks);
+      // A lock wait cannot preserve an expired local enforcement lease.
+      await refreshPolicy();
       if (payload.kind === "PRIVACY_DELETE") {
         // Compatibility fence for old readers. Acquired after the complete new
         // scope set and before any tombstone/job/resource row is locked.
@@ -400,6 +444,7 @@ export class Alpha16Operator {
       }
       assert(!preview.consumed_at, "STATE_CONFLICT", 409);
       await this.consumeStepUp(tx, session, preview, input.stepUpToken);
+      await refreshPolicy();
       let result: Record<string, unknown>, operationId: string;
       if (payload.kind === "PRIVACY_DELETE") {
         assert(!operatorMutationBlockers(policy, true).length && this.options.vault && this.options.publicSessionCipher && this.options.privacy, "PRIVACY_POLICY_REQUIRED", 503);
@@ -436,9 +481,17 @@ export class Alpha16Operator {
         result = { operationId, state: invitation.status, revision: invitation.generation, guildId: invitation.guild_id, erasureTargetType: "GUILD_SAVED_DATA", unknownExternalEffectsReplayed: false };
       } else if (payload.kind === "ANNOUNCEMENT") {
         assert(this.options.publications, "ANNOUNCEMENT_ADAPTER_REQUIRED", 503);
-        const publication = await this.options.publications.changeInTransaction(tx, payload.input);
         operationId = payload.input.requestId;
-        result = { operationId, state: publication.status, revision: publication.revision, announcementId: publication.id, publicSiteChanged: false };
+        if (payload.input.action === "publish" || payload.input.action === "withdraw") {
+          assert(this.options.staticPublications && payload.expectedGeneration !== undefined, "PUBLIC_PUBLISH_UNAVAILABLE", 503);
+          assert(payload.input.confirmed === true && payload.input.translationsReviewed === true && payload.input.target === "public-site", "PUBLICATION_CONFIRMATION_REQUIRED", 400);
+          assert(publicationCommand && publicationStage, "PUBLICATION_STAGE_PROOF_REQUIRED", 503);
+          const staged = await this.options.staticPublications.stageInTransaction(tx, publicationCommand, new Date(), publicationStage);
+          result = { operationId, state: staged.state, generation: staged.generation, announcementId: payload.input.id, publicSiteChanged: false };
+        } else {
+          const publication = await this.options.publications.changeInTransaction(tx, payload.input);
+          result = { operationId, state: publication.status, revision: publication.revision, announcementId: publication.id, publicSiteChanged: false };
+        }
       } else if (payload.kind === "LEGAL_SETTINGS") {
         assert(this.options.publications, "ANNOUNCEMENT_ADAPTER_REQUIRED", 503);
         const legal = await this.options.publications.saveLegalInTransaction(tx, payload.input);
@@ -457,8 +510,20 @@ export class Alpha16Operator {
       await sql`INSERT INTO alpha16_operator_commands(idempotency_hash,session_digest,fingerprint,preview_id,operation_id,expires_at) VALUES(${keyHash},${session},${preview.fingerprint},${preview.id}::uuid,${operationId}::uuid,${preview.expires_at})`.execute(tx);
       await sql`INSERT INTO operator_audit(id,request_id,action,guild_id,result,reason,before_state,after_state,retention_class,expires_at) VALUES(${randomUUID()}::uuid,${operationId}::uuid,${payload.kind},${payload.kind === "PRIVACY_DELETE" ? payload.scope.guildId : payload.kind === "ADMISSION" || payload.kind === "BETA_LIFECYCLE" ? payload.input.guildId : payload.kind === "CONTROL" ? payload.input.scope?.guildId ?? null : null},'SUCCEEDED',${payload.kind === "CONTROL" ? payload.input.reason : payload.kind === "ANNOUNCEMENT" || payload.kind === "LEGAL_SETTINGS" ? payload.reason : "OPERATOR_REQUEST"},NULL,NULL,'ALPHA16',${retentionExpiry(policy.retention, "AUDIT", new Date())})`.execute(tx);
       await sql`UPDATE alpha16_operator_previews SET consumed_at=clock_timestamp() WHERE id=${preview.id}::uuid`.execute(tx);
+      // Revalidate after domain/row lock waits as well: failure rolls back the
+      // proof, domain change, command receipt and audit together.
+      await refreshPolicy();
       return result;
     });
+    // Only the fresh PREPARED result of this commit can dispatch. A repeated
+    // HTTP confirmation returns its existing operation and never sends again.
+    if (payload.kind === "ANNOUNCEMENT" && (payload.input.action === "publish" || payload.input.action === "withdraw") && committed.state === "PREPARED" && !committed.replay) {
+      await refreshPolicy();
+      await this.permission(session, "OPERATOR_ANNOUNCEMENT_PUBLISH", undefined, true);
+      const outcome = await this.options.staticPublications!.dispatch(payload.input.id, z.number().safe().int().positive().parse(committed.generation));
+      return { ...committed, state: outcome.state, publicSiteChanged: outcome.state === "CONFIRMED", published: outcome.published ?? false };
+    }
+    return committed;
   }
   private async jobStatus(tx: Tx, id: string) {
     const job = (await sql<JobRow>`SELECT * FROM alpha16_privacy_jobs WHERE id=${id}::uuid`.execute(tx)).rows[0];
@@ -523,6 +588,42 @@ export class Alpha16Operator {
       return { processed: failed.rows.length > 0, state: failed.rows.length ? "PARTIAL_FAILURE" : "CLAIM_LOST" };
     }
   }
+  /** Only source-reviewed Operator-owned TTL rows. This does not process a
+   * privacy job, receipt, tombstone, backup or restore capability. Each table is
+   * bounded independently; backlog keeps the local enforcement lease closed. */
+  async purgeOperatorEphemeral(batchSize: number) {
+    assert(Number.isSafeInteger(batchSize) && batchSize > 0 && batchSize <= 1000,
+      "MAINTENANCE_BATCH_POLICY_REQUIRED", 503);
+    return this.db.transaction().execute(async (tx) => {
+      await sql`SELECT set_config('statement_timeout','10000',true),set_config('lock_timeout','2000',true)`.execute(tx);
+      await sql`SELECT pg_advisory_xact_lock(763214)`.execute(tx);
+      await sql`DELETE FROM alpha16_operator_stepups WHERE ctid IN (SELECT ctid FROM alpha16_operator_stepups WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT ${batchSize} FOR UPDATE SKIP LOCKED)`.execute(tx);
+      await sql`DELETE FROM alpha16_operator_challenges WHERE ctid IN (SELECT ctid FROM alpha16_operator_challenges WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT ${batchSize} FOR UPDATE SKIP LOCKED)`.execute(tx);
+      await sql`DELETE FROM alpha16_operator_commands WHERE ctid IN (SELECT ctid FROM alpha16_operator_commands WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT ${batchSize} FOR UPDATE SKIP LOCKED)`.execute(tx);
+      // Avoid an unbounded FK cascade: remove a parent only after all its
+      // children have been removed within their own per-table batch budgets.
+      await sql`DELETE FROM alpha16_operator_previews WHERE id IN (
+        SELECT p.id FROM alpha16_operator_previews p
+        WHERE p.expires_at<=clock_timestamp()
+          AND NOT EXISTS(SELECT 1 FROM alpha16_operator_stepups s WHERE s.preview_id=p.id)
+          AND NOT EXISTS(SELECT 1 FROM alpha16_operator_challenges c WHERE c.preview_id=p.id)
+          AND NOT EXISTS(SELECT 1 FROM alpha16_operator_commands c WHERE c.preview_id=p.id)
+        ORDER BY p.expires_at LIMIT ${batchSize} FOR UPDATE OF p SKIP LOCKED
+      )`.execute(tx);
+      await sql`DELETE FROM operator_audit WHERE ctid IN (SELECT ctid FROM operator_audit WHERE retention_class='ALPHA16' AND expires_at<=clock_timestamp() ORDER BY expires_at LIMIT ${batchSize} FOR UPDATE SKIP LOCKED)`.execute(tx);
+      await sql`DELETE FROM alpha16_operator_controls WHERE ctid IN (SELECT ctid FROM alpha16_operator_controls WHERE expires_at<=clock_timestamp() ORDER BY expires_at LIMIT ${batchSize} FOR UPDATE SKIP LOCKED)`.execute(tx);
+      const backlog = (await sql`SELECT 1 WHERE
+        EXISTS(SELECT 1 FROM alpha16_operator_previews WHERE expires_at<=clock_timestamp())
+        OR EXISTS(SELECT 1 FROM alpha16_operator_stepups WHERE expires_at<=clock_timestamp())
+        OR EXISTS(SELECT 1 FROM alpha16_operator_challenges WHERE expires_at<=clock_timestamp())
+        OR EXISTS(SELECT 1 FROM alpha16_operator_commands WHERE expires_at<=clock_timestamp())
+        OR EXISTS(SELECT 1 FROM operator_audit WHERE retention_class='ALPHA16' AND expires_at<=clock_timestamp())
+        OR EXISTS(SELECT 1 FROM alpha16_operator_controls WHERE expires_at<=clock_timestamp())
+      `.execute(tx)).rows.length > 0;
+      return { ready: !backlog };
+    });
+  }
+
   /** Missing control state remains fail-closed after finite retention expiry. */
   async purgeEphemeral() {
     return this.db.transaction().execute(async (tx) => {

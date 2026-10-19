@@ -397,6 +397,8 @@ it("enforces actual operator authentication, CSRF, Host/Origin, expiry and no-st
   let contactReadCount = 0,
     contactsAvailable = true;
   const app = createOperatorServer(db, auth, beta, "http://127.0.0.1:3210", {
+    // Explicit isolated fixture read grant; never a production default.
+    alpha16: { grant: async () => ({ permissions: ["OPERATOR_PUBLICATION_READ", "OPERATOR_LEGAL_READ"], guildIds: [], global: true }) },
     readLegalCandidate: async () => "# Synthetic private candidate",
     readConfirmedLegalContacts: async () => {
       contactReadCount++;
