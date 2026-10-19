@@ -1,13 +1,15 @@
 import {publicSessionPolicy} from '../../../../../packages/security/src/public-sessions';
 import {NextRequest,NextResponse} from 'next/server';
 import {oauthRedirectUri,sealSession,secureCookies,validOAuthState} from '../session';
-import {authProblem} from '../problem-response';
+import {authCancelled,authProblem} from '../problem-response';
 import {DomainError} from '../../../../../packages/shared/src/index';
 import {webOrigin} from '../../../../../packages/config/src/web-origin';
 import {checkoutLoginOffering} from '../checkout-intent';
 export async function GET(req:NextRequest){
- const state=req.nextUrl.searchParams.get('state'),code=req.nextUrl.searchParams.get('code');
- if(!code||!validOAuthState(req.cookies.get('nexus_oauth_state')?.value,state))return authProblem(new DomainError('SESSION_EXPIRED',403));
+ const state=req.nextUrl.searchParams.get('state'),code=req.nextUrl.searchParams.get('code'),providerError=req.nextUrl.searchParams.get('error');
+ if(!validOAuthState(req.cookies.get('nexus_oauth_state')?.value,state))return authProblem(new DomainError('SESSION_EXPIRED',403));
+ if(providerError==='access_denied')return authCancelled();
+ if(providerError||!code)return authProblem(new DomainError('SESSION_EXPIRED',403));
  const clientId=process.env.DISCORD_APPLICATION_ID,secret=process.env.DISCORD_CLIENT_SECRET;if(!clientId||!secret)return authProblem(new DomainError('WEB_CONNECTION_UNAVAILABLE',503));
  try{
   const body=new URLSearchParams({grant_type:'authorization_code',code,redirect_uri:oauthRedirectUri()});

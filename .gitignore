@@ -23,3 +23,6 @@ build/
 # Private legal review inputs must never be committed.
 /legal/sources/
 /legal/private/
+
+# Local Vitest reporter output.
+/.vitest/

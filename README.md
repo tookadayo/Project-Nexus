@@ -1,8 +1,18 @@
 # NEXUS
 
+## このPCでの起動
+
+本番用の入口は [起動用フォルダ](起動用/README.md) にまとめています。「事前確認」は秘密を開かない配置・依存の診断です。DB接続・schema検査・migration・アプリ起動は行いません。現在の確定結果と未完了事項は [統合検証記録](docs/design/alpha17-integration-validation-status.md) を参照してください。本番の通常起動もmigrationを実行しません。秘密、データ、ログ、backupは入口と分離します。
+
+[alpha17運用設計](docs/design/alpha17-operations-plan.md) と各検証記録を参照してください。実資格情報、Windowsの保護設定、Dockerの契約条件、実hostingの原子的切替・撤回などは別の運用受入です。ローカル試験成功は公開・実配信完了を意味しません。
+
+以下のDevelopment self-hostと `起動用/開発用/` の旧SETUP/STARTは開発用です。依存導入、開発用基盤、秘密生成、自動migration、Discord接続を含むため、本番の準備確認や通常起動には使わないでください。
+
 NEXUS は Discord Community Operations 製品です。サーバーの運営目的に合う計測方法を保存し、Discordで確認できた投稿・返信・参加の範囲と、集計できていないデータを示します。新しいメンバーへの対応、最初の返信やVoice同席、参加後の活動を確認し、運営の対応とその後の結果をつなげます。比較から原因を断定せず、個人の活動点数やスタッフ評価を作りません。
 
 現在のリリースは **0.6.0-alpha.14** です。バージョンはルートの `package.json` を唯一のリリース版ソースとし、`MAJOR.MINOR.PATCH-prerelease` の SemVer に従います。例: `0.6.0-alpha.2`、`0.6.0-beta.1`、`0.6.0-rc.1`、`0.6.0`。Build は Git の短縮 SHA です。パッケージ環境では `NEXUS_BUILD_SHA` を指定できます。
+
+本準備の基点となる保存済み実装は **alpha15・alpha16**（[引継ぎ記録](docs/design/alpha16-alpha17-handoff.md)）です。**alpha17** は、このPCで追加した運用準備と合成ローカル検証を指します。[統合検証記録](docs/design/alpha17-integration-validation-status.md)に結果と未完了事項をまとめています。公開リリースは上記の版のままで、公開・本番稼働の完了を意味しません。
 
 ## Project Nexus 製品サイト
 
@@ -14,10 +24,10 @@ Web の `/` は、実装済みの Discord Community Operations 製品を紹介�
 
 1. Node.js 24 を用意します。Discord Developer Portal で Bot の **Server Members Intent** を有効にします。Message Content Intent は不要です。
 2. Gateway を使う場合、Developer Portal の **Interactions Endpoint URL を空欄**にします。Webhook を選ぶ場合のみ公開 HTTPS URL と `DISCORD_PUBLIC_KEY` が必要です。
-3. Windows では `NEXUS SETUP.cmd` を実行し、Application ID、開発サーバー ID、Bot Token を設定します。`.env.example` にすべての環境変数があります。`START NEXUS.cmd` で起動します。
+3. Windows では `起動用/開発用/NEXUS SETUP.cmd` を実行し、Application ID、開発サーバー ID、Bot Token を設定します。`.env.example` にすべての環境変数があります。`起動用/開発用/START NEXUS.cmd` で起動します。
 4. スタッフ専用チャンネルで `/nexus panel` を実行します。Web は既定で [http://localhost:3100](http://localhost:3100) です。
 
-CLI で起動する場合は `corepack pnpm install`、`corepack pnpm migrate`、`corepack pnpm dev` を使います。PostgreSQL と Redis が必要です。`NEXUS STATUS.cmd` はサービスと Interaction の状態、`NEXUS DOCTOR.cmd` は環境と残留プロセスを診断します。安全な修復は `NEXUS DOCTOR.cmd -Repair` で明示的に実行します。所有者が確認できないプロセスや ghost listener は停止しません。両方で Version / Build / Channel を表示します。
+CLI で起動する場合は `corepack pnpm install`、`corepack pnpm migrate`、`corepack pnpm dev` を使います。PostgreSQL と Redis が必要です。`起動用/開発用/NEXUS STATUS.cmd` はサービスと Interaction の状態、`起動用/開発用/NEXUS DOCTOR.cmd` は環境と残留プロセスを診断します。安全な修復は `起動用/開発用/NEXUS DOCTOR.cmd -Repair` で明示的に実行します。所有者が確認できないプロセスや ghost listener は停止しません。両方で Version / Build / Channel を表示します。
 
 ## Discord Control Panel
 

@@ -11,6 +11,6 @@ export function ServerCards({locale, guilds}: {locale: SiteLocale; guilds: Autho
       : t("サーバー用Botを追加してからWebで設定します", "Add the server bot, then complete setup on the web")}</p>
       {guild.failure?.reference && <small>{t("参照ID", "Reference ID")}: {guild.failure.reference}</small>}
     </div>
-    <a className="button button-primary" href={`/setup?guild=${encodeURIComponent(guild.id)}`}>{guild.availability === "UNAVAILABLE" ? t("もう一度確認", "Check again") : guild.state === "VERIFIED" ? t("ダッシュボードへ", "Open Dashboard") : t("このサーバーを設定", "Set up this server")}</a>
+    <a className="button button-primary" href={`${guild.state === "VERIFIED" ? "/auth/select" : "/setup"}?guild=${encodeURIComponent(guild.id)}`}>{guild.availability === "UNAVAILABLE" ? t("もう一度確認", "Check again") : guild.state === "VERIFIED" ? t("ダッシュボードへ", "Open Dashboard") : t("このサーバーを設定", "Set up this server")}</a>
   </article>)}{!guilds.length && <div className="server-empty"><h2>{t("管理できるサーバーがありません", "No manageable servers found")}</h2><p>{t("サーバーの管理権限、または接続済みサーバーで設定されたNEXUS管理ロールが必要です。", "You need server management permission or a configured NEXUS manager role on a connected server.")}</p></div>}</div>;
 }

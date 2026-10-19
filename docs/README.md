@@ -4,6 +4,24 @@ Current release: **0.6.0-alpha.14** — Community operations UX, official announ
 entitlement source of truth. Current documents retain their established paths
 where moving them would create unnecessary link churn.
 
+本準備の基点となる保存済み実装は **alpha15・alpha16**（[alpha15の実装記録](design/alpha15-scratch-implementation-evidence.md)、[alpha16の検証状況](design/alpha16-validation-status.md)）です。**alpha17** は、このPCで追加した運用準備と合成ローカル検証を指します。公開リリースは上記の **0.6.0-alpha.14** のままで、各検証記録の未完了事項と本番受入を確認してください。
+
+- [運用PC準備と未完了事項](design/alpha17-pc-setup-status.md)
+
+- [DB接続のcold/warm診断と未達条件](design/alpha17-db-connection-diagnosis.md)
+
+- [連携検証計画](design/alpha17-integration-validation-plan.md)
+- [統合検証の結果と未完了事項](design/alpha17-integration-validation-status.md)
+
+## alpha17 運用PC準備
+
+- [起動・停止・診断の入口](../起動用/README.md)
+- [今回の設計と許可範囲](design/alpha17-operations-plan.md)
+- [Operator policy・最小権限と期限処理](design/alpha17-operator-wiring.md)
+- [DB／Redisの配置と未実施条件](design/alpha17-datastore-operations.md)
+- [静的公開の世代切替と未確認のhosting能力](design/alpha17-static-publication.md)
+- [WinSCPのstaging限定転送](design/alpha17-winscp-staging.md)
+- [Windows転送helperの終了・隔離検証](design/alpha17-windows-job.md)
 ## alpha14
 
 - [Scope and local verification](alpha14-acceptance.md)
