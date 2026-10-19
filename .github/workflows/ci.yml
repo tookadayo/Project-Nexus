@@ -16,7 +16,8 @@ jobs:
       - run: corepack pnpm lint
       - run: corepack pnpm typecheck
       - run: corepack pnpm test
-      - run: corepack pnpm build
+      - name: Build with bounded resource diagnostics
+        run: node .github/scripts/ci-build.mjs corepack pnpm run build --concurrency=1
       - run: corepack pnpm exec playwright install --with-deps chromium
       - run: corepack pnpm test:e2e
       - run: corepack pnpm exec playwright test --config playwright.verification.config.ts
