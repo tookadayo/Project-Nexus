@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
-import { mkdtemp, writeFile, unlink, rmdir, lstat } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, unlink, rmdir, lstat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { scrypt } from "node:crypto";
 
@@ -20,6 +20,7 @@ const synthetic = {
   csrfKey: "33".repeat(32),
 };
 beforeAll(async () => {
+  await mkdir(resolve(".local"), { recursive: true });
   directory = await mkdtemp(resolve(".local/alpha15-synthetic-credentials-"));
   path = join(directory, "synthetic-placeholder.json");
   await writeFile(path, JSON.stringify(synthetic));

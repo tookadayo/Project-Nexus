@@ -108,20 +108,22 @@ production buildはPASSです。実運用LCP／INP／CLS、Lighthouse、低速�
 
 ## G. スクリーンショット
 
+以下はローカル限定・Git管理外の撮影保存先です。画像はリポジトリに同梱していません。
+
 実際のローカルブラウザ撮影です。変更前56枚、変更後94枚を `.local/clear-product-phase-b/` に保存しました。開発認証の注意表示やNext.jsインジケータが写っているものがあります。サンプルは合成データで、実績ではありません。
 
 | 画面 | 変更前 | 変更後 |
 | --- | --- | --- |
-| Home JA Desktop | [1440px](../../.local/clear-product-phase-b/before/ja-home-1440.png) | [1440px](../../.local/clear-product-phase-b/after/ja-home-1440.png) |
-| Home JA Mobile | [390px](../../.local/clear-product-phase-b/before/ja-home-390.png) | [390px](../../.local/clear-product-phase-b/after/ja-home-390.png) |
-| 要確認 EN Desktop | [1440px](../../.local/clear-product-phase-b/before/en-attention-1440.png) | [1440px](../../.local/clear-product-phase-b/after/en-attention-1440.png) |
-| 要確認 JA Mobile | [390px](../../.local/clear-product-phase-b/before/ja-attention-390.png) | [390px](../../.local/clear-product-phase-b/after/ja-attention-390.png) |
-| Explore EN Desktop | [1440px](../../.local/clear-product-phase-b/before/en-explore-1440.png) | [1440px](../../.local/clear-product-phase-b/after/en-explore-1440.png) |
-| Explore EN Mobile | [390px](../../.local/clear-product-phase-b/before/en-explore-390.png) | [390px](../../.local/clear-product-phase-b/after/en-explore-390.png) |
-| 分析 JA Desktop | [1440px](../../.local/clear-product-phase-b/before/ja-analysis-1440.png) | [1440px](../../.local/clear-product-phase-b/after/ja-analysis-1440.png) |
-| 履歴 JA Desktop | [1440px](../../.local/clear-product-phase-b/before/ja-history-1440.png) | [1440px](../../.local/clear-product-phase-b/after/ja-history-1440.png) |
+| Home JA Desktop | 1440px（ローカル限定: `../../.local/clear-product-phase-b/before/ja-home-1440.png`） | 1440px（ローカル限定: `../../.local/clear-product-phase-b/after/ja-home-1440.png`） |
+| Home JA Mobile | 390px（ローカル限定: `../../.local/clear-product-phase-b/before/ja-home-390.png`） | 390px（ローカル限定: `../../.local/clear-product-phase-b/after/ja-home-390.png`） |
+| 要確認 EN Desktop | 1440px（ローカル限定: `../../.local/clear-product-phase-b/before/en-attention-1440.png`） | 1440px（ローカル限定: `../../.local/clear-product-phase-b/after/en-attention-1440.png`） |
+| 要確認 JA Mobile | 390px（ローカル限定: `../../.local/clear-product-phase-b/before/ja-attention-390.png`） | 390px（ローカル限定: `../../.local/clear-product-phase-b/after/ja-attention-390.png`） |
+| Explore EN Desktop | 1440px（ローカル限定: `../../.local/clear-product-phase-b/before/en-explore-1440.png`） | 1440px（ローカル限定: `../../.local/clear-product-phase-b/after/en-explore-1440.png`） |
+| Explore EN Mobile | 390px（ローカル限定: `../../.local/clear-product-phase-b/before/en-explore-390.png`） | 390px（ローカル限定: `../../.local/clear-product-phase-b/after/en-explore-390.png`） |
+| 分析 JA Desktop | 1440px（ローカル限定: `../../.local/clear-product-phase-b/before/ja-analysis-1440.png`） | 1440px（ローカル限定: `../../.local/clear-product-phase-b/after/ja-analysis-1440.png`） |
+| 履歴 JA Desktop | 1440px（ローカル限定: `../../.local/clear-product-phase-b/before/ja-history-1440.png`） | 1440px（ローカル限定: `../../.local/clear-product-phase-b/after/ja-history-1440.png`） |
 
-追加：[記録あり履歴・Desktop抜粋](../../.local/clear-product-phase-b/after/populated-history-ja-1440.png)、[同EN 320px抜粋](../../.local/clear-product-phase-b/after/populated-history-en-320.png)、[Home JA 320px](../../.local/clear-product-phase-b/after/ja-home-320.png)、[Explore CSS zoom 200%](../../.local/clear-product-phase-b/after/en-explore-200-percent.png)。
+追加：記録あり履歴・Desktop抜粋（ローカル限定: `../../.local/clear-product-phase-b/after/populated-history-ja-1440.png`）、同EN 320px抜粋（ローカル限定: `../../.local/clear-product-phase-b/after/populated-history-en-320.png`）、Home JA 320px（ローカル限定: `../../.local/clear-product-phase-b/after/ja-home-320.png`）、Explore CSS zoom 200%（ローカル限定: `../../.local/clear-product-phase-b/after/en-explore-200-percent.png`）。
 
 ## H. 残課題
 

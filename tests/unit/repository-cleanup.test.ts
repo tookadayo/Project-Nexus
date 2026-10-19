@@ -56,12 +56,12 @@ it("preserves shipped migrations, Windows entrypoints and the new public billing
       ),
     ).toBe(true);
   for (const file of [
-    "NEXUS SETUP.cmd",
-    "NEXUS STATUS.cmd",
-    "NEXUS DOCTOR.cmd",
-    "START NEXUS.cmd",
-    "STOP NEXUS.cmd",
-    "RESTART NEXUS.cmd",
+    "起動用/開発用/NEXUS SETUP.cmd",
+    "起動用/開発用/NEXUS STATUS.cmd",
+    "起動用/開発用/NEXUS DOCTOR.cmd",
+    "起動用/開発用/START NEXUS.cmd",
+    "起動用/開発用/STOP NEXUS.cmd",
+    "起動用/開発用/RESTART NEXUS.cmd",
     "packages/settings/src/billing/index.ts",
     "apps/web/app/billing/webhooks/stripe/route.ts",
   ])

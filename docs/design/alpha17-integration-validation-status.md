@@ -48,7 +48,7 @@ WorkerはSTOPPED/期限切れ/無権限の拒否、重複NOT_CLAIMED、TARGET_UN
 - 旧HTTP/HTTPS transport・CSRF fixture・setup CSS・test手順の各FAILを保存した。native起動失敗はbody0件、初期OAuthのserial skipは未実施と区別する。最終の選択group成功は、旧8件一括runや全CI成功を意味しない。
 - OAuthのAPIRequestContextによるlogout代行はCSRF_REJECTED403になった。手動のguard header補完は行わず、通常browser POSTと実応答の観測へ修正した。相対Locationは実応答URLを基準に解決してURL全体を完全一致で検証する。本文長0の仮説はDB無し再現で成立せず、そのvalid=false記録も保持する。
 - **BLOCKED: 実strict preflight**。既存NEXUS-SERVICEでの `scripts/production/bootstrap.mjs preflight app` は、資格情報を読み得ることを理由に自動承認レビューが実行前に拒否した。再試行・間接実行なし。独立したmetadata-only `diagnose app` は未設定とPowerShell RestrictedによるACL verifier停止を報告し、本番起動成功ではない。
-- **BLOCKED: 正式Security Standard scan**。必須Security MCPが未提供。[security-scan SKILL.md](C:/Users/pc-ad/.codex/plugins/cache/openai-curated-remote/codex-security/0.1.32/skills/security-scan/SKILL.md) と [artifact-storage.md](C:/Users/pc-ad/.codex/plugins/cache/openai-curated-remote/codex-security/0.1.32/references/artifact-storage.md:7) に従い、scan ID/canonical artifactsを作成していない。通常reviewを正式scan完了と扱わない。
+- **BLOCKED: 正式Security Standard scan**。必須Security MCPが未提供。`codex-security:security-scan` の `SKILL.md`（当時PC内の資料・非同梱） と 同プラグインの `references/artifact-storage.md:7`（当時PC内の資料・非同梱） に従い、scan ID/canonical artifactsを作成していない。通常reviewを正式scan完了と扱わない。
 
 > If the required MCP is unavailable or the selected baseline is unsupported, report the blocker; do not fall back to shell-authored canonical files.
 

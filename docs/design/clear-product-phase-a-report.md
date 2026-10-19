@@ -169,18 +169,20 @@ Newsの公開／取り下げ／取得不能、LegalのPrivate／Publicと候補�
 
 ## G. スクリーンショット
 
+以下はローカル限定・Git管理外の撮影保存先です。画像はリポジトリに同梱していません。
+
 ローカルブラウザで実際に撮影した画像です。Homeのファーストビュー、全ページ、Heroプレビュー、機能紹介、操作デモを保存しています。撮影用の生成画像や完成イメージではありません。開発環境のNext.jsインジケータが一部に写っています。
 
 | 画面 | 変更前 | 変更後 |
 | --- | --- | --- |
-| Home JA Desktop | [1440px](../../.local/clear-product-phase-a/before/ja-1440.png) | [1440px](../../.local/clear-product-phase-a/after/ja-1440.png) |
-| Home JA Mobile | [390px](../../.local/clear-product-phase-a/before/ja-390.png) | [390px](../../.local/clear-product-phase-a/after/ja-390.png) |
-| Home EN Desktop | [1440px](../../.local/clear-product-phase-a/before/en-1440.png) | [1440px](../../.local/clear-product-phase-a/after/en-1440.png) |
-| Home EN Mobile | [390px](../../.local/clear-product-phase-a/before/en-390.png) | [390px](../../.local/clear-product-phase-a/after/en-390.png) |
-| Pricing JA Desktop | [1440px](../../.local/clear-product-phase-a/before/ja-pricing-1440.png) | [1440px](../../.local/clear-product-phase-a/after/ja-pricing-1440.png) |
-| Product JA Mobile | [390px](../../.local/clear-product-phase-a/before/ja-product-390.png) | [390px](../../.local/clear-product-phase-a/after/ja-product-390.png) |
+| Home JA Desktop | 1440px（ローカル限定: `../../.local/clear-product-phase-a/before/ja-1440.png`） | 1440px（ローカル限定: `../../.local/clear-product-phase-a/after/ja-1440.png`） |
+| Home JA Mobile | 390px（ローカル限定: `../../.local/clear-product-phase-a/before/ja-390.png`） | 390px（ローカル限定: `../../.local/clear-product-phase-a/after/ja-390.png`） |
+| Home EN Desktop | 1440px（ローカル限定: `../../.local/clear-product-phase-a/before/en-1440.png`） | 1440px（ローカル限定: `../../.local/clear-product-phase-a/after/en-1440.png`） |
+| Home EN Mobile | 390px（ローカル限定: `../../.local/clear-product-phase-a/before/en-390.png`） | 390px（ローカル限定: `../../.local/clear-product-phase-a/after/en-390.png`） |
+| Pricing JA Desktop | 1440px（ローカル限定: `../../.local/clear-product-phase-a/before/ja-pricing-1440.png`） | 1440px（ローカル限定: `../../.local/clear-product-phase-a/after/ja-pricing-1440.png`） |
+| Product JA Mobile | 390px（ローカル限定: `../../.local/clear-product-phase-a/before/ja-product-390.png`） | 390px（ローカル限定: `../../.local/clear-product-phase-a/after/ja-product-390.png`） |
 
-追加の確認画像：[HTMLプレビューDesktop](../../.local/clear-product-phase-a/after/ja-hero-preview-1440.png)、[同Mobile](../../.local/clear-product-phase-a/after/ja-hero-preview-390.png)、[3機能](../../.local/clear-product-phase-a/after/ja-features-1440.png)、[操作デモ](../../.local/clear-product-phase-a/after/ja-demo-1440.png)、[EN最小320px](../../.local/clear-product-phase-a/after/en-320.png)。News、Support、Legal各ページの日英Desktop／Mobile画像も `after/` に保存しています。
+追加の確認画像：HTMLプレビューDesktop（ローカル限定: `../../.local/clear-product-phase-a/after/ja-hero-preview-1440.png`）、同Mobile（ローカル限定: `../../.local/clear-product-phase-a/after/ja-hero-preview-390.png`）、3機能（ローカル限定: `../../.local/clear-product-phase-a/after/ja-features-1440.png`）、操作デモ（ローカル限定: `../../.local/clear-product-phase-a/after/ja-demo-1440.png`）、EN最小320px（ローカル限定: `../../.local/clear-product-phase-a/after/en-320.png`）。News、Support、Legal各ページの日英Desktop／Mobile画像も `after/` に保存しています。
 
 ## H. 残課題とPhase Bへの引継ぎ
 
