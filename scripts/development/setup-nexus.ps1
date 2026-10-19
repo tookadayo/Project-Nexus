@@ -49,7 +49,7 @@ try {
     & corepack pnpm build
     if($LASTEXITCODE -ne 0) { throw 'Build failed. Review the output above before starting NEXUS.' }
     Write-Host 'Starting database, Redis, Discord, and dashboard. The database is migrated automatically; commands register when their definition changes.'
-    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $script:NexusRoot 'start-nexus.ps1')
+    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $script:NexusRoot 'scripts\development\start-nexus.ps1')
     if($LASTEXITCODE -ne 0) { throw 'NEXUS did not start. Check .local\runtime\*.err.log and run NEXUS DOCTOR.cmd.' }
     $ready=$false
     for($attempt=0;$attempt -lt 20;$attempt++) {

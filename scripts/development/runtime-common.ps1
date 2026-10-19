@@ -1,5 +1,5 @@
 Set-StrictMode -Version 2.0
-$script:NexusRoot = [System.IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
+$script:NexusRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..')).TrimEnd('\')
 $script:RuntimeDirectory = Join-Path $script:NexusRoot '.local\runtime'
 $script:RuntimeManifest = Join-Path $script:RuntimeDirectory 'runtime.json'
 

@@ -97,5 +97,5 @@ if(-not (Wait-NexusPortsReleased $ports 5)){Write-Warning 'Ports did not release
 if($manifest -and (Test-Path -LiteralPath $script:RuntimeManifest)){Remove-Item -LiteralPath $script:RuntimeManifest -Force}
 New-Item -ItemType Directory -Path $script:RuntimeDirectory -Force|Out-Null
 Write-Host 'Verified runtime state was cleaned. Starting missing roles.'
-& (Join-Path $script:NexusRoot 'start-nexus.ps1')
+& (Join-Path $script:NexusRoot 'scripts\development\start-nexus.ps1')
 exit $LASTEXITCODE

@@ -45,9 +45,9 @@ describe("community worker privacy lock composition",()=>{
   expect(fence.held).toBe(false);expect(community).toHaveBeenCalledTimes(1);expect(fence.betaWork).toHaveBeenCalledTimes(1);
  });
  it("keeps the actual dev composition on this tested boundary outside betaWork",()=>{
-  // Importing scripts/dev would start workers/listeners. Inspect its wiring
+  // Importing scripts/runtime would start workers/listeners. Inspect its wiring
   // separately; the four runtime tests above exercise the callable protocol.
-  const source=ts.createSourceFile("scripts/dev.ts",readFileSync(new URL("../../scripts/dev.ts",import.meta.url),"utf8"),ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
+  const source=ts.createSourceFile("scripts/runtime.ts",readFileSync(new URL("../../scripts/runtime.ts",import.meta.url),"utf8"),ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
   const calls:{node:ts.CallExpression;insideLegacyFence:boolean}[]=[];
   const isCall=(node:ts.Node,name:string):node is ts.CallExpression=>ts.isCallExpression(node)&&ts.isIdentifier(node.expression)&&node.expression.text===name;
   function visit(node:ts.Node,insideLegacyFence=false){

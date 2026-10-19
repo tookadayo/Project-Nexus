@@ -3,6 +3,8 @@ $source = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $tempBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\')
 $root = Join-Path $tempBase ('NEXUS Runtime Test ' + [guid]::NewGuid().ToString('N'))
 $bin = Join-Path $root 'fake bin'
+$development = Join-Path $root 'scripts\development'
+[IO.Directory]::CreateDirectory($development) | Out-Null
 $chosen=New-Object System.Collections.Generic.List[int]
 for($i=0;$i -lt 5;$i++){ $listener=[System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback,0);$listener.Start();$port=([System.Net.IPEndPoint]$listener.LocalEndpoint).Port;$listener.Stop();if($chosen.Contains($port)){$i--;continue};$chosen.Add($port) }
 $pgPort=$chosen[0];$redisPort=$chosen[1];$apiPort=$chosen[2];$interactionPort=$chosen[3];$webPort=$chosen[4]
@@ -16,7 +18,7 @@ function ConvertTo-TestPorts([string]$Contents,[System.Collections.IDictionary]$
 }
 function Invoke-Launcher([string]$Name,[string]$Extra='') {
     $info=New-Object System.Diagnostics.ProcessStartInfo
-    $info.FileName='powershell.exe';$info.Arguments='-NoLogo -NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $root $Name)+'" '+$Extra;$info.UseShellExecute=$false;$info.CreateNoWindow=$true
+    $info.FileName='powershell.exe';$info.Arguments='-NoLogo -NoProfile -ExecutionPolicy Bypass -File "'+(Join-Path $development $Name)+'" '+$Extra;$info.UseShellExecute=$false;$info.CreateNoWindow=$true
     $process=New-Object System.Diagnostics.Process;$process.StartInfo=$info;$null=$process.Start()
     if(-not $process.WaitForExit(180000)){Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue;throw "Launcher timed out: $Name"}
     return @{code=$process.ExitCode;text=$Name}
@@ -30,7 +32,7 @@ try {
     $portExample='55432,56379,http://127.0.0.1:3001/,3002,3100,53001,13001'
     Assert ((ConvertTo-TestPorts $portExample $collisionMap) -eq '53001,55379,http://127.0.0.1:53004/,53002,53100,53001,13001') 'Port substitution cascaded or changed a different numeric token'
     New-Item -ItemType Directory -Path $bin,(Join-Path $root 'node_modules') -Force | Out-Null
-    foreach($name in @('runtime-common.ps1','runtime-child.ps1','start-nexus.ps1','stop-nexus.ps1','restart-nexus.ps1','status-nexus.ps1','doctor-nexus.ps1','setup-nexus.ps1')) { $contents=ConvertTo-TestPorts (Get-Content -LiteralPath (Join-Path $source $name) -Raw);Set-Content -LiteralPath (Join-Path $root $name) -Value $contents -Encoding UTF8 }
+    foreach($name in @('runtime-common.ps1','runtime-child.ps1','start-nexus.ps1','stop-nexus.ps1','restart-nexus.ps1','status-nexus.ps1','doctor-nexus.ps1','setup-nexus.ps1')) { $contents=ConvertTo-TestPorts (Get-Content -LiteralPath (Join-Path (Join-Path $source 'scripts\development') $name) -Raw);Set-Content -LiteralPath (Join-Path $development $name) -Value $contents -Encoding UTF8 }
     Set-Content -LiteralPath (Join-Path $root '.env') -Value 'NEXUS_WEB_AUTH_MODE=development' -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $root 'package.json') -Value '{}' -Encoding ASCII
     @'
@@ -53,7 +55,7 @@ node "%~dp0fake-service.cjs" ngrok
 '@ | Set-Content -LiteralPath (Join-Path $bin 'ngrok.cmd') -Encoding ASCII
     $env:PATH = "$bin;$env:PATH"
     foreach($name in @('runtime-common.ps1','runtime-child.ps1','start-nexus.ps1','stop-nexus.ps1','restart-nexus.ps1','status-nexus.ps1','doctor-nexus.ps1','setup-nexus.ps1')) {
-        $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $root $name),[ref]$tokens,[ref]$errors)|Out-Null
+        $tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $development $name),[ref]$tokens,[ref]$errors)|Out-Null
         Assert ($errors.Count -eq 0) "PowerShell 5.1 parse failed: $name"
     }
     $stopped=Invoke-Launcher 'stop-nexus.ps1';Assert ($stopped.code -eq 0) "First STOP failed code=$($stopped.code): $($stopped.text)"
@@ -95,7 +97,7 @@ node "%~dp0fake-service.cjs" ngrok
     Stop-Process -Id $unrelated.Id -Force -ErrorAction SilentlyContinue
     $pgData=Join-Path $root '.local\pg';New-Item -ItemType Directory -Path $pgData -Force|Out-Null
     @('424242',$pgData,'1727251200',[string]$pgPort)|Set-Content -LiteralPath (Join-Path $pgData 'postmaster.pid') -Encoding ASCII
-    . (Join-Path $root 'runtime-common.ps1')
+    . (Join-Path $development 'runtime-common.ps1')
     $ownBinary=Join-Path $root 'node_modules\.pnpm\@embedded-postgres+windows-x64@18.4.0-beta.17\node_modules\@embedded-postgres\windows-x64\bin\postgres.exe'
     $script:mockProcesses=@(
         [pscustomobject]@{Name='postgres.exe';ProcessId=424243;ParentProcessId=424242;CommandLine='postgres.exe --fork backend';ExecutablePath=$ownBinary;CreationDate=(Get-Date)},
@@ -120,7 +122,7 @@ node "%~dp0fake-service.cjs" ngrok
     Write-Host 'Runtime manager tests passed.'
 } finally {
     Remove-Item Env:NEXUS_FAKE_FAIL -ErrorAction SilentlyContinue
-    if(Test-Path -LiteralPath (Join-Path $root 'stop-nexus.ps1')){& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'stop-nexus.ps1')|Out-Null}
+    if(Test-Path -LiteralPath (Join-Path $development 'stop-nexus.ps1')){& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $development 'stop-nexus.ps1')|Out-Null}
     if($null -ne $unrelated){Stop-Process -Id $unrelated.Id -Force -ErrorAction SilentlyContinue}
     $resolved=[System.IO.Path]::GetFullPath($root)
     if($resolved.StartsWith($tempBase+'\',[System.StringComparison]::OrdinalIgnoreCase) -and $resolved -like '*NEXUS Runtime Test *'){Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction SilentlyContinue}

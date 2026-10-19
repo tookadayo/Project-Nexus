@@ -44,7 +44,7 @@ try {
     function Start-NexusRole([string]$Role, [int[]]$Ports) {
         $script:StartStage=$Role
         $script:StartLog=".local\runtime\$Role.err.log"
-        $args = @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + (Join-Path $script:NexusRoot 'runtime-child.ps1') + '"'),'-Role',$Role,'-Root',('"' + $script:NexusRoot + '"'))
+        $args = @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + (Join-Path $script:NexusRoot 'scripts\development\runtime-child.ps1') + '"'),'-Role',$Role,'-Root',('"' + $script:NexusRoot + '"'))
         $process = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -WorkingDirectory $script:NexusRoot -ArgumentList $args -PassThru -RedirectStandardOutput (Join-Path $script:RuntimeDirectory "$Role.out.log") -RedirectStandardError (Join-Path $script:RuntimeDirectory "$Role.err.log")
         $info = Get-NexusProcess $process.Id
         if ($null -eq $info) { throw "$Role exited immediately." }
