@@ -12,6 +12,15 @@ export function withoutBotPostReference(event:Envelope):Envelope {
  return safe;
 }
 
+/** PostgreSQL timestamps have microsecond precision. Reject unsupported input
+ * before a cast, which would otherwise round excess fractional digits. */
+function referenceTimestamp(value:unknown):string|null {
+ const parsed=z.iso.datetime().safeParse(value);
+ if(!parsed.success||parsed.data.startsWith("0000-"))return null;
+ const fraction=/\.(\d+)Z$/.exec(parsed.data)?.[1];
+ return fraction&&fraction.length>6?null:parsed.data;
+}
+
 /** Called in the existing privacy-read transaction before ingress persistence
  * and again before projection. No actor/message correspondence is retained. */
 export async function sanitizeBotPostReference(tx:Tx,s:Scope,event:Envelope):Promise<Envelope>{
@@ -21,13 +30,14 @@ export async function sanitizeBotPostReference(tx:Tx,s:Scope,event:Envelope):Pro
  await privacyReadLock(tx,s);
  const stripped=()=>withoutBotPostReference(event);
  if(!["BOT","WEBHOOK"].includes(event.authorKind??"")||!event.channelId||event.messageId===event.referenceId||event.messageType!==MessageType.Reply||event.referenceType!==undefined&&event.referenceType!==MessageReferenceType.Default)return stripped();
- const settings=await new SettingsService(tx).get(s,tx),clock=(await sql<{now:Date}>`SELECT clock_timestamp() AS now`.execute(tx)).rows[0]!.now,
-  cutoff=new Date(clock.getTime()-settings.detailedRetentionDays*86400000),replyAt=new Date(event.at);
- if(!Number.isFinite(replyAt.getTime())||replyAt>clock)return stripped();
+ const settings=await new SettingsService(tx).get(s,tx),clock=(await sql<{clock:string}>`SELECT clock_timestamp()::text AS clock`.execute(tx)).rows[0]!.clock,
+  // Preserve one full-precision DB instant and the existing absolute 24h days.
+  cutoff=sql`(${clock}::timestamptz-${settings.detailedRetentionDays*86400000}::double precision*interval '1 millisecond')`,replyAt=referenceTimestamp(event.at);
+ if(!replyAt||!(await sql<{allowed:boolean}>`SELECT ${replyAt}::timestamptz<=${clock}::timestamptz AS allowed`.execute(tx)).rows[0]!.allowed)return stripped();
  const source=(await sql<{present:boolean;allowed:boolean}>`SELECT
   EXISTS(SELECT 1 FROM location_post_observations p WHERE p.organization_id=${s.organizationId}::uuid AND p.guild_id=${s.guildId} AND p.message_id=${event.referenceId}) AS present,
   EXISTS(SELECT 1 FROM location_post_observations p WHERE p.organization_id=${s.organizationId}::uuid AND p.guild_id=${s.guildId} AND p.message_id=${event.referenceId} AND p.channel_id=${event.channelId}
-   AND p.sent_at>${cutoff} AND p.sent_at<=${replyAt} AND (p.author_kind IN ('BOT','WEBHOOK') OR p.author_kind='HUMAN' AND p.subject_hash IS NOT NULL)
+   AND p.sent_at>${cutoff} AND p.sent_at<=${replyAt}::timestamptz AND (p.author_kind IN ('BOT','WEBHOOK') OR p.author_kind='HUMAN' AND p.subject_hash IS NOT NULL)
    AND NOT EXISTS(SELECT 1 FROM deletion_requests d WHERE d.organization_id=p.organization_id AND d.guild_id=p.guild_id AND (d.lookup_hash IS NULL OR d.lookup_hash=p.subject_hash))) AS allowed`.execute(tx)).rows[0]!;
  if(source.present)return source.allowed?event:stripped();
  // Only minimal typed metadata of a not-yet-projected original is selected.
@@ -35,14 +45,16 @@ export async function sanitizeBotPostReference(tx:Tx,s:Scope,event:Envelope):Pro
  const originals=(await sql<{kind:string;author_kind:string|null;at:string|null;subject_hash:string|null;deleted:boolean}>`SELECT i.payload->>'kind' AS kind,i.payload->>'authorKind' AS author_kind,i.payload->>'at' AS at,i.subject_hash,
   EXISTS(SELECT 1 FROM deletion_requests d WHERE d.organization_id=i.organization_id AND d.guild_id=i.guild_id AND (d.lookup_hash IS NULL OR d.lookup_hash=i.subject_hash)) AS deleted
   FROM gateway_ingest i WHERE i.organization_id=${s.organizationId}::uuid AND i.guild_id=${s.guildId} AND i.projected_at IS NULL
-  AND i.received_at>${cutoff} AND i.received_at<=${clock} AND i.payload->>'messageId'=${event.referenceId} AND i.payload->>'channelId'=${event.channelId}
+  AND i.received_at>${cutoff} AND i.received_at<=${clock}::timestamptz AND i.payload->>'messageId'=${event.referenceId} AND i.payload->>'channelId'=${event.channelId}
   AND i.payload->>'kind' IN ('message.sent','channel.post_observed') ORDER BY i.received_at,i.dedupe_key LIMIT 2`.execute(tx)).rows;
  if(originals.length!==1)return stripped();
- const original=originals[0]!,parsed=z.iso.datetime().safeParse(original.at),originalAt=parsed.success?new Date(parsed.data):null;
- if(original.deleted||!originalAt||originalAt<=cutoff||originalAt>replyAt||originalAt>clock)return stripped();
+ const original=originals[0]!,originalAt=referenceTimestamp(original.at);
+ if(original.deleted||!originalAt)return stripped();
+ if(!(await sql<{allowed:boolean}>`SELECT ${originalAt}::timestamptz>${cutoff} AND ${originalAt}::timestamptz<=${replyAt}::timestamptz AND ${originalAt}::timestamptz<=${clock}::timestamptz AS allowed`.execute(tx)).rows[0]!.allowed)return stripped();
  const known=original.kind==="message.sent"?original.subject_hash!==null:["BOT","WEBHOOK"].includes(original.author_kind??"");
  return known?event:stripped();
 }
+
 
 function ownedPosts(s:Scope,actorHash:string){return sql`SELECT message_id,channel_id,sent_at,reference_id FROM location_post_observations WHERE ${tenant(s)} AND subject_hash=${actorHash}
  UNION SELECT payload->>'messageId',payload->>'channelId',NULL::timestamptz,NULL::text FROM gateway_ingest WHERE ${tenant(s)} AND subject_hash=${actorHash} AND projected_at IS NULL AND payload->>'kind'='message.sent' AND payload->>'messageId' IS NOT NULL AND payload->>'channelId' IS NOT NULL`;}

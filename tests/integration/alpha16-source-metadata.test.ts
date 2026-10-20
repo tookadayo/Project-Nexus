@@ -1,4 +1,5 @@
 import {randomUUID} from "node:crypto";
+import type {KyselyPlugin} from "kysely";
 import {afterAll,beforeAll,expect,it} from "vitest";
 import {connect,migrate,sql,json,tenant,type Database} from "../../packages/db/src/index";
 import {BOT_REPLY_REFERENCE_CONTRACT,MASS_MENTION_CONTRACT,SCHEDULED_EVENT_TIME_CONTRACT,dedupeKey,type Envelope} from "../../packages/events/src/index";
@@ -119,4 +120,111 @@ it("sanitizes both persisted/recovered Gateway copies and old Redis projection w
  // the saved actual channel type with an absent metadata field's fallback.
  const surface=(await sql<{channel_type:number;visibility_state:string}>`SELECT channel_type,visibility_state FROM discord_surface_state WHERE ${tenant(f.s)} AND channel_id=${f.channel}`.execute(db)).rows[0];expect(surface).toMatchObject({channel_type:0,visibility_state:"VISIBLE"});
  const stored=(await sql<{payload:Envelope}>`SELECT payload FROM gateway_ingest WHERE ${tenant(f.s)} AND dedupe_key=${dedupeKey(event)}`.execute(db)).rows[0]!.payload;expect(stored.referenceId).toBeUndefined();expect(stored.botReplyReferenceContract).toBeUndefined();
+});
+
+const referenceClock="2026-10-20T00:00:00.123900Z";
+type ReferenceFixture=Awaited<ReturnType<typeof referenceFixture>>;
+type ReferenceRoute="retained"|"ingress";
+async function referenceTime(microseconds:number,retentionDays=0){
+ return (await sql<{at:string}>`SELECT to_char((${referenceClock}::timestamptz-${retentionDays*86400000}::double precision*interval '1 millisecond'+${microseconds}::double precision*interval '1 microsecond') AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at`.execute(db)).rows[0]!.at;
+}
+async function referenceFixture(route:ReferenceRoute){
+ const f=await fixture(),parent="966168100000000001",event:Envelope={...f.s,shardId:0,gatewaySessionId:"precise-reference",sequence:1,context:"PRODUCTION",kind:"channel.post_observed",at:await referenceTime(-100),messageId:"966168100000000002",channelId:f.channel,messageType:19,referenceType:0,referenceId:parent,authorKind:"BOT",botReplyReferenceContract:BOT_REPLY_REFERENCE_CONTRACT},original:Envelope={...f.s,shardId:0,gatewaySessionId:"precise-original",sequence:2,context:"PRODUCTION",kind:"message.sent",at:await referenceTime(-1000),messageId:parent,channelId:f.channel},cfg=await f.settings.get(f.s);
+ if(route==="retained")await sql`INSERT INTO location_post_observations(organization_id,guild_id,message_id,channel_id,sent_at,author_kind,subject_hash,message_type) VALUES(${f.s.organizationId}::uuid,${f.s.guildId},${parent},${f.channel},${original.at}::timestamptz,'HUMAN',${f.actor.key},0)`.execute(db);
+ else await sql`INSERT INTO gateway_ingest(organization_id,guild_id,dedupe_key,subject_hash,payload,received_at) VALUES(${f.s.organizationId}::uuid,${f.s.guildId},${dedupeKey(original)},${f.actor.key},${json(original)},${await referenceTime(-500)}::timestamptz)`.execute(db);
+ return {f,parent,event,original,retentionDays:cfg.detailedRetentionDays};
+}
+function referenceClockPlugin(){
+ let samples=0;
+ const plugin:KyselyPlugin={
+  transformQuery({node}){
+   // Replace only the production clock sample, never a privacy predicate.
+   if(node.kind==="RawNode"&&node.sqlFragments.length===1&&node.sqlFragments[0]==="SELECT clock_timestamp()::text AS clock"&&node.parameters.length===0){samples++;return sql`SELECT ${referenceClock}::timestamptz::text AS clock`.toOperationNode();}
+   return node;
+  },
+  async transformResult({result}){return result;},
+ };
+ return {plugin,samples:()=>samples};
+}
+async function checkReference(f:ReferenceFixture,event:Envelope,allowed:boolean){
+ const clock=referenceClockPlugin(),result=await db.transaction().execute(tx=>sanitizeBotPostReference(tx.withPlugin(clock.plugin),f.f.s,event));
+ expect(clock.samples()).toBe(1);
+ if(allowed)expect(result).toBe(event);
+ else {expect(result.referenceId).toBeUndefined();expect(result.referenceType).toBeUndefined();expect(result.botReplyReferenceContract).toBeUndefined();expect(result).toMatchObject({kind:event.kind,messageId:event.messageId,at:event.at,authorKind:event.authorKind});}
+}
+async function originalAt(f:ReferenceFixture,at:string){
+ await sql`UPDATE gateway_ingest SET payload=jsonb_set(payload,'{at}',${json(at)}) WHERE ${tenant(f.f.s)} AND dedupe_key=${dedupeKey(f.original)}`.execute(db);
+}
+
+it("preserves microsecond ingress receipt upper and strict retention boundaries",async()=>{
+ const f=await referenceFixture("ingress");
+ for(const [offset,allowed] of [[-1,true],[0,true],[1,false]] as const){
+  await sql`UPDATE gateway_ingest SET received_at=${await referenceTime(offset)}::timestamptz WHERE ${tenant(f.f.s)}`.execute(db);
+  await checkReference(f,f.event,allowed);
+ }
+ for(const [offset,allowed] of [[-1,false],[0,false],[1,true]] as const){
+  await sql`UPDATE gateway_ingest SET received_at=${await referenceTime(offset,f.retentionDays)}::timestamptz WHERE ${tenant(f.f.s)}`.execute(db);
+  await checkReference(f,f.event,allowed);
+ }
+});
+it("preserves microsecond original event strict retention and reply boundaries",async()=>{
+ const f=await referenceFixture("ingress");
+ for(const [offset,allowed] of [[-1,false],[0,false],[1,true]] as const){await originalAt(f,await referenceTime(offset,f.retentionDays));await checkReference(f,f.event,allowed);}
+ for(const [offset,allowed] of [[-101,true],[-100,true],[-99,false]] as const){await originalAt(f,await referenceTime(offset));await checkReference(f,f.event,allowed);}
+ // Original time also cannot exceed the sampled DB instant.
+ await originalAt(f,await referenceTime(1));await checkReference(f,{...f.event,at:referenceClock},false);
+});
+it.each(["retained","ingress"] as const)("preserves microsecond %s reply time upper boundary",async route=>{
+ const f=await referenceFixture(route);
+ for(const [offset,allowed] of [[-1,true],[0,true],[1,false]] as const)await checkReference(f,{...f.event,at:await referenceTime(offset)},allowed);
+});
+it("preserves microsecond retained source strict retention and reply boundaries",async()=>{
+ const f=await referenceFixture("retained");
+ for(const [offset,allowed] of [[-1,false],[0,false],[1,true]] as const){
+  await sql`UPDATE location_post_observations SET sent_at=${await referenceTime(offset,f.retentionDays)}::timestamptz WHERE ${tenant(f.f.s)}`.execute(db);
+  await checkReference(f,f.event,allowed);
+ }
+ for(const [offset,allowed] of [[-101,true],[-100,true],[-99,false]] as const){
+  await sql`UPDATE location_post_observations SET sent_at=${await referenceTime(offset)}::timestamptz WHERE ${tenant(f.f.s)}`.execute(db);
+  await checkReference(f,f.event,allowed);
+ }
+});
+it.each(["retained","ingress"] as const)("keeps %s deletion, channel, scope and identity guards with a precise clock",async route=>{
+ const f=await referenceFixture(route);
+ await checkReference(f,f.event,true);
+ await checkReference(f,{...f.event,channelId:"966168100000000003"},false);
+ const clock=referenceClockPlugin();
+ await expect(db.transaction().execute(tx=>sanitizeBotPostReference(tx.withPlugin(clock.plugin),{...f.f.s,guildId:"966168100000000004"},f.event))).rejects.toThrow("REFERENCE_SCOPE_MISMATCH");expect(clock.samples()).toBe(0);
+ if(route==="retained")await sql`UPDATE location_post_observations SET subject_hash=NULL WHERE ${tenant(f.f.s)}`.execute(db);
+ else await sql`UPDATE gateway_ingest SET subject_hash=NULL WHERE ${tenant(f.f.s)}`.execute(db);
+ await checkReference(f,f.event,false);
+ if(route==="retained")await sql`UPDATE location_post_observations SET subject_hash=${f.f.actor.key} WHERE ${tenant(f.f.s)}`.execute(db);
+ else await sql`UPDATE gateway_ingest SET subject_hash=${f.f.actor.key} WHERE ${tenant(f.f.s)}`.execute(db);
+ for(const hash of [f.f.actor.key,null]){
+  const id=randomUUID();await sql`INSERT INTO deletion_requests(organization_id,guild_id,id,lookup_hash,requested_at,completed_at) VALUES(${f.f.s.organizationId}::uuid,${f.f.s.guildId},${id}::uuid,${hash},${referenceClock}::timestamptz,${referenceClock}::timestamptz)`.execute(db);
+  await checkReference(f,f.event,false);
+  await sql`DELETE FROM deletion_requests WHERE ${tenant(f.f.s)} AND id=${id}::uuid`.execute(db);
+ }
+ await checkReference(f,f.event,true);
+});
+it("keeps ambiguous, projected and mismatched originals fail closed with a precise clock",async()=>{
+ const f=await referenceFixture("ingress");
+ await sql`UPDATE gateway_ingest SET projected_at=${referenceClock}::timestamptz WHERE ${tenant(f.f.s)}`.execute(db);await checkReference(f,f.event,false);
+ await sql`UPDATE gateway_ingest SET projected_at=NULL WHERE ${tenant(f.f.s)}`.execute(db);
+ const duplicate={...f.original,sequence:3,at:"invalid"};
+ await sql`INSERT INTO gateway_ingest(organization_id,guild_id,dedupe_key,subject_hash,payload,received_at) VALUES(${f.f.s.organizationId}::uuid,${f.f.s.guildId},${dedupeKey(duplicate)},${f.f.actor.key},${json(duplicate)},${await referenceTime(-400)}::timestamptz)`.execute(db);
+ await checkReference(f,f.event,false);
+ await sql`DELETE FROM gateway_ingest WHERE ${tenant(f.f.s)} AND dedupe_key=${dedupeKey(duplicate)}`.execute(db);
+ // A retained but disallowed row must not fall back to the valid ingress copy.
+ await sql`INSERT INTO location_post_observations(organization_id,guild_id,message_id,channel_id,sent_at,author_kind,subject_hash,message_type) VALUES(${f.f.s.organizationId}::uuid,${f.f.s.guildId},${f.parent},'966168100000000003',${f.original.at}::timestamptz,'HUMAN',${f.f.actor.key},0)`.execute(db);
+ await checkReference(f,f.event,false);
+});
+it("rejects invalid or excess-precision reply and original timestamps without rounding or casting them",async()=>{
+ const f=await referenceFixture("ingress");
+ for(const at of ["invalid","0000-01-01T00:00:00Z","2026-10-20T00:00:00.1239001Z","2026-02-30T00:00:00Z"]){
+  await checkReference(f,{...f.event,at},false);
+  await originalAt(f,at);await checkReference(f,f.event,false);
+  await originalAt(f,f.original.at);
+ }
+ await checkReference(f,f.event,true);
 });

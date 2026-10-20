@@ -1,4 +1,5 @@
 import { test, expect } from "./alpha17-verification-fixture";
+import { observeSetupStatus } from "./alpha17-setup-status-diagnostic";
 
 const base = process.env.NEXUS_VERIFICATION_WEB_ORIGIN ?? "http://127.0.0.1:" + (process.env.NEXUS_VERIFICATION_WEB_PORT ?? "3150");
 const fixture = "http://127.0.0.1:" + (process.env.NEXUS_VERIFICATION_API_PORT ?? "3151");
@@ -9,6 +10,8 @@ type Stored = { settings: { revision: number; timezone: string; setupVersion: nu
 /** Real Next/BFF/createApi + the existing private DB/FakeDiscord fixture.
  * Authentication starts at fixture/session; this is not real OAuth evidence. */
 test("alpha17 core setup applies once through BFF and survives dashboard reload within its guild", async ({ page, context, request }) => {
+  const diagnostic = observeSetupStatus(page, base);
+  try {
 
   const pageErrors: string[] = [];
   page.on("pageerror", error => pageErrors.push(error.message));
@@ -84,4 +87,12 @@ test("alpha17 core setup applies once through BFF and survives dashboard reload 
     body: JSON.stringify({ profile: "real-next-api-private-db-fake-discord", oauth: "fixture-session-only", guild, otherGuild, fromRevision: before.settings.revision, toRevision: after.settings.revision, timezone: zone, otherGuildUnchanged: true }),
     contentType: "application/json",
   });
+  } finally {
+    // Diagnostic failures must never replace the original test outcome.
+    try {
+      const body = JSON.stringify(diagnostic.stop());
+      console.log("ALPHA17_SETUP_STATUS " + body);
+      await test.info().attach("alpha17-setup-status-diagnostic", { body, contentType: "application/json" });
+    } catch { /* Only safe, best-effort diagnostics; preserve the original assertion. */ }
+  }
 });

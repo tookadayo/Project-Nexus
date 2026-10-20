@@ -7,6 +7,7 @@ import http from "node:http";
 import https from "node:https";
 import type { Socket } from "node:net";
 import { createBrowserProxy } from "./alpha17-browser-proxy.js";
+import { trackOwnedSocket } from "./alpha17-owned-sockets.js";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const origin = new URL("https://app.nexus.test:3150");
@@ -49,7 +50,7 @@ async function main() {
   let tlsDirectory: string | undefined;
   let tlsIdentity: Awaited<ReturnType<typeof lstat>> | undefined;
   const sockets = new Set<Socket>();
-  const track = (socket: Socket) => { sockets.add(socket); socket.once("close", () => sockets.delete(socket)); return socket; };
+  const track = (socket: Socket) => trackOwnedSocket(sockets, socket);
   const servers: (http.Server | https.Server)[] = [];
   const owned: { child: ChildProcess; closed: Promise<Exit> }[] = [];
   let stopping = false, failure: string | undefined, cancellation: "SIGINT" | "SIGTERM" | undefined, nextExit: Exit | undefined;

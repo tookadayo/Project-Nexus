@@ -2,11 +2,13 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { createCheckoutDiagnostics } from "./checkout-diagnostics.js";
 const { databaseUrl } = JSON.parse(
   await readFile(".local/checkout-e2e.json", "utf8"),
 ) as { databaseUrl: string };
 const port = Number(process.env.NEXUS_CHECKOUT_WEB_PORT ?? 3160),
   apiPort = Number(process.env.NEXUS_CHECKOUT_API_PORT ?? 3161);
+const diagnostics = createCheckoutDiagnostics({ port });
 const child = spawn(
   process.execPath,
   [
@@ -46,8 +48,12 @@ const child = spawn(
     },
   },
 );
-child.on("exit", (code) => {
+child.once("spawn", () => diagnostics.spawn());
+child.once("error", error => { diagnostics.error(error); process.exitCode = 1; });
+child.once("close", (code, signal) => diagnostics.close(code, signal));
+child.on("exit", (code, signal) => {
+  diagnostics.exit(code, signal);
   process.exitCode = code ?? 0;
 });
-process.on("SIGINT", () => child.kill("SIGINT"));
-process.on("SIGTERM", () => child.kill("SIGTERM"));
+process.on("SIGINT", () => { diagnostics.signal("SIGINT"); child.kill("SIGINT"); });
+process.on("SIGTERM", () => { diagnostics.signal("SIGTERM"); child.kill("SIGTERM"); });

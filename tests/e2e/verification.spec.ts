@@ -111,11 +111,26 @@ test("logged-out /link returns through OAuth and GET cannot redeem", async ({
   });
   expect(login.headers().location).toContain("discord.com/oauth2/authorize");
   expect(login.headers()["set-cookie"]).toContain("nexus_oauth_next");
-  const sessionResponse = await request.post("/link/redeem", {
+  // Missing CSRF and missing session are separate rejections. Keep the real
+  // anonymous cookie binding issued by the preceding /auth/login GET.
+  const csrfRejected = await request.post("/link/redeem", {
     headers: { origin: base, "sec-fetch-site": "same-origin" },
     data: { code: "invalid" },
   });
+  expect(csrfRejected.status()).toBe(403);
+  expect(await csrfRejected.json()).toEqual({ error: "CSRF_REJECTED" });
+  const state = await request.storageState();
+  const originCookies = state.cookies.filter(cookie => cookie.domain === new URL(base).hostname && cookie.path === "/");
+  expect(originCookies.some(cookie => cookie.name === "nexus_session")).toBe(false);
+  const csrf = originCookies.find(cookie => cookie.name === "nexus_csrf")?.value;
+  expect(Boolean(csrf && /^[A-Za-z0-9_-]{32}[.][A-Za-z0-9_-]{43}$/.test(csrf))).toBe(true);
+  if (!csrf) throw new Error("TEST_ANONYMOUS_CSRF_NOT_ISSUED");
+  const sessionResponse = await request.post("/link/redeem", {
+    headers: { origin: base, "sec-fetch-site": "same-origin", "X-Nexus-CSRF": csrf },
+    data: { code: "invalid" },
+  });
   expect(sessionResponse.status()).toBe(401);
+  expect(await sessionResponse.json()).toEqual({ error: "SESSION_REQUIRED" });
 });
 test("unverified and arbitrary URLs cannot expose dashboard data", async ({
   page,
@@ -174,6 +189,11 @@ test("issuer-only redemption and confirmed disconnect preserve settings while Be
   await expect(page.getByRole("heading", { name: "Connected" })).toBeVisible();
   expect(capturedUrls.every((url) => !url.includes(code))).toBe(true);
   await page.getByRole("link", { name: "Open Dashboard", exact: true }).click();
+  await confirmSelectedGuild(page, ids[1]!);
+  await expect(page).toHaveURL(base + "/setup?guild=" + ids[1]);
+  // The fixture has not completed setup. Selection still requires its real
+  // confirmation POST before an explicit Dashboard request is authorized.
+  await page.goto(`/dashboard/${ids[1]}`);
   await expect(page).toHaveURL(new RegExp(`/dashboard/${ids[1]}$`));
   const before = await (
     await request.get(`${fixture}/fixture/data/${ids[1]}`)
@@ -271,7 +291,9 @@ for (const locale of ["en", "ja"])
     await page.goto("/billing/manage");
     const statusResponse = await page.request.get("/billing/status");
     expect(statusResponse.status()).toBe(200);
-    expect(statusResponse.headers()["cache-control"]).toBe("no-store");
+    const cacheDirectives = statusResponse.headers()["cache-control"]?.split(",").map(value => value.trim().toLowerCase()) ?? [];
+    expect(cacheDirectives).toContain("no-store");
+    expect(cacheDirectives.every(value => value === "no-store" || value === "max-age=0")).toBe(true);
     const model = await statusResponse.json();
     expect(model.canManage).toBe(false);
     expect(model.presentation.revision).toBe(1);
@@ -310,12 +332,19 @@ for (const locale of ["en", "ja"])
         () => document.documentElement.scrollWidth <= innerWidth + 1,
       ),
     ).toBe(true);
-    const headers = { origin: base, "sec-fetch-site": "same-origin" };
+    const missingProof = await page.request.post("/billing/actions", {
+      headers: { origin: base, "sec-fetch-site": "same-origin" },
+      data: { action: "redeem", code: "invalid" },
+    });
+    expect(missingProof.status()).toBe(403);
+    expect(await missingProof.json()).toEqual({ error: "CSRF_REJECTED" });
+    const headers = await sessionCsrfHeaders(context, ids[0]!);
     const denied = await page.request.post("/billing/actions", {
       headers,
       data: { action: "redeem", code: "invalid" },
     });
     expect(denied.status()).toBe(403);
+    expect((await denied.json()).error).toBe("BILLING_AUTHORIZATION_REQUIRED");
     await request.post(`${fixture}/fixture/billing-authority`, {
       data: { guildId: ids[0], enabled: true },
     });
@@ -400,6 +429,7 @@ for (const locale of ["en", "ja"])
         data: { action: "redeem", code: "invalid" },
       });
       expect(stale.status()).toBe(403);
+      expect((await stale.json()).error).toBe("BILLING_AUTHORIZATION_REQUIRED");
       expect((await page.request.get("/billing/status")).status()).toBe(403);
     } finally {
       await request.post(`${fixture}/fixture/permission`, {
