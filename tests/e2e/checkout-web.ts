@@ -9,6 +9,7 @@ import type { Socket } from "node:net";
 import { checkoutOrigin, checkoutForwardHeaders, createCheckoutBrowserProxy, probeCheckoutHttpsRoot } from "./checkout-transport.js";
 import { createCheckoutDiagnostics } from "./checkout-diagnostics.js";
 import { trackOwnedSocket } from "./alpha17-owned-sockets.js";
+import { checkoutExecutionProfile } from "./checkout-execution-profile.js";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const origin = new URL(checkoutOrigin);
@@ -23,7 +24,7 @@ async function main() {
       (process.env.NEXUS_CHECKOUT_WEB_PORT ?? "3160") !== "3160" ||
       (process.env.NEXUS_CHECKOUT_API_PORT ?? "3161") !== "3161") throw new Error("TEST_ORIGIN_NOT_ALLOWED");
   for (const root of [repo, resolve(repo, "apps/web")]) {
-    for (const name of [".env", ".env.local", ".env.production", ".env.production.local"]) {
+    for (const name of [".env", ".env.local", ".env.production", ".env.production.local", ".env.test", ".env.test.local"]) {
       const present = await lstat(resolve(root, name)).then(() => true, (error: NodeJS.ErrnoException) => {
         if (error.code === "ENOENT") return false;
         throw new Error("TEST_ENV_METADATA_UNAVAILABLE");
@@ -140,19 +141,19 @@ async function main() {
     await Promise.all([verifyTlsFile(certificate), verifyTlsFile(privateKey)]);
     const [cert, key] = await Promise.all([readFile(certificate), readFile(privateKey)]);
     if (cancellation) return;
-    const env: NodeJS.ProcessEnv = { NODE_ENV: "production" };
+    const env: NodeJS.ProcessEnv = { ...checkoutExecutionProfile };
     for (const name of ["PATH", "SystemRoot", "WINDIR", "ComSpec", "PATHEXT", "TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "CI"]) {
       if (process.env[name]) env[name] = process.env[name];
     }
     Object.assign(env, {
-      NODE_ENV: "production", DATABASE_URL: databaseUrl,
+      DATABASE_URL: databaseUrl,
       NODE_OPTIONS: `--import="${pathToFileURL(resolve(repo, "tests/e2e/checkout-fetch.mjs")).href}"`,
       NEXUS_CHECKOUT_WEB_PORT: "3160", NEXUS_CHECKOUT_API_PORT: "3161", NEXUS_CHECKOUT_WEB_ORIGIN: origin.origin,
       IDENTITY_KEY: "aa".repeat(32), LOOKUP_KEY: "bb".repeat(32), COMPONENT_KEY: "checkout-components",
       DISCORD_TOKEN: "checkout-bot", DISCORD_APPLICATION_ID: "941111111111111111", DISCORD_CLIENT_SECRET: "checkout-client",
-      NEXUS_SESSION_SECRET: "s".repeat(64), NEXUS_WEB_URL: origin.origin, NEXUS_WEB_AUTH_MODE: "oauth",
-      NEXUS_VERIFICATION_API_PORT: "3161", NEXUS_STRIPE_ENABLED: "true", NEXUS_STRIPE_MODE: "SANDBOX",
-      STRIPE_SECRET_KEY: "sk_test_fixture_checkout", STRIPE_WEBHOOK_SECRET: "whsec_fixture_checkout", STRIPE_PUBLISHABLE_KEY: "pk_test_fixture_checkout",
+      NEXUS_SESSION_SECRET: "s".repeat(64),
+      NEXUS_VERIFICATION_API_PORT: "3161",
+      STRIPE_WEBHOOK_SECRET: "whsec_fixture_checkout", STRIPE_PUBLISHABLE_KEY: "pk_test_fixture_checkout",
       STRIPE_PORTAL_CONFIGURATION_ID: "bpc_fixture", NEXUS_BILLING_DEVELOPER_COUNTRY: "JP", NEXT_TELEMETRY_DISABLED: "1",
     });
     diagnostics = createCheckoutDiagnostics({ port: 3160, probe: (_port, signal) => probeCheckoutHttpsRoot(cert, signal) });

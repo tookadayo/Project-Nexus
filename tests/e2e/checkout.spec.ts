@@ -1,5 +1,6 @@
 import { test, expect } from "./checkout-fixture.js";
 import { randomUUID } from "node:crypto";
+import { checkoutSessionCsrfHeaders } from "./checkout-csrf.js";
 const api = Number(process.env.NEXUS_CHECKOUT_API_PORT ?? 3161),
   base = "https://checkout.nexus.test:3160",
   fixture = `http://127.0.0.1:${api}`,
@@ -34,6 +35,16 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
   await expect(
     page.getByRole("heading", { name: "Choose a server you own" }),
   ).toBeVisible();
+  const headers = await checkoutSessionCsrfHeaders(context);
+  // Keep proof absence independent from the authorization failures below.
+  const missingProof = await context.request.post("/checkout/connect", {
+    headers: { Origin: base, "Sec-Fetch-Site": "same-origin" },
+    data: { guildId: guild, confirm: true },
+  });
+  expect(missingProof.status()).toBe(403);
+  const missingProofBody: unknown = await missingProof.json();
+  expect(Boolean(missingProofBody && typeof missingProofBody === "object" &&
+    "error" in missingProofBody && missingProofBody.error === "CSRF_REJECTED")).toBe(true);
   const managed = page.locator(".checkout-managed");
   await expect(managed.getByRole("link")).toHaveCount(0);
   const install = new URL(
@@ -45,7 +56,7 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
   expect(install.searchParams.get("disable_guild_select")).toBe("true");
   for (const g of ["931111111111112113", "931111111111112114"]) {
     const response = await context.request.post("/checkout/actions", {
-      headers: { Origin: base, "Sec-Fetch-Site": "same-origin" },
+      headers,
       data: {
         action: "start",
         guildId: g,
@@ -58,7 +69,7 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
   expect(
     (
       await context.request.post("/checkout/connect", {
-        headers: { Origin: "https://evil.example" },
+        headers: { ...headers, Origin: "https://evil.example" },
         data: { guildId: guild, confirm: true },
       })
     ).status(),
@@ -77,7 +88,7 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
     data: { guildId: guild, ownerId: other },
   });
   const stale = await context.request.post("/checkout/actions", {
-    headers: { Origin: base, "Sec-Fetch-Site": "same-origin" },
+    headers,
     data: {
       action: "start",
       guildId: guild,
@@ -90,7 +101,7 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
     data: { guildId: guild, ownerId: user },
   });
   const tampered = await context.request.post("/checkout/actions", {
-    headers: { Origin: base, "Sec-Fetch-Site": "same-origin" },
+    headers,
     data: {
       action: "start",
       guildId: guild,
@@ -273,7 +284,7 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
   expect(
     (
       await context.request.post("/billing/actions", {
-        headers: { Origin: base, "Sec-Fetch-Site": "same-origin" },
+        headers,
         data: { action: "portal", idempotencyKey: randomUUID() },
       })
     ).status(),
@@ -296,8 +307,9 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
         )
       ).status(),
     ).toBe(307);
+    const nextOwnerHeaders = await checkoutSessionCsrfHeaders(nextOwner);
     const portalB = await nextOwner.request.post("/billing/actions", {
-      headers: { Origin: base, "Sec-Fetch-Site": "same-origin" },
+      headers: nextOwnerHeaders,
       data: { action: "portal", idempotencyKey: randomUUID() },
     });
     expect(portalB.status()).toBe(403);
@@ -339,7 +351,7 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
     ).json()
   ).accountId;
   const portal = await context.request.post("/billing/payments/actions", {
-    headers: { Origin: base, "Sec-Fetch-Site": "same-origin" },
+    headers,
     data: { action: "portal", accountId, idempotencyKey: randomUUID() },
   });
   expect(portal.status()).toBe(200);
@@ -347,7 +359,7 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
   expect(
     (
       await context.request.post("/billing/payments/actions", {
-        headers: { Origin: "https://evil.example" },
+        headers: { ...headers, Origin: "https://evil.example" },
         data: {
           action: "cancel",
           accountId,
@@ -360,7 +372,7 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
   expect(
     (
       await context.request.post("/billing/payments/actions", {
-        headers: { Origin: base, "Sec-Fetch-Site": "same-origin" },
+        headers,
         data: {
           action: "cancel",
           accountId: randomUUID(),
@@ -390,8 +402,7 @@ test("confirmed unpaid abandonment frees the provisional payer without transferr
   request,
   browser,
 }) => {
-  const abandonedGuild = "931111111111112112",
-    headers = { Origin: base, "Sec-Fetch-Site": "same-origin" };
+  const abandonedGuild = "931111111111112112";
   await context.addCookies([{ name: "nexus_locale", value: "en", url: base }]);
   const login = await context.request.get(
       "/auth/login?next=%2Fbilling%2Fpayments",
@@ -400,6 +411,7 @@ test("confirmed unpaid abandonment frees the provisional payer without transferr
     state = new URL(login.headers().location!).searchParams.get("state");
   await page.goto(`/auth/callback?code=fixture-code&state=${state}`);
   await expect(page).toHaveURL(/\/billing\/payments/);
+  const headers = await checkoutSessionCsrfHeaders(context);
   await request.post(`${fixture}/fixture/install`);
   expect(
     (
@@ -466,10 +478,11 @@ test("confirmed unpaid abandonment frees the provisional payer without transferr
       `${base}/auth/callback?code=other-user&state=${ownerState}`,
       { maxRedirects: 0 },
     );
+    const ownerHeaders = await checkoutSessionCsrfHeaders(owner);
     expect(
       (
         await owner.request.post(base + "/checkout/connect", {
-          headers,
+          headers: ownerHeaders,
           data: { guildId: abandonedGuild, confirm: true },
         })
       ).status(),
@@ -477,7 +490,7 @@ test("confirmed unpaid abandonment frees the provisional payer without transferr
     expect(
       (
         await owner.request.post(base + "/checkout/actions", {
-          headers,
+          headers: ownerHeaders,
           data: {
             action: "start",
             guildId: abandonedGuild,
