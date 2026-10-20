@@ -1,6 +1,7 @@
 import EmbeddedPostgres from "embedded-postgres";
 import { fixtureShutdown, installFixtureShutdown, waitForOwnedDatabaseClients } from "./alpha17-fixture-shutdown";
 import Fastify from "fastify";
+import { noCompletedCheckoutSession, relayCheckoutWebhook, writeCheckoutWebhookDiagnostic } from "./checkout-webhook-relay";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createServer } from "node:net";
@@ -305,11 +306,12 @@ const providerClient = new Stripe(env.STRIPE_SECRET_KEY, {
 });
 const provider = new StripeBillingProvider({ env, client: providerClient }),
   billing = new BillingService(db, vault);
-app.post("/fixture/payment", async (req) => {
-  const { clientSecret } = req.body as { clientSecret: string },
-    session = [...sessions.values()].find(
+app.post("/fixture/payment", async (req, reply) => {
+  const { clientSecret } = (req.body ?? {}) as { clientSecret?: unknown },
+    session = typeof clientSecret === "string" ? [...sessions.values()].find(
       (s) => s.client_secret === clientSecret,
-    )!;
+    ) : undefined;
+  if (!session) return reply.code(404).send({ error: "CHECKOUT_FIXTURE_SESSION_NOT_FOUND" });
   session.status = "complete";
   session.subscription = "sub_fixture_" + session.id;
   const now = Math.floor(Date.now() / 1000),
@@ -343,8 +345,13 @@ app.post("/fixture/payment", async (req) => {
   subscriptions.set(String(sub.id), sub);
   return { ok: true };
 });
-app.post("/fixture/webhook", async (_req) => {
-  const session = [...sessions.values()].find((s) => s.status === "complete")!;
+app.post("/fixture/webhook", async (_req, reply) => {
+  const session = [...sessions.values()].find((s) => s.status === "complete");
+  if (!session) {
+    const result = noCompletedCheckoutSession();
+    writeCheckoutWebhookDiagnostic(result);
+    return reply.code(409).send(result);
+  }
   const body = JSON.stringify({
       id: "evt_fixture_" + session.id,
       object: "event",
@@ -356,20 +363,9 @@ app.post("/fixture/webhook", async (_req) => {
       payload: body,
       secret: env.STRIPE_WEBHOOK_SECRET,
     });
-  const response = await fetch(
-    "http://127.0.0.1:3162/billing/webhooks/stripe",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Stripe-Signature": signature,
-        Host: "checkout.nexus.test:3160",
-        "X-Forwarded-Proto": "https",
-      },
-      body,
-    },
-  );
-  return { status: response.status, body: await response.json() };
+  const result = await relayCheckoutWebhook(body, signature);
+  writeCheckoutWebhookDiagnostic(result);
+  return result;
 });
 app.post("/fixture/reconcile", async () => {
   for (const guildId of ids) {

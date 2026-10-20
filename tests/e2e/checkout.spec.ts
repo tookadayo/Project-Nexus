@@ -164,11 +164,22 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
                 },
               }),
               confirm: async () => {
-                await fetch(fixtureUrl + "/fixture/payment", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ clientSecret: options.clientSecret }),
-                });
+                if (typeof options.clientSecret !== "string" || !options.clientSecret.length)
+                  throw new Error("TEST_PAYMENT_SECRET_REQUIRED");
+                let response: Response;
+                try {
+                  response = await fetch(fixtureUrl + "/fixture/payment", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ clientSecret: options.clientSecret }),
+                  });
+                } catch { throw new Error("TEST_PAYMENT_TRANSPORT_FAILED"); }
+                if (!response.ok) throw new Error("TEST_PAYMENT_HTTP_FAILED status=" + response.status);
+                let result: unknown;
+                try { result = await response.json(); }
+                catch { throw new Error("TEST_PAYMENT_RESPONSE_INVALID status=" + response.status); }
+                if (!result || typeof result !== "object" || !("ok" in result) || result.ok !== true)
+                  throw new Error("TEST_PAYMENT_RESPONSE_INVALID status=" + response.status);
                 return { type: "success" };
               },
             },
@@ -239,9 +250,9 @@ test("Owner purchase, live negative authorization, Elements responsive UI and si
       })
     ).status(),
   ).toBe(400);
-  expect(
-    (await (await request.post(`${fixture}/fixture/webhook`)).json()).status,
-  ).toBe(200);
+  const webhookResult = await (await request.post(`${fixture}/fixture/webhook`)).json();
+  expect(webhookResult.status).toBe(200);
+  expect(webhookResult.jsonParsed).toBe(true);
   // A higher effective grant must not make an unreconciled purchase ACTIVE.
   const higherGrant = await request.post(`${fixture}/fixture/higher-grant`, {
     data: { enabled: true },
