@@ -1,8 +1,7 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./checkout-fixture.js";
 import { randomUUID } from "node:crypto";
-const web = Number(process.env.NEXUS_CHECKOUT_WEB_PORT ?? 3160),
-  api = Number(process.env.NEXUS_CHECKOUT_API_PORT ?? 3161),
-  base = `http://127.0.0.1:${web}`,
+const api = Number(process.env.NEXUS_CHECKOUT_API_PORT ?? 3161),
+  base = "https://checkout.nexus.test:3160",
   fixture = `http://127.0.0.1:${api}`,
   offering = "11111111-1111-4111-8111-111111111119",
   guild = "931111111111112111",

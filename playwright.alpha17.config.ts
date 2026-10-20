@@ -40,7 +40,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "corepack pnpm exec tsx tests/e2e/verification-server.ts",
+      command: "node --import tsx tests/e2e/alpha17-fixture-server-runner.ts verification",
       url: "http://127.0.0.1:3151/health",
       timeout: 60000,
       reuseExistingServer: false,

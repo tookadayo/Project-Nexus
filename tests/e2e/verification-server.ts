@@ -1,4 +1,5 @@
 import EmbeddedPostgres from "embedded-postgres";
+import { fixtureShutdown, installFixtureShutdown, waitForOwnedDatabaseClients } from "./alpha17-fixture-shutdown.js";
 import { z } from "zod";
 import Fastify from "fastify";
 import { mkdir, mkdtemp, writeFile, readFile, lstat, realpath } from "node:fs/promises";
@@ -27,6 +28,8 @@ import { randomUUID, createHash } from "node:crypto";
 import { BetaOperator } from "../../packages/security/src/beta-operator.js";
 import { betaInvitation } from "../../packages/security/src/hosted-beta.js";
 process.env.NEXUS_HOSTED_BETA = "on";
+process.env.NEXUS_SESSION_SECRET = "s".repeat(64);
+process.env.NEXUS_WEB_URL = process.env.NEXUS_VERIFICATION_WEB_ORIGIN ?? "http://127.0.0.1:" + (process.env.NEXUS_VERIFICATION_WEB_PORT ?? "3150");
 const port = Number(process.env.NEXUS_VERIFICATION_API_PORT ?? 3151),
   user = "911111111111111111",
   other = "911111111111111112",
@@ -349,15 +352,9 @@ fixture.get("/fixture/data/:guildId", async (request) => {
 fixture.get("/fixture/constants", async () => ({ ids, user, other }));
 await fixture.listen({ host: "127.0.0.1", port });
 if (provider) await ownerReceipt("READY");
-let stopping = false;
-const stop = async () => {
-  if (stopping) return;
-  stopping = true;
-  await fixture.close();
-  await api.close();
-  await db.destroy();
-  await pg?.stop();
-  if (provider) await ownerReceipt("CLOSED");
-};
-process.on("SIGINT", () => void stop());
-process.on("SIGTERM", () => void stop());
+const stop = fixtureShutdown({
+  closeFixture: () => fixture.close(), closeApi: () => api.close(), destroyDatabase: () => db.destroy(),
+  ...(pg ? { drainDatabase: () => waitForOwnedDatabaseClients(databaseUrl), stopDatabase: () => pg!.stop() } : {}),
+  markClosed: async () => { if (provider) await ownerReceipt("CLOSED"); },
+});
+installFixtureShutdown(stop);
