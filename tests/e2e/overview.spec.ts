@@ -463,10 +463,12 @@ test("acknowledges, snoozes, and resolves observed attention posts", async ({
   const guild = "321111111111111111",
     channelId = "621111111111111111";
   // Basic development authentication does not grant the OAuth operations session.
-  // Keep the real route's rejection covered; the stateful fixture below covers UI
-  // requests and rendering, not successful OAuth authorization or persistence.
+  // The real proxy issues this context's anonymous binding and CSRF proof.
+  // Keep CSRF rejection separate from the handler's OAuth session rejection.
+  const issued = await request.get("/", { maxRedirects: 0 });
+  expect(issued.status()).toBe(200);
   for (const method of ["GET", "POST"] as const) {
-    const response = await request.fetch("/data/attention", {
+    const options = {
       method,
       headers: {
         "X-Nexus-Guild": guild,
@@ -483,6 +485,30 @@ test("acknowledges, snoozes, and resolves observed attention posts", async ({
             },
           }
         : {}),
+    };
+    let proofHeaders: Record<string, string> = {};
+    if (method === "POST") {
+      const missingProof = await request.fetch("/data/attention", options);
+      expect(missingProof.status()).toBe(403);
+      expect((await missingProof.json()).error === "CSRF_REJECTED").toBe(true);
+      const hostname = new URL(baseURL!).hostname;
+      const cookies = (await request.storageState()).cookies.filter(
+        (cookie) => cookie.domain.replace(/^\./, "") === hostname && cookie.path === "/",
+      );
+      const binding = cookies.find((cookie) => cookie.name === "nexus_browser")?.value;
+      const proof = cookies.find((cookie) => cookie.name === "nexus_csrf")?.value;
+      const proofIssued = Boolean(
+        binding && /^[A-Za-z0-9_-]{43}$/.test(binding) &&
+        proof && /^[A-Za-z0-9_-]{32}\.[A-Za-z0-9_-]{43}$/.test(proof),
+      );
+      expect(proofIssued).toBe(true);
+      expect(cookies.some((cookie) => cookie.name === "nexus_session")).toBe(false);
+      if (!proofIssued || !proof) throw new Error("TEST_ATTENTION_CSRF_NOT_ISSUED");
+      proofHeaders = { "X-Nexus-CSRF": proof };
+    }
+    const response = await request.fetch("/data/attention", {
+      ...options,
+      headers: { ...options.headers, ...proofHeaders },
     });
     expect(response.status()).toBe(401);
     expect(await response.json()).toMatchObject({
@@ -490,6 +516,8 @@ test("acknowledges, snoozes, and resolves observed attention posts", async ({
       failure: { effect: "NOT_STARTED" },
     });
   }
+  // The stateful fixture below covers UI requests and rendering, not successful
+  // OAuth authorization or persistence.
   const records = ["521111111111111999", "521111111111111998"].map(
     (messageId) => ({
       channelId,

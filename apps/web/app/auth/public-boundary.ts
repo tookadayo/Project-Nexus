@@ -34,6 +34,9 @@ const browserHandlers: Readonly<Record<string, readonly string[]>> = {
 };
 const readMethods = ["GET", "HEAD"] as const;
 const uuid = "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}";
+// Next encodes @ and brackets in generated chunk URLs. Admit only these
+// spellings in one JS/CSS filename; never decode a path into another route.
+const encodedNextChunk = /^\/_next\/static\/chunks\/(?:[a-zA-Z0-9_.@-]|%40|%5[bBdD])+\.(?:js|css)$/;
 
 export function webRouteBoundary(path: string): { kind: WebRouteBoundary; methods: readonly string[] } | null {
   // Encoded separators, malformed escapes and traversal spellings never expand
@@ -66,7 +69,7 @@ export function webRouteBoundary(path: string): { kind: WebRouteBoundary; method
   if (new RegExp(`^/api/analysis/(?:preview|runs|runs/${uuid}/cancel)$`, "i").test(path)) return { kind: "BROWSER", methods: ["POST"] };
   if (/^\/api\/rules\/(?:catalog|config|config\/history|suggestions|suggestions\/[a-zA-Z0-9_-]+(?:\/history)?|fact-snapshots\/[a-zA-Z0-9_-]+|rule-evaluations(?:\/[a-zA-Z0-9_-]+)?|operations\/[a-zA-Z0-9_-]+)$/.test(path)) return { kind: "BROWSER", methods: readMethods };
   if (/^\/api\/rules\/(?:config\/revisions|rule-evaluations|rule-evaluations\/[a-zA-Z0-9_-]+\/cancel|suggestions\/[a-zA-Z0-9_-]+\/(?:view|dismiss|save|reject|draft|apply))$/.test(path)) return { kind: "BROWSER", methods: ["POST"] };
-  if (path === "/favicon.ico" || path === "/_next/image" || /^\/(?:_next\/static|nexus)\/[a-zA-Z0-9_./@-]+$/.test(path)) return { kind: "ASSET", methods: readMethods };
+  if (path === "/favicon.ico" || path === "/_next/image" || encodedNextChunk.test(path) || /^\/(?:_next\/static|nexus)\/[a-zA-Z0-9_./@-]+$/.test(path)) return { kind: "ASSET", methods: readMethods };
   return null;
 }
 
