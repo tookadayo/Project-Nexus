@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, authenticatedSettingsOptions } from "./settings-auth-fixture";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -344,6 +344,9 @@ test("explains an unusable notification channel with a direct fix", async ({
   );
 });
 
+test.describe(() => {
+  test.use(authenticatedSettingsOptions);
+
 test("chooses a goal, tests an improvement and sees a useful small-community comparison", async ({
   page,
 }) => {
@@ -404,6 +407,7 @@ test("chooses a goal, tests an improvement and sees a useful small-community com
     fullPage: true,
   });
 });
+});
 
 test("keeps forbidden technical terms out of normal English and Japanese pages", async ({
   page,
@@ -429,6 +433,9 @@ test("keeps forbidden technical terms out of normal English and Japanese pages",
     await expect(page.locator("main")).not.toContainText(forbidden);
   }
 });
+test.describe(() => {
+  test.use(authenticatedSettingsOptions);
+
 test("saves a multi-channel analysis scope and shows the community comparison pages", async ({
   page,
 }) => {
@@ -453,6 +460,7 @@ test("saves a multi-channel analysis scope and shows the community comparison pa
   await expect(page.getByTestId("adaptive-community")).toContainText(
     "Channels NEXUS can observe: 2 · Server-wide total: 2",
   );
+});
 });
 
 test("acknowledges, snoozes, and resolves observed attention posts", async ({
