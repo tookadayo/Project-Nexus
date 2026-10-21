@@ -5,7 +5,7 @@ const fixture = "http://127.0.0.1:3151";
 const guildId = "321111111111111111";
 const userId = "911111111111111111";
 
-// Only the three explicit positive-path describes opt in. Development and
+// Only the four explicit positive-path describes opt in. Development and
 // anonymous rejection cases retain the ordinary Playwright fixtures.
 export const authenticatedSettingsOptions = {
   authenticatedSettings: true,

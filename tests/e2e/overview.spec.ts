@@ -324,6 +324,9 @@ test("persists Japanese web language across reload and shows the improvement flo
   ).toBeVisible();
 });
 
+test.describe(() => {
+  test.use(authenticatedSettingsOptions);
+
 test("explains an unusable notification channel with a direct fix", async ({
   page,
 }) => {
@@ -342,6 +345,7 @@ test("explains an unusable notification channel with a direct fix", async ({
   await expect(page.locator('.builder-v3 [role="status"]')).toContainText(
     "Permission needed. Give NEXUS View Channel and Send Messages in the selected channels.",
   );
+});
 });
 
 test.describe(() => {

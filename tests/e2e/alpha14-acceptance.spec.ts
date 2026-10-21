@@ -24,11 +24,40 @@ async function fitsViewport(page: Page) {
 }
 async function homeLayoutDoesNotOverlap(page: Page, width: number) {
   const home = page.locator(".home-overview");
-  const focus = (await home.locator(".home-focus").boundingBox())!;
-  const recent = (await home.locator(".home-recent").boundingBox())!;
-  const primary = (await home.locator(".home-focus .primary").boundingBox())!;
+  const { homeBox, focus, recent, primary, hasActivity, activityBox, bounds } =
+    await home.evaluate((root) => {
+      const box = (element: Element | null) => {
+        if (!element?.getClientRects().length) return null;
+        const { x, y, width, height } = element.getBoundingClientRect();
+        return { x, y, width, height };
+      };
+      const one = (selector: string, optional = false) => {
+        const elements = root.querySelectorAll(selector);
+        if (optional && elements.length === 0) return null;
+        if (elements.length !== 1)
+          throw new Error("Expected one Home layout element: " + selector);
+        return elements[0]!;
+      };
+      const activity = one(".home-activity", true);
+      return {
+        homeBox: box(root)!,
+        focus: box(one(".home-focus"))!,
+        recent: box(one(".home-recent"))!,
+        primary: box(one(".home-focus .primary"))!,
+        hasActivity: activity !== null,
+        activityBox: box(activity)!,
+        bounds: activity
+          ? Array.from(
+              activity.querySelectorAll(
+                ":scope > div, :scope > dl, :scope > button",
+              ),
+              box,
+            )
+          : [],
+      };
+    });
   if (width === 1440) {
-    expect((await home.boundingBox())!.width).toBeGreaterThan(900);
+    expect(homeBox.width).toBeGreaterThan(900);
     expect(focus.width).toBeGreaterThan(500);
   }
   if (width <= 850)
@@ -40,16 +69,12 @@ async function homeLayoutDoesNotOverlap(page: Page, width: number) {
   expect(primary.y + primary.height).toBeLessThanOrEqual(
     focus.y + focus.height,
   );
-  const activity = home.locator(".home-activity");
-  if (await activity.count()) {
-    const box = (await activity.boundingBox())!;
+  if (hasActivity) {
+    const box = activityBox;
     expect(box.y).toBeGreaterThanOrEqual(
       Math.max(focus.y + focus.height, recent.y + recent.height) - 1,
     );
-    const parts = await activity
-      .locator(":scope > div, :scope > dl, :scope > button")
-      .all();
-    const bounds = await Promise.all(parts.map((part) => part.boundingBox()));
+
     for (let i = 0; i < bounds.length; i++)
       for (let j = i + 1; j < bounds.length; j++) {
         const a = bounds[i]!,

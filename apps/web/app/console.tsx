@@ -2817,7 +2817,7 @@ export default function Console({
           <a href="/rules">{locale === "ja" ? "ルールからの提案" : "Rule suggestions"}</a>
           <a href="/onboarding-flows">{locale === "ja" ? "参加案内のフロー" : "Onboarding flows"}</a>
           <a href="/lifecycle-interventions">{locale === "ja" ? "参加の支援" : "Lifecycle interventions"}</a>
-          <a href="/experiments">{locale === "ja" ? "改善の実験" : "Experiments"}</a>
+          <a href="/experiments">{locale === "ja" ? "改善の比較" : "Experiments"}</a>
           <a href="/reports/definitions">{locale === "ja" ? "レポートの定義" : "Report definitions"}</a>
         </nav>
       </details>
@@ -2829,7 +2829,7 @@ export default function Console({
         <nav>
           {group([4, 9, 11, 12, 13, 14])}
           <a href="/health">{locale === "ja" ? "準備状況とデータの状態" : "Readiness and data health"}</a>
-          <a href="/rules/issues">{locale === "ja" ? "課題と施策の対応表" : "Issue mappings"}</a>
+          <a href="/rules/issues">{locale === "ja" ? "課題と対応の一覧" : "Issue mappings"}</a>
           <a href="/rules/sources">{locale === "ja" ? "ルールの計測対象設定" : "Rule source settings"}</a>
           <a href="/rules/config">{locale === "ja" ? "ルールの評価設定" : "Rule evaluation settings"}</a>
           <a href="/rules/context">{locale === "ja" ? "運営状況の設定" : "Operating context"}</a>
