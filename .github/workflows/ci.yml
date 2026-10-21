@@ -22,6 +22,9 @@ jobs:
       - id: chromium
         run: corepack pnpm exec playwright install --with-deps chromium
       - run: corepack pnpm test:e2e
+        env:
+          NEXUS_E2E_CONNECTION_RESET_OBSERVE: "1"
+          NODE_OPTIONS: --require="${{ github.workspace }}/tests/e2e/connection-reset-observer.cjs"
       - run: corepack pnpm exec playwright test --config playwright.alpha15-scratch-acceptance.config.ts
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.chromium.outcome == 'success' }}
       - run: corepack pnpm exec playwright test --config playwright.alpha15-datetime-setup.config.ts

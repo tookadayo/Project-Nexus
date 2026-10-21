@@ -150,6 +150,10 @@ async function main() {
       NEXUS_API_URL: "http://127.0.0.1:3153", API_KEY: "verification-api-key", NEXT_TELEMETRY_DISABLED: "1",
       NEXUS_DISCORD_BILLING_ENABLED: "false", NEXUS_BILLING_DEVELOPER_COUNTRY: "JP", NEXUS_INTERNAL_ADMIN_IDS: "911111111111111111",
     });
+    if (process.env.CI === "true" && process.env.NEXUS_E2E_CONNECTION_RESET_OBSERVE === "1") {
+      env.NEXUS_E2E_CONNECTION_RESET_OBSERVE = "1";
+      env.NODE_OPTIONS += ` --require="${resolve(repo, "tests/e2e/connection-reset-observer.cjs").replaceAll("\\", "/")}"`;
+    }
     const next = own(spawn(process.execPath, [resolve(repo, "apps/web/node_modules/next/dist/bin/next"), "start", "--port", "3152", "--hostname", "127.0.0.1"],
       { cwd: resolve(repo, "apps/web"), env, windowsHide: true, shell: false, stdio: "inherit" }), "TEST_NEXT_START_FAILED");
     void next.closed.then(exit => { nextExit = exit; if (!stopping) { if (!cancellation) failure = "TEST_NEXT_EARLY_EXIT"; finish(); } });
