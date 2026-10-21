@@ -243,8 +243,20 @@ export async function dashboardContext(
     token: apiToken(process.env.API_KEY, scope),
     guilds: [selected],
     userId: session.userId,
+    sessionReference: session.reference,
     betaState: invitation ? (invitation.expires_at! <= new Date() ? "EXPIRED" as const : invitation.status === "PAUSED" ? "PAUSED" as const : "ACTIVE" as const) : undefined,
     operationsRole: connection.operationsRole,
     operationsCanConfigure: connection.operationsCanConfigure,
   };
+}
+
+/** Limited setup entry: this does not grant dashboard or historical-data access. */
+export async function setupContext(sessionCookie: string | undefined, guildId: string) {
+  if (!/^\d{17,20}$/.test(guildId)) return null;
+  const session = await openSession(sessionCookie);
+  if (!session?.reference) return null;
+  await validateOAuthSession(session);
+  if (!process.env.API_KEY) throw new Error("WEB_CONNECTION_UNAVAILABLE");
+  const scope = scopeForGuild(guildId);
+  return { base: process.env.NEXUS_API_URL ?? "http://127.0.0.1:3001", organizationId: scope.organizationId, guildId, userId: session.userId, sessionReference: session.reference, token: apiToken(process.env.API_KEY, scope) };
 }

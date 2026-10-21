@@ -6,6 +6,10 @@ import { z } from "zod";
 import { sql, tenant, json, type Database } from "../../db/src/index";
 import type { Scope } from "../../shared/src/index";
 import type { Actor } from "../../settings/src/index";
+import { assert } from "../../shared/src/index";
+import { acquireRuleScopeLocks, ruleScopeLockSet } from "../../rules/src/locks";
+import { minimalOperationAudit } from "./alpha16-audit";
+import { assertMaintenanceAuthorization, type MaintenanceAuthorizationProof } from "./maintenance-authorization";
 import type { ChartSpec } from "../../analytics/src/chart-spec";
 import {
   chartQuerySchema,
@@ -20,7 +24,7 @@ import {
 } from "./policy";
 const DAY = 86400000;
 export class InterventionReview {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: Database, private readonly maintenanceProof?:MaintenanceAuthorizationProof) {}
   async create(s: Scope, actor: Actor, input: unknown, now = new Date()) {
     const data = z
         .object({
@@ -122,7 +126,7 @@ export class InterventionReview {
       await operationsLock(tx, s);
       if (
         !(
-          await sql`UPDATE operations_interventions SET state='REVIEW_READY' WHERE ${tenant(s)} AND id=${row.id}::uuid AND state='MEASURING' RETURNING id`.execute(
+          await sql`UPDATE operations_interventions SET state='REVIEW_READY',revision=revision+1 WHERE ${tenant(s)} AND id=${row.id}::uuid AND state='MEASURING' RETURNING id`.execute(
             tx,
           )
         ).rows.length
@@ -147,11 +151,43 @@ export class InterventionReview {
     });
     return true;
   }
+  async detail(s:Scope,actor:Actor,id:string,now=new Date()){
+    z.uuid().parse(id);
+    return this.db.transaction().execute(async tx=>{
+      await operationsAccess(tx,s,actor,"READ");
+      const row=(await interventionRows(tx,s,now,id))[0];assert(row,"INTERVENTION_NOT_AVAILABLE",404);return {...row,causalClaim:false};
+    });
+  }
+  async update(s:Scope,actor:Actor,input:unknown){
+    const data=z.object({id:z.uuid(),revision:z.number().int().positive(),title:z.string().trim().min(1).max(120),teamId:z.uuid().nullable()}).strict().parse(input);
+    return this.db.transaction().execute(async tx=>{
+      await acquireRuleScopeLocks(tx,ruleScopeLockSet(s));await operationsAccess(tx,s,actor,"OPERATE","improvement_tracking");await operationsLock(tx,s);
+      const row=(await sql<{revision:number;state:string}>`SELECT revision,state FROM operations_interventions WHERE ${tenant(s)} AND id=${data.id}::uuid FOR UPDATE`.execute(tx)).rows[0];
+      assertMaintenanceAuthorization(this.maintenanceProof,s,actor);assert(row,"INTERVENTION_NOT_FOUND",404);assert(row.revision===data.revision,"REVISION_CONFLICT",412);assert(row.state!=='ARCHIVED',"INTERVENTION_ENDED",409);
+      if(data.teamId){await operationsAccess(tx,s,actor,"OPERATE","team_assignment");assert((await sql`SELECT team_id FROM operations_team_bindings WHERE ${tenant(s)} AND team_id=${data.teamId}::uuid`.execute(tx)).rows.length,"TEAM_NOT_FOUND",404);}
+      await operationsAccess(tx,s,actor,"OPERATE","improvement_tracking");assertMaintenanceAuthorization(this.maintenanceProof,s,actor);
+      await sql`UPDATE operations_interventions SET title=${data.title},assigned_team_id=${data.teamId}::uuid,revision=revision+1 WHERE ${tenant(s)} AND id=${data.id}::uuid`.execute(tx);
+      await minimalOperationAudit(tx,s,actor.key,"INTERVENTION_UPDATED",data.id,data.revision+1);return {id:data.id,revision:data.revision+1};
+    });
+  }
+  async end(s:Scope,actor:Actor,input:unknown){
+    const data=z.object({id:z.uuid(),revision:z.number().int().positive()}).strict().parse(input);
+    return this.db.transaction().execute(async tx=>{
+      await acquireRuleScopeLocks(tx,ruleScopeLockSet(s));await operationsAccess(tx,s,actor,"OPERATE","improvement_tracking");await operationsLock(tx,s);
+      const row=(await sql<{revision:number;state:string}>`SELECT revision,state FROM operations_interventions WHERE ${tenant(s)} AND id=${data.id}::uuid FOR UPDATE`.execute(tx)).rows[0];
+      assertMaintenanceAuthorization(this.maintenanceProof,s,actor);assert(row,"INTERVENTION_NOT_FOUND",404);assert(row.revision===data.revision,"REVISION_CONFLICT",412);
+      if(row.state==='ARCHIVED')return {id:data.id,revision:row.revision,state:'ARCHIVED'};
+      await operationsAccess(tx,s,actor,"OPERATE","improvement_tracking");assertMaintenanceAuthorization(this.maintenanceProof,s,actor);
+      await sql`UPDATE operations_interventions SET state='ARCHIVED',revision=revision+1 WHERE ${tenant(s)} AND id=${data.id}::uuid`.execute(tx);
+      await minimalOperationAudit(tx,s,actor.key,"INTERVENTION_ENDED",data.id,data.revision+1);return {id:data.id,revision:data.revision+1,state:'ARCHIVED'};
+    });
+  }
 }
 export async function interventionRows(
   tx: import("../../db/src/index").Tx,
   s: Scope,
   now = new Date(),
+  id?:string,
 ) {
   const state = await new EntitlementService(tx).effective(s, now);
   const settings = await new SettingsService(tx).get(s);
@@ -172,6 +208,7 @@ export async function interventionRows(
   const rows = (
     await sql<{
       id: string;
+      revision:number;
       title: string;
       started_at: Date;
       review_at: Date;
@@ -181,7 +218,7 @@ export async function interventionRows(
       baseline: unknown;
       after_snapshot: unknown;
       comparison: unknown;
-    }>`SELECT i.metric_query,i.id,i.title,i.started_at,i.review_at,i.state,i.assigned_team_id,i.baseline,r.after_snapshot,r.comparison FROM operations_interventions i LEFT JOIN operations_intervention_reviews r ON r.organization_id=i.organization_id AND r.guild_id=i.guild_id AND r.intervention_id=i.id WHERE i.organization_id=${s.organizationId}::uuid AND i.guild_id=${s.guildId} ORDER BY i.started_at DESC LIMIT 100`.execute(
+    }>`SELECT i.metric_query,i.id,i.revision,i.title,i.started_at,i.review_at,i.state,i.assigned_team_id,i.baseline,r.after_snapshot,r.comparison FROM operations_interventions i LEFT JOIN operations_intervention_reviews r ON r.organization_id=i.organization_id AND r.guild_id=i.guild_id AND r.intervention_id=i.id WHERE i.organization_id=${s.organizationId}::uuid AND i.guild_id=${s.guildId} AND (${id??null}::uuid IS NULL OR i.id=${id??null}::uuid) ORDER BY i.started_at DESC LIMIT 100`.execute(
       tx,
     )
   ).rows;
@@ -210,6 +247,7 @@ export async function interventionRows(
     return [
       {
         id: row.id,
+        revision:row.revision,
         title: row.title,
         started_at: row.started_at,
         review_at: row.review_at,

@@ -285,6 +285,33 @@ export class OperatorAuth {
       await operatorAudit(tx, "LOGOUT", "SUCCEEDED");
     });
   }
+  /** Verify the configured local factor again without creating a login or
+   * extending its lifetime. The caller binds the result to a server challenge
+   * and consumes that challenge in its own transaction. */
+  async reauthenticate(value: string, password: string, csrf: string) {
+    await this.read(value, csrf, true);
+    z.string().min(1).max(1024).parse(password);
+    const credentials = await this.credentials();
+    const verified = await this.db.transaction().execute(async (tx) => {
+      await sql`SELECT pg_advisory_xact_lock(763213)`.execute(tx);
+      await sql`INSERT INTO operator_login_budget(account,window_start,failures) VALUES('operator',clock_timestamp(),0) ON CONFLICT DO NOTHING`.execute(tx);
+      await sql`UPDATE operator_login_budget SET window_start=clock_timestamp(),failures=0 WHERE account='operator' AND window_start<=clock_timestamp()-make_interval(secs=>${this.policy.failureWindowSeconds})`.execute(tx);
+      const budget = (await sql<{ failures: number }>`SELECT failures FROM operator_login_budget WHERE account='operator' FOR UPDATE`.execute(tx)).rows[0]!;
+      if (budget.failures >= this.policy.maxFailures) return null;
+      const hash = await derive(password, credentials.salt, 32, { N: 131072, r: 8, p: 1, maxmem: 256 * 1024 * 1024 });
+      if (!timingSafeEqual(hash, Buffer.from(credentials.hash, "hex"))) {
+        await sql`UPDATE operator_login_budget SET failures=failures+1 WHERE account='operator'`.execute(tx);
+        return null;
+      }
+      if ((await this.credentials()).epoch !== credentials.epoch) return null;
+      const session = (await sql`SELECT digest FROM operator_sessions WHERE digest=${operatorDigest(value)} AND credential_epoch=${credentials.epoch}::uuid AND revoked_at IS NULL AND expires_at>clock_timestamp() AND last_used_at>clock_timestamp()-make_interval(secs=>${this.policy.idleSeconds}) FOR UPDATE`.execute(tx)).rows[0];
+      if (!session) return null;
+      await sql`UPDATE operator_login_budget SET failures=0 WHERE account='operator'`.execute(tx);
+      return credentials.epoch;
+    });
+    assert(verified, "STEP_UP_REQUIRED", 403);
+    return { credentialEpoch: verified };
+  }
   async revokeAll() {
     await this.db.transaction().execute(async (tx) => {
       await sql`UPDATE operator_sessions SET revoked_at=COALESCE(revoked_at,clock_timestamp())`.execute(

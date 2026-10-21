@@ -1,0 +1,106 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 02:41 UTC
+Reasoning: 極高. Design only. Several explicit unresolved details remain; not implementation-ready in isolation.
+
+付録I-C1：6つの整合修正
+1. Suggestion Apply
+
+必須field
+SuggestionId、If-Match（Suggestion版）、liveTargetVersion、draftId、immutableDraftRevisionId、draftContentHashを必須とする。actor/guildはserver sessionから確定。
+
+不変条件
+6項目は別概念として保存する。draftIdだけでは適用対象を確定できない。operationにはSuggestion版、live版、draft revision/hashを固定し、後のdraft編集を適用対象にしない。適用直前にlive版、draft版/hash、Suggestion版、guild/permission、tombstone、変更可能fieldを再検証する。
+
+atomic処理
+版CAS確認、draft固定、apply reservation、operation intent作成を同一transactionで確定する。
+
+状態・エラー
+If-Match欠落=428 PRECONDITION_REQUIRED、Suggestion版不一致=412 SUGGESTION_VERSION_MISMATCH、live/draft競合=409 APPLY_CONFLICT、適用不能=409 SUGGESTION_NOT_APPLICABLE。自動activation・課金・投稿・権限変更は不可。
+
+未決定
+hash・version型・payload上限は未検証・承認待ち。
+
+2. 二重Apply
+
+必須field
+重複単位はguildId + suggestionId + immutableDraftRevisionId。actor/Idempotency-Keyは主キーに含めない。
+
+不変条件
+同一Suggestion＋immutable draftは一つ。RESERVED/IN_PROGRESS/SUCCEEDED/RESULT_UNKNOWNは予約を保持する。UNKNOWNはFAILEDへ変更せず、同一外部副作用の自動再送を禁止する。
+
+atomic処理
+3項目のunique制約でreservationを一意化し、取得とoperation intent確定を一transactionで行う。既存reservationは常に409とし、新operationを作らない。同一Keyのreplayは既存operationの再表示とする。解除は、外部副作用前・外部要求未送信・attemptなしを確実に証明できる場合だけ許可。同transactionで解除し、送信後、応答喪失、判定不能は保持する。
+
+状態・エラー
+重複=409 APPLY_ALREADY_RESERVED、UNKNOWN=409 APPLY_RESULT_UNKNOWN。確実な副作用前失敗のみ再Apply可能。
+
+未決定
+uniqueの物理実装は未照合。論理一意性は固定。
+
+3. evaluationAsOf
+
+必須field
+enqueue時にevaluationAsOfをserver生成し、job/status/dedupe key/input hashへ保存する。client指定は禁止。
+
+不変条件
+retry/resume/reclaimで時刻を更新しない。同一Idempotency-Keyは同一jobへ収束。明示評価だけが新しいevaluationAsOfを持つ。
+
+atomic処理
+初回enqueue transactionでdedupe、job、evaluationAsOf、input snapshot/hashを確定する。同時enqueueは一jobへ収束。
+
+状態・エラー
+削除/tombstone化した入力は現在データで補完せず評価不能とする。
+
+未決定
+timestamp精度・clock source・hash方式は未検証・承認待ち。server生成・retry不変を固定。
+
+4. Suggestion shared state
+
+必須field
+shared stateはACTIVE / REJECTED / EXPIRED / INVALIDATED / CONSUMEDの単一enumとする。SUPERSEDED/APPLIEDはstateにせず履歴/operationで表現する。per-userのVIEWED/DISMISSED/SAVED等は別record。
+
+不変条件
+draft作成・Apply受付・成功・UNKNOWN・確実失敗はSuggestion stateと同義ではない。draft作成でINVALIDATED、Apply受付でCONSUMEDにしない。版変更で旧evidenceを書換えず、reject/dismissを復活させない。
+
+atomic処理
+shared stateはexpected-version CASでtransaction更新。per-user更新はshared stateを変更しない。必要なreservationとの整合も同一domain transactionで確定する。
+
+状態・エラー
+版競合=409 SUGGESTION_STATE_CONFLICT、適用不能=409 SUGGESTION_NOT_APPLICABLE。UNKNOWNを成功/CONSUMEDへ変換しない。
+
+未決定
+CONSUMED条件はRuntimeで確定。
+
+5. Idempotency response replayと古いKey
+
+必須field
+client自由生成の無期限Key墓標は使わず、server発行の署名付き期限idempotencyTokenを採用する。tokenはoperationIntentId / guildScope / operationClass / issuedAt / expiresAt / nonceを持ち、intentとbody canonical hashへ束縛する。
+
+不変条件
+replayでも現在のtombstone、scope、閲覧権限を再検証し、過去responseを無条件再返却しない。tokenは既存intentのreplay資格。intentが削除済みなら新規実行へ昇格させない。無期限Key墓標でRun保持を延長しない。
+
+atomic処理
+token発行とintent作成をtransactionで束縛。replayはintent→scope/hash→tombstone/permissionを確認してresponse再構成する。intent消失後のtokenは410 IDEMPOTENCY_INTENT_GONEとして終了する。
+
+状態・エラー
+期限切れ=409 IDEMPOTENCY_TOKEN_EXPIRED、body不一致=409 IDEMPOTENCY_BODY_MISMATCH、scope不一致=403 FORBIDDEN、削除済み=410 RESOURCE_DELETED。認可失効時も旧responseを返さない。
+
+未決定
+token期限・署名・nonce長・削除時点は未検証・承認待ち。Runの7日削除を延長しない。
+
+6. Privacy deletion receipt
+
+必須field
+session失効後のstatus確認専用deletionReceiptId + secretを発行し、DBにはsecret hashのみ保存する。recordはreceiptId / secretHash / scope / createdAt / expiresAt / status。receiptは削除進捗確認だけに使う。
+
+不変条件
+receiptで通常認証、データ閲覧、取消、復活、別scope参照を不可とする。削除transactionでscopeをtombstone化し、session失効・削除job・receiptを確定する。purge後は最小の完了情報だけ返す。backup restore時もtombstoneを再適用する。
+
+atomic処理
+認可確認→session失効→tombstone→deletion job→receipt発行を一transactionで確定する。lost receiptは別本人確認で再発行可能だが、通常sessionは復活させない。
+
+状態・エラー
+job状態とreceipt期限を分離する。不正/期限切れreceiptは403 INVALID_RECEIPT。照会にはrate limitを設け、purge後は対象詳細を返さない。
+
+未決定
+receipt期限・rate limit・hash・purge後表示は未検証・承認待ち。Run終了後最小状態7日以内削除・backup7日は確定。receipt/privacy job等は一律7日とせず、旧30日/24か月案も採用しない。

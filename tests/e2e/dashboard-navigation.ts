@@ -17,8 +17,8 @@ const entries: Record<
   },
   3: { label: ["History", "履歴"] },
   4: { label: ["Settings", "設定"], group: ["Settings", "設定"] },
-  5: { label: ["Analysis", "分析"] },
-  8: { label: ["Needs attention", "要確認"] },
+  5: { label: ["Analytics", "分析"] },
+  8: { label: ["Tasks", "対応"] },
   9: {
     label: ["Goals & Rules", "目標と判定ルール"],
     group: ["Settings", "設定"],

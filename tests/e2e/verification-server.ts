@@ -1,8 +1,9 @@
 import EmbeddedPostgres from "embedded-postgres";
+import { fixtureShutdown, installFixtureShutdown, waitForOwnedDatabaseClients } from "./alpha17-fixture-shutdown.js";
 import { z } from "zod";
 import Fastify from "fastify";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, mkdtemp, writeFile, readFile, lstat, realpath } from "node:fs/promises";
+import { resolve, dirname, basename } from "node:path";
 import { createServer } from "node:net";
 import {
   connect,
@@ -23,10 +24,12 @@ import { FakeDiscord } from "../fixtures/discord.js";
 import { PromotionService } from "../../packages/settings/src/billing/index.js";
 import { internalBillingActor } from "../../packages/security/src/billing-authorization.js";
 import { PublicSessions } from "../../packages/security/src/public-sessions.js";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { BetaOperator } from "../../packages/security/src/beta-operator.js";
 import { betaInvitation } from "../../packages/security/src/hosted-beta.js";
 process.env.NEXUS_HOSTED_BETA = "on";
+process.env.NEXUS_SESSION_SECRET = "s".repeat(64);
+process.env.NEXUS_WEB_URL = process.env.NEXUS_VERIFICATION_WEB_ORIGIN ?? "http://127.0.0.1:" + (process.env.NEXUS_VERIFICATION_WEB_PORT ?? "3150");
 const port = Number(process.env.NEXUS_VERIFICATION_API_PORT ?? 3151),
   user = "911111111111111111",
   other = "911111111111111112",
@@ -47,30 +50,53 @@ const installed = new Set([ids[0]!, ids[1]!, ids[2]!, ids[4]!]),
     "Add NEXUS community",
     "Unauthorized community",
   ];
-await mkdir(".local", { recursive: true });
-const dir = await mkdtemp(resolve(".local/pg-verification-e2e-"));
-const pgPort = await new Promise<number>((done) => {
-  const probe = createServer();
-  probe.listen(0, "127.0.0.1", () => {
-    const address = probe.address();
-    if (!address || typeof address === "string")
-      throw new Error("PORT_UNAVAILABLE");
-    probe.close(() => done(address.port));
+type TestProvider = { runId: string; ownerPid: number; host: "127.0.0.1"; port: number; username: "nexus_synthetic"; database: "nexus_alpha17_core" };
+const external = Boolean(process.env.NEXUS_TEST_DATABASE_URL || process.env.NEXUS_TEST_PG_PROVIDER_RECEIPT);
+let provider: TestProvider | undefined, providerSha: string | undefined, bootstrapSha: string | undefined, dir: string | undefined, pg: EmbeddedPostgres | undefined, databaseUrl: string;
+let bootstrapPath = resolve(".local/verification-e2e.json");
+const createdAt = new Date().toISOString();
+async function ownerReceipt(state: "STARTING" | "READY" | "CLOSED", exclusive = false) {
+  const target = process.env.NEXUS_TEST_FIXTURE_RECEIPT;
+  if (!target) { if (provider) throw new Error("TEST_PROVIDER_OWNER_RECEIPT_REQUIRED"); return; }
+  if (!process.env.NEXUS_TEST_RUN_ID) throw new Error("TEST_RUN_ID_REQUIRED");
+  if (provider && target !== resolve(dirname(bootstrapPath), "fixture-owner.json")) throw new Error("TEST_OWNER_PATH_UNCONFIRMED");
+  if (!exclusive) { const info = await lstat(target); if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || (await realpath(target)).toLowerCase() !== resolve(target).toLowerCase()) throw new Error("TEST_OWNER_RECEIPT_UNSAFE"); }
+  await writeFile(target, JSON.stringify({ runId: process.env.NEXUS_TEST_RUN_ID, ownerPid: process.pid, directory: dir, createdAt,
+    ...(provider ? { provider: "DOCKER_POSTGRES", providerOwnerPid: provider.ownerPid, providerReceiptSha256: providerSha, bootstrapPath, bootstrapSha256: bootstrapSha, state } : {}),
+  }), { flag: exclusive ? "wx" : "w" });
+}
+if (external) {
+  const receiptPath = process.env.NEXUS_TEST_PG_PROVIDER_RECEIPT, rawUrl = process.env.NEXUS_TEST_DATABASE_URL;
+  if (!receiptPath || !rawUrl || !process.env.NEXUS_TEST_BOOTSTRAP_FILE) throw new Error("TEST_PROVIDER_REQUIRED");
+  const info = await lstat(receiptPath);
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size > 16384 || (await realpath(receiptPath)).toLowerCase() !== resolve(receiptPath).toLowerCase()) throw new Error("TEST_PROVIDER_FILE_UNSAFE");
+  const bytes = await readFile(receiptPath);
+  providerSha = createHash("sha256").update(bytes).digest("hex");
+  if (providerSha !== process.env.NEXUS_TEST_PROVIDER_RECEIPT_SHA256) throw new Error("TEST_PROVIDER_RECEIPT_CHANGED");
+  let value: unknown; try { value = JSON.parse(bytes.toString("utf8")); } catch { throw new Error("TEST_PROVIDER_INVALID"); }
+  const parsed = z.object({ schemaVersion: z.literal(1), provider: z.literal("DOCKER_POSTGRES"), runId: z.string().uuid(), ownerPid: z.number().int().positive(), syntheticOnly: z.literal(true), credentialsRecorded: z.literal(false), host: z.literal("127.0.0.1"), port: z.number().int().min(1024).max(65535), username: z.literal("nexus_synthetic"), database: z.literal("nexus_alpha17_core") }).passthrough().safeParse(value);
+  if (!parsed.success || parsed.data.runId !== process.env.NEXUS_TEST_RUN_ID) throw new Error("TEST_PROVIDER_INVALID");
+  provider = parsed.data;
+  const screen = resolve(dirname(receiptPath), "screen");
+  if (basename(receiptPath) !== "pg-provider.json" || basename(dirname(receiptPath)) !== "alpha17-screen-run-" + provider.runId || (await realpath(screen)).toLowerCase() !== screen.toLowerCase() || (await lstat(screen)).isSymbolicLink()) throw new Error("TEST_PROVIDER_DIRECTORY_UNSAFE");
+  bootstrapPath = resolve(screen, "bootstrap-" + provider.runId + ".json");
+  if (process.env.NEXUS_TEST_BOOTSTRAP_FILE !== bootstrapPath) throw new Error("TEST_BOOTSTRAP_PATH_UNCONFIRMED");
+  let url: URL; try { url = new URL(rawUrl); } catch { throw new Error("TEST_DATABASE_NOT_ALLOWED"); }
+  if (url.protocol !== "postgresql:" || url.hostname !== provider.host || url.port !== String(provider.port) || url.username !== provider.username || url.pathname !== "/" + provider.database || !url.password || url.search || url.hash) throw new Error("TEST_DATABASE_NOT_ALLOWED");
+  databaseUrl = rawUrl;
+  await ownerReceipt("STARTING", true);
+} else {
+  await mkdir(".local", { recursive: true });
+  dir = await mkdtemp(resolve(".local/pg-verification-e2e-"));
+  await ownerReceipt("STARTING", true);
+  const pgPort = await new Promise<number>((done) => {
+    const probe = createServer(); probe.listen(0, "127.0.0.1", () => { const address = probe.address(); if (!address || typeof address === "string") throw new Error("PORT_UNAVAILABLE"); probe.close(() => done(address.port)); });
   });
-});
-const pg = new EmbeddedPostgres({
-  databaseDir: dir,
-  user: "nexus",
-  password: "nexus",
-  port: pgPort,
-  persistent: true,
-  onLog: () => {},
-  onError: () => {},
-});
-await pg.initialise();
-await pg.start();
-const databaseUrl = `postgresql://nexus:nexus@127.0.0.1:${pgPort}/postgres`,
-  db = connect(databaseUrl);
+  pg = new EmbeddedPostgres({ databaseDir: dir, user: "nexus", password: "nexus", port: pgPort, persistent: true, onLog: () => {}, onError: () => {} });
+  await pg.initialise(); await pg.start();
+  databaseUrl = "postgresql://nexus:nexus@127.0.0.1:" + pgPort + "/postgres";
+}
+const db = connect(databaseUrl);
 await migrate(db);
 await sql`INSERT INTO billing_offerings(id,plan_key,plan_revision,provider,enabled,currency,final_price_minor,provider_product_id,provider_price_id,tax_behavior) VALUES('11111111-1111-4111-8111-111111111111','GROWTH',2,'STRIPE',true,'JPY',4900,'fixture-product-verification-growth','fixture-price-verification-growth','EXCLUSIVE')`.execute(
   db,
@@ -142,16 +168,16 @@ for (const guildId of installed) {
 const verified = await verification.issue(scopeForGuild(ids[0]!), user);
 await verification.redeem(user, verified.code);
 await verification.issue(scopeForGuild(ids[2]!), user);
-await writeFile(
-  ".local/verification-e2e.json",
-  JSON.stringify({ databaseUrl }),
-  "utf8",
-);
+const bootstrapBytes = JSON.stringify(provider ? { databaseUrl, runId: provider.runId, providerReceiptSha256: providerSha } : { databaseUrl });
+await writeFile(bootstrapPath, bootstrapBytes, provider ? { encoding: "utf8", flag: "wx" } : "utf8");
+if (provider) { bootstrapSha = createHash("sha256").update(bootstrapBytes).digest("hex"); await ownerReceipt("STARTING"); }
 const api = createApi(
   new AnalyticsService(db, settings),
   "verification-api-key",
   db,
   discord,
+  undefined,
+  vault,
 );
 await api.listen({ host: "127.0.0.1", port: port + 2 });
 const fixture = Fastify({ logger: false });
@@ -304,6 +330,17 @@ fixture.post("/fixture/operations-plan", async (request) => {
   );
   return { ok: true };
 });
+// A pre-existing, completed setup for the independent permission-loss case.
+// This test-only seed changes no connection, role, invitation or entitlement.
+fixture.post("/fixture/setup-complete", async (request) => {
+  const { guildId } = z.object({ guildId: z.literal(ids[0]!) }).strict().parse(request.body);
+  const s = scopeForGuild(guildId), current = await settings.get(s);
+  const complete = current.setupVersion >= 3 && Object.values(current.setupSteps).every(Boolean);
+  const seeded = complete ? current : await settings.update(s, {
+    key: vault.hash(s, user), permissions: "32", roles: [], source: "DISCORD_PANEL", requestId: "fixture-setup-complete",
+  }, current.revision, { setupVersion: 3, setupSteps: { scope: true, team: true, notifications: true, goals: true } });
+  return { setupVersion: seeded.setupVersion };
+});
 fixture.get("/fixture/data/:guildId", async (request) => {
   const { guildId } = request.params as { guildId: string };
   return {
@@ -314,14 +351,10 @@ fixture.get("/fixture/data/:guildId", async (request) => {
 });
 fixture.get("/fixture/constants", async () => ({ ids, user, other }));
 await fixture.listen({ host: "127.0.0.1", port });
-let stopping = false;
-const stop = async () => {
-  if (stopping) return;
-  stopping = true;
-  await fixture.close();
-  await api.close();
-  await db.destroy();
-  await pg.stop();
-};
-process.on("SIGINT", () => void stop());
-process.on("SIGTERM", () => void stop());
+if (provider) await ownerReceipt("READY");
+const stop = fixtureShutdown({
+  closeFixture: () => fixture.close(), closeApi: () => api.close(), destroyDatabase: () => db.destroy(),
+  ...(pg ? { drainDatabase: () => waitForOwnedDatabaseClients(databaseUrl), stopDatabase: () => pg!.stop() } : {}),
+  markClosed: async () => { if (provider) await ownerReceipt("CLOSED"); },
+});
+installFixtureShutdown(stop);

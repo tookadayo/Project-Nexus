@@ -4,6 +4,7 @@ import { publicSessions } from "../public-session-store";
 import { sameOrigin } from "../origin";
 import { failureResponse } from "../failure-response";
 import { DomainError } from "../../../../../packages/shared/src/index";
+import { csrfCookieName, csrfFormField } from "../csrf";
 const html = (text: string) =>
   new NextResponse(
     `<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>NEXUS</title><main>${text}</main></html>`,
@@ -16,9 +17,9 @@ const html = (text: string) =>
       },
     },
   );
-export async function GET() {
+export async function GET(req: NextRequest) {
   return html(
-    '<h1>個人の接続を解除 / Disconnect your account</h1><p>あなたの公開ログイン、保存したDiscord tokenとログイン情報を消去します。他の管理者、サーバーの利用権・データは変更しません。サーバー全体の解除・削除はサーバー画面から行ってください。 / Removes your public sessions, saved Discord tokens and login identity. Other administrators and server access or data are kept. Unlink or delete a whole server from its server page.</p><form method="post"><input type="hidden" name="confirmation" value="disconnect-personal"><button>個人の接続を解除 / Disconnect my account</button></form><a href="/servers">戻る / Back</a>',
+    `<h1>個人の接続を解除 / Disconnect your account</h1><p>あなたの公開ログイン、保存したDiscord tokenとログイン情報を消去します。他の管理者、サーバーの利用権・データは変更しません。サーバー全体の解除・削除はサーバー画面から行ってください。 / Removes your public sessions, saved Discord tokens and login identity. Other administrators and server access or data are kept. Unlink or delete a whole server from its server page.</p><form method="post">${csrfFormField(req.cookies.get(csrfCookieName)?.value)}<input type="hidden" name="confirmation" value="disconnect-personal"><button>個人の接続を解除 / Disconnect my account</button></form><a href="/servers">戻る / Back</a>`,
   );
 }
 export async function POST(req: NextRequest) {

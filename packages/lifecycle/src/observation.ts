@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { sql, tenant, json, type Tx } from "../../db/src/index";
 import type { Scope } from "../../shared/src/index";
-import type { Envelope } from "../../events/src/index";
+import {BOT_REPLY_REFERENCE_CONTRACT,type Envelope} from "../../events/src/index";
 import {
   observationIntents,
   type IntegrationHealth,
@@ -56,13 +56,19 @@ export async function projectObservation(tx: Tx, s: Scope, e: Envelope) {
   const at = new Date(e.observedAt ?? e.at);
   const active = (await sql<{active:boolean}>`SELECT EXISTS(SELECT 1 FROM location_population_collection WHERE ${tenant(s)} AND introduced_at<=${at}) AS active`.execute(tx)).rows[0]!.active;
   if (!active) return;
-  const previous = (
+  const prior = (
     await sql<{
       last_gateway_at: Date | null;
-    }>`SELECT last_gateway_at FROM discord_integration_health WHERE ${tenant(s)} FOR UPDATE`.execute(
+      gateway_value:string|null;
+      stale:boolean;
+    }>`SELECT last_gateway_at,last_gateway_at::text AS gateway_value,last_gateway_at>${at}::timestamptz AS stale FROM discord_integration_health WHERE ${tenant(s)} FOR UPDATE`.execute(
       tx,
     )
-  ).rows[0]?.last_gateway_at;
+  ).rows[0];
+  // Reclaimed/out-of-order telemetry cannot rotate newer epochs or establish
+  // protocol coverage. PostgreSQL performs this comparison at full precision.
+  if(e.kind.startsWith("telemetry.")&&prior?.stale)return;
+  const previous=prior?.last_gateway_at;
   const missing = previous && at.getTime() - previous.getTime() > 90000;
   if (missing) {
     await closeCollectionEpoch(tx, s, previous, "GATEWAY_GAP");
@@ -96,6 +102,7 @@ export async function projectObservation(tx: Tx, s: Scope, e: Envelope) {
       "GATEWAY_GAP",
     );
     await openCollectionEpoch(tx, s, at, "GATEWAY_GAP");
+    await sql`UPDATE location_population_collection SET bot_reference_started_at=NULL,bot_reference_observed_at=NULL WHERE ${tenant(s)} AND (bot_reference_observed_at IS NULL OR bot_reference_observed_at<=${at})`.execute(tx);
   } else
     await openCollectionEpoch(
       tx,
@@ -133,12 +140,27 @@ export async function projectObservation(tx: Tx, s: Scope, e: Envelope) {
       intents[key] = e.requestedIntents.includes(key)
         ? "AVAILABLE"
         : "UNAVAILABLE";
-  await sql`INSERT INTO discord_integration_health(organization_id,guild_id,gateway_state,last_gateway_at,intents,updated_at)
+  const accepted=await sql`INSERT INTO discord_integration_health(organization_id,guild_id,gateway_state,last_gateway_at,intents,updated_at)
  VALUES(${s.organizationId}::uuid,${s.guildId},${disconnected ? "DISCONNECTED" : "CONNECTED"},${at},${json(intents)},${at})
  ON CONFLICT(organization_id,guild_id) DO UPDATE SET gateway_state=EXCLUDED.gateway_state,last_gateway_at=EXCLUDED.last_gateway_at,
- intents=discord_integration_health.intents||EXCLUDED.intents,updated_at=EXCLUDED.updated_at WHERE discord_integration_health.last_gateway_at IS NULL OR discord_integration_health.last_gateway_at<=EXCLUDED.last_gateway_at`.execute(
+ intents=discord_integration_health.intents||EXCLUDED.intents,updated_at=EXCLUDED.updated_at WHERE discord_integration_health.last_gateway_at IS NULL OR discord_integration_health.last_gateway_at<=EXCLUDED.last_gateway_at RETURNING last_gateway_at`.execute(
     tx,
   );
+  if(!accepted.rows.length)return;
+  const feature=!disconnected&&e.botReplyReferenceContract===BOT_REPLY_REFERENCE_CONTRACT&&e.requestedIntents?.includes("messages")===true,
+    previousValue=prior?.gateway_value??null;
+  // A current producer and projector must both attest this exact heartbeat.
+  // An old producer clears the start. An old projector advancing only native
+  // last_gateway_at breaks the previous exact pairing, so the next new heartbeat
+  // starts coverage again. No queue replay can backdate the first observation.
+  await sql`UPDATE location_population_collection SET
+   bot_reference_started_at=CASE WHEN ${feature} THEN CASE
+    WHEN bot_reference_observed_at=${previousValue}::timestamptz AND ${at}::timestamptz<=${previousValue}::timestamptz+interval '90 seconds'
+    THEN COALESCE(bot_reference_started_at,${at}::timestamptz) ELSE ${at}::timestamptz END ELSE NULL END,
+   bot_reference_observed_at=CASE WHEN ${feature} THEN ${at}::timestamptz ELSE NULL END
+   WHERE ${tenant(s)} AND introduced_at<=${at} AND
+    (NOT ${feature} OR ${previousValue}::timestamptz IS NULL OR ${at}::timestamptz>${previousValue}::timestamptz)
+    AND (NOT ${feature} OR NOT EXISTS(SELECT 1 FROM deletion_requests d WHERE d.organization_id=${s.organizationId}::uuid AND d.guild_id=${s.guildId} AND GREATEST(d.requested_at,d.completed_at)>${at}::timestamptz))`.execute(tx);
 }
 export async function integrationHealth(
   tx: Tx,

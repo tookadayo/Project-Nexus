@@ -22,10 +22,47 @@ let infra: Awaited<ReturnType<typeof isolatedPostgres>>, db: Database;
 const key = "synthetic-public-session-key-for-isolated-tests-only";
 const user = "822222222222222222",
   other = "833333333333333333";
+// This fixture tests encrypted refresh serialization with ready connections.
+// The separate cold eight-connection burst still exceeds this Windows host's
+// unchanged 500 ms acquire deadline; preparing this fixture does not certify
+// production cold startup. Hold leases so sequential acquisition creates eight
+// distinct ready connections instead of repeatedly reusing a single client.
+async function readyRefreshFixturePool(database: Database) {
+  const releases: (() => void)[] = [];
+  const leases: Promise<void>[] = [];
+  let preparationFailed = false, preparationError: unknown;
+  try {
+    for (let index = 0; index < 8; index++) {
+      let ready!: () => void, fail!: (error: unknown) => void, release!: () => void;
+      const acquired = new Promise<void>((resolve, reject) => { ready = resolve; fail = reject; });
+      const hold = new Promise<void>((resolve) => { release = resolve; });
+      releases.push(release);
+      const lease = database.connection().execute(async (connection) => {
+        await sql`SELECT 1`.execute(connection);
+        ready();
+        await hold;
+      });
+      leases.push(lease);
+      // Observe acquisition/query errors immediately, including before ready().
+      void lease.catch(fail);
+      await acquired;
+    }
+  } catch (error) {
+    preparationFailed = true;
+    preparationError = error;
+  } finally {
+    for (const release of releases) release();
+  }
+  const results = await Promise.allSettled(leases);
+  if (preparationFailed) throw preparationError;
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed?.status === "rejected") throw failed.reason;
+}
 beforeAll(async () => {
   infra = await isolatedPostgres();
   db = connect(infra.databaseUrl);
   await migrate(db);
+  await readyRefreshFixturePool(db);
 });
 afterAll(async () => {
   await db?.destroy();

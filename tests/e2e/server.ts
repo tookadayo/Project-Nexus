@@ -17,6 +17,7 @@ import { AnalyticsService } from "../../packages/analytics/src/index.js";
 import { IdentityVault } from "../../packages/identity/src/index.js";
 import { createApi } from "../../apps/api/src/server.js";
 import type { DiscordPort } from "../../packages/discord/src/rest.js";
+import { startSettingsAuthApi } from "./settings-auth-api.js";
 import {
   openCollectionEpoch,
   projectObservation,
@@ -44,7 +45,8 @@ const pg = new EmbeddedPostgres({
 });
 await pg.initialise();
 await pg.start();
-const db = connect(`postgresql://nexus:nexus@127.0.0.1:${pgPort}/postgres`);
+const databaseUrl = `postgresql://nexus:nexus@127.0.0.1:${pgPort}/postgres`;
+const db = connect(databaseUrl);
 await migrate(db);
 const s = scopeForGuild("321111111111111111");
 await ensureGuild(db, s);
@@ -217,13 +219,19 @@ const discord = {
     events: [{ id: "821111111111111111", label: "Weekly Community Call" }],
   }),
 } as unknown as DiscordPort;
-const api = createApi(
-  new AnalyticsService(db, new SettingsService(db)),
-  "test-api-key",
-  db,
-  discord,
-);
-await api.listen({ host: "127.0.0.1", port: 3101 });
+const settingsAuth = process.env.NEXUS_E2E_SETTINGS_AUTH === "1";
+const authenticatedApi = settingsAuth
+  ? await startSettingsAuthApi({ db, settings, vault, discord, scope: s, databaseUrl })
+  : undefined;
+const api = settingsAuth
+  ? undefined
+  : createApi(
+      new AnalyticsService(db, new SettingsService(db)),
+      "test-api-key",
+      db,
+      discord,
+    );
+if (api) await api.listen({ host: "127.0.0.1", port: 3101 });
 const healthTimer = setInterval(() => {
   void heartbeat();
 }, 30000);
@@ -232,9 +240,16 @@ async function stop() {
   if (stopped) return;
   stopped = true;
   clearInterval(healthTimer);
-  await api.close();
-  await db.destroy();
-  await pg.stop();
+  try {
+    await authenticatedApi?.close();
+    await api?.close();
+  } finally {
+    try {
+      await db.destroy();
+    } finally {
+      await pg.stop();
+    }
+  }
 }
 process.on("SIGTERM", () => {
   void stop();

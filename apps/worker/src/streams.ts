@@ -6,7 +6,15 @@ import type {IdentityVault} from '../../../packages/identity/src/index.js';
 import type {Scope} from '../../../packages/shared/src/index.js';
 export async function scrubStream(redis:Redis,vault:IdentityVault,s:Scope,hash:string|null){
  let cursor='-';for(;;){const rows=await redis.xrange(STREAM,cursor,'+','COUNT',200);if(!rows.length)break;
-  for(const [id,fields] of rows){let matches=false;try{const e=eventSchema.parse(JSON.parse(fields[fields.indexOf('event')+1]??''));matches=e.organizationId===s.organizationId&&e.guildId===s.guildId&&(hash===null||e.targetHash===hash||e.ownerHash===hash||e.mentionHashes?.includes(hash)===true||Boolean(e.encryptedUserId&&vault.hash(s,vault.open(s,e.encryptedUserId))===hash));}catch{/* Invalid envelopes are never projected. */}if(matches)await redis.xdel(STREAM,id);}
+  for(const [id,fields] of rows){let matches=false;try{const e=eventSchema.parse(JSON.parse(fields[fields.indexOf('event')+1]??''));
+   // Nonhuman reply observations deliberately carry no author identity. An
+   // actor erasure therefore cannot prove which retained reference points to
+   // that actor's message. Remove these references conservatively in this
+   // already-authorized guild scrub, rather than allowing Redis to reproject
+   // them after the canonical DB observation has been erased.
+   const opaqueReply=hash!==null&&e.kind==='channel.post_observed'&&(e.authorKind==='BOT'||e.authorKind==='WEBHOOK')&&Boolean(e.referenceId);
+   matches=e.organizationId===s.organizationId&&e.guildId===s.guildId&&(hash===null||opaqueReply||e.targetHash===hash||e.ownerHash===hash||e.mentionHashes?.includes(hash)===true||Boolean(e.encryptedUserId&&vault.hash(s,vault.open(s,e.encryptedUserId))===hash));
+  }catch{/* Invalid envelopes are never projected. */}if(matches)await redis.xdel(STREAM,id);}
   cursor=`(${rows[rows.length-1]![0]}`;
  }
 }

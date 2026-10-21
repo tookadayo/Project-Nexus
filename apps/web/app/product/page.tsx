@@ -1,7 +1,7 @@
 import { BetaNotice } from "../landing/beta-notice";
 import { HeroExample } from "../landing/hero-example";
 import { CommunityWorkflow } from "../landing/workflow";
-import { Preview, SiteCta, SiteShell, copy, siteLocale } from "../public-ui";
+import { Preview, SiteShell, copy, siteLocale } from "../public-ui";
 
 export default async function Product() {
   const locale = await siteLocale();
@@ -26,10 +26,17 @@ export default async function Product() {
               "Understand activity, review a post, and look back on your response. Discord and Web bring the right context to each part of your work.",
             )}
           </p>
-          <SiteCta locale={locale} secondary={false} />
-          <a className="nx-text-link nx-product-demo-link" href="#demo">
-            {copy(locale, "操作デモを見る", "Try the interactive demo")}
-          </a>
+          <div className="nx-cta-row">
+            <a className="nx-button nx-button-primary" href="#demo">
+              {copy(locale, "操作デモを試す", "Try the demo")}
+            </a>
+            <a
+              className="nx-button nx-button-outline"
+              href="#product-workflow-heading"
+            >
+              {copy(locale, "機能を詳しく見る", "Explore features")}
+            </a>
+          </div>
           <p className="nx-availability">
             {copy(
               locale,

@@ -8,6 +8,8 @@ export async function revokedCredentialActor(
   scope: Scope,
   actorHash: string,
 ) {
+  if ((await sql`SELECT 1 FROM operations_org_guilds WHERE organization_id=${scope.organizationId}::uuid AND guild_id=${scope.guildId} AND state='DETACHED' LIMIT 1`.execute(tx)).rows.length)
+    return true;
   const members = (
     await sql<{
       organization_id: string;

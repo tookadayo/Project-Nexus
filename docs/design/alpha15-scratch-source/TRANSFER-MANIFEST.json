@@ -1,0 +1,186 @@
+{
+  "purpose": "Authorized text transfer after WindowsApps python3.exe ResourceUnavailable; not an access-denial workaround.",
+  "destination_root": "docs/design/alpha15-scratch-source",
+  "canonical_original_zip_sha256": "c16d85517066dc059d8b62e7996372ac5c6a016616c92a85c8a9c335dba7af1c",
+  "integrated_supplement_zip_sha256": "e69bcf165124233a2dbea07e27749280223f5df68f0d52392a8cd0e7cff591f0",
+  "scope": "17 full text files. Prior six source documents already exist and are hash-verified in the repository; do not resend or modify them. No image/PDF binary or duplicated H2 chunks.",
+  "normal_chat_review_status": "Round 1 completed; round 2 Model not found; round 3 not completed.",
+  "implementation_gate": "Persist documents only. No NEXUS application changes until all transfer parts are verified AND parent sends a separate final go.",
+  "canonical_tests": 132,
+  "supplement_tests": 60,
+  "tests_executed": 0,
+  "public_opcodes": 212,
+  "trace_rows": 236,
+  "files": [
+    {
+      "path": "docs/design/alpha15-scratch-source/canonical/NEXUS-alpha15-scratch-full-coverage-design.md",
+      "source_bytes": 57043,
+      "sha256": "11ead8d783fb6d13f73767ced0b824b0903e29bb478555f4ac9a7b50cad1986d",
+      "encoding": "UTF-8 without BOM",
+      "newline": "LF",
+      "final_newline": true,
+      "text_lf_sha256": "11ead8d783fb6d13f73767ced0b824b0903e29bb478555f4ac9a7b50cad1986d",
+      "text_characters": 27004
+    },
+    {
+      "path": "docs/design/alpha15-scratch-source/canonical/NEXUS-scratch-official-inventory.md",
+      "source_bytes": 88802,
+      "sha256": "26b38096d4de86ee1cb3b1fc2088dd83042f38244468a7858168121046fd6a37",
+      "encoding": "UTF-8 without BOM",
+      "newline": "LF",
+      "final_newline": true,
+      "text_lf_sha256": "26b38096d4de86ee1cb3b1fc2088dd83042f38244468a7858168121046fd6a37",
+      "text_characters": 67432
+    },
+    {
+      "path": "docs/design/alpha15-scratch-source/canonical/NEXUS-alpha15-scratch-coverage-acceptance-tests.md",
+      "source_bytes": 16108,
+      "sha256": "44499e9e24225789134eed25b6aee0db4a5deb86ed2ac14280425bf2853b90d3",
+      "encoding": "UTF-8 without BOM",
+      "newline": "LF",
+      "final_newline": true,
+      "text_lf_sha256": "44499e9e24225789134eed25b6aee0db4a5deb86ed2ac14280425bf2853b90d3",
+      "text_characters": 9163
+    },
+    {
+      "path": "docs/design/alpha15-scratch-source/NEXUS-alpha15-scratch-final-supplement-R01-R09.md",
+      "source_bytes": 42461,
+      "sha256": "89e4a6ed86987c728a185fed455af077f25fcf50a78bdc5c09a8223af00dcbfe",
+      "encoding": "UTF-8 without BOM",
+      "newline": "LF",
+      "final_newline": true,
+      "text_lf_sha256": "89e4a6ed86987c728a185fed455af077f25fcf50a78bdc5c09a8223af00dcbfe",
+      "text_characters": 20526
+    },
+    {
+      "path": "docs/design/alpha15-scratch-source/NEXUS-alpha15-scratch-supplement-acceptance-tests.md",
+      "source_bytes": 8992,
+      "sha256": "cd7260dd2655f94eeb6f72b1db1545fac3f7d2088b4ef6b8b60a3d27fa226462",
+      "encoding": "UTF-8 without BOM",
+      "newline": "LF",
+      "final_newline": true,
+      "text_lf_sha256": "cd7260dd2655f94eeb6f72b1db1545fac3f7d2088b4ef6b8b60a3d27fa226462",
+      "text_characters": 4914
+    },
+    {
+      "path": "docs/design/alpha15-scratch-source/NEXUS-alpha15-scratch-opcode-trace.md",
+      "source_bytes": 7563,
+      "sha256": "494eebf3b9ac5a432532927c1aa141482b5b5737dbcc228b029e621f15898433",
+      "encoding": "UTF-8 without BOM",
+      "newline": "LF",
+      "final_newline": true,
+      "text_lf_sha256": "494eebf3b9ac5a432532927c1aa141482b5b5737dbcc228b029e621f15898433",
+      "text_characters": 4225
+    },
+    {
+      "path": "docs/design/alpha15-scratch-source/NEXUS-alpha15-scratch-opcode-trace.csv",
+      "source_bytes": 309691,
+      "sha256": "7788a0a3be8852815f68fbcf54802ed7c6c5f3a0107b8179d0e8a11e6d889231",
+      "encoding": "UTF-8 with BOM",
+      "newline": "CRLF",
+      "final_newline": true,
+      "text_lf_sha256": "bca8f428c3c642c7d1afd3221a0665642ce7320a4eb6c937620f059970c567e5",
+      "text_characters": 228735
+    },
+    {
+      "path": "docs/design/alpha15-scratch-source/NEXUS-alpha15-scratch-excluded-opcode-ledger.csv",
+      "source_bytes": 32283,
+      "sha256": "254f5a5d348d59dcc2873d97e23a65b261288fe153b1168761973a8c74f23136",
+      "encoding": "UTF-8 with BOM",
+      "newline": "CRLF",
+      "final_newline": true,
+      "text_lf_sha256": "86ab4e4f801b1a0b336d3bad8ce784185d0046abe2fd178ba6e11c5714f135e0",
+      "text_characters": 23253
+    },
+    {
+      "path": "docs/design/alpha15-scratch-source/NEXUS-alpha15-scratch-opcode-trace-check.json",
+      "source_bytes": 835,
+      "sha256": "970dcc6acec0659f3ef85899ef9947f508a5032476c240328e5be89022da5500",
+      "encoding": "UTF-8 without BOM",
+      "newline": "LF",
+      "final_newline": true,
+      "text_lf_sha256": "970dcc6acec0659f3ef85899ef9947f508a5032476c240328e5be89022da5500",
+      "text_characters": 835
+    },
+    {
+      "path": "docs/design/alpha15-scratch-source/NEXUS-alpha15-scratch-final-decisions.md",
+      "source_bytes": 4127,
+      "sha256": "b5d3e0518fd288a07191f3a1262280f6963a8e0d3677f2a59debcffc542810b4",
+      "encoding": "UTF-8 without BOM",
+      "newline": "LF",
+      "final_newline": true,
+      "text_lf_sha256": "b5d3e0518fd288a07191f3a1262280f6963a8e0d3677f2a59debcffc542810b4",
+      "text_characters": 1917
+    },
+    {
+      "path": "docs/design/alpha15-scratch-source/NEXUS-alpha15-scratch-final-package-README.md",
+      "source_bytes": 3170,
+      "sha256": "9fc0e2b78428fd265055d35b1718eadd286b99863d7085114b53ba40816d6849",
+      "encoding": "UTF-8 without BOM",
+      "newline": "LF",
+      "final_newline": true,
+      "text_lf_sha256": "9fc0e2b78428fd265055d35b1718eadd286b99863d7085114b53ba40816d6849",
+      "text_characters": 1653
+    },
+    {
+      "path": "docs/design/alpha15-scratch-source/NEXUS-alpha15-CT01-code-evidence-supplement.md",
+      "source_bytes": 5944,
+      "sha256": "7ee8944eae18925a29b03c2be404988461c1ed4089ad778255a2d412540236d4",
+      "encoding": "UTF-8 without BOM",
+      "newline": "LF",
+      "final_newline": true,
+      "text_lf_sha256": "7ee8944eae18925a29b03c2be404988461c1ed4089ad778255a2d412540236d4",
+      "text_characters": 2878
+    },
+    {
+      "path": "docs/design/alpha15-scratch-source/NEXUS-alpha15-numeric-unicode-feasibility-note.md",
+      "source_bytes": 17155,
+      "sha256": "5e543e4f75c85dc683b737dea9a432b22cf8d11d4e6edd3e66f12bdc4d8aca16",
+      "encoding": "UTF-8 without BOM",
+      "newline": "LF",
+      "final_newline": true,
+      "text_lf_sha256": "5e543e4f75c85dc683b737dea9a432b22cf8d11d4e6edd3e66f12bdc4d8aca16",
+      "text_characters": 8119
+    },
+    {
+      "path": "docs/design/alpha15-scratch-source/normalchat-evidence/nexus-scratch-normalchat-round1-response-2026-10-15.txt",
+      "source_bytes": 19735,
+      "sha256": "af417f13889b6dc353bc615fa07f64442b7911ea402705548b38fd3a0b359cef",
+      "encoding": "UTF-8 without BOM",
+      "newline": "LF",
+      "final_newline": true,
+      "text_lf_sha256": "af417f13889b6dc353bc615fa07f64442b7911ea402705548b38fd3a0b359cef",
+      "text_characters": 8090
+    },
+    {
+      "path": "docs/design/alpha15-scratch-source/normalchat-evidence/NEXUS-alpha15-scratch-normalchat-round1-result.md",
+      "source_bytes": 3371,
+      "sha256": "b6dbe3973b950786890b06440526f662330c07835f58d0933c1b6ce9e65d00d3",
+      "encoding": "UTF-8 without BOM",
+      "newline": "LF",
+      "final_newline": true,
+      "text_lf_sha256": "b6dbe3973b950786890b06440526f662330c07835f58d0933c1b6ce9e65d00d3",
+      "text_characters": 1553
+    },
+    {
+      "path": "docs/design/alpha15-scratch-source/canonical/visual-references/README.md",
+      "source_bytes": 3834,
+      "sha256": "5c0171caa60d5be721c1fbe666f29b800ab730af6422682b964365c21a76b012",
+      "encoding": "UTF-8 without BOM",
+      "newline": "LF",
+      "final_newline": true,
+      "text_lf_sha256": "5c0171caa60d5be721c1fbe666f29b800ab730af6422682b964365c21a76b012",
+      "text_characters": 2086
+    },
+    {
+      "path": "docs/design/alpha15-scratch-source/canonical/visual-references/manifest.json",
+      "source_bytes": 5756,
+      "sha256": "b913d9c9c31ffcd518f52a928c8a543548abee2a3699605e80665dbc83573643",
+      "encoding": "UTF-8 without BOM",
+      "newline": "LF",
+      "final_newline": true,
+      "text_lf_sha256": "b913d9c9c31ffcd518f52a928c8a543548abee2a3699605e80665dbc83573643",
+      "text_characters": 4592
+    }
+  ]
+}

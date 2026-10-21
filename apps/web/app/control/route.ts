@@ -1,3 +1,4 @@
+import { publicApiHeaders } from "../auth/api-proof";
 import { assertDisplayedGuild } from "../auth/displayed-guild";
 import { NextRequest, NextResponse } from "next/server";
 import { dashboardContext, openSession, authMode } from "../auth/session";
@@ -166,7 +167,7 @@ export async function POST(req: NextRequest) {
     const response = await fetch(url, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${context.token}`,
+        ...publicApiHeaders(context, req.cookies.get("nexus_session")?.value, "POST", url, payload),
         "Content-Type": "application/json",
       },
       body: payload,

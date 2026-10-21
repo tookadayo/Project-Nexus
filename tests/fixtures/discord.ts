@@ -5,9 +5,14 @@ import {
   type Role,
   type DiscordAttachment,
 } from "../../packages/discord/src/rest.js";
+import type { RESTPostAPIChannelMessageJSONBody } from "discord-api-types/v10";
 export class FakeDiscord implements DiscordPort {
   attachments = new Map<string, DiscordAttachment[]>();
   capabilityState?: DiscordPort["capabilityState"];
+  installationSystemChannelId: string | null = null;
+  async installationSystemChannel(_guildId: string) {
+    return this.installationSystemChannelId;
+  }
   async registerCommands(_guildId: string, _commands: unknown[]) {
     this.calls.push("registerCommands");
   }
@@ -61,6 +66,22 @@ export class FakeDiscord implements DiscordPort {
     this.panels.set(id, body);
     this.panelNonces.set(nonce, id);
     if (files) this.attachments.set(id, files);
+    return id;
+  }
+  async sendInstallNotice(
+    _channelId: string,
+    body: RESTPostAPIChannelMessageJSONBody,
+    nonce: string,
+    beforeDispatch?: () => Promise<void>,
+  ) {
+    await beforeDispatch?.();
+    this.calls.push("sendInstallNotice");
+    if (this.failure) throw this.failure;
+    const previous = this.panelNonces.get(nonce);
+    if (previous) return previous;
+    const id = String(940000000000000000n + BigInt(this.panels.size + 1));
+    this.panels.set(id, body);
+    this.panelNonces.set(nonce, id);
     return id;
   }
   async editPanel(_channelId: string, messageId: string, body: unknown) {

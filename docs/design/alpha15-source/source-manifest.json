@@ -1,0 +1,82 @@
+{
+  "source": "Parent text retransmissions 1/12–12/12 on 2026-10-15; original design dated 2026-10-14",
+  "sourceThreadId": "01a119e7-afb0-7503-8930-c35d0ed63031",
+  "originalFiles": 6,
+  "receivedParts": 12,
+  "normalization": "Wrappers removed; document parts joined by blank lines; UTF-8/LF; escaped Markdown entities preserved. SHA-256 identifies saved text, not original Library ZIP.",
+  "approvalPrecedence": "The seven explicit 2026-10-15 approvals override pending statements in the preserved originals.",
+  "files": [
+    {
+      "name": "NEXUS-alpha15-practical-blocks-integrated.md",
+      "parts": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "bytes": 113355,
+      "lines": 778,
+      "sha256": "eb26c9567b8cbe567a451072b1cb97142eda4cf7036622ade2dd76edf6684ffa",
+      "utf8RoundTrip": true,
+      "requiredMarkersPresent": true
+    },
+    {
+      "name": "NEXUS-alpha15-web-setup-dashboard-revision.md",
+      "parts": [
+        5
+      ],
+      "bytes": 25972,
+      "lines": 209,
+      "sha256": "f54c54f1b3fd30e1228c8d00a2e450a874be4468bd2531de3d133d350ac8e543",
+      "utf8RoundTrip": true,
+      "requiredMarkersPresent": true
+    },
+    {
+      "name": "NEXUS-alpha15-block-editor-revision.md",
+      "parts": [
+        6,
+        7
+      ],
+      "bytes": 42640,
+      "lines": 432,
+      "sha256": "74de636a359827d9267ad48d8457fa389575bd52441f2068772745a0e9f21d5e",
+      "utf8RoundTrip": true,
+      "requiredMarkersPresent": true
+    },
+    {
+      "name": "NEXUS-alpha15-block-expansion-revision.md",
+      "parts": [
+        8,
+        9
+      ],
+      "bytes": 31341,
+      "lines": 241,
+      "sha256": "b6f714512ac01c035540d17297948ac58b0c2a06379d109c0619f9a02729ee07",
+      "utf8RoundTrip": true,
+      "requiredMarkersPresent": true
+    },
+    {
+      "name": "NEXUS-discord-api-action-catalog.md",
+      "parts": [
+        10,
+        11
+      ],
+      "bytes": 50508,
+      "lines": 392,
+      "sha256": "3458625f77f1cc9b11c24fddf1da3619a8f886abc7fc2b8a33d504d615f788e4",
+      "utf8RoundTrip": true,
+      "requiredMarkersPresent": true
+    },
+    {
+      "name": "NEXUS-automation-plan-proposal.md",
+      "parts": [
+        12
+      ],
+      "bytes": 30110,
+      "lines": 255,
+      "sha256": "e126a7273b554bfe334ea8299fabacaae50730cfb56bd391480c0d9d6e106d71",
+      "utf8RoundTrip": true,
+      "requiredMarkersPresent": true
+    }
+  ]
+}

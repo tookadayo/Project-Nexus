@@ -5,6 +5,7 @@ import {
   betaLock,
 } from "../../../packages/security/src/hosted-beta";
 import { hostedBetaEnabled } from "../../../packages/config/src/hosted-beta";
+import { InstallNotices } from "../../gateway/src/install-notices";
 import {
   betaActionPolicy,
   type BetaActionPolicy,
@@ -99,6 +100,12 @@ export class ActionWorker {
     return traceStep("action.outbox", {}, async () => {
       const action = await this.claim(s);
       if (!action) return false;
+      if (Object.hasOwn(action.payload, "ruleRuntimeContract") || Object.hasOwn(action.payload, "ruleOperationIntentId")) {
+        // The legacy worker has no alpha16 Intent/fence/send-admission adapter.
+        // Stop before any provider read or write; a flag cannot upgrade it.
+        await sql`UPDATE action_outbox SET state='FAILED',lease_until=NULL,lease_token=NULL,error_category='RULE_RUNTIME_UNSUPPORTED',last_error='Rule runtime dispatch is unavailable',completed_at=now(),updated_at=now() WHERE ${tenant(s)} AND id=${action.id}::uuid AND lease_token=${action.leaseToken}::uuid`.execute(this.db);
+        return true;
+      }
       let executing = false;
       try {
         action.policy = betaActionPolicy(
@@ -155,6 +162,10 @@ export class ActionWorker {
     return action;
   }
   private async execute(s: Scope, action: Action): Promise<boolean> {
+    if(action.kind==='INSTALL_NOTICE'){
+      await new InstallNotices(this.db,this.discord).deliver(s,action);
+      return true;
+    }
     if (action.kind === "PANEL_REFRESH") return this.refresh(s, action);
     if (action.kind === "INTERVENTION_DELIVER") {
       const runId = z.uuid().parse(action.payload.runId);

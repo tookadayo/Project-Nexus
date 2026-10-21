@@ -1,29 +1,38 @@
 import {randomUUID} from 'node:crypto';
-import {sql,tenant,json,privacyReadLock,type Database,type Tx} from '../../db/src/index.js';
-import {SettingsService,audit,type Actor, type Settings} from '../../settings/src/index.js';
-import {IdentityVault} from '../../identity/src/index.js';
-import {assert,type Scope,type EventContext} from '../../shared/src/index.js';
-import {enqueue} from '../../discord/src/outbox.js';
-import {validateFlow,templateFlow,answerFlow,initialFlowState,type Flow,type FlowState} from './flow.js';
-import {validateSignal} from '../../events/src/registry.js';
-import {chooseMode,type GuildCapabilityProfile} from '../../lifecycle/src/capabilities.js';
+import {sql,tenant,json,privacyReadLock,type Database,type Tx} from '../../db/src/index';
+import {SettingsService,audit,type Actor, type Settings} from '../../settings/src/index';
+import {IdentityVault} from '../../identity/src/index';
+import {assert,type Scope,type EventContext} from '../../shared/src/index';
+import {enqueue} from '../../discord/src/outbox';
+import {validateFlow,templateFlow,answerFlow,initialFlowState,type Flow,type FlowState} from './flow';
+import {validateSignal} from '../../events/src/registry';
+import {chooseMode,type GuildCapabilityProfile} from '../../lifecycle/src/capabilities';
 export type Session={id:string,episode_id:string,flow_version_id:string,revision:number,state:FlowState,context:EventContext,definition:Flow};
 export async function appendEvent(tx:Tx,s:Scope,episodeId:string,kind:string,context:EventContext,data:Record<string,unknown>={},at=new Date()){
  validateSignal(kind,data);
  await sql`INSERT INTO lifecycle_events(organization_id,guild_id,id,episode_id,kind,occurred_at,context,data)
  VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${episodeId}::uuid,${kind},${at},${context},${json(data)})`.execute(tx);
 }
+export type OnboardingFlowSlot='MAIN'|'HYBRID';
+/** The native allocator is protected by SettingsService's guild fence. Draft
+ * authoring never calls this function until an explicit publication commit. */
+export async function appendPublishedOnboardingFlow(tx:Tx,s:Scope,actor:Actor,current:Settings,definition:Flow,template?:Settings['template'],slot:OnboardingFlowSlot='MAIN',beforeWrite?:(tx:Tx)=>Promise<void>):Promise<Settings>{
+ assert(tx.isTransaction,'CONFIG_TRANSACTION_REQUIRED',500);const flow=validateFlow(definition);
+ const version=(await sql<{n:number}>`SELECT COALESCE(MAX(version),0)::integer+1 AS n FROM flow_versions WHERE ${tenant(s)}`.execute(tx)).rows[0]!.n;
+ const id=randomUUID();await beforeWrite?.(tx);
+ await sql`INSERT INTO flow_versions(organization_id,guild_id,id,version,definition) VALUES(${s.organizationId}::uuid,${s.guildId},${id}::uuid,${version},${json(flow)})`.execute(tx);
+ await beforeWrite?.(tx);await audit(tx,s,actor,'flow.published',null,{id,version});await beforeWrite?.(tx);
+ return slot==='HYBRID'?{...current,hybrid:{...current.hybrid,flowVersionId:id}}:{...current,flowVersionId:id,template:template??current.template};
+}
+/** Same native settings CAS/plan/safety boundary as normal publish/rollback. */
+export function publishOnboardingFlowInTransaction(tx:Tx,settings:SettingsService,s:Scope,actor:Actor,revision:number,definition:Flow,slot:OnboardingFlowSlot='MAIN',beforeWrite?:(tx:Tx)=>Promise<void>){
+ return settings.mutateInTransaction(tx,s,actor,revision,(current,connection)=>appendPublishedOnboardingFlow(connection,s,actor,current,definition,undefined,slot,beforeWrite),false,beforeWrite);
+}
 export class OnboardingService {
  constructor(private readonly db:Database,private readonly settings:SettingsService,private readonly vault:IdentityVault){}
  async publish(s:Scope,actor:Actor,revision:number,definition:Flow,template?:Settings['template']){
   const flow=validateFlow(definition);
-  return this.settings.mutate(s,actor,revision,async(current,tx)=>{
-   const version=(await sql<{n:number}>`SELECT COALESCE(MAX(version),0)::integer+1 AS n FROM flow_versions WHERE ${tenant(s)}`.execute(tx)).rows[0]!.n;
-   const id=randomUUID();await sql`INSERT INTO flow_versions(organization_id,guild_id,id,version,definition)
-    VALUES(${s.organizationId}::uuid,${s.guildId},${id}::uuid,${version},${json(flow)})`.execute(tx);
-   await audit(tx,s,actor,'flow.published',null,{id,version});
-   return {...current,flowVersionId:id,template:template??current.template};
-  });
+  return this.settings.mutate(s,actor,revision,(current,tx)=>appendPublishedOnboardingFlow(tx,s,actor,current,flow,template));
  }
  async chooseTemplate(s:Scope,actor:Actor,revision:number,template:Settings['template']){return this.publish(s,actor,revision,templateFlow(template),template);}
  async rollback(s:Scope,actor:Actor,revision:number,versionId:string){const flow=await this.flow(s,versionId);return this.publish(s,actor,revision,flow);}

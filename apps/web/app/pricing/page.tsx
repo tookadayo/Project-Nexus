@@ -50,16 +50,6 @@ export default async function Pricing() {
   const canPurchase = status === "READY" && launch.checkoutEnabled;
   return (
     <SiteShell locale={locale}>
-      <BetaNotice
-        locale={locale}
-        purchaseMode={
-          launch.publishPrices
-            ? launch.livemode
-              ? "live"
-              : "sandbox"
-            : "closed"
-        }
-      />
       <section className="site-section pricing-intro r3-pricing-intro">
         <h1>{copy(locale, "プランを比較する", "Compare plans")}</h1>
         <p>
@@ -286,6 +276,18 @@ export default async function Pricing() {
             {copy(locale, "利用上限と条件", "Limits and conditions")}
           </a>
         </p>
+      </div>
+      <div className="site-section nx-pricing-beta">
+        <BetaNotice
+          locale={locale}
+          purchaseMode={
+            launch.publishPrices
+              ? launch.livemode
+                ? "live"
+                : "sandbox"
+              : "closed"
+          }
+        />
       </div>
       <section className="site-section pricing-payment-info">
         <h2>

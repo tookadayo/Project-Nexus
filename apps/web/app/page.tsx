@@ -11,7 +11,7 @@ import { Navigation } from "./landing/navigation";
 import { Icon } from "./landing/primitives";
 import { ProductPreview } from "./landing/product-preview";
 import "./landing/landing.css";
-import "./landing/official-refresh.css";
+import "./landing/clear-product.css";
 
 const geist = Geist({
   subsets: ["latin"],
@@ -113,7 +113,7 @@ export default async function Home() {
   const locale = await siteLocale();
   return (
     <div
-      className={`nexus-site nx-home-r3 ${geist.variable}`}
+      className={`nexus-site nx-clear-product nx-home ${geist.variable}`}
       lang={locale}
       id="top"
     >
@@ -130,33 +130,42 @@ export default async function Home() {
             <h1 id="hero-heading">
               <HeadingCopy
                 locale={locale}
-                en="Review activity and reply status in your Discord community."
-                ja={["Discordの活動と、", "投稿への返信状況を確認する。"]}
+                en="Review Discord activity and posts to check for replies."
+                ja={[
+                  "Discordの活動状況と、",
+                  "返信を確認したい",
+                  "投稿をまとめて確認。",
+                ]}
               />
             </h1>
             <p className="nx-lead">
               {text(
                 locale,
-                "See activity by period and channel, check eligible posts with no response detected, and revisit your team’s follow-up records.",
-                "期間やチャンネルごとの活動を見て、返信を確認できない対象投稿を整理。スタッフの対応と、その後の記録を振り返れます。",
+                "NEXUS helps you review activity within your configured scope and posts where a qualifying reply or participation has not been observed. Open the original post in Discord and review staff follow-up records.",
+                "NEXUSは、設定した対象の活動状況や、返信・参加を確認できていない投稿の候補を表示します。元の投稿をDiscordで確認し、スタッフの対応記録も振り返れます。",
               )}
             </p>
-            <Cta locale={locale} />
+            <div className="nx-cta-row">
+              <a className="nx-button nx-button-primary" href="/#demo">
+                {text(locale, "Try the demo", "操作デモを試す")}
+                <Icon name="arrow" size={18} />
+              </a>
+              <a className="nx-button nx-button-outline" href="/product">
+                {text(locale, "Explore features", "製品の機能を見る")}
+                <Icon name="arrow" size={18} />
+              </a>
+            </div>
             <p className="nx-availability">
               {text(
                 locale,
                 "Closed Beta 1 in preparation · Free, invitation only",
-                "Closed Beta 1 準備中 · 無料・招待制",
+                "Closed Beta 1 準備中・無料招待制",
               )}
               {" · "}
-              <a href="#invitation-beta">
-                {text(locale, "Participation conditions", "提供条件を見る")}
+              <a href="/support#invitation-beta">
+                {text(locale, "Participation information", "参加案内")}
               </a>
             </p>
-            <a className="nx-text-link nx-demo-jump" href="#demo">
-              <Icon name="play" size={16} />
-              {text(locale, "Try the sample demo", "操作デモを試す")}
-            </a>
           </div>
           <HeroExample locale={locale} />
         </section>
@@ -170,11 +179,7 @@ export default async function Home() {
             <div className="nx-demo-intro">
               <div className="nx-section-heading">
                 <h2 id="demo-heading">
-                  {text(
-                    locale,
-                    "Try the activity view.",
-                    "活動の値と、測定の根拠を見る。",
-                  )}
+                  {text(locale, "Try it for yourself.", "操作して、確かめる。")}
                 </h2>
               </div>
               <p>
@@ -241,8 +246,8 @@ export default async function Home() {
                 [
                   "Confirm access and connect",
                   "利用条件を確認して接続",
-                  "Once access is available, confirm the invitation conditions and access period, then add the bot with the required permissions. Open /nexus panel in a staff channel.",
-                  "利用開始時は招待条件と利用期間を確認し、必要な権限でBotを追加。スタッフ用チャンネルで /nexus panel を開きます。",
+                  "Once access is available, sign in on the web and select your server. We check your current permissions and bot installation, then guide you through web setup.",
+                  "利用開始時はWebにログインしてサーバーを選びます。現在の権限とBotの導入状態を確認し、そのままWebで初期設定を進めます。",
                 ],
                 [
                   "Choose what to collect",

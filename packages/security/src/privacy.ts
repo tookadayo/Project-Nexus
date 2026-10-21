@@ -15,6 +15,15 @@ import { assert, type Scope } from "../../shared/src/index.js";
 import { productGuildHash } from "../../shared/src/product-telemetry.js";
 import { deleteBillingCommunity, deleteBillingActor } from "./billing-privacy";
 import { EntitlementService } from "../../settings/src/billing";
+import {purgeAutomationActor,purgeAutomationGuild} from '../../automation/src/retention';
+import { acquireRuleScopeLocks, ruleScopeLockSet } from "../../rules/src/locks";
+import { purgeRuleActor, purgeRuleGuild } from "../../rules/src/privacy";
+import { purgePersonalizationActor,purgePersonalizationGuild } from "../../operations/src/alpha16-personalization";
+import { purgeManualReportsActor,purgeManualReportsGuild,purgeReportDefinitionActor } from "../../operations/src/reports";
+import { purgeLifecycleWebActor,purgeLifecycleWebGuild } from "../../lifecycle/src/web-workspace";
+import { redactWebhookEventSources } from "../../operations/src/webhooks";
+import { purgeOnboardingFlowDrafts } from "../../onboarding/src/flow-drafts";
+import { scrubStoredPostReferences } from "../../lifecycle/src/alpha16-reference-privacy";
 export class PrivacyService {
   constructor(
     private readonly db: Database,
@@ -56,12 +65,23 @@ export class PrivacyService {
       return;
     }
     await this.db.transaction().execute(async (tx) => {
+      await acquireRuleScopeLocks(tx, ruleScopeLockSet(s, { subjectHashes: [hash] }));
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"privacy:" + s.organizationId + ":" + s.guildId},0))`.execute(
         tx,
       );
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${s.organizationId + s.guildId + hash},0))`.execute(
         tx,
       );
+      await purgeRuleActor(tx, s, hash);
+      await scrubStoredPostReferences(tx, s, hash);
+      await purgePersonalizationActor(tx,s,hash,userId);
+      await purgeManualReportsActor(tx,s,hash);
+      await purgeReportDefinitionActor(tx,s,hash);
+      await purgeLifecycleWebActor(tx,s,hash);
+      await purgeOnboardingFlowDrafts(tx,s,userId);
+      await purgeAutomationActor(tx,s,hash,userId);
+      for(const table of ['web_setup_drafts','web_setup_requests','web_setup_install_requests'])
+        await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)} AND actor_hash=${hash}`.execute(tx);
       const ids = (
         await sql<{
           id: string;
@@ -192,9 +212,10 @@ export class PrivacyService {
       await sql`DELETE FROM operations_org_members m USING operations_role_bindings b WHERE b.organization_id=${s.organizationId}::uuid AND b.guild_id=${s.guildId} AND b.actor_hash=${hash} AND m.organization_id=b.root_organization_id AND m.id=b.member_id`.execute(
         tx,
       );
-      await sql`DELETE FROM operations_domain_events v USING operations_requests r WHERE v.organization_id=r.organization_id AND v.guild_id=r.guild_id AND r.organization_id=${s.organizationId}::uuid AND r.guild_id=${s.guildId} AND r.actor_hash=${hash} AND v.data->>'attentionKey'=r.attention_key`.execute(
+      const sourceEvents=(await sql<{id:string}>`SELECT v.id FROM operations_domain_events v JOIN operations_requests r ON v.organization_id=r.organization_id AND v.guild_id=r.guild_id AND v.data->>'attentionKey'=r.attention_key WHERE r.organization_id=${s.organizationId}::uuid AND r.guild_id=${s.guildId} AND r.actor_hash=${hash} ORDER BY v.id`.execute(
         tx,
-      );
+      )).rows.map(row=>row.id);
+      await redactWebhookEventSources(tx,s,sourceEvents);
       await sql`DELETE FROM attention_items a USING operations_requests r WHERE a.organization_id=r.organization_id AND a.guild_id=r.guild_id AND a.message_id=r.attention_key AND r.organization_id=${s.organizationId}::uuid AND r.guild_id=${s.guildId} AND r.actor_hash=${hash}`.execute(
         tx,
       );
@@ -216,9 +237,9 @@ export class PrivacyService {
       await sql`DELETE FROM audit_logs WHERE ${tenant(s)} AND actor=${hash}`.execute(
         tx,
       );
-      await sql`INSERT INTO deletion_requests(organization_id,guild_id,id,lookup_hash,completed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${hash},now())`.execute(
-        tx,
-      );
+      const existingTombstone = await sql`UPDATE deletion_requests SET completed_at=COALESCE(completed_at,clock_timestamp()) WHERE ${tenant(s)} AND lookup_hash=${hash} RETURNING id`.execute(tx);
+      if (!existingTombstone.rows.length)
+        await sql`INSERT INTO deletion_requests(organization_id,guild_id,id,lookup_hash,completed_at) VALUES(${s.organizationId}::uuid,${s.guildId},${randomUUID()}::uuid,${hash},now())`.execute(tx);
       await audit(
         tx,
         s,
@@ -238,6 +259,18 @@ export class PrivacyService {
       await betaLock(tx, s, true);
       await requestBetaDeletion(tx, s, "DELETE_REQUEST");
     }
+    await purgeRuleGuild(tx, s);
+    await purgePersonalizationGuild(tx,s);
+    await purgeManualReportsGuild(tx,s);
+    await purgeLifecycleWebGuild(tx,s);
+    await purgeOnboardingFlowDrafts(tx,s);
+    await purgeAutomationGuild(tx,s);
+    await sql`DELETE FROM automation_rollbacks WHERE ${tenant(s)}`.execute(tx);
+    // The guild erasure also removes limited member-deletion receipts. They
+    // cannot retain a FK to a member tombstone that this transaction removes.
+    await sql`DELETE FROM alpha16_privacy_jobs WHERE ${tenant(s)}`.execute(tx);
+    for(const table of ['web_setup_drafts','web_setup_requests','web_setup_install_requests','install_notices'])
+      await sql`DELETE FROM ${sql.table(table)} WHERE ${tenant(s)}`.execute(tx);
     await sql`DELETE FROM server_verification_challenges WHERE ${tenant(s)}`.execute(
       tx,
     );
@@ -282,6 +315,8 @@ export class PrivacyService {
       "playbooks",
       "operations_intake_panels",
       "integration_destinations",
+      "webhook_deliveries",
+      "webhook_secrets",
       "webhook_endpoints",
       "api_credentials",
       "api_guild_usage_months",
@@ -362,6 +397,7 @@ export class PrivacyService {
   // mandatory; no caller can use operator authentication as a Guild admin.
   async deleteBetaGuild(s: Scope, id: string) {
     const pending = await this.db.transaction().execute(async (tx) => {
+      await acquireRuleScopeLocks(tx, ruleScopeLockSet(s));
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"privacy:" + s.organizationId + ":" + s.guildId},0))`.execute(
         tx,
       );
@@ -406,6 +442,7 @@ export class PrivacyService {
     const entitlement = await new EntitlementService(this.db).effective(s);
     const cutoff = new Date(Date.now() - cfg.detailedRetentionDays * 86400000);
     await this.db.transaction().execute(async (tx) => {
+      await acquireRuleScopeLocks(tx, ruleScopeLockSet(s));
       await sql`SELECT pg_advisory_xact_lock(hashtextextended(${"privacy:" + s.organizationId + ":" + s.guildId},0))`.execute(
         tx,
       );

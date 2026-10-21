@@ -1,3 +1,4 @@
+import { publicApiHeaders } from "../../auth/api-proof";
 import { assertDisplayedGuild } from "../../auth/displayed-guild";
 import { DomainError } from "../../../../../packages/shared/src/index";
 import { failureResponse } from "../../auth/failure-response";
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest) {
     const response = await fetch(
       `${context.base}/v3/organizations/${context.organizationId}/guilds/${context.guildId}/actions`,
       {
-        headers: { Authorization: `Bearer ${context.token}` },
+        headers: publicApiHeaders(context, req.cookies.get("nexus_session")?.value, "GET", `${context.base}/v3/organizations/${context.organizationId}/guilds/${context.guildId}/actions`),
         cache: "no-store",
         signal: AbortSignal.timeout(15000),
       },

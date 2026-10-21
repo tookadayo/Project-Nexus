@@ -1,6 +1,6 @@
-import {canonicalSignal,signalRegistry} from '../../events/src/registry.js';
+import {canonicalSignal,signalRegistry} from '../../events/src/registry';
 import type {MetricEpisode,MetricEvent} from './index.js';
-import {metricEvidence,type MetricEvidence} from '../../shared/src/metric-evidence.js';
+import {metricEvidence,type MetricEvidence} from '../../shared/src/metric-evidence';
 export type CoverageMetric={signal:string,expected:number|null,observed:number|null,status:'healthy'|'degraded'|'incomplete'|'unavailable'};
 export function inputCoverage(signal:string,expected:number|null,observed:number|null):CoverageMetric{return {signal,expected,observed,status:expected===null||observed===null?'unavailable':observed>=expected?'healthy':observed===0?'incomplete':'degraded'};}
 export const metricRegistry={

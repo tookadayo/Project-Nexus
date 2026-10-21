@@ -7,6 +7,7 @@ import { ProductPreview } from "./landing/product-preview";
 import "./landing/landing.css";
 import "./landing/public-pages.css";
 import "./landing/public-content.css";
+import "./landing/clear-product.css";
 
 const geist = Geist({
   subsets: ["latin"],
@@ -115,7 +116,10 @@ export function SiteShell({
   children: ReactNode;
 }) {
   return (
-    <div className={`site nexus-site ${geist.variable}`} lang={locale}>
+    <div
+      className={`site nexus-site nx-clear-product ${geist.variable}`}
+      lang={locale}
+    >
       <a className="nx-skip-link" href="#public-main">
         {copy(locale, "本文へスキップ", "Skip to content")}
       </a>

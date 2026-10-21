@@ -4,12 +4,18 @@ PostgreSQL is canonical for the normalized durable inbox, projections, immutable
 
 Before hosted beta, configure encrypted PostgreSQL backups and point-in-time recovery, retention/access controls, off-host storage and tested recovery targets. Protect IdentityVault/encryption/lookup keys separately; a DB backup without the matching keys cannot route or decrypt identity. Keys and tokens must never appear in command history, logs or public artifacts.
 
+For alpha15 the approved maximum backup lifetime is **seven days**, including
+snapshots, point-in-time archives, replicas retained for recovery, and exported
+execution state. Expire every recovery copy within that window; a longer existing
+backup policy is a release blocker, not an exception to automation retention.
+This implementation does not change the host's backup/security configuration.
+
 Restore drill:
 
 1. Restore a consistent backup into an isolated environment. Disable Gateway and Discord outbound transports before starting workers.
-2. Match encryption/lookup key versions through the deployment secret manager. Run additive migrations through 051; verify schema and immutable recipe revisions. Keep every ingress, public endpoint and outbound transport closed.
+2. Match encryption/lookup key versions through the deployment secret manager. Run additive migrations through 059; verify schema and immutable recipe revisions, including the saved schedule-meaning reviews. Keep every ingress, public endpoint and outbound transport closed.
 3. Apply the **newest protected deletion tombstone export**, which may be newer than the restored DB backup, using the offline procedure in [alpha12 operator operations](alpha12-operator-operations.md). This reapplies scoped Guild/member deletion and revokes every restored public/operator session. An older DONE marker does not authorize restored data. Missing keys, identity evidence, current tombstones or incomplete queue scrub mean remain offline. Verify org/guild scoping, UNKNOWN legacy flags and retained epoch attribution after erasure.
-4. Compare source fact counts and typed daily projections. Use `nexus_rebuild_guild_rollups(organization_id, guild_id)` under a scoped privacy transaction if a repair is required.
+4. Tombstone application also fences restored alpha15 automations: active definitions and schedules are disabled with new generations; unfinished runs are cancelled, or UNKNOWN when an external write may have started; old approval receipts expire. Revalidate/test/review before explicitly enabling a new run. Never resume restored waits or repeat restored external operations automatically. Compare source fact counts and typed daily projections. Use `nexus_rebuild_guild_rollups(organization_id, guild_id)` under a scoped privacy transaction if a repair is required.
 5. Replay pending durable inbox events through idempotent projectors. Expired ambiguous creates/sends remain UNKNOWN for review; do not enqueue them as new messages. Safe edits/deletes may use their bounded retry policy.
 6. Reconcile outbox leases/backlog, integration freshness, collection gaps and retained panel/role ownership before reconnecting the controlled Discord app.
 7. Record elapsed restore time, lost-data boundary, duplicate-write results, deletion results and operator approval before production restoration.

@@ -1,18 +1,20 @@
 vi.mock('../../apps/web/app/auth/public-session-store',async()=>{const {memoryPublicSessions}=await import('../fixtures/public-sessions');return {publicSessions:()=>memoryPublicSessions};});
 vi.mock("server-only",()=>({}));
 import {afterEach,expect,it,vi} from 'vitest';
-vi.mock('../../apps/web/app/auth/server-access',()=>({manageableConnection:vi.fn(async(id:string)=>['111111111111111111','222222222222222222'].includes(id)?{state:'VERIFIED',version:'2026-09-30T00:00:00.000Z',name:'Server'}:null)}));
+vi.mock('../../apps/web/app/auth/server-access',()=>({manageableConnection:vi.fn(async(id:string)=>['111111111111111111','222222222222222222'].includes(id)?{state:'VERIFIED',version:'2026-09-30T00:00:00.000Z',name:'Server',operationsCanConfigure:true}:null),serverServices:()=>({db:{}})}));
 import {PublicTokenCipher} from '../../packages/security/src/public-sessions';
 import {memoryPublicSessions} from '../fixtures/public-sessions';
 import {readFileSync} from 'node:fs';
 import {NextRequest} from '../../apps/web/node_modules/next/server.js';
 import {authorizedGuilds,dashboardContext,openSession,sealSession,validOAuthState} from '../../apps/web/app/auth/session';
-import {GET as selectGuild} from '../../apps/web/app/auth/select/route';
+import {GET as confirmGuild,POST as selectGuild} from '../../apps/web/app/auth/select/route';
+import {createCsrfToken,csrfFieldName} from '../../apps/web/app/auth/csrf';
+import {proxy} from '../../apps/web/proxy';
 import {GET as oauthLogin} from '../../apps/web/app/auth/login/route';
 import {GET as oauthCallback} from '../../apps/web/app/auth/callback/route';
 import {POST as webControl} from '../../apps/web/app/control/route';
 import {previousCompleteWeek} from '../../apps/worker/src/weekly.js';
-import {settingsSchema} from '../../packages/settings/src/index.js';
+import {settingsSchema,SettingsService} from '../../packages/settings/src/index.js';
 import {actionTemplates} from '../../packages/presentation/src/templates.js';
 import {planRegistry} from '../../packages/settings/src/billing/index.js';
 import {toOpportunity} from '../../packages/presentation/src/adapters.js';
@@ -20,7 +22,7 @@ import {en} from '../../packages/discord-panels/src/i18n/en.js';
 import {ja} from '../../packages/discord-panels/src/i18n/ja.js';
 import {webEn,webJa,messages,opportunityNames,evidenceNames} from '../../packages/discord-panels/src/i18n/web.js';
 
-afterEach(()=>{vi.unstubAllGlobals();vi.unstubAllEnvs();});
+afterEach(()=>{vi.unstubAllGlobals();vi.unstubAllEnvs();vi.restoreAllMocks();memoryPublicSessions.reset();});
 it('starts measurement by default while leaving improvements and weekly messages off',()=>{
  const settings=settingsSchema.parse({});
  expect(settings.enabled).toBe(true);
@@ -48,8 +50,10 @@ it('checks OAuth state and rejects token ciphertext tampering or another session
  expect(()=>cipher.open('session-binding',tampered.toString('base64url'))).toThrow();expect(()=>cipher.open('other-session',encrypted)).toThrow();
  const value=await sealSession({accessToken:'access',userId:'12345678901234567',expiresAt:Date.now()+10000});expect((await openSession(value))?.userId).toBe('12345678901234567');expect(await openSession('tampered')).toBeNull();
 });
-it('authorizes only guilds with administrative permissions on each request',async()=>{
+it('authorizes dashboard data on each request and sends incomplete or uninstalled guilds through limited Web setup',async()=>{
  vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_SESSION_SECRET','a'.repeat(64));vi.stubEnv('API_KEY','b'.repeat(64));vi.stubEnv('DISCORD_TOKEN','bot-test');vi.stubEnv('DISCORD_APPLICATION_ID','123456789012345678');
+ vi.stubEnv('NEXUS_WEB_URL','http://localhost:3100');vi.stubEnv('NEXUS_HOSTED_BETA','off');
+ const readSettings=vi.spyOn(SettingsService.prototype,'get').mockResolvedValue({...settingsSchema.parse({setupVersion:3}),revision:4});
  vi.stubGlobal('fetch',vi.fn(async(_url:string,init?:RequestInit)=>({ok:true,json:async()=>String(_url).endsWith('/users/@me')?{id:'444444444444444444'}:init?.headers&&JSON.stringify(init.headers).includes('Bot ')?[
   {id:'111111111111111111'},{id:'222222222222222222'}]:[
   {id:'111111111111111111',name:'Admin',permissions:'32'},
@@ -60,10 +64,21 @@ it('authorizes only guilds with administrative permissions on each request',asyn
  const guilds=await authorizedGuilds('access','444444444444444444');expect(guilds.map(guild=>guild.id)).toEqual(['111111111111111111','222222222222222222','555555555555555555']);expect(guilds[2]?.installed).toBe(false);expect(guilds[2]?.installUrl).toContain('guild_id=555555555555555555');
  const session=await sealSession({accessToken:'access',userId:'444444444444444444',expiresAt:Date.now()+10000});
  const selected=await dashboardContext(session,'222222222222222222');expect(selected?.guildId).toBe('222222222222222222');
- const allowed=await selectGuild(new NextRequest('http://localhost:3100/auth/select?guild=222222222222222222',{headers:{cookie:`nexus_session=${session}`}}));expect(allowed.headers.get('location')).toContain('/dashboard/222222222222222222');
+  const csrf=createCsrfToken(session,'a'.repeat(64)),cookie=`nexus_session=${session}; nexus_csrf=${csrf}`;
+  const confirmation=await confirmGuild(new NextRequest('http://localhost:3100/auth/select?guild=222222222222222222',{headers:{host:'localhost:3100',cookie}}));
+  expect(confirmation.status).toBe(200);expect(confirmation.cookies.get('nexus_guild')).toBeUndefined();expect(await confirmation.text()).toContain(`name="${csrfFieldName}" value="${csrf}"`);
+  const selectRequest=(guild:string,origin='http://localhost:3100',supplied=csrf)=>new NextRequest('http://localhost:3100/auth/select',{method:'POST',headers:{host:'localhost:3100',origin,'sec-fetch-site':'same-origin',cookie,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({guild,[csrfFieldName]:supplied})});
+  expect((await proxy(selectRequest('222222222222222222','https://outside.example'))).status).toBe(403);
+  expect((await proxy(selectRequest('222222222222222222','http://localhost:3100','tampered'))).status).toBe(403);
+  expect((await proxy(selectRequest('222222222222222222'))).status).toBe(200);
+  const allowed=await selectGuild(selectRequest('222222222222222222'));expect(allowed.status).toBe(303);expect(allowed.headers.get('location')).toContain('/dashboard/222222222222222222');expect(allowed.cookies.get('nexus_guild')?.httpOnly).toBe(true);
+ readSettings.mockResolvedValueOnce({...settingsSchema.parse({setupVersion:2}),revision:3});
+  const incomplete=await selectGuild(selectRequest('222222222222222222'));expect(incomplete.headers.get('location')).toContain('/setup?guild=222222222222222222');
  const unauthorized=await dashboardContext(session,'333333333333333333');expect(unauthorized).toBeNull();
- const response=await selectGuild(new NextRequest('http://localhost:3100/auth/select?guild=333333333333333333',{headers:{cookie:`nexus_session=${session}`}}));expect(response.status).toBe(307);expect(response.headers.get('location')).toContain('/servers');
- const uninstalled=await selectGuild(new NextRequest('http://localhost:3100/auth/select?guild=555555555555555555',{headers:{cookie:`nexus_session=${session}`}}));expect(uninstalled.status).toBe(307);expect(uninstalled.headers.get('location')).toContain('/servers');
+  const response=await selectGuild(selectRequest('333333333333333333'));expect(response.status).toBe(303);expect(response.headers.get('location')).toContain('/setup?guild=333333333333333333');
+ // Navigation to setup is not authorization; the limited API separately rejects
+ // a member without current management authority and exposes no dashboard data.
+  const uninstalled=await selectGuild(selectRequest('555555555555555555'));expect(uninstalled.status).toBe(303);expect(uninstalled.headers.get('location')).toContain('/setup?guild=555555555555555555');
 });
 it('keeps OAuth return paths inside a validated guild dashboard route',async()=>{
  vi.stubEnv('NEXUS_WEB_AUTH_MODE','oauth');vi.stubEnv('NEXUS_WEB_URL','https://nexus.example');vi.stubEnv('NEXUS_SESSION_SECRET','a'.repeat(64));vi.stubEnv('DISCORD_APPLICATION_ID','123456789012345678');vi.stubEnv('DISCORD_CLIENT_SECRET','test-secret');

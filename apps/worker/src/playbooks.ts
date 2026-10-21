@@ -276,7 +276,7 @@ export class PlaybookWorker {
       await sql`UPDATE playbook_action_runs r SET state=q.state FROM action_outbox q WHERE r.organization_id=${s.organizationId}::uuid AND r.guild_id=${s.guildId} AND q.organization_id=r.organization_id AND q.guild_id=r.guild_id AND q.id=r.action_id AND r.state='QUEUED' AND q.state IN ('SUCCEEDED','FAILED','UNKNOWN')`.execute(
         tx,
       );
-      await sql`UPDATE playbook_action_runs r SET state=q.state FROM webhook_deliveries q WHERE r.organization_id=${s.organizationId}::uuid AND r.guild_id=${s.guildId} AND q.organization_id=r.organization_id AND q.guild_id=r.guild_id AND q.id=r.delivery_id AND r.state='QUEUED' AND q.state IN ('SUCCEEDED','FAILED')`.execute(
+      await sql`UPDATE playbook_action_runs r SET state=q.state FROM webhook_deliveries q WHERE r.organization_id=${s.organizationId}::uuid AND r.guild_id=${s.guildId} AND q.organization_id=r.organization_id AND q.guild_id=r.guild_id AND q.id=r.delivery_id AND r.state='QUEUED' AND q.state IN ('SUCCEEDED','FAILED','UNKNOWN')`.execute(
         tx,
       );
       const done = (

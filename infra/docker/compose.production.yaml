@@ -1,0 +1,120 @@
+# Standalone production datastores. Do not merge with compose.yaml.
+# Official Docker Hub tag metadata checked 2026-10-18; see alpha17-datastore-operations.md.
+name: nexus-production-data
+
+x-bounded-logs: &bounded-logs
+  driver: local
+  options:
+    max-size: "${NEXUS_PRODUCTION_LOG_MAX_SIZE:?Set an approved finite log size}"
+    max-file: "${NEXUS_PRODUCTION_LOG_MAX_FILES:?Set an approved positive log file count}"
+
+services:
+  postgres:
+    image: postgres:18.6-trixie@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336
+    platform: linux/amd64
+    restart: "${NEXUS_PRODUCTION_DATASTORE_RESTART_POLICY:?Set approved datastore restart policy}"
+    stop_grace_period: 30s
+    cpus: "${NEXUS_PRODUCTION_PG_CPUS:?Set approved positive PostgreSQL CPU limit}"
+    mem_limit: "${NEXUS_PRODUCTION_PG_MEMORY:?Set approved finite PostgreSQL memory limit}"
+    memswap_limit: "${NEXUS_PRODUCTION_PG_MEMORY:?Set approved finite PostgreSQL memory limit}"
+    pids_limit: "${NEXUS_PRODUCTION_PG_PIDS:?Set approved positive PostgreSQL PID limit}"
+    shm_size: "${NEXUS_PRODUCTION_PG_SHM_SIZE:?Set approved finite PostgreSQL shared memory size}"
+    environment:
+      POSTGRES_USER: nexus_owner
+      POSTGRES_DB: nexus
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
+      PGDATA: /var/lib/postgresql/18/docker
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres_production:/var/lib/postgresql
+    secrets:
+      - postgres_password
+    healthcheck:
+      # Server readiness only; application authentication/schema checks are separate.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "5432", "-U", "nexus_owner", "-d", "nexus"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 30s
+    logging: *bounded-logs
+
+  redis:
+    image: redis:8.10.2-trixie@sha256:2c2dff791878316e3b083188be0d578423b24813cdda5de0e80ea4f7b3e6bfd6
+    platform: linux/amd64
+    restart: "${NEXUS_PRODUCTION_DATASTORE_RESTART_POLICY:?Set approved datastore restart policy}"
+    stop_grace_period: 30s
+    cpus: "${NEXUS_PRODUCTION_REDIS_CPUS:?Set approved positive Redis CPU limit}"
+    mem_limit: "${NEXUS_PRODUCTION_REDIS_MEMORY:?Set approved finite Redis memory limit}"
+    memswap_limit: "${NEXUS_PRODUCTION_REDIS_MEMORY:?Set approved finite Redis memory limit}"
+    pids_limit: "${NEXUS_PRODUCTION_REDIS_PIDS:?Set approved positive Redis PID limit}"
+    environment:
+      NEXUS_REDIS_MAXMEMORY_BYTES: "${NEXUS_PRODUCTION_REDIS_MAXMEMORY_BYTES:?Set approved positive Redis maxmemory bytes}"
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if ! test -s /run/secrets/redis_acl; then
+          printf '%s\n' 'Redis ACL file is missing or empty.' >&2
+          exit 1
+        fi
+        if ! awk '
+          { sub(/\r$$/, "") }
+          $$1 == "user" && $$2 == "default" {
+            defaults++
+            if (NF != 3 || $$3 != "off") invalid = 1
+          }
+          {
+            for (i = 1; i <= NF; i++)
+              if ($$i == "nopass" || substr($$i, 1, 1) == ">") invalid = 1
+          }
+          END { exit (defaults != 1 || invalid) }
+        ' /run/secrets/redis_acl; then
+          printf '%s\n' 'Redis ACL requires one disabled default user and no plaintext or password-free user.' >&2
+          exit 1
+        fi
+        case "$$NEXUS_REDIS_MAXMEMORY_BYTES" in
+          ''|*[!0-9]*)
+            printf '%s\n' 'Redis maxmemory must be approved positive integer bytes.' >&2
+            exit 1 ;;
+        esac
+        if ! test "$$NEXUS_REDIS_MAXMEMORY_BYTES" -gt 0; then
+          printf '%s\n' 'Redis maxmemory must be approved positive integer bytes.' >&2
+          exit 1
+        fi
+        exec /usr/local/bin/docker-entrypoint.sh redis-server \
+          --bind 0.0.0.0 --port 6379 --protected-mode yes \
+          --appendonly yes --appendfsync everysec \
+          --aclfile /run/secrets/redis_acl \
+          --maxmemory "$$NEXUS_REDIS_MAXMEMORY_BYTES" --maxmemory-policy noeviction
+    ports:
+      - "127.0.0.1:56379:6379"
+    volumes:
+      - redis_production:/data
+    secrets:
+      - redis_acl
+    healthcheck:
+      # NOAUTH proves only an alive server refusing unauthenticated PING.
+      # It does not prove application credentials or BullMQ/Streams permissions.
+      test:
+        - CMD-SHELL
+        - 'reply="$$(redis-cli --raw -h 127.0.0.1 -p 6379 ping 2>/dev/null)"; case "$$reply" in "NOAUTH Authentication required."*) exit 0 ;; *) exit 1 ;; esac'
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+    logging: *bounded-logs
+
+volumes:
+  postgres_production:
+    name: nexus-production-postgres-18
+  redis_production:
+    name: nexus-production-redis-8
+
+secrets:
+  postgres_password:
+    file: "${NEXUS_PRODUCTION_POSTGRES_PASSWORD_FILE:?Set absolute path to protected PostgreSQL password file outside checkout}"
+  redis_acl:
+    file: "${NEXUS_PRODUCTION_REDIS_ACL_FILE:?Set absolute path to protected Redis ACL file outside checkout}"

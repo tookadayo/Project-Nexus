@@ -1,0 +1,39 @@
+{
+  "main_rows": 236,
+  "public_opcodes": 212,
+  "static_standard": 105,
+  "dynamic_data": 17,
+  "dynamic_procedure_call": 1,
+  "procedure_definition": 1,
+  "argument_reporters": 2,
+  "editor_support": 4,
+  "math_selection_details": 14,
+  "stop_selection_details": 3,
+  "extension_public": 89,
+  "hidden_standard": 17,
+  "hidden_extensions": 7,
+  "disposition_public_counts": {
+    "nonapplicable": 55,
+    "reference_only": 15,
+    "excluded": 90,
+    "bounded_alternative": 12,
+    "adopted_design": 36,
+    "ui_alternative": 4
+  },
+  "sprite_public": 210,
+  "stage_public": 160,
+  "extension_counts": {
+    "music": 7,
+    "pen": 9,
+    "videoSensing": 4,
+    "faceSensing": 9,
+    "text2speech": 3,
+    "translate": 2,
+    "makeymakey": 2,
+    "microbit": 10,
+    "gdxfor": 9,
+    "ev3": 11,
+    "boost": 12,
+    "wedo2": 11
+  }
+}

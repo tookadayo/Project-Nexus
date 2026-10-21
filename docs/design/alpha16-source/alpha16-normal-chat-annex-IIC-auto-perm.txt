@@ -1,0 +1,97 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 03:40 UTC
+Reasoning: 極高. Proposed rules and synthetic fixtures only; no tests executed. Thresholds are unvalidated and require approval. Source adapters are unverified.
+
+付録II-C：AUTO-001 / AUTO-002 / PERM-001
+AUTO-001 — Runの確実な失敗率
+項目	契約
+ID / version	AUTO-001 / 1.0
+目的	同一Automationの同一live revisionについて、確実にFAILEDと確定したRunの割合を検出し、運用改善のレビュー案を提示する。RESULT_UNKNOWN、CANCELLED、未完了、期限切れをFAILEDへ混入しない。
+metric / source	automation.run.confirmed_failure_rate。提案adapter runtime_run_outcome_v1。同一automationId + liveRevisionId、Run状態、terminal outcome、source revision、snapshot/health observationが取得可能であること。Automation Runtime/PG永続化の存在はコード監査で確認済みだが、このadapterの実在は未確認。
+対象・重複除外	1 Run = 1観測単位。retry/attemptはRun数へ重複加算しない。同一runIdの重複観測は1件。対象期間内に開始または完了したRunのうち、対象live revisionへ固定されたものだけを対象。tombstone対象は除外。
+式	knownN = FAILED + SUCCEEDED。failureRate = FAILED / knownN。unknownRate = RESULT_UNKNOWN / (FAILED + SUCCEEDED + RESULT_UNKNOWN)。CANCELLED / unfinished / expiredは両式の分母・分子から除外。
+window / period_role	CURRENT = [2026-10-08T00:00:00Z, 2026-10-15T00:00:00Z)、evaluationAsOf = 2026-10-15T00:00:00Z。PREVIOUSは使用しない。
+minN / freshness / coverage	候補：minKnownN=20、source-health freshness <= 24h、coverage >= 0.95。いずれも未検証・承認待ち。minNは統計的信頼度や匿名性保証ではない。
+threshold / bounds	候補：failureRate >= 0.10でFIRE、unknownRate > 0.20で判定抑止。failure threshold候補範囲0.05–0.50、unknown上限0.00–0.50、minN候補10–200。単位は率。未検証・承認待ち。
+欠測等	sourceなし→INELIGIBLE/MISSING_SOURCE。source stale→INELIGIBLE/STALE_SOURCE。coverage不足→INELIGIBLE/PARTIAL_COVERAGE。knownN不足→INELIGIBLE/INSUFFICIENT_N。unknownRate超過→INELIGIBLE/UNKNOWN_SUPPRESSED。knownN=0→INELIGIBLE/ZERO_DENOMINATOR。privacy抑止→INELIGIBLE/PRIVACY_SUPPRESSED。
+判定	knownN >= minN、quality十分、unknownRate <= 0.20を満たし、failureRate >= 0.10ならFIRE。それ以外の十分な観測で閾値未満ならNO_FIRE。UNKNOWNをFAILEDへ変換しない。
+cooldown / 解消 / 再発 / priority	候補cooldown 24h。起点はSuggestion生成時刻。後続の十分な評価がNO_FIREなら解消。同一conditionが継続してもcooldown中は同一dedupe keyで再生成しない。解消後の新規FIREは新window/evaluation hashで再発として扱う。priority=P2。
+target	提案targetType AUTOMATION_FLOW、targetId=automationId、liveVersion=対象liveRevisionId。別revisionを混ぜない。
+action	REVIEW_ONLYのみ。CREATE_DRAFTは現時点で許可しない。typed draft fieldは指定しない。強制retry、resume、timeout短縮等を自動提案しない。
+evidence / 説明	snapshotId/sourceHealthObservationId/sourceRevision/liveRevision/window/FAILED/SUCCEEDED/UNKNOWN/excluded counts/failureRate/unknownRateのみ。説明例：「同一live revisionの期間内で、確実に失敗したRunは4/40（10%）でした。RESULT_UNKNOWNは別集計し、失敗には含めていません。」因果・個人の意思は断定しない。
+合成fixture — AUTO-001
+
+候補config：failureRate >= 0.10、unknownRate <= 0.20、minKnownN=20。
+asOf=2026-10-15T00:00:00Z、CURRENT [2026-10-08T00:00:00Z, 2026-10-15T00:00:00Z)。
+
+Fixture	入力	期待結果	action
+II-C-AUTO001-F01	FAILED=6, SUCCEEDED=34, UNKNOWN=0、CANCELLED=3、unfinished=2、expired=1 → knownN=40、failureRate=0.15	FIRE	REVIEW_ONLY
+II-C-AUTO001-F02	FAILED=2, SUCCEEDED=38、UNKNOWN=0 → knownN=40、failureRate=0.05	NO_FIRE	—
+II-C-AUTO001-F03	FAILED=4, SUCCEEDED=36、UNKNOWN=0 → knownN=40、failureRate=0.10	FIRE（閾値ちょうど）	REVIEW_ONLY
+II-C-AUTO001-F04	FAILED=6, SUCCEEDED=14、UNKNOWN=6 → knownN=20、unknownRate=6/26=0.2307…、failureRate=0.30	INELIGIBLE / UNKNOWN_SUPPRESSED	—
+II-C-AUTO001-F05	FAILED=3, SUCCEEDED=12、UNKNOWN=0 → knownN=15、failureRate=0.20	INELIGIBLE / INSUFFICIENT_N	—
+II-C-AUTO001-F06	FAILED=0, SUCCEEDED=0、UNKNOWN=0、CANCELLED=4、unfinished=2、expired=1	INELIGIBLE / ZERO_DENOMINATOR	—
+II-C-AUTO001-F07	FAILED=6, SUCCEEDED=34だがsource-health observationが2026-10-13T00:00Zで、freshness条件外	INELIGIBLE / STALE_SOURCE	—
+AUTO-002 — wait/resume・execution/leaseの運用異常
+項目	契約
+ID / version	AUTO-002 / 1.0
+目的	意図した長時間waitを異常扱いせず、dueAt・deadline・heartbeat・leaseから観測可能なRuntime異常を検出する。Tunnel断だけでRuntime停止やUNKNOWNとは判定しない。
+metric / source	automation.runtime.operational_anomaly_rate。提案adapter runtime_execution_observation_v1。state/dueAt/deadlineAt/heartbeatAt/leaseExpiresAt/sourceObservationAt/liveRevisionが必要。正確なadapter/schemaは未確認。
+対象・重複除外	1 runtime execution itemを1観測単位とする。同一operation/step executionの重複snapshotは1件。tombstone対象を除外。将来dueのWAITING/RESUMABLEは分母から除外。
+厳密な式	overdueWait = state∈{WAITING,RESUMABLE} AND dueAt + grace < asOf AND terminalAt IS NULL。expiredDeadline = deadlineAt + grace < asOf AND terminalAt IS NULL。staleExecution = state∈{EXECUTING,CLAIMED} AND (leaseExpiresAt < asOf OR heartbeatAt + heartbeatGrace < asOf)。anomaly = overdueWait OR expiredDeadline OR staleExecution。anomalyRate = anomalyCount / eligibleN。境界が== asOfの場合は異常に含めない。
+window / period_role	CURRENT = [2026-10-14T00:00:00Z, 2026-10-15T00:00:00Z)、evaluationAsOf=2026-10-15T00:00:00Z。
+minN / freshness / coverage	候補：minN=20、source observation freshness <=5min、coverage >=0.95。未検証・承認待ち。source snapshot自体が古い場合はRuntime異常と断定しない。
+threshold / bounds	候補anomalyRate >= 0.10。threshold候補0.05–0.50、grace 5–60min、heartbeatGrace 2–15min、minN 10–200、freshness 1–15min、coverage 0.90–1.00。全て未検証・承認待ち。
+欠測等	due/heartbeat/lease等の必要観測が取得不能→INELIGIBLE/MISSING_SOURCEまたはPARTIAL_COVERAGE。source stale→INELIGIBLE/STALE_SOURCE。minN不足→INELIGIBLE/INSUFFICIENT_N。privacy suppression→INELIGIBLE/PRIVACY_SUPPRESSED。eligibleN=0→INELIGIBLE/ZERO_DENOMINATOR。Tunnel状態だけではFIREしない。
+cooldown / 解消 / 再発 / priority	候補cooldown 6h。起点はSuggestion生成時。十分なNO_FIREで解消。同一異常のcooldown中は同一dedupe keyで再生成しない。解消後に新windowで再発した場合のみ新Suggestion。priority=P1。
+target	提案targetType AUTOMATION_RUNTIME、targetId=automationId、liveVersion=対象liveRevisionId。
+action	REVIEW_ONLYのみ。CREATE_DRAFTは許可しない。強制resume、再送、leaseの手動延長等を推奨actionにしない。
+evidence / 説明	anomaly種別別count、eligibleN、rate、due/grace、deadline、heartbeat/lease観測時刻、source observation ID/version。説明例：「観測可能なRuntime item 40件中6件が、due/grace・deadline・lease/heartbeatのいずれかの異常条件に該当しました。将来dueのwaitおよびTunnel状態は判定対象外です。」
+合成fixture — AUTO-002
+
+候補config：anomalyRate >= 0.10、grace=15min、heartbeatGrace=5min、minN=20、coverage>=0.95、freshness<=5min。
+
+Fixture	入力	期待結果	action
+II-C-AUTO002-F01	eligible=40、overdueWait=2、staleExecution=2、expiredDeadline=2 → 6/40=0.15	FIRE	REVIEW_ONLY
+II-C-AUTO002-F02	eligible=40、anomaly=2 → 2/40=0.05	NO_FIRE	—
+II-C-AUTO002-F03	eligible=40、anomaly=4 → 4/40=0.10、うちdueAt+15minがasOfと完全一致する項目は非異常	FIRE（閾値ちょうど）	REVIEW_ONLY
+II-C-AUTO002-F04	Runtime source observationが2026-10-14T23:40Z、asOfから20min以上経過	INELIGIBLE / STALE_SOURCE	—
+II-C-AUTO002-F05	expected observable=30、観測可能=24、coverage=0.80、anomaly=6/24	INELIGIBLE / PARTIAL_COVERAGE	—
+II-C-AUTO002-F06	eligible=10、anomaly=3 → 0.30だがminN未満	INELIGIBLE / INSUFFICIENT_N	—
+II-C-AUTO002-F07	eligible=0。全WAITING itemのdueAtが2026-10-15T02:00Z以降で将来wait	INELIGIBLE / ZERO_DENOMINATOR	—
+II-C-AUTO002-F08	eligible=30、anomaly=0。Tunnel down=trueだがRuntime sourceはasOf直前に正常観測	NO_FIRE。Tunnel断をRuntime異常へ変換しない	—
+PERM-001 — 必要permissionと観測permissionの差
+項目	契約
+ID / version	PERM-001 / 1.0
+目的	対象に必要と定義されたpermissionのうち、実際にDENYと確認できたものだけを不足として提示する。観測不能を権限不足と誤認しない。
+metric / source	permission.confirmed_gap_rate。提案adapter permission_observation_v1＋permission_requirement_registry_v1。必要permissionの適用範囲と、権限状態ALLOW/DENY/UNKNOWNを取得できること。現コードにこのadapterが存在することは未確認。
+対象・重複除外	対象guild/feature/integrationについて、要求registryのpermissionCode + resourceScope単位で重複排除。対象外permissionは除外。UNKNOWNはDENYへ変換しない。user IDや個人のrole履歴を長期保存して判定しない。
+厳密な式	requiredN = applicable required permission entries。missingN = count(observed state = DENY)。gapRate = missingN / requiredN。UNKNOWNはmissingNに含めないがcoverageを低下させる。coverage = observed(ALLOW or DENY) / requiredN。
+window / period_role	CURRENT = [2026-10-14T00:00:00Z, 2026-10-15T00:00:00Z)、evaluationAsOf=2026-10-15T00:00:00Z。最新の許可されたpermission observationを使用。
+minN / freshness / coverage	候補：minN=5、freshness <=24h、coverage >=0.95。未検証・承認待ち。
+threshold / bounds	候補gapRate >= 0.20でFIRE。threshold候補0.05–1.00、minN 3–20、freshness 1–72h、coverage 0.90–1.00。未検証・承認待ち。
+欠測等	requirement registryなし→DISABLED/REQUIREMENT_SOURCE_MISSING。requiredN=0→INELIGIBLE/ZERO_DENOMINATOR。coverage不足でUNKNOWN等が残る→INELIGIBLE/OBSERVATION_UNAVAILABLE。privacy suppression→INELIGIBLE/PRIVACY_SUPPRESSED。source stale→INELIGIBLE/STALE_SOURCE。minN不足→INELIGIBLE/INSUFFICIENT_N。確認済みDENYのみを権限不足として提示。
+cooldown / 解消 / 再発 / priority	候補cooldown 24h。起点はSuggestion生成。十分なNO_FIREで解消。同一permission gapをcooldown中に再生成しない。解消後に新しい観測で再発した場合のみ新Suggestion。priority=P1。
+target	提案targetType GUILD_PERMISSION_PROFILE、targetId=guildId、liveVersion=active permission requirement version。いずれも提案上の論理名。
+action	REVIEW_ONLYのみ。CREATE_DRAFT不可。AIからrole grant、permission変更、managed role変更を行わない。typed draft fieldなし。
+evidence / 説明	permission code、resource scope、requiredN、confirmed DENY数、coverage、source revision/observation ID。secret、token、個人別role履歴は含めない。説明例：「必要permission 5件のうち1件がDENYとして確認されました。観測不能なpermissionは不足として数えていません。」因果・意図は断定しない。
+合成fixture — PERM-001
+
+候補config：gapRate >= 0.20、minN=5、coverage>=0.95、freshness<=24h。
+
+Fixture	入力	期待結果	action
+II-C-PERM001-F01	required=5、ALLOW=4、DENY=1、UNKNOWN=0 → gapRate=1/5=0.20	FIRE（閾値ちょうど）	REVIEW_ONLY
+II-C-PERM001-F02	required=5、ALLOW=5、DENY=0、UNKNOWN=0 → 0/5=0	NO_FIRE	—
+II-C-PERM001-F03	required=5、ALLOW=3、DENY=2 → gapRate=2/5=0.40	FIRE	REVIEW_ONLY
+II-C-PERM001-F04	required=5、ALLOW=3、DENY=1、UNKNOWN=1 → coverage=4/5=0.80	INELIGIBLE / OBSERVATION_UNAVAILABLE。UNKNOWNをDENY扱いしない	—
+II-C-PERM001-F05	required=2、ALLOW=1、DENY=1 → gapRate=0.50だがminN=2	INELIGIBLE / INSUFFICIENT_N	—
+II-C-PERM001-F06	required=0、適用可能な必要permissionなし	INELIGIBLE / ZERO_DENOMINATOR	—
+II-C-PERM001-F07	required=5、ALLOW=3、DENY=1、1件privacy suppression → coverage=0.80	INELIGIBLE / PRIVACY_SUPPRESSED	—
+II-C-PERM001-F08	required=5、ALLOW=4、DENY=1だがsource observationが2026-10-13T00:00Z	INELIGIBLE / STALE_SOURCE	—
+3ルール対応
+Rule	adapter	UI	action	合成fixture
+AUTO-001	runtime_run_outcome_v1（提案・未照合）	Automation / Run Health	REVIEW_ONLY	II-C-AUTO001-F01〜F07
+AUTO-002	runtime_execution_observation_v1（提案・未照合）	Automation / Runtime Health	REVIEW_ONLY	II-C-AUTO002-F01〜F08
+PERM-001	permission_observation_v1＋permission_requirement_registry_v1（提案・未照合）	Settings / Permission Health	REVIEW_ONLY	II-C-PERM001-F01〜F08
+
+数値threshold、minN、freshness、coverage、cooldown、graceはすべて未検証・承認待ちの設計候補であり、benchmark・統計的信頼度・匿名性保証を意味しない。必要なsource adapterが現コードで成立しない場合は、本文収集・新規個人IDの長期保存・Run保持延長で補完せず、該当評価をMISSING/DISABLED側へ倒す。

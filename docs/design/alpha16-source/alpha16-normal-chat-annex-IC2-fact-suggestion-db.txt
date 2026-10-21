@@ -1,0 +1,501 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 02:50 UTC
+Reasoning: 極高. Proposed design only. No implementation or tests. Retention, public scope, and mapping to existing tables remain pending as marked.
+
+NEXUS alpha16 — 付録I-C2
+Fact・Rule・Suggestionの論理DB契約
+
+状態：設計案／未実装／未検証
+
+本付録はI-A・I-B・I-A追補・I-C1を継承し、競合時はI-C1を優先する。以下の13名称はすべて提案論理テーブル名であり、既存実テーブルとの対応は未照合。既存正本で同等の制約を満たせる場合、別テーブルの追加は必須としない。
+
+C2-1. 共通型・制約
+型と命名
+記法	定義
+UUID	サーバー生成UUID
+ID	VARCHAR(128)、正規化された識別子
+GID	VARCHAR(20)、Discord guild ID文字列
+VER	INTEGER、1以上
+TS	TIMESTAMPTZ、UTC
+DEC	NUMERIC(38,18)
+HASH	CHAR(64)、SHA-256小文字hex
+ENUM	列挙値をCHECKで制限
+!	NOT NULL
+?	NULL許可
+=値	DEFAULT値
+
+全guild所属テーブルには原則guild_id:GID!を設ける。created_at:TS!=now()を共通とし、変更可能な集約根にはrow_version:VER!=1を設ける。
+
+全FKは可能な限り(guild_id, resource_id)による複合FKとし、異なるguildの行を参照できない構造にする。グローバルなrule_versionのみguild非依存とする。
+
+削除依存は原則RESTRICT。物理削除は承認済みpurge transactionで依存関係を解消して実施する。無条件CASCADEによる監査・tombstone消失は禁止する。
+
+型付きFact Registry
+
+metric_keyはコードで版管理する許可済みregistryのみ。
+
+各定義はmetric_key / metric_definition_version / value_kind / unit / allowed_source_type / dimension_policy / privacy_policyを固定する。
+
+許可値型はINTEGER / DECIMAL / BOOLEAN / ENUM / TIMESTAMP。各値は対応する専用列へ格納し、value_kindと一致しない列はNULLとする。
+
+quality_stateはPRESENT / MISSING / STALE / SUPPRESSED / ERROR。PRESENT以外の値列はすべてNULLとし、0を代入しない。
+
+ENUM値はmetricごとの許可集合で検証する。任意の自由文字列をFact値として保存しない。
+
+禁止対象： raw投稿本文、DM、添付本文、自由文の人物評価、心理・センシティブ属性推定、不要な個人ID、credential、secret、任意SQL、実行可能コード。
+
+C2-2. 論理テーブル定義
+01. fact_snapshot
+
+追加field
+
+guild_id:GID!、snapshot_id:UUID!、scope_type:ENUM!、scope_id:ID!、scope_version:VER!、window_start:TS!、window_end:TS!、data_as_of:TS!、metric_registry_version:VER!、snapshot_hash:HASH?、sealed_at:TS?、state:ENUM!=BUILDING、invalidated_at:TS?、invalidation_reason:ENUM?
+
+制約
+
+PK：(guild_id,snapshot_id)
+
+window_start < window_end
+
+state：BUILDING / SEALED / INVALIDATED
+
+SEALED時はsealed_atとsnapshot_hash必須
+
+SEALED後、scope・期間・Fact集合・hashを変更不可
+
+snapshot_hashは正規化した全Factと期間・scope・registry版から生成
+
+UNIQUE：(guild_id,snapshot_hash)、ただしNULL除外
+
+INDEX：(guild_id,scope_type,scope_id,data_as_of DESC)
+
+不足Factが後から到着しても既存snapshotへ追加しない。新しいsnapshotを生成する。INVALIDATEDは制御メタデータの変更であり、元Factの書換えを許さない。
+
+削除： 参照するevaluation/evidenceを失効処理してからpurge。
+Retention： R_FACT。Run由来はR_RUN_BOUNDを優先。
+
+02. fact_value
+
+追加field
+
+guild_id:GID!、snapshot_id:UUID!、fact_id:UUID!、metric_key:ID!、metric_definition_version:VER!、value_kind:ENUM!、integer_value:BIGINT?、decimal_value:DEC?、boolean_value:BOOLEAN?、enum_value:VARCHAR(64)?、timestamp_value:TS?、unit:ENUM!、quality_state:ENUM!、missing_reason:ENUM?、sample_size:BIGINT?、source_type:ENUM!、source_revision:ID!、observed_at:TS!、window_start:TS!、window_end:TS!、dimension_key:ID?
+
+制約
+
+PK：(guild_id,snapshot_id,fact_id)
+
+FK：(guild_id,snapshot_id)→fact_snapshot
+
+UNIQUE：(guild_id,snapshot_id,metric_key,dimension_key)、NULLを同値扱い
+
+CHECK：sample_size >= 0、存在時
+
+PRESENT時は対応する値列だけ非NULL
+
+その他の品質状態では全値列NULL
+
+metric registryにない型・unit・dimensionを拒否
+
+INDEX：(guild_id,metric_key,observed_at DESC)
+
+dimension_keyは許可済み集計区分のみ。user IDや投稿IDを格納しない。
+
+更新： snapshot確定後はimmutable。
+削除： snapshotの管理されたpurgeに従う。
+Retention： 親snapshotと同一。
+
+03. source_health
+
+業務指標Factとは独立した取得基盤の観測記録。
+
+追加field
+
+guild_id:GID!、observation_id:UUID!、source_key:ID!、source_revision:ID!、observed_at:TS!、last_success_at:TS?、health_state:ENUM!、coverage_ratio:DEC?、error_category:ENUM?、observation_hash:HASH!
+
+制約
+
+PK：(guild_id,observation_id)
+
+UNIQUE：(guild_id,source_key,observed_at,source_revision)
+
+health：HEALTHY / DEGRADED / FAILED / UNKNOWN
+
+CHECK：coverageは0～1
+
+UNKNOWN時に健全性を推定補完しない
+
+INDEX：(guild_id,source_key,observed_at DESC)
+
+DATA-001は確認済みのhealth/coverage/last-success観測だけを使用する。health自体が未確認なら評価はUNKNOWN相当とする。
+
+更新： immutable。新観測は新行。
+削除： 参照evidenceを先に失効。
+Retention： R_SOURCE_HEALTH。
+
+04. rule_version
+
+追加field
+
+rule_id:ID!、rule_version:VER!、engine_version:ID!、registry_version:VER!、target_type:ENUM!、condition_handler_id:ID!、reason_template_id:ID!、action_template_id:ID!、definition_hash:HASH!、approval_state:ENUM!=DRAFT、approved_at:TS?
+
+制約
+
+PK：(rule_id,rule_version)
+
+UNIQUE：definition_hashは不要。異なるRuleが同じ実装を参照可能
+
+approval：DRAFT / APPROVED / RETIRED
+
+定義内容はimmutable。承認状態のみ制約付き遷移
+
+handler/templateは版管理済みコードregistryに存在必須
+
+INDEX：(engine_version,approval_state)
+
+Rule本体を自由JSONや実行式としてDB保存しない。
+
+削除： 参照中はRESTRICT。
+Retention： R_RULE_CONFIG。
+
+05. rule_config_version
+
+guildごとの設定snapshot。1つのconfigVersionに複数Rule行を含む。
+
+追加field
+
+guild_id:GID!、config_version:VER!、rule_id:ID!、rule_version:VER!、engine_version:ID!、enabled:BOOLEAN!=false、minimum_n:INTEGER?、threshold_value:DEC?、minimum_delta:DEC?、window_days:INTEGER?、freshness_seconds:INTEGER?、comparison_required:BOOLEAN!=false、config_state:ENUM!=DRAFT、approved_at:TS?、activated_at:TS?、config_hash:HASH!
+
+制約
+
+PK：(guild_id,config_version,rule_id)
+
+FK：(rule_id,rule_version)→rule_version
+
+UNIQUE：guildごとにACTIVEのconfigVersionは1つ
+
+各パラメータはrule registryで許可されたものだけ非NULL
+
+CHECK：minimum_n >= 1、window_days > 0、freshness_seconds > 0
+
+config：DRAFT / APPROVED / ACTIVE / RETIRED
+
+INDEX：(guild_id,config_state,config_version DESC)
+
+設定内容はimmutable。変更は新configVersionを作る。ACTIVE切替は全Rule行を一単位として行う。未承認configを評価に使わない。
+
+削除： 関連評価が残る間RESTRICT。
+Retention： R_RULE_CONFIG。
+
+06. evaluation_job
+
+追加field
+
+guild_id:GID!、job_id:UUID!、fact_snapshot_id:UUID?、source_health_set_hash:HASH?、evaluation_as_of:TS!、engine_version:ID!、config_version:VER!、rule_set_hash:HASH!、input_hash:HASH!、dedupe_key:HASH!、status:ENUM!=QUEUED、row_version:VER!=1、attempt_count:INTEGER!=0、started_at:TS?、finished_at:TS?、failure_code:ENUM?
+
+制約
+
+PK：(guild_id,job_id)
+
+FK：snapshot参照時はguild複合FK
+
+fact snapshot/source health入力の少なくとも一方必須
+
+UNIQUE：(guild_id,dedupe_key)
+
+status：QUEUED / RUNNING / CANCEL_REQUESTED / SUCCEEDED / FAILED / CANCELLED
+
+INDEX：(status,created_at)、(guild_id,evaluation_as_of DESC)
+
+evaluation_as_ofは初回enqueue時にserverが1回だけ確定。job、input hash、dedupe key、結果へ固定する。
+
+retry/resumeで変更しない。同じKeyは同じjob。新しい明示評価だけが新時刻を取得する。
+
+input hashにはFact/source-health集合hash、evaluationAsOf、rule/engine/config版を含める。
+
+更新： 状態と試行回数のみCAS。入力immutable。
+Retention： R_EVALUATION。
+
+07. evaluation_result
+
+追加field
+
+guild_id:GID!、result_id:UUID!、job_id:UUID!、rule_id:ID!、rule_version:VER!、engine_version:ID!、config_version:VER!、target_type:ENUM!、target_id:ID!、live_target_version:VER!、window_start:TS!、window_end:TS!、evaluation_as_of:TS!、decision:ENUM!、reason_code:ID!、quality_state:ENUM!、issue_fingerprint:HASH!、evidence_set_hash:HASH!
+
+制約
+
+PK：(guild_id,result_id)
+
+FK：(guild_id,job_id)→evaluation_job
+
+UNIQUE：(guild_id,job_id,rule_id,target_type,target_id,issue_fingerprint)
+
+decision：FIRED / NOT_MET / INSUFFICIENT_DATA / SUPPRESSED / ERROR
+
+INDEX：(guild_id,target_type,target_id,created_at DESC)
+
+結果はimmutable。統計的独立性、信頼確率、AI確信度を生成・保存しない。
+
+削除： Suggestion evidence等の失効後。
+Retention： R_EVALUATION。
+
+08. suggestion
+
+追加field
+
+guild_id:GID!、suggestion_id:UUID!、suggestion_version:VER!=1、target_type:ENUM!、target_id:ID!、live_target_version:VER!、evaluation_result_id:UUID!、rule_id:ID!、rule_version:VER!、engine_version:ID!、config_version:VER!、window_start:TS!、window_end:TS!、issue_code:ID!、issue_fingerprint:HASH!、dedupe_key:HASH!、lineage_key:HASH!、action_kind:ENUM!、action_schema_version:VER!、action_payload:JSONB!、shared_state:ENUM!=ACTIVE、invalidation_reason:ENUM?、last_observed_at:TS!、expires_at:TS!、consumed_at:TS?
+
+制約
+
+PK：(guild_id,suggestion_id)
+
+FK：evaluation resultはguild複合FK
+
+UNIQUE：(guild_id,dedupe_key)
+
+INDEX：(guild_id,target_type,target_id,shared_state)
+
+INDEX：(guild_id,lineage_key,created_at DESC)
+
+shared stateはI-C1どおり、
+
+ACTIVE / REJECTED / EXPIRED / INVALIDATED / CONSUMED
+
+のみ。
+
+SUPERSEDEDはinvalidation_reasonと履歴で表現。APPLIEDはoperation成功履歴で表現する。
+
+CONSUMED条件： 承認済みoperationが確実に成功し、対象domainの変更が確定した場合だけ。Draft作成・Apply受付ではCONSUMEDにしない。UNKNOWNはoperation側へ保持し、予約を解除しない。
+
+型付きaction payload
+
+action_payloadは自由JSONではなく、以下のdiscriminated unionに限定する。
+
+ADVISORY：reasonCode:ID
+
+DRAFT_FIELD_SET：changes[]。各要素はfieldKey:ID、valueKind:ENUM、型対応値列。1～50件
+
+DRAFT_TEMPLATE_APPLY：templateId:ID、templateVersion:VER
+
+各actionにはaction_kindとaction_schema_versionを一致させる。
+
+fieldKeyはtarget registryのdraft-editable allowlistのみ。未知field、任意HTTP、SQL、credential、permission、課金、公開、投稿、自動activation等は禁止。schema不適合JSONはDB保存前に拒否する。
+
+更新： shared state/CAS版と観測メタデータのみ。元評価・元根拠・提案payloadはimmutable。
+Retention： R_SUGGESTION。
+
+09. suggestion_evidence
+
+追加field
+
+guild_id:GID!、suggestion_id:UUID!、evidence_id:UUID!、evidence_kind:ENUM!、fact_snapshot_id:UUID?、fact_id:UUID?、source_health_observation_id:UUID?、evaluation_result_id:UUID!、evidence_role:ENUM!、added_at:TS!=now()
+
+制約
+
+PK：(guild_id,suggestion_id,evidence_id)
+
+FK：Suggestion、evaluation result、Factまたはsource healthへguild複合FK
+
+FACTではfact参照必須、health参照NULL
+
+SOURCE_HEALTHではhealth参照必須、fact参照NULL
+
+UNIQUE：同Suggestionへの同一根拠の重複登録禁止
+
+INDEX：Fact逆引き、source-health逆引き
+
+数値・個人情報・raw本文を複写しない。根拠の削除・失効時は関連Suggestionのactionable状態を同transactionで失効させる。
+
+更新： immutable。別観測は新evidenceとして追加。
+Retention： 参照元とSuggestionのうち短い期限。
+
+10. suggestion_user_state
+
+追加field
+
+guild_id:GID!、suggestion_id:UUID!、user_id:ID!、viewed_at:TS?、dismissed_at:TS?、saved_at:TS?、row_version:VER!=1
+
+制約
+
+PK：(guild_id,suggestion_id,user_id)
+
+FK：Suggestionへguild複合FK
+
+INDEX：(guild_id,user_id,dismissed_at DESC)
+
+本人以外の通常閲覧を禁止
+
+view/dismiss/saveはshared stateへ影響しない。削除対象ユーザーの状態は削除対象に含める。
+
+Retention： R_USER_STATE。Suggestion削除時に削除。
+
+11. suggestion_history
+
+追加field
+
+guild_id:GID!、suggestion_id:UUID!、event_id:UUID!、event_sequence:BIGINT!、event_type:ENUM!、actor_kind:ENUM!、actor_ref:ID?、related_operation_id:UUID?、from_state:ENUM?、to_state:ENUM?、reason_code:ID?、occurred_at:TS!
+
+制約
+
+PK：(guild_id,suggestion_id,event_id)
+
+UNIQUE：(guild_id,suggestion_id,event_sequence)
+
+FK：Suggestionへguild複合FK
+
+INDEX：(guild_id,suggestion_id,occurred_at)
+
+event例：CREATED / REOBSERVED / REJECTED / SUPERSEDED / EXPIRED / INVALIDATED / DRAFT_CREATED / APPLY_RESERVED / APPLY_SUCCEEDED / APPLY_FAILED / APPLY_UNKNOWN / CONSUMED
+
+履歴はappend-only。過去eventを上書きしない。閲覧・個人dismissの現在状態はuser_stateで管理する。
+
+Retention： R_HISTORY。削除要求時は必要に応じてactor参照を除去し、承認済み目的を超えて保持しない。
+
+12. suggestion_draft_link
+
+追加field
+
+guild_id:GID!、suggestion_id:UUID!、draft_id:ID!、immutable_draft_revision_id:ID!、draft_content_hash:HASH!、base_live_target_version:VER!、suggestion_version_at_creation:VER!、created_by:ID!
+
+制約
+
+PK：(guild_id,suggestion_id,immutable_draft_revision_id)
+
+UNIQUE：(guild_id,draft_id,immutable_draft_revision_id)
+
+FK：Suggestionへguild複合FK
+
+既存Draft正本との複合FKは既存schema照合後に対応
+
+INDEX：(guild_id,draft_id)
+
+draft作成だけではlive版を変更せず、Suggestionを無効化しない。
+
+hashとimmutable revision IDは変更不可。後続draft編集は別revisionとする。
+
+Retention： R_DRAFT_LINK。DraftまたはSuggestionの削除・失効に従う。
+
+13. apply_reservation
+
+追加field
+
+guild_id:GID!、reservation_id:UUID!、suggestion_id:UUID!、suggestion_version:VER!、live_target_version:VER!、draft_id:ID!、immutable_draft_revision_id:ID!、draft_content_hash:HASH!、approval_content_hash:HASH!、operation_id:UUID!、reservation_state:ENUM!=RESERVED、external_dispatch_started:BOOLEAN!=false、released_at:TS?、release_reason:ENUM?、row_version:VER!=1
+
+制約
+
+PK：(guild_id,reservation_id)
+
+FK：Suggestion＋Draft Linkへguild複合FK
+
+UNIQUE：(guild_id,operation_id)
+
+部分UNIQUE：(guild_id,suggestion_id,immutable_draft_revision_id)、RELEASED_PRE_EFFECT以外に適用
+
+INDEX：(guild_id,suggestion_id,reservation_state)
+
+actorやIdempotency-Keyを一意性条件に含めない。
+
+状態はRESERVED / IN_PROGRESS / SUCCEEDED / UNKNOWN / FAILED_CONFIRMED / RELEASED_PRE_EFFECT。
+
+予約中・成功・UNKNOWNでは二重Apply禁止。異なるactor/keyでも重複は409 APPLY_ALREADY_RESERVED。
+
+RELEASED_PRE_EFFECTへ遷移できるのは、外部dispatch未開始、未送信、実行可能Workerが存在しないことをfencing下で証明できた場合のみ。
+
+UNKNOWNでは予約解除禁止。同じ外部副作用を自動再送しない。
+
+Retention： R_APPLY_RESERVATION。予約の削除前に対応Suggestionを非actionable化し、古い操作の再利用を禁止する。
+
+C2-3. Dedupe・継承契約
+同一提案の判定
+
+suggestion.dedupe_keyは次を正規化してSHA-256化する。
+
+guildId + targetType + targetId + liveTargetVersion + ruleId + ruleVersion + engineVersion + configVersion + windowStart + windowEnd + issueFingerprint
+
+evaluationAsOfはjob/input hashへ含めるが、Suggestion dedupe keyには直接含めない。
+
+したがって、同一期間・同一対象版・同一Rule版・同じ問題の再観測は、既存Suggestionへ収束する。
+
+再観測ではlast_observed_atと履歴を更新し、必要な場合のみ新しいimmutable evidenceを追加する。元evidenceは書き換えない。
+
+Lineageによる状態継承
+
+lineage_keyは、
+
+guildId + targetType + targetId + issueCode + normalizedMetricScope
+
+から生成する。
+
+ruleVersion、engineVersion、configVersion、期間は含めない。
+
+同一lineageでshared REJECTEDが存在する場合、版変更だけでは新しいACTIVEを生成しない。評価結果を抑止として記録する。
+
+個人のdismissは同一lineageの過去user_stateを参照して引き継ぐ。新Suggestion生成によって未読・再表示状態を無断復活させない。
+
+再提案を許すのは、確認済みの問題解消後の再発、または明示的な利用者操作がある場合に限定する。解消は品質を満たしたNOT_MET評価で確認し、単なる欠測・Rule版変更を解消と扱わない。
+
+C2-4. 版競合と削除
+条件	結果
+必須If-Matchなし	428 PRECONDITION_REQUIRED
+Suggestion版不一致	412 SUGGESTION_VERSION_MISMATCH
+live版不一致	412 TARGET_VERSION_MISMATCH
+immutable draft版/hash不一致	412 DRAFT_VERSION_MISMATCH
+版は一致するが状態が操作禁止	409 STATE_CONFLICT
+Apply予約重複	409 APPLY_ALREADY_RESERVED
+別guildの対象	404 TARGET_NOT_FOUND
+
+これにより、I-C1中の一般的な「version競合409」は412へ訂正する。409はdomain状態競合に限定する。
+
+Privacy tombstoneが有効になった対象は、通常read/evaluation/applyを即時遮断する。
+
+根拠削除transactionでは、関連するACTIVE SuggestionをINVALIDATEDへCAS更新し、evidenceを削除する。CONSUMED済みの適用成功履歴は失敗へ書き換えず、公開・参照を遮断したうえで保持方針に従い削除または最小化する。
+
+C2-5. Retention class
+
+確定済み：Run終了後最小状態は7日以内に削除。Backupは7日。
+
+Class	対象	未承認の最小候補	必要性
+R_RUN_BOUND	Run由来Fact/evidence等	Run終了から7日以内、親Runより長く保持しない	既存Run契約との整合
+R_FACT	非Run由来Fact snapshot/value	48時間、候補範囲24時間～7日	評価と再取得
+R_SOURCE_HEALTH	source health	72時間、候補範囲24時間～7日	取得状態の短期比較
+R_EVALUATION	job/result	48時間、候補範囲24時間～7日	評価結果の照合
+R_SUGGESTION	Suggestion	14日、候補範囲7～28日	利用者の検討時間
+R_USER_STATE	個人状態	Suggestion存続中のみ	表示状態の維持
+R_HISTORY	Suggestion履歴	14日、候補範囲7～28日	最小限の変更追跡
+R_DRAFT_LINK	Draftとの関連	両対象が有効な期間内	適用整合性
+R_APPLY_RESERVATION	Apply予約	参照操作の必要期間内。具体値は承認待ち	重複Apply禁止
+R_RULE_CONFIG	Rule/config版	ACTIVE期間＋退役後14日候補	判定の再現性
+
+これらの数値は未検証・未承認であり、採用済み保持期間ではない。旧30日/24か月案や、Run以外の一律7日は採用しない。
+
+未承認のclassについては、永続Fact/Suggestionの新規生成を有効化しない。保存期限を実装担当者が独断で補完しない。
+
+期限到来時は、参照元Factの削除に先立ちSuggestion失効と根拠削除を同一管理transactionで処理する。
+
+UNKNOWNを無期限の実行状態として維持しない。既存Run期限に従ってRESULT_UNKNOWNのままterminal化し、FAILEDに偽装しない。終了後の最小Run状態は7日以内に削除し、別テーブルへの複写で延長しない。
+
+Apply予約等を削除する場合は、先にSuggestionを非actionable化し、古い署名付き操作tokenの期限を確認する。既存I-C1のIdempotency契約を維持する。
+
+Backup復元では、最新の削除記録・tombstoneを通常公開より先に再適用する。削除済みFactやSuggestionを復元したまま利用可能にしてはならない。
+
+C2-6. 5つのTransaction契約
+
+共通lock順は、対象guildの削除・scope gate → 対象live resource → Suggestion → Draft/Link → Reservation → Job/Result/Historyとする。既存domainが別のlock順を持つ場合は、全体で矛盾しない順序に統合する。
+
+Transaction	atomic境界と不変条件	後日受入
+T1 Snapshot確定	Fact集合の検証、hash計算、snapshot SEALED化を同一transaction。確定後はimmutable。途中crashでは未確定snapshotを評価対象にしない	A16-DB-01：途中停止・重複確定でも一意な完全snapshotのみ参照
+T2 Evaluation確定＋提案生成	job/input版確認、evaluation result、dedupe判定、Suggestion/evidence/historyをatomicに確定。UNIQUE競合時は既存Suggestionへ収束。旧evidence不変	A16-DB-02：同入力・同版は同結果。重複生成なし
+T3 Draft作成	Suggestion版CAS、live版確認、許可field検証、immutable draft作成、draft link/historyをatomicに確定。live版は不変	A16-DB-03：draft編集・競合で未承認内容が適用されない
+T4 Apply予約	現在認可・Suggestion/live/draft版確認、content hash固定、unique reservation、operation intentを同一transaction。異なるactor/keyでも二重予約不可	A16-DB-04：競合は409、古い版は412、UNKNOWN予約保持
+T5 削除・失効	tombstone確認、参照Suggestion失効CAS、evidence削除、Fact削除、必要な履歴最小化を一貫して実行。途中crashでもtombstoneによるアクセス遮断を継続	A16-DB-05：削除後の再公開・再生成・復元時復活なし
+
+各transactionではCASとUNIQUE制約を最終的な競合防止境界とする。アプリケーション側の事前チェックだけに依存しない。
+
+保存前crashでは未commit状態を有効扱いしない。保存後crashでは確定済み結果を再利用し、重複生成や同一外部副作用の再送を発生させない。
+
+C2-7. 残る承認事項
+
+利用者判断が必要なのは、Run以外の保持classの期間・許可するSuggestion公開範囲・削除後に残す最小監査情報の範囲である。
+
+型、enum、hash、版管理、複合scope、dedupe、lineage、Apply一意性、CONSUMED条件は本付録の単一設計案で固定する。
+
+実テーブル・既存正本との対応、および上記保持・公開方針が未確定のため、本付録を実装済み・検証済み・完全確定とは扱わない。

@@ -1,0 +1,94 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 03:45 UTC
+Reasoning: 極高. Design only; numeric defaults unvalidated and pending approval.
+
+付録II-D：EXP-001 / PLAY-001 / DATA-001
+EXP-001 — 構造化issueの反復に対する実験候補
+項目	契約
+ID / version	EXP-001 / 1.0
+metric / source	issue.recurrence_consecutive_periods。提案adapter structured_issue_registry_v1＋experiment_registry_v1。参照可能な基礎issueCodeは ONB-001 / HELP-001 / RET-001 / ENG-001 / EVENT-001 / REPORT-001 / AUTO-001 / AUTO-002 / PERM-001 のFIRE結果のみ。EXP-001、PLAY-001、COMM系結果は入力にしない。adapterの現コード実在は未確認。
+対象集合・除外・重複排除	guildId + issueCode + targetType + targetId + targetLiveVersionごとに評価。CURRENTを3つの完了済み暦日periodへ分割し、各periodに1件以上の同一issueがあればissuePeriod=1。同一snapshotId、同一issue観測、同一period内の再観測は1回へdedupe。本文、個人単位score、個人IDは使用しない。
+正確な式	issuePeriod_i ∈ {0,1}、repeatedPeriodCount = Σ issuePeriod_i、repeatRate = repeatedPeriodCount / 3。FIRE条件は repeatedPeriodCount >= 2 かつ隣接する2period以上でissuePeriod=1 かつ同一対象にactive experimentが存在しない。P1/P3のみの2件はFIREしない。
+window / period_role	evaluationAsOf=2026-10-15T00:00:00Z。CURRENT=[2026-10-12T00:00:00Z,2026-10-15T00:00:00Z)、P1/P2/P3各24時間のUTC暦日。長期windowを使用する場合、7日を超えるRun保存へ依存せず、認可済みaggregate sourceが必要。
+minN / freshness / coverage	minN=3 completed periods。これは人・投稿・Runの母数ではない。coverage=observedCompletedPeriods/3、候補coverage=1.00必須。issue source freshness候補<=24h。すべて未検証・承認待ち。
+threshold / bounds	候補：repeatedPeriodCount >= 2/3＋隣接条件。repeatRate候補bounds 0.00–1.00、period数3–7、required consecutive periods2–7。未検証・承認待ち。
+null / partial / stale / 不足	issue sourceなし→INELIGIBLE/MISSING_SOURCE。period欠測・coverage<1.00→INELIGIBLE/PARTIAL_COVERAGE。source stale→INELIGIBLE/STALE_SOURCE。privacy suppression→INELIGIBLE/PRIVACY_SUPPRESSED。required periods<3→INELIGIBLE/INSUFFICIENT_N。active experiment registryが観測不能→INELIGIBLE/ACTIVE_EXPERIMENT_UNKNOWN。
+cooldown / 解消 / 再発 / priority	候補cooldown 7d。起点はSuggestion生成。後続の完全観測で隣接反復条件を満たさなくなれば解消。同一dedupe keyの再発はcooldown終了後か、対象liveVersion/window/evidence hashが変化した新評価でのみ生成。priority=P2。
+target / action	targetType=ISSUE_TARGET、targetId・liveVersionは基礎issueから固定。基本action=REVIEW_ONLY。typed editorが確認済みの場合のみCREATE_DRAFTを許可する。提案typed field：issueCode(enum), targetType(enum), targetId(string), baseLiveVersion(string), hypothesisCode(enum), successMetricId(enum), durationDays(integer)。自由実験コード・自由SQLは不可。
+evidence / 説明	issueCode、3periodのissue有無、source revision/snapshot ID、active experiment確認結果、target/liveVersion、windowのみ。「同じ構造化issueが3期間中2期間連続して確認され、現在同じ対象のactive experimentは確認されませんでした。改善効果を保証するものではありません。」とする。実験は自動開始しない。
+合成fixture — EXP-001
+Fixture	入力	期待結果	action
+II-D-EXP001-F01	P1=1、P2=1、P3=1、coverage=3/3、activeExperiment=なし	FIRE	CREATE_DRAFT*
+II-D-EXP001-F02	P1=0、P2=0、P3=0、coverage=3/3	NO_FIRE	—
+II-D-EXP001-F03	P1=1、P2=1、P3=0 → 2/3、隣接2period	FIRE（候補境界）	CREATE_DRAFT*
+II-D-EXP001-F04	P1=1、P2=0、P3=1 → 2/3だが非連続	NO_FIRE	—
+II-D-EXP001-F05	P1=1、P2=1、P3=MISSING → coverage=2/3	INELIGIBLE / PARTIAL_COVERAGE	—
+II-D-EXP001-F06	P1=1、P2=1、P3=1、active experiment=同一guild/issue/target/liveVersion	NO_FIRE / ACTIVE_EXPERIMENT_EXISTS	—
+II-D-EXP001-F07	P1=1、P2=1、P3=1、active experiment registry=UNKNOWN	INELIGIBLE / ACTIVE_EXPERIMENT_UNKNOWN	—
+
+*は提案typed editorが実際に存在し、全fieldを安全に扱える場合のみ。未照合ならREVIEW_ONLYへ倒す。
+
+PLAY-001 — 構造化issueに対応するplaybook候補
+項目	契約
+ID / version	PLAY-001 / 1.0
+metric / source	issue.playbook_coverage。提案adapter structured_issue_registry_v1＋playbook_mapping_registry_v1。EXP-001と同じ9個の基礎issueCodeのみを入力とし、PLAY-001自身・EXP-001・COMM系結果を参照しない。現コードのadapter実在は未確認。
+対象集合・除外・重複排除	guildId + issueCode + targetType + targetId + targetLiveVersion。同一issueの同一period内重複は1件。playbook判定は登録された明示mappingだけで行い、本文の意味理解・類似検索・推測によるmappingは禁止。
+正確な式	issuePeriod_i=1をEXP-001と同じ方法で算出。repeatedRate=repeatedPeriodCount/3。候補判定はrepeatedPeriodCount>=2＋隣接2period以上＋playbook mapping状態がABSENTまたはDISABLED。enabled mappingならNO_FIRE。
+window / period_role	evaluationAsOf=2026-10-15T00:00:00Z、CURRENT=[2026-10-12T00:00:00Z,2026-10-15T00:00:00Z)、3つの24h暦日period。
+minN / freshness / coverage	minN=3 completed periods、coverage候補1.00、issue/mapping source freshness候補<=24h。いずれも未検証・承認待ち。minNは人・機械件数ではなくperiod数。
+threshold / bounds	repeatedPeriodCount >= 2/3＋隣接条件。候補boundsはrequired periods 3–7、consecutive periods 2–7。未検証・承認待ち。
+null / partial / stale / 不足	issue sourceなし→INELIGIBLE/MISSING_SOURCE。coverage不足→INELIGIBLE/PARTIAL_COVERAGE。stale→INELIGIBLE/STALE_SOURCE。privacy抑止→INELIGIBLE/PRIVACY_SUPPRESSED。mapping registryなし→INELIGIBLE/MISSING_PLAYBOOK_REGISTRY。mapping状態UNKNOWN→INELIGIBLE/PLAYBOOK_MAPPING_UNKNOWN。
+cooldown / 解消 / 再発 / priority	候補cooldown 7d。mappingがenabledになった完全観測で解消。disabled/absentが再発した場合、新window/evidenceで新Suggestion。priority=P2。
+target / action	targetType=ISSUE_TARGET、targetId・liveVersionはissueから固定。基本REVIEW_ONLY。typed editor確認時のみCREATE_DRAFT。許可field：issueCode(enum), targetType(enum), targetId(string), baseLiveVersion(string), playbookTemplateId(enum), stepTemplateIds(enum[]), requiresManualApproval(boolean=true)。自由本文から手順を生成しない。
+evidence / 説明	issueCode、target、3periodの観測、mapping registry revision、mapping状態のみ。「同一の登録issueCodeが複数期間確認され、対応する登録playbook mappingが存在しない／明示的にdisabledです。登録mappingに基づく対応手順の候補を確認できます。」自動実行・投稿・権限変更なし。
+合成fixture — PLAY-001
+Fixture	入力	期待結果	action
+II-D-PLAY001-F01	P1=1、P2=1、P3=0、mapping=ABSENT	FIRE	CREATE_DRAFT*
+II-D-PLAY001-F02	P1=1、P2=0、P3=0、mapping=ABSENT	NO_FIRE	—
+II-D-PLAY001-F03	P1=1、P2=1、P3=0、mapping=ABSENT → 2/3境界	FIRE	CREATE_DRAFT*
+II-D-PLAY001-F04	P1=1、P2=1、P3=0、mapping=ENABLED	NO_FIRE / PLAYBOOK_EXISTS	—
+II-D-PLAY001-F05	P1=1、P2=1、P3=MISSING	INELIGIBLE / PARTIAL_COVERAGE	—
+II-D-PLAY001-F06	P1=1、P2=1、P3=1、mapping registry=UNKNOWN	INELIGIBLE / PLAYBOOK_MAPPING_UNKNOWN	—
+II-D-PLAY001-F07	P1=1、P2=1、P3=1、mapping=DISABLED	FIRE / PLAYBOOK_DISABLED	CREATE_DRAFT*
+
+*typed editor未照合時はREVIEW_ONLY。
+
+DATA-001 — 業務Factの欠測・staleをsource-healthで確認する品質警告
+項目	契約
+ID / version	DATA-001 / 1.0
+metric / source	fact.quality_warning。提案adapter business_fact_registry_v1＋source_health_observation_v1。業務Factのqualityと、source-healthのquality/lastSuccessAt/coverageを別入力として扱う。現コードのadapter実在は未確認。
+対象集合・除外・重複排除	認可済みmetric registryに登録された業務metricのみ。guildId + metricId + dimension + period_role + windowで対象を固定。同一snapshotは1回。raw投稿、DM、自由文、secret、個人推測、不要な個人IDを使用しない。
+正確な式	healthAge = evaluationAsOf - lastSuccessAt。healthEligible = sourceHealth.quality=SUFFICIENT AND lastSuccessAt IS NOT NULL AND healthAge <= 24h AND coverage >= 0.95。businessGap=1 iff businessFact.quality∈{MISSING,STALE}。FIRE iff healthEligible AND businessGap=1。業務Factの欠測値を0へ置換しない。
+window / period_role	evaluationAsOf=2026-10-15T00:00:00Z。CURRENT=[2026-10-14T00:00:00Z,2026-10-15T00:00:00Z)、period_role=CURRENT。source-health observationはこの評価時点以前の最新認可済み観測を使用。
+minN / freshness / coverage	minNは適用外。これはoperational/source-health判定であり、人・イベント・Run等の母数閾値を流用しない。候補：lastSuccessAge <=24h、coverage>=0.95。未検証・承認待ち。
+threshold / bounds	health threshold候補：lastSuccessAge <=24h、coverage >=0.95、quality=SUFFICIENT。候補bounds：lastSuccess 1–72h、coverage 0.90–1.00。未検証・承認待ち。
+null / partial / stale / 不足	source-health observationなし→INELIGIBLE/SOURCE_HEALTH_UNKNOWN。lastSuccessAt=null→INELIGIBLE/SOURCE_NEVER_SUCCEEDED。lastSuccessが24h超→INELIGIBLE/HEALTH_LAST_SUCCESS_STALE。coverage<0.95→INELIGIBLE/HEALTH_PARTIAL_COVERAGE。health qualityがSUFFICIENTでない→INELIGIBLE/SOURCE_HEALTH_NOT_SUFFICIENT。business quality=MISSING/STALE＋healthEligible→FIRE。business quality=SUFFICIENT→NO_FIRE。business quality=PARTIAL等で本ルールの対象外→INELIGIBLE/BUSINESS_QUALITY_UNSUPPORTED。
+cooldown / 解消 / 再発 / priority	候補cooldown 24h。business FactがSUFFICIENTとなった十分な新観測で解消。再度MISSING/STALEがhealthEligible下で確認された場合、新snapshot/evidence hashで再発。priority=P1。
+target / action	targetType=DATA_SOURCE_METRIC、targetId=metricId、liveVersion=metric registry version。action=REVIEW_ONLY。typed draft fieldなし。データソースや業務FactをAIが修正・再取得・補完しない。
+evidence / 説明	metricId/dimension/window/businessQuality/sourceHealthObservationId/sourceHealthRevision/lastSuccessAt/coverage/qualityのみ。「対象FactはMISSING/STALEとして観測されていますが、source-healthは評価時点でSUFFICIENTと確認されています。値を0とみなさず、データ状態の確認を推奨します。」とする。
+合成fixture — DATA-001
+
+候補config：lastSuccessAge <=24h、coverage>=0.95、sourceHealth.quality=SUFFICIENT。
+asOf=2026-10-15T00:00:00Z、CURRENT=[2026-10-14T00:00:00Z,2026-10-15T00:00:00Z)。
+
+Fixture	入力	期待結果	action
+II-D-DATA001-F01	business=MISSING、health=SUFFICIENT、lastSuccess=2026-10-14T12:00Z、coverage=1.00	FIRE	REVIEW_ONLY
+II-D-DATA001-F02	business=SUFFICIENT、health=SUFFICIENT、lastSuccess=2026-10-14T12:00Z、coverage=1.00	NO_FIRE	—
+II-D-DATA001-F03	business=STALE、health=SUFFICIENT、lastSuccess=2026-10-14T00:00Z、coverage=0.95 → age=24h	FIRE（freshness境界）	REVIEW_ONLY
+II-D-DATA001-F04	business=MISSING、health observationなし	INELIGIBLE / SOURCE_HEALTH_UNKNOWN	—
+II-D-DATA001-F05	business=STALE、health=SUFFICIENT、lastSuccess=2026-10-13T23:59Z → age>24h	INELIGIBLE / HEALTH_LAST_SUCCESS_STALE	—
+II-D-DATA001-F06	business=MISSING、health=SUFFICIENT、lastSuccess=2026-10-14T12:00Z、coverage=0.94	INELIGIBLE / HEALTH_PARTIAL_COVERAGE	—
+II-D-DATA001-F07	business=MISSING、health=SUFFICIENT、lastSuccessAt=null	INELIGIBLE / SOURCE_NEVER_SUCCEEDED	—
+II-D-DATA001-F08	business=STALE、health=SUPPRESSED、lastSuccess=2026-10-14T12:00Z、coverage=1.00	INELIGIBLE / SOURCE_HEALTH_NOT_SUFFICIENT	—
+依存DAG・対応
+
+認可済みsource → 基礎Rule/構造化issue → EXP-001 / PLAY-001。
+source-health + business Fact → DATA-001。
+EXP-001 / PLAY-001 / DATA-001 → Suggestion/UI は一方向とし、EXP-001・PLAY-001・COMM系は互いを入力にしない。DATA-001もEXP/PLAY/COMMの結果を入力にしない。
+
+Rule	adapter	UI	action	fixture
+EXP-001	structured_issue_registry_v1＋experiment_registry_v1（提案・未照合）	Explore / Experiments	REVIEW_ONLY、条件成立時CREATE_DRAFT	II-D-EXP001-F01〜F07
+PLAY-001	structured_issue_registry_v1＋playbook_mapping_registry_v1（提案・未照合）	Operations / Playbook	REVIEW_ONLY、条件成立時CREATE_DRAFT	II-D-PLAY001-F01〜F07
+DATA-001	business_fact_registry_v1＋source_health_observation_v1（提案・未照合）	Data Health / Fact detail	REVIEW_ONLY	II-D-DATA001-F01〜F08
+
+共通制約： 長期反復windowに必要な認可済みaggregate sourceが成立しない場合はMISSING/DISABLEDまたはINELIGIBLEとし、Run保持延長・本文収集・新規個人ID長期保存では補完しない。閾値・minN・freshness・coverage・cooldown等の数値はすべて未検証・承認待ちの設計候補であり、統計的信頼度や匿名性保証を意味しない。全Suggestionは人が確認する改善案であり、自動適用・自動投稿・activation・課金・権限変更を行わない。

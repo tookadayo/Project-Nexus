@@ -1,6 +1,11 @@
 import {modalTextInput} from "../../discord-panels/src/modal-primitives";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { acquireRuleScopeLocks,ruleScopeLockSet } from "../../rules/src/locks";
+import { minimalOperationAudit } from "./alpha16-audit";
+import { assertMaintenanceAuthorization, type MaintenanceAuthorizationProof } from "./maintenance-authorization";
+import {automationLock} from "../../automation/src/quota";
+import {redactWebhookEventSources} from "./webhooks";
 import type { APIModalInteractionResponseCallbackData } from "discord-api-types/v10";
 import {
   sql,
@@ -70,6 +75,7 @@ export class OperationsIntake {
     private readonly vault: IdentityVault,
     private readonly discord: DiscordPort,
     private readonly components: Components,
+    private readonly maintenanceProof?:MaintenanceAuthorizationProof,
   ) {}
   async save(s: Scope, actor: Actor, input: unknown) {
     const data = intakeInput.parse(input);
@@ -406,7 +412,7 @@ export class OperationsIntake {
           )
         ).rows,
         requests: (
-          await sql`SELECT r.id,r.panel_id,r.category,a.status,r.created_at FROM operations_requests r JOIN attention_items a ON a.organization_id=r.organization_id AND a.guild_id=r.guild_id AND a.message_id=r.attention_key WHERE r.organization_id=${s.organizationId}::uuid AND r.guild_id=${s.guildId} ORDER BY r.created_at DESC LIMIT 100`.execute(
+          await sql`SELECT r.id,r.panel_id,r.category,r.attention_key,a.channel_id,a.status,a.version,r.created_at FROM operations_requests r JOIN attention_items a ON a.organization_id=r.organization_id AND a.guild_id=r.guild_id AND a.message_id=r.attention_key WHERE r.organization_id=${s.organizationId}::uuid AND r.guild_id=${s.guildId} AND r.state<>'DELETED' ORDER BY r.created_at DESC LIMIT 100`.execute(
             tx,
           )
         ).rows,
@@ -420,7 +426,7 @@ export class OperationsIntake {
       const row = (
         await sql<{
           fields_ciphertext: string;
-        }>`SELECT fields_ciphertext FROM operations_requests WHERE ${tenant(s)} AND id=${id}::uuid`.execute(
+        }>`SELECT fields_ciphertext FROM operations_requests WHERE ${tenant(s)} AND id=${id}::uuid AND state<>'DELETED'`.execute(
           tx,
         )
       ).rows[0];
@@ -438,6 +444,51 @@ export class OperationsIntake {
         labels: { key: string; label: string }[];
         version: number;
       };
+    });
+  }
+  async removeRequest(s:Scope,actor:Actor,input:unknown){
+    const data=z.object({id:z.uuid(),version:z.number().int().nonnegative()}).strict().parse(input);
+    return this.db.transaction().execute(async tx=>{
+      await acquireRuleScopeLocks(tx,ruleScopeLockSet(s));await automationLock(tx,s);await operationsAccess(tx,s,actor,"CONFIGURE");await operationsLock(tx,s);
+      const request=(await sql<{attention_key:string;state:string}>`SELECT attention_key,state FROM operations_requests WHERE ${tenant(s)} AND id=${data.id}::uuid FOR UPDATE`.execute(tx)).rows[0];assert(request,"REQUEST_NOT_FOUND",404);
+      const item=(await sql<{version:number}>`SELECT version FROM attention_items WHERE ${tenant(s)} AND message_id=${request.attention_key} FOR UPDATE`.execute(tx)).rows[0];assert(item,"REQUEST_NOT_FOUND",404);
+      assertMaintenanceAuthorization(this.maintenanceProof,s,actor);
+      if(request.state==='DELETED')return {id:data.id,deleted:true};
+      assert(item.version===data.version,"REVISION_CONFLICT",412);
+      const notifications=(await sql<{id:string;state:string}>`SELECT id,state FROM action_outbox WHERE ${tenant(s)} AND payload->>'intakeRequestId'=${data.id} ORDER BY id FOR UPDATE`.execute(tx)).rows;
+      assert(notifications.every(n=>n.state!=='RUNNING'),"REQUEST_NOTIFICATION_IN_PROGRESS",409);
+      await sql`DELETE FROM action_outbox WHERE ${tenant(s)} AND payload->>'intakeRequestId'=${data.id} AND state='PENDING'`.execute(tx);
+      const events=(await sql<{id:string}>`SELECT id FROM operations_domain_events WHERE ${tenant(s)} AND data->>'attentionKey'=${request.attention_key} ORDER BY id`.execute(tx)).rows.map(r=>r.id);
+      await redactWebhookEventSources(tx,s,events);
+      // Source erasure cannot become a synthetic ticket transition or allow a
+      // waiting/queued continuation to consume the removed request again.
+      await sql`UPDATE automation_runs r SET cancel_requested_at=COALESCE(cancel_requested_at,now()),wake_at=now(),updated_at=now() WHERE r.organization_id=${s.organizationId}::uuid AND r.guild_id=${s.guildId} AND r.ended_at IS NULL AND (EXISTS(SELECT 1 FROM automation_event_inbox e WHERE e.organization_id=r.organization_id AND e.guild_id=r.guild_id AND e.run_id=r.id AND e.ticket_id=${request.attention_key}) OR EXISTS(SELECT 1 FROM automation_event_waits w WHERE w.organization_id=r.organization_id AND w.guild_id=r.guild_id AND w.run_id=r.id AND w.ticket_id=${request.attention_key}))`.execute(tx);
+      await sql`UPDATE automation_event_inbox SET state=CASE WHEN state='PENDING' THEN 'SKIPPED' ELSE state END,reason='SOURCE_REQUEST_DELETED',finished_at=COALESCE(finished_at,now()),ticket_id=NULL,ticket_state=NULL,ticket_version=NULL,channel_id=NULL,actor_ciphertext=NULL WHERE ${tenant(s)} AND ticket_id=${request.attention_key}`.execute(tx);
+      await sql`UPDATE automation_event_waits SET state='CANCELLED',ticket_id=NULL,matched_cursor=NULL,matched_state=NULL,matched_version=NULL,occurred_at=NULL WHERE ${tenant(s)} AND ticket_id=${request.attention_key} AND state IN ('PENDING','MATCHED')`.execute(tx);
+      // Keep only the existing bounded receipt identity for duplicate Discord
+      // submissions; erase the explicit form values and the participant link.
+      await operationsAccess(tx,s,actor,"CONFIGURE");assertMaintenanceAuthorization(this.maintenanceProof,s,actor);
+      await sql`UPDATE operations_requests SET fields_ciphertext='',category='',actor_hash='erased-request',state='DELETED',erased_at=now() WHERE ${tenant(s)} AND id=${data.id}::uuid`.execute(tx);
+      await sql`UPDATE attention_items SET status='DISMISSED',reason='REQUEST_DELETED',evidence=NULL,last_actor_hash=NULL,snooze_until=NULL,resolved_at=COALESCE(resolved_at,now()),resolution_reason='REQUEST_DELETED',version=version+1,updated_at=now() WHERE ${tenant(s)} AND message_id=${request.attention_key}`.execute(tx);
+      await minimalOperationAudit(tx,s,actor.key,"INTAKE_REQUEST_DELETED",data.id,data.version);
+      return {id:data.id,deleted:true,externalEffect:"NONE"};
+    });
+  }
+  async removePanel(s:Scope,actor:Actor,input:unknown){
+    const data=z.object({id:z.uuid(),version:z.number().int().positive()}).strict().parse(input);
+    return this.db.transaction().execute(async tx=>{
+      await acquireRuleScopeLocks(tx,ruleScopeLockSet(s));await operationsAccess(tx,s,actor,"CONFIGURE","intake_panels");await operationsLock(tx,s);
+      const panel=(await sql<{version:number}>`SELECT version FROM operations_intake_panels WHERE ${tenant(s)} AND id=${data.id}::uuid FOR UPDATE`.execute(tx)).rows[0];
+      assertMaintenanceAuthorization(this.maintenanceProof,s,actor);assert(panel,"INTAKE_PANEL_NOT_FOUND",404);assert(panel.version===data.version,"REVISION_CONFLICT",412);
+      assert(!(await sql`SELECT id FROM operations_requests WHERE ${tenant(s)} AND panel_id=${data.id}::uuid AND state<>'DELETED' LIMIT 1`.execute(tx)).rows.length,"INTAKE_PANEL_HAS_REQUESTS",409);
+      const pending=(await sql<{state:string}>`SELECT state FROM action_outbox WHERE ${tenant(s)} AND payload->>'intakePanelId'=${data.id} ORDER BY id FOR UPDATE`.execute(tx)).rows;
+      await operationsAccess(tx,s,actor,"CONFIGURE","intake_panels");assertMaintenanceAuthorization(this.maintenanceProof,s,actor);
+      assert(pending.every(r=>!['RUNNING','UNKNOWN'].includes(r.state)),"INTAKE_PANEL_DELIVERY_UNRESOLVED",409);
+      await sql`DELETE FROM action_outbox WHERE ${tenant(s)} AND payload->>'intakePanelId'=${data.id} AND state='PENDING'`.execute(tx);
+      await sql`DELETE FROM component_tokens WHERE ${tenant(s)} AND intent->>'panelId'=${data.id}`.execute(tx);
+      await sql`DELETE FROM operations_intake_panels WHERE ${tenant(s)} AND id=${data.id}::uuid`.execute(tx);
+      await minimalOperationAudit(tx,s,actor.key,"INTAKE_PANEL_DELETED",data.id,data.version);
+      return {id:data.id,deleted:true,externalEffect:"NONE",publishedMessageDeleted:false};
     });
   }
 }

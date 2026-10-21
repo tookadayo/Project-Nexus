@@ -1,0 +1,3096 @@
+{
+  "schemaVersion": 1,
+  "oracle": {
+    "library": "decimal.js",
+    "version": "10.6.0",
+    "license": "MIT",
+    "sourceArtifactSha256": "433210122e8149972f64054c54b0ce0872e5f15a3c5835aab57ff1a8e6d071b1",
+    "generatorSha256": "e13a61b0eb4018a90fe952fdfbe10f2de35ee76fd01007c7df5d5222486f9c51",
+    "precisions": [
+      400,
+      800
+    ],
+    "precisionAgreement": "expected binary64 bits/error plus interval endpoints are identical at both precisions",
+    "input": "Exact signed binary64 dyadic converted using BigInt to a terminating decimal string; no Number.toString conversion.",
+    "degrees": "Signed exact BigInt modulo360 centered to [-180,180], then high-precision multiplication by pi/180. Inverse functions return degrees.",
+    "trigonometry": "Independent sine/cosine entire Taylor series using Decimal arithmetic on |radians|<=pi; stop when the sum is unchanged at the requested precision, at most2048 terms. tan=sin/cos. Avoids decimal.js public trig's precision+argument.sd pi-limit amplification without shrinking inputs/precision.",
+    "rounding": "Exact integer/rational binary64 round-to-nearest ties-to-even of the high-precision Decimal result; public zero normalized to +0.",
+    "fourUlp": "Correctly rounded binary64 reference r, abs(y-r)<=4*ulp(r), evaluated as exact rationals. ulp(r)=2^(floor(log2(abs(r)))-52), or 2^-1074 for zero/subnormal. lower/upper are ceil/floor of that absolute interval intersected with finite binary64 outputs, not four adjacent steps.",
+    "exact": "Entries marked exact require their stated representative value/pole exactly; no ULP tolerance supersedes domain or exact representatives.",
+    "limitations": [
+      "Finite corpus and two-precision convergence are not proof over every finite input.",
+      "Two precisions share decimal.js algorithms and constants; matching results cannot exclude shared-library defects.",
+      "Decimal transcendental outputs are high-precision approximations, not formally directed real enclosures. Their converged binary64 rounding is an independent test reference, not a universal correct-rounding certificate.",
+      "Fixed pi and ln10 constants have 1025 digits; requested400/800 significant digits plus internal guards remain below that limit.",
+      "Existing abs/floor/ceiling/sqrt have separate evidence and are not included here."
+    ],
+    "sources": [
+      "https://mikemcl.github.io/decimal.js/",
+      "https://registry.npmjs.org/decimal.js/10.6.0"
+    ]
+  },
+  "corpus": {
+    "seed": "6e65787573616c35",
+    "selection": "fixed full corpus",
+    "fullFiniteInputSpaceCovered": false,
+    "productionOutputInspectedToChooseExpectations": false
+  },
+  "cases": [
+    {
+      "id": "sin.representative.0000000000000000",
+      "operator": "sin",
+      "inputBits": "0000000000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "sin.representative.8000000000000000",
+      "operator": "sin",
+      "inputBits": "8000000000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "sin.representative.403e000000000000",
+      "operator": "sin",
+      "inputBits": "403e000000000000",
+      "expectedBits": "3fe0000000000000",
+      "lowerBits": "3fdffffffffffff8",
+      "upperBits": "3fe0000000000004"
+    },
+    {
+      "id": "sin.representative.c03e000000000000",
+      "operator": "sin",
+      "inputBits": "c03e000000000000",
+      "expectedBits": "bfe0000000000000",
+      "lowerBits": "bfe0000000000004",
+      "upperBits": "bfdffffffffffff8"
+    },
+    {
+      "id": "sin.representative.4046800000000000",
+      "operator": "sin",
+      "inputBits": "4046800000000000",
+      "expectedBits": "3fe6a09e667f3bcd",
+      "lowerBits": "3fe6a09e667f3bc9",
+      "upperBits": "3fe6a09e667f3bd1"
+    },
+    {
+      "id": "sin.representative.c046800000000000",
+      "operator": "sin",
+      "inputBits": "c046800000000000",
+      "expectedBits": "bfe6a09e667f3bcd",
+      "lowerBits": "bfe6a09e667f3bd1",
+      "upperBits": "bfe6a09e667f3bc9"
+    },
+    {
+      "id": "sin.representative.4056800000000000",
+      "operator": "sin",
+      "inputBits": "4056800000000000",
+      "expectedBits": "3ff0000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "sin.representative.c056800000000000",
+      "operator": "sin",
+      "inputBits": "c056800000000000",
+      "expectedBits": "bff0000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "sin.representative.4066800000000000",
+      "operator": "sin",
+      "inputBits": "4066800000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "sin.representative.c066800000000000",
+      "operator": "sin",
+      "inputBits": "c066800000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "sin.representative.4070e00000000000",
+      "operator": "sin",
+      "inputBits": "4070e00000000000",
+      "expectedBits": "bff0000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "sin.representative.c070e00000000000",
+      "operator": "sin",
+      "inputBits": "c070e00000000000",
+      "expectedBits": "3ff0000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "sin.representative.4076800000000000",
+      "operator": "sin",
+      "inputBits": "4076800000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "sin.representative.c076800000000000",
+      "operator": "sin",
+      "inputBits": "c076800000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "sin.boundary.0000000000000001",
+      "operator": "sin",
+      "inputBits": "0000000000000001",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "sin.boundary.8000000000000001",
+      "operator": "sin",
+      "inputBits": "8000000000000001",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "sin.boundary.000000000000001c",
+      "operator": "sin",
+      "inputBits": "000000000000001c",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "sin.boundary.800000000000001c",
+      "operator": "sin",
+      "inputBits": "800000000000001c",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "sin.boundary.000000000000001d",
+      "operator": "sin",
+      "inputBits": "000000000000001d",
+      "expectedBits": "0000000000000001",
+      "lowerBits": "8000000000000003",
+      "upperBits": "0000000000000005"
+    },
+    {
+      "id": "sin.boundary.800000000000001d",
+      "operator": "sin",
+      "inputBits": "800000000000001d",
+      "expectedBits": "8000000000000001",
+      "lowerBits": "8000000000000005",
+      "upperBits": "0000000000000003"
+    },
+    {
+      "id": "sin.boundary.0000000000000064",
+      "operator": "sin",
+      "inputBits": "0000000000000064",
+      "expectedBits": "0000000000000002",
+      "lowerBits": "8000000000000002",
+      "upperBits": "0000000000000006"
+    },
+    {
+      "id": "sin.boundary.8000000000000064",
+      "operator": "sin",
+      "inputBits": "8000000000000064",
+      "expectedBits": "8000000000000002",
+      "lowerBits": "8000000000000006",
+      "upperBits": "0000000000000002"
+    },
+    {
+      "id": "sin.boundary.0010000000000000",
+      "operator": "sin",
+      "inputBits": "0010000000000000",
+      "expectedBits": "0000477d1a894a75",
+      "lowerBits": "0000477d1a894a71",
+      "upperBits": "0000477d1a894a79"
+    },
+    {
+      "id": "sin.boundary.8010000000000000",
+      "operator": "sin",
+      "inputBits": "8010000000000000",
+      "expectedBits": "8000477d1a894a75",
+      "lowerBits": "8000477d1a894a79",
+      "upperBits": "8000477d1a894a71"
+    },
+    {
+      "id": "sin.boundary.7fefffffffffffff",
+      "operator": "sin",
+      "inputBits": "7fefffffffffffff",
+      "expectedBits": "3fe9376253f463d1",
+      "lowerBits": "3fe9376253f463cd",
+      "upperBits": "3fe9376253f463d5"
+    },
+    {
+      "id": "sin.boundary.ffefffffffffffff",
+      "operator": "sin",
+      "inputBits": "ffefffffffffffff",
+      "expectedBits": "bfe9376253f463d1",
+      "lowerBits": "bfe9376253f463d5",
+      "upperBits": "bfe9376253f463cd"
+    },
+    {
+      "id": "sin.pole-neighbor.-1.40567fffffffffff",
+      "operator": "sin",
+      "inputBits": "40567fffffffffff",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "sin.pole-neighbor.1.4056800000000001",
+      "operator": "sin",
+      "inputBits": "4056800000000001",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "sin.pole-neighbor.-1.c0567fffffffffff",
+      "operator": "sin",
+      "inputBits": "c0567fffffffffff",
+      "expectedBits": "bff0000000000000",
+      "lowerBits": "bff0000000000004",
+      "upperBits": "bfeffffffffffff8"
+    },
+    {
+      "id": "sin.pole-neighbor.1.c056800000000001",
+      "operator": "sin",
+      "inputBits": "c056800000000001",
+      "expectedBits": "bff0000000000000",
+      "lowerBits": "bff0000000000004",
+      "upperBits": "bfeffffffffffff8"
+    },
+    {
+      "id": "sin.pole-neighbor.-1.40667fffffffffff",
+      "operator": "sin",
+      "inputBits": "40667fffffffffff",
+      "expectedBits": "3cc1df46a2529d39",
+      "lowerBits": "3cc1df46a2529d35",
+      "upperBits": "3cc1df46a2529d3d"
+    },
+    {
+      "id": "sin.pole-neighbor.1.4066800000000001",
+      "operator": "sin",
+      "inputBits": "4066800000000001",
+      "expectedBits": "bcc1df46a2529d39",
+      "lowerBits": "bcc1df46a2529d3d",
+      "upperBits": "bcc1df46a2529d35"
+    },
+    {
+      "id": "sin.pole-neighbor.-1.4070dfffffffffff",
+      "operator": "sin",
+      "inputBits": "4070dfffffffffff",
+      "expectedBits": "bff0000000000000",
+      "lowerBits": "bff0000000000004",
+      "upperBits": "bfeffffffffffff8"
+    },
+    {
+      "id": "sin.pole-neighbor.1.4070e00000000001",
+      "operator": "sin",
+      "inputBits": "4070e00000000001",
+      "expectedBits": "bff0000000000000",
+      "lowerBits": "bff0000000000004",
+      "upperBits": "bfeffffffffffff8"
+    },
+    {
+      "id": "sin.seeded-exponent.0003d9016b0003ad",
+      "operator": "sin",
+      "inputBits": "0003d9016b0003ad",
+      "expectedBits": "000011310c078a52",
+      "lowerBits": "000011310c078a4e",
+      "upperBits": "000011310c078a56"
+    },
+    {
+      "id": "sin.seeded-exponent.8003d9016b0003ad",
+      "operator": "sin",
+      "inputBits": "8003d9016b0003ad",
+      "expectedBits": "800011310c078a52",
+      "lowerBits": "800011310c078a56",
+      "upperBits": "800011310c078a4e"
+    },
+    {
+      "id": "sin.seeded-exponent.0011e0cf387748ea",
+      "operator": "sin",
+      "inputBits": "0011e0cf387748ea",
+      "expectedBits": "00004fe161843354",
+      "lowerBits": "00004fe161843350",
+      "upperBits": "00004fe161843358"
+    },
+    {
+      "id": "sin.seeded-exponent.8011e0cf387748ea",
+      "operator": "sin",
+      "inputBits": "8011e0cf387748ea",
+      "expectedBits": "80004fe161843354",
+      "lowerBits": "80004fe161843358",
+      "upperBits": "80004fe161843350"
+    },
+    {
+      "id": "sin.seeded-exponent.0023725feb3edcfb",
+      "operator": "sin",
+      "inputBits": "0023725feb3edcfb",
+      "expectedBits": "0000adc72ee3fd05",
+      "lowerBits": "0000adc72ee3fd01",
+      "upperBits": "0000adc72ee3fd09"
+    },
+    {
+      "id": "sin.seeded-exponent.8023725feb3edcfb",
+      "operator": "sin",
+      "inputBits": "8023725feb3edcfb",
+      "expectedBits": "8000adc72ee3fd05",
+      "lowerBits": "8000adc72ee3fd09",
+      "upperBits": "8000adc72ee3fd01"
+    },
+    {
+      "id": "sin.seeded-exponent.080a1fa7bfc4ff82",
+      "operator": "sin",
+      "inputBits": "080a1fa7bfc4ff82",
+      "expectedBits": "07ad2e2ec1476586",
+      "lowerBits": "07ad2e2ec1476582",
+      "upperBits": "07ad2e2ec147658a"
+    },
+    {
+      "id": "sin.seeded-exponent.880a1fa7bfc4ff82",
+      "operator": "sin",
+      "inputBits": "880a1fa7bfc4ff82",
+      "expectedBits": "87ad2e2ec1476586",
+      "lowerBits": "87ad2e2ec147658a",
+      "upperBits": "87ad2e2ec1476582"
+    },
+    {
+      "id": "sin.seeded-exponent.20022966338ed6fd",
+      "operator": "sin",
+      "inputBits": "20022966338ed6fd",
+      "expectedBits": "1fa4496dc4966e3f",
+      "lowerBits": "1fa4496dc4966e3b",
+      "upperBits": "1fa4496dc4966e43"
+    },
+    {
+      "id": "sin.seeded-exponent.a0022966338ed6fd",
+      "operator": "sin",
+      "inputBits": "a0022966338ed6fd",
+      "expectedBits": "9fa4496dc4966e3f",
+      "lowerBits": "9fa4496dc4966e43",
+      "upperBits": "9fa4496dc4966e3b"
+    },
+    {
+      "id": "sin.seeded-exponent.3fe4dfce6ea3d410",
+      "operator": "sin",
+      "inputBits": "3fe4dfce6ea3d410",
+      "expectedBits": "3f8750f5c696a3a7",
+      "lowerBits": "3f8750f5c696a3a3",
+      "upperBits": "3f8750f5c696a3ab"
+    },
+    {
+      "id": "sin.seeded-exponent.bfe4dfce6ea3d410",
+      "operator": "sin",
+      "inputBits": "bfe4dfce6ea3d410",
+      "expectedBits": "bf8750f5c696a3a7",
+      "lowerBits": "bf8750f5c696a3ab",
+      "upperBits": "bf8750f5c696a3a3"
+    },
+    {
+      "id": "sin.seeded-exponent.3ffda82d0f7997b8",
+      "operator": "sin",
+      "inputBits": "3ffda82d0f7997b8",
+      "expectedBits": "3fa08f880b3c8c59",
+      "lowerBits": "3fa08f880b3c8c55",
+      "upperBits": "3fa08f880b3c8c5d"
+    },
+    {
+      "id": "sin.seeded-exponent.bffda82d0f7997b8",
+      "operator": "sin",
+      "inputBits": "bffda82d0f7997b8",
+      "expectedBits": "bfa08f880b3c8c59",
+      "lowerBits": "bfa08f880b3c8c5d",
+      "upperBits": "bfa08f880b3c8c55"
+    },
+    {
+      "id": "sin.seeded-exponent.400dea3aacdb8a97",
+      "operator": "sin",
+      "inputBits": "400dea3aacdb8a97",
+      "expectedBits": "3fb0b22057132d8c",
+      "lowerBits": "3fb0b22057132d88",
+      "upperBits": "3fb0b22057132d90"
+    },
+    {
+      "id": "sin.seeded-exponent.c00dea3aacdb8a97",
+      "operator": "sin",
+      "inputBits": "c00dea3aacdb8a97",
+      "expectedBits": "bfb0b22057132d8c",
+      "lowerBits": "bfb0b22057132d90",
+      "upperBits": "bfb0b22057132d88"
+    },
+    {
+      "id": "sin.seeded-exponent.600856ba6eb67842",
+      "operator": "sin",
+      "inputBits": "600856ba6eb67842",
+      "expectedBits": "3fe7c7d7a833bec2",
+      "lowerBits": "3fe7c7d7a833bebe",
+      "upperBits": "3fe7c7d7a833bec6"
+    },
+    {
+      "id": "sin.seeded-exponent.e00856ba6eb67842",
+      "operator": "sin",
+      "inputBits": "e00856ba6eb67842",
+      "expectedBits": "bfe7c7d7a833bec2",
+      "lowerBits": "bfe7c7d7a833bec6",
+      "upperBits": "bfe7c7d7a833bebe"
+    },
+    {
+      "id": "sin.seeded-exponent.700e14a0f0994432",
+      "operator": "sin",
+      "inputBits": "700e14a0f0994432",
+      "expectedBits": "3fe0f5193eacdd2a",
+      "lowerBits": "3fe0f5193eacdd26",
+      "upperBits": "3fe0f5193eacdd2e"
+    },
+    {
+      "id": "sin.seeded-exponent.f00e14a0f0994432",
+      "operator": "sin",
+      "inputBits": "f00e14a0f0994432",
+      "expectedBits": "bfe0f5193eacdd2a",
+      "lowerBits": "bfe0f5193eacdd2e",
+      "upperBits": "bfe0f5193eacdd26"
+    },
+    {
+      "id": "sin.seeded-exponent.7fd7e1f8cbdb3a3a",
+      "operator": "sin",
+      "inputBits": "7fd7e1f8cbdb3a3a",
+      "expectedBits": "3fea8779cda8eea5",
+      "lowerBits": "3fea8779cda8eea1",
+      "upperBits": "3fea8779cda8eea9"
+    },
+    {
+      "id": "sin.seeded-exponent.ffd7e1f8cbdb3a3a",
+      "operator": "sin",
+      "inputBits": "ffd7e1f8cbdb3a3a",
+      "expectedBits": "bfea8779cda8eea5",
+      "lowerBits": "bfea8779cda8eea9",
+      "upperBits": "bfea8779cda8eea1"
+    },
+    {
+      "id": "sin.seeded-exponent.7fe2fef82e5942ce",
+      "operator": "sin",
+      "inputBits": "7fe2fef82e5942ce",
+      "expectedBits": "3fefd31f94f867c6",
+      "lowerBits": "3fefd31f94f867c2",
+      "upperBits": "3fefd31f94f867ca"
+    },
+    {
+      "id": "sin.seeded-exponent.ffe2fef82e5942ce",
+      "operator": "sin",
+      "inputBits": "ffe2fef82e5942ce",
+      "expectedBits": "bfefd31f94f867c6",
+      "lowerBits": "bfefd31f94f867ca",
+      "upperBits": "bfefd31f94f867c2"
+    },
+    {
+      "id": "cos.representative.0000000000000000",
+      "operator": "cos",
+      "inputBits": "0000000000000000",
+      "expectedBits": "3ff0000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "cos.representative.8000000000000000",
+      "operator": "cos",
+      "inputBits": "8000000000000000",
+      "expectedBits": "3ff0000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "cos.representative.403e000000000000",
+      "operator": "cos",
+      "inputBits": "403e000000000000",
+      "expectedBits": "3febb67ae8584caa",
+      "lowerBits": "3febb67ae8584ca6",
+      "upperBits": "3febb67ae8584cae"
+    },
+    {
+      "id": "cos.representative.c03e000000000000",
+      "operator": "cos",
+      "inputBits": "c03e000000000000",
+      "expectedBits": "3febb67ae8584caa",
+      "lowerBits": "3febb67ae8584ca6",
+      "upperBits": "3febb67ae8584cae"
+    },
+    {
+      "id": "cos.representative.4046800000000000",
+      "operator": "cos",
+      "inputBits": "4046800000000000",
+      "expectedBits": "3fe6a09e667f3bcd",
+      "lowerBits": "3fe6a09e667f3bc9",
+      "upperBits": "3fe6a09e667f3bd1"
+    },
+    {
+      "id": "cos.representative.c046800000000000",
+      "operator": "cos",
+      "inputBits": "c046800000000000",
+      "expectedBits": "3fe6a09e667f3bcd",
+      "lowerBits": "3fe6a09e667f3bc9",
+      "upperBits": "3fe6a09e667f3bd1"
+    },
+    {
+      "id": "cos.representative.4056800000000000",
+      "operator": "cos",
+      "inputBits": "4056800000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "cos.representative.c056800000000000",
+      "operator": "cos",
+      "inputBits": "c056800000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "cos.representative.4066800000000000",
+      "operator": "cos",
+      "inputBits": "4066800000000000",
+      "expectedBits": "bff0000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "cos.representative.c066800000000000",
+      "operator": "cos",
+      "inputBits": "c066800000000000",
+      "expectedBits": "bff0000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "cos.representative.4070e00000000000",
+      "operator": "cos",
+      "inputBits": "4070e00000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "cos.representative.c070e00000000000",
+      "operator": "cos",
+      "inputBits": "c070e00000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "cos.representative.4076800000000000",
+      "operator": "cos",
+      "inputBits": "4076800000000000",
+      "expectedBits": "3ff0000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "cos.representative.c076800000000000",
+      "operator": "cos",
+      "inputBits": "c076800000000000",
+      "expectedBits": "3ff0000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "cos.boundary.0000000000000001",
+      "operator": "cos",
+      "inputBits": "0000000000000001",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.boundary.8000000000000001",
+      "operator": "cos",
+      "inputBits": "8000000000000001",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.boundary.000000000000001c",
+      "operator": "cos",
+      "inputBits": "000000000000001c",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.boundary.800000000000001c",
+      "operator": "cos",
+      "inputBits": "800000000000001c",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.boundary.000000000000001d",
+      "operator": "cos",
+      "inputBits": "000000000000001d",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.boundary.800000000000001d",
+      "operator": "cos",
+      "inputBits": "800000000000001d",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.boundary.0000000000000064",
+      "operator": "cos",
+      "inputBits": "0000000000000064",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.boundary.8000000000000064",
+      "operator": "cos",
+      "inputBits": "8000000000000064",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.boundary.0010000000000000",
+      "operator": "cos",
+      "inputBits": "0010000000000000",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.boundary.8010000000000000",
+      "operator": "cos",
+      "inputBits": "8010000000000000",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.boundary.7fefffffffffffff",
+      "operator": "cos",
+      "inputBits": "7fefffffffffffff",
+      "expectedBits": "bfe3b37fb1bdc939",
+      "lowerBits": "bfe3b37fb1bdc93d",
+      "upperBits": "bfe3b37fb1bdc935"
+    },
+    {
+      "id": "cos.boundary.ffefffffffffffff",
+      "operator": "cos",
+      "inputBits": "ffefffffffffffff",
+      "expectedBits": "bfe3b37fb1bdc939",
+      "lowerBits": "bfe3b37fb1bdc93d",
+      "upperBits": "bfe3b37fb1bdc935"
+    },
+    {
+      "id": "cos.pole-neighbor.-1.40567fffffffffff",
+      "operator": "cos",
+      "inputBits": "40567fffffffffff",
+      "expectedBits": "3cb1df46a2529d39",
+      "lowerBits": "3cb1df46a2529d35",
+      "upperBits": "3cb1df46a2529d3d"
+    },
+    {
+      "id": "cos.pole-neighbor.1.4056800000000001",
+      "operator": "cos",
+      "inputBits": "4056800000000001",
+      "expectedBits": "bcb1df46a2529d39",
+      "lowerBits": "bcb1df46a2529d3d",
+      "upperBits": "bcb1df46a2529d35"
+    },
+    {
+      "id": "cos.pole-neighbor.-1.c0567fffffffffff",
+      "operator": "cos",
+      "inputBits": "c0567fffffffffff",
+      "expectedBits": "3cb1df46a2529d39",
+      "lowerBits": "3cb1df46a2529d35",
+      "upperBits": "3cb1df46a2529d3d"
+    },
+    {
+      "id": "cos.pole-neighbor.1.c056800000000001",
+      "operator": "cos",
+      "inputBits": "c056800000000001",
+      "expectedBits": "bcb1df46a2529d39",
+      "lowerBits": "bcb1df46a2529d3d",
+      "upperBits": "bcb1df46a2529d35"
+    },
+    {
+      "id": "cos.pole-neighbor.-1.40667fffffffffff",
+      "operator": "cos",
+      "inputBits": "40667fffffffffff",
+      "expectedBits": "bff0000000000000",
+      "lowerBits": "bff0000000000004",
+      "upperBits": "bfeffffffffffff8"
+    },
+    {
+      "id": "cos.pole-neighbor.1.4066800000000001",
+      "operator": "cos",
+      "inputBits": "4066800000000001",
+      "expectedBits": "bff0000000000000",
+      "lowerBits": "bff0000000000004",
+      "upperBits": "bfeffffffffffff8"
+    },
+    {
+      "id": "cos.pole-neighbor.-1.4070dfffffffffff",
+      "operator": "cos",
+      "inputBits": "4070dfffffffffff",
+      "expectedBits": "bcd1df46a2529d39",
+      "lowerBits": "bcd1df46a2529d3d",
+      "upperBits": "bcd1df46a2529d35"
+    },
+    {
+      "id": "cos.pole-neighbor.1.4070e00000000001",
+      "operator": "cos",
+      "inputBits": "4070e00000000001",
+      "expectedBits": "3cd1df46a2529d39",
+      "lowerBits": "3cd1df46a2529d35",
+      "upperBits": "3cd1df46a2529d3d"
+    },
+    {
+      "id": "cos.seeded-exponent.0003d9016b0003ad",
+      "operator": "cos",
+      "inputBits": "0003d9016b0003ad",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.seeded-exponent.8003d9016b0003ad",
+      "operator": "cos",
+      "inputBits": "8003d9016b0003ad",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.seeded-exponent.0011e0cf387748ea",
+      "operator": "cos",
+      "inputBits": "0011e0cf387748ea",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.seeded-exponent.8011e0cf387748ea",
+      "operator": "cos",
+      "inputBits": "8011e0cf387748ea",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.seeded-exponent.0023725feb3edcfb",
+      "operator": "cos",
+      "inputBits": "0023725feb3edcfb",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.seeded-exponent.8023725feb3edcfb",
+      "operator": "cos",
+      "inputBits": "8023725feb3edcfb",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.seeded-exponent.080a1fa7bfc4ff82",
+      "operator": "cos",
+      "inputBits": "080a1fa7bfc4ff82",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.seeded-exponent.880a1fa7bfc4ff82",
+      "operator": "cos",
+      "inputBits": "880a1fa7bfc4ff82",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.seeded-exponent.20022966338ed6fd",
+      "operator": "cos",
+      "inputBits": "20022966338ed6fd",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.seeded-exponent.a0022966338ed6fd",
+      "operator": "cos",
+      "inputBits": "a0022966338ed6fd",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "cos.seeded-exponent.3fe4dfce6ea3d410",
+      "operator": "cos",
+      "inputBits": "3fe4dfce6ea3d410",
+      "expectedBits": "3fefff78156e4d44",
+      "lowerBits": "3fefff78156e4d40",
+      "upperBits": "3fefff78156e4d48"
+    },
+    {
+      "id": "cos.seeded-exponent.bfe4dfce6ea3d410",
+      "operator": "cos",
+      "inputBits": "bfe4dfce6ea3d410",
+      "expectedBits": "3fefff78156e4d44",
+      "lowerBits": "3fefff78156e4d40",
+      "upperBits": "3fefff78156e4d48"
+    },
+    {
+      "id": "cos.seeded-exponent.3ffda82d0f7997b8",
+      "operator": "cos",
+      "inputBits": "3ffda82d0f7997b8",
+      "expectedBits": "3feffbb6b09767b7",
+      "lowerBits": "3feffbb6b09767b3",
+      "upperBits": "3feffbb6b09767bb"
+    },
+    {
+      "id": "cos.seeded-exponent.bffda82d0f7997b8",
+      "operator": "cos",
+      "inputBits": "bffda82d0f7997b8",
+      "expectedBits": "3feffbb6b09767b7",
+      "lowerBits": "3feffbb6b09767b3",
+      "upperBits": "3feffbb6b09767bb"
+    },
+    {
+      "id": "cos.seeded-exponent.400dea3aacdb8a97",
+      "operator": "cos",
+      "inputBits": "400dea3aacdb8a97",
+      "expectedBits": "3fefee8f3f952a62",
+      "lowerBits": "3fefee8f3f952a5e",
+      "upperBits": "3fefee8f3f952a66"
+    },
+    {
+      "id": "cos.seeded-exponent.c00dea3aacdb8a97",
+      "operator": "cos",
+      "inputBits": "c00dea3aacdb8a97",
+      "expectedBits": "3fefee8f3f952a62",
+      "lowerBits": "3fefee8f3f952a5e",
+      "upperBits": "3fefee8f3f952a66"
+    },
+    {
+      "id": "cos.seeded-exponent.600856ba6eb67842",
+      "operator": "cos",
+      "inputBits": "600856ba6eb67842",
+      "expectedBits": "3fe5698496e20bd8",
+      "lowerBits": "3fe5698496e20bd4",
+      "upperBits": "3fe5698496e20bdc"
+    },
+    {
+      "id": "cos.seeded-exponent.e00856ba6eb67842",
+      "operator": "cos",
+      "inputBits": "e00856ba6eb67842",
+      "expectedBits": "3fe5698496e20bd8",
+      "lowerBits": "3fe5698496e20bd4",
+      "upperBits": "3fe5698496e20bdc"
+    },
+    {
+      "id": "cos.seeded-exponent.700e14a0f0994432",
+      "operator": "cos",
+      "inputBits": "700e14a0f0994432",
+      "expectedBits": "3feb2335c2cda945",
+      "lowerBits": "3feb2335c2cda941",
+      "upperBits": "3feb2335c2cda949"
+    },
+    {
+      "id": "cos.seeded-exponent.f00e14a0f0994432",
+      "operator": "cos",
+      "inputBits": "f00e14a0f0994432",
+      "expectedBits": "3feb2335c2cda945",
+      "lowerBits": "3feb2335c2cda941",
+      "upperBits": "3feb2335c2cda949"
+    },
+    {
+      "id": "cos.seeded-exponent.7fd7e1f8cbdb3a3a",
+      "operator": "cos",
+      "inputBits": "7fd7e1f8cbdb3a3a",
+      "expectedBits": "3fe1e4e88411fd12",
+      "lowerBits": "3fe1e4e88411fd0e",
+      "upperBits": "3fe1e4e88411fd16"
+    },
+    {
+      "id": "cos.seeded-exponent.ffd7e1f8cbdb3a3a",
+      "operator": "cos",
+      "inputBits": "ffd7e1f8cbdb3a3a",
+      "expectedBits": "3fe1e4e88411fd12",
+      "lowerBits": "3fe1e4e88411fd0e",
+      "upperBits": "3fe1e4e88411fd16"
+    },
+    {
+      "id": "cos.seeded-exponent.7fe2fef82e5942ce",
+      "operator": "cos",
+      "inputBits": "7fe2fef82e5942ce",
+      "expectedBits": "bfbac2609b3c576c",
+      "lowerBits": "bfbac2609b3c5770",
+      "upperBits": "bfbac2609b3c5768"
+    },
+    {
+      "id": "cos.seeded-exponent.ffe2fef82e5942ce",
+      "operator": "cos",
+      "inputBits": "ffe2fef82e5942ce",
+      "expectedBits": "bfbac2609b3c576c",
+      "lowerBits": "bfbac2609b3c5770",
+      "upperBits": "bfbac2609b3c5768"
+    },
+    {
+      "id": "tan.representative.0000000000000000",
+      "operator": "tan",
+      "inputBits": "0000000000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "tan.representative.8000000000000000",
+      "operator": "tan",
+      "inputBits": "8000000000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "tan.representative.403e000000000000",
+      "operator": "tan",
+      "inputBits": "403e000000000000",
+      "expectedBits": "3fe279a74590331c",
+      "lowerBits": "3fe279a745903318",
+      "upperBits": "3fe279a745903320"
+    },
+    {
+      "id": "tan.representative.c03e000000000000",
+      "operator": "tan",
+      "inputBits": "c03e000000000000",
+      "expectedBits": "bfe279a74590331c",
+      "lowerBits": "bfe279a745903320",
+      "upperBits": "bfe279a745903318"
+    },
+    {
+      "id": "tan.representative.4046800000000000",
+      "operator": "tan",
+      "inputBits": "4046800000000000",
+      "expectedBits": "3ff0000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "tan.representative.c046800000000000",
+      "operator": "tan",
+      "inputBits": "c046800000000000",
+      "expectedBits": "bff0000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "tan.representative.4056800000000000",
+      "operator": "tan",
+      "inputBits": "4056800000000000",
+      "error": "DomainError",
+      "exact": true,
+      "reason": "exact-degree-pole"
+    },
+    {
+      "id": "tan.representative.c056800000000000",
+      "operator": "tan",
+      "inputBits": "c056800000000000",
+      "error": "DomainError",
+      "exact": true,
+      "reason": "exact-degree-pole"
+    },
+    {
+      "id": "tan.representative.4066800000000000",
+      "operator": "tan",
+      "inputBits": "4066800000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "tan.representative.c066800000000000",
+      "operator": "tan",
+      "inputBits": "c066800000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "tan.representative.4070e00000000000",
+      "operator": "tan",
+      "inputBits": "4070e00000000000",
+      "error": "DomainError",
+      "exact": true,
+      "reason": "exact-degree-pole"
+    },
+    {
+      "id": "tan.representative.c070e00000000000",
+      "operator": "tan",
+      "inputBits": "c070e00000000000",
+      "error": "DomainError",
+      "exact": true,
+      "reason": "exact-degree-pole"
+    },
+    {
+      "id": "tan.representative.4076800000000000",
+      "operator": "tan",
+      "inputBits": "4076800000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "tan.representative.c076800000000000",
+      "operator": "tan",
+      "inputBits": "c076800000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-degree-representative"
+    },
+    {
+      "id": "tan.boundary.0000000000000001",
+      "operator": "tan",
+      "inputBits": "0000000000000001",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "tan.boundary.8000000000000001",
+      "operator": "tan",
+      "inputBits": "8000000000000001",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "tan.boundary.000000000000001c",
+      "operator": "tan",
+      "inputBits": "000000000000001c",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "tan.boundary.800000000000001c",
+      "operator": "tan",
+      "inputBits": "800000000000001c",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "tan.boundary.000000000000001d",
+      "operator": "tan",
+      "inputBits": "000000000000001d",
+      "expectedBits": "0000000000000001",
+      "lowerBits": "8000000000000003",
+      "upperBits": "0000000000000005"
+    },
+    {
+      "id": "tan.boundary.800000000000001d",
+      "operator": "tan",
+      "inputBits": "800000000000001d",
+      "expectedBits": "8000000000000001",
+      "lowerBits": "8000000000000005",
+      "upperBits": "0000000000000003"
+    },
+    {
+      "id": "tan.boundary.0000000000000064",
+      "operator": "tan",
+      "inputBits": "0000000000000064",
+      "expectedBits": "0000000000000002",
+      "lowerBits": "8000000000000002",
+      "upperBits": "0000000000000006"
+    },
+    {
+      "id": "tan.boundary.8000000000000064",
+      "operator": "tan",
+      "inputBits": "8000000000000064",
+      "expectedBits": "8000000000000002",
+      "lowerBits": "8000000000000006",
+      "upperBits": "0000000000000002"
+    },
+    {
+      "id": "tan.boundary.0010000000000000",
+      "operator": "tan",
+      "inputBits": "0010000000000000",
+      "expectedBits": "0000477d1a894a75",
+      "lowerBits": "0000477d1a894a71",
+      "upperBits": "0000477d1a894a79"
+    },
+    {
+      "id": "tan.boundary.8010000000000000",
+      "operator": "tan",
+      "inputBits": "8010000000000000",
+      "expectedBits": "8000477d1a894a75",
+      "lowerBits": "8000477d1a894a79",
+      "upperBits": "8000477d1a894a71"
+    },
+    {
+      "id": "tan.boundary.7fefffffffffffff",
+      "operator": "tan",
+      "inputBits": "7fefffffffffffff",
+      "expectedBits": "bff47aa413b0ee1e",
+      "lowerBits": "bff47aa413b0ee22",
+      "upperBits": "bff47aa413b0ee1a"
+    },
+    {
+      "id": "tan.boundary.ffefffffffffffff",
+      "operator": "tan",
+      "inputBits": "ffefffffffffffff",
+      "expectedBits": "3ff47aa413b0ee1e",
+      "lowerBits": "3ff47aa413b0ee1a",
+      "upperBits": "3ff47aa413b0ee22"
+    },
+    {
+      "id": "tan.pole-neighbor.-1.40567fffffffffff",
+      "operator": "tan",
+      "inputBits": "40567fffffffffff",
+      "expectedBits": "432ca5dc1a63c1f8",
+      "lowerBits": "432ca5dc1a63c1f4",
+      "upperBits": "432ca5dc1a63c1fc"
+    },
+    {
+      "id": "tan.pole-neighbor.1.4056800000000001",
+      "operator": "tan",
+      "inputBits": "4056800000000001",
+      "expectedBits": "c32ca5dc1a63c1f8",
+      "lowerBits": "c32ca5dc1a63c1fc",
+      "upperBits": "c32ca5dc1a63c1f4"
+    },
+    {
+      "id": "tan.pole-neighbor.-1.c0567fffffffffff",
+      "operator": "tan",
+      "inputBits": "c0567fffffffffff",
+      "expectedBits": "c32ca5dc1a63c1f8",
+      "lowerBits": "c32ca5dc1a63c1fc",
+      "upperBits": "c32ca5dc1a63c1f4"
+    },
+    {
+      "id": "tan.pole-neighbor.1.c056800000000001",
+      "operator": "tan",
+      "inputBits": "c056800000000001",
+      "expectedBits": "432ca5dc1a63c1f8",
+      "lowerBits": "432ca5dc1a63c1f4",
+      "upperBits": "432ca5dc1a63c1fc"
+    },
+    {
+      "id": "tan.pole-neighbor.-1.40667fffffffffff",
+      "operator": "tan",
+      "inputBits": "40667fffffffffff",
+      "expectedBits": "bcc1df46a2529d39",
+      "lowerBits": "bcc1df46a2529d3d",
+      "upperBits": "bcc1df46a2529d35"
+    },
+    {
+      "id": "tan.pole-neighbor.1.4066800000000001",
+      "operator": "tan",
+      "inputBits": "4066800000000001",
+      "expectedBits": "3cc1df46a2529d39",
+      "lowerBits": "3cc1df46a2529d35",
+      "upperBits": "3cc1df46a2529d3d"
+    },
+    {
+      "id": "tan.pole-neighbor.-1.4070dfffffffffff",
+      "operator": "tan",
+      "inputBits": "4070dfffffffffff",
+      "expectedBits": "430ca5dc1a63c1f8",
+      "lowerBits": "430ca5dc1a63c1f4",
+      "upperBits": "430ca5dc1a63c1fc"
+    },
+    {
+      "id": "tan.pole-neighbor.1.4070e00000000001",
+      "operator": "tan",
+      "inputBits": "4070e00000000001",
+      "expectedBits": "c30ca5dc1a63c1f8",
+      "lowerBits": "c30ca5dc1a63c1fc",
+      "upperBits": "c30ca5dc1a63c1f4"
+    },
+    {
+      "id": "tan.seeded-exponent.0003d9016b0003ad",
+      "operator": "tan",
+      "inputBits": "0003d9016b0003ad",
+      "expectedBits": "000011310c078a52",
+      "lowerBits": "000011310c078a4e",
+      "upperBits": "000011310c078a56"
+    },
+    {
+      "id": "tan.seeded-exponent.8003d9016b0003ad",
+      "operator": "tan",
+      "inputBits": "8003d9016b0003ad",
+      "expectedBits": "800011310c078a52",
+      "lowerBits": "800011310c078a56",
+      "upperBits": "800011310c078a4e"
+    },
+    {
+      "id": "tan.seeded-exponent.0011e0cf387748ea",
+      "operator": "tan",
+      "inputBits": "0011e0cf387748ea",
+      "expectedBits": "00004fe161843354",
+      "lowerBits": "00004fe161843350",
+      "upperBits": "00004fe161843358"
+    },
+    {
+      "id": "tan.seeded-exponent.8011e0cf387748ea",
+      "operator": "tan",
+      "inputBits": "8011e0cf387748ea",
+      "expectedBits": "80004fe161843354",
+      "lowerBits": "80004fe161843358",
+      "upperBits": "80004fe161843350"
+    },
+    {
+      "id": "tan.seeded-exponent.0023725feb3edcfb",
+      "operator": "tan",
+      "inputBits": "0023725feb3edcfb",
+      "expectedBits": "0000adc72ee3fd05",
+      "lowerBits": "0000adc72ee3fd01",
+      "upperBits": "0000adc72ee3fd09"
+    },
+    {
+      "id": "tan.seeded-exponent.8023725feb3edcfb",
+      "operator": "tan",
+      "inputBits": "8023725feb3edcfb",
+      "expectedBits": "8000adc72ee3fd05",
+      "lowerBits": "8000adc72ee3fd09",
+      "upperBits": "8000adc72ee3fd01"
+    },
+    {
+      "id": "tan.seeded-exponent.080a1fa7bfc4ff82",
+      "operator": "tan",
+      "inputBits": "080a1fa7bfc4ff82",
+      "expectedBits": "07ad2e2ec1476586",
+      "lowerBits": "07ad2e2ec1476582",
+      "upperBits": "07ad2e2ec147658a"
+    },
+    {
+      "id": "tan.seeded-exponent.880a1fa7bfc4ff82",
+      "operator": "tan",
+      "inputBits": "880a1fa7bfc4ff82",
+      "expectedBits": "87ad2e2ec1476586",
+      "lowerBits": "87ad2e2ec147658a",
+      "upperBits": "87ad2e2ec1476582"
+    },
+    {
+      "id": "tan.seeded-exponent.20022966338ed6fd",
+      "operator": "tan",
+      "inputBits": "20022966338ed6fd",
+      "expectedBits": "1fa4496dc4966e3f",
+      "lowerBits": "1fa4496dc4966e3b",
+      "upperBits": "1fa4496dc4966e43"
+    },
+    {
+      "id": "tan.seeded-exponent.a0022966338ed6fd",
+      "operator": "tan",
+      "inputBits": "a0022966338ed6fd",
+      "expectedBits": "9fa4496dc4966e3f",
+      "lowerBits": "9fa4496dc4966e43",
+      "upperBits": "9fa4496dc4966e3b"
+    },
+    {
+      "id": "tan.seeded-exponent.3fe4dfce6ea3d410",
+      "operator": "tan",
+      "inputBits": "3fe4dfce6ea3d410",
+      "expectedBits": "3f875158d0b25866",
+      "lowerBits": "3f875158d0b25862",
+      "upperBits": "3f875158d0b2586a"
+    },
+    {
+      "id": "tan.seeded-exponent.bfe4dfce6ea3d410",
+      "operator": "tan",
+      "inputBits": "bfe4dfce6ea3d410",
+      "expectedBits": "bf875158d0b25866",
+      "lowerBits": "bf875158d0b2586a",
+      "upperBits": "bf875158d0b25862"
+    },
+    {
+      "id": "tan.seeded-exponent.3ffda82d0f7997b8",
+      "operator": "tan",
+      "inputBits": "3ffda82d0f7997b8",
+      "expectedBits": "3fa091c038e02534",
+      "lowerBits": "3fa091c038e02530",
+      "upperBits": "3fa091c038e02538"
+    },
+    {
+      "id": "tan.seeded-exponent.bffda82d0f7997b8",
+      "operator": "tan",
+      "inputBits": "bffda82d0f7997b8",
+      "expectedBits": "bfa091c038e02534",
+      "lowerBits": "bfa091c038e02538",
+      "upperBits": "bfa091c038e02530"
+    },
+    {
+      "id": "tan.seeded-exponent.400dea3aacdb8a97",
+      "operator": "tan",
+      "inputBits": "400dea3aacdb8a97",
+      "expectedBits": "3fb0bb3ec46285c7",
+      "lowerBits": "3fb0bb3ec46285c3",
+      "upperBits": "3fb0bb3ec46285cb"
+    },
+    {
+      "id": "tan.seeded-exponent.c00dea3aacdb8a97",
+      "operator": "tan",
+      "inputBits": "c00dea3aacdb8a97",
+      "expectedBits": "bfb0bb3ec46285c7",
+      "lowerBits": "bfb0bb3ec46285cb",
+      "upperBits": "bfb0bb3ec46285c3"
+    },
+    {
+      "id": "tan.seeded-exponent.600856ba6eb67842",
+      "operator": "tan",
+      "inputBits": "600856ba6eb67842",
+      "expectedBits": "3ff1c511a0db83e2",
+      "lowerBits": "3ff1c511a0db83de",
+      "upperBits": "3ff1c511a0db83e6"
+    },
+    {
+      "id": "tan.seeded-exponent.e00856ba6eb67842",
+      "operator": "tan",
+      "inputBits": "e00856ba6eb67842",
+      "expectedBits": "bff1c511a0db83e2",
+      "lowerBits": "bff1c511a0db83e6",
+      "upperBits": "bff1c511a0db83de"
+    },
+    {
+      "id": "tan.seeded-exponent.700e14a0f0994432",
+      "operator": "tan",
+      "inputBits": "700e14a0f0994432",
+      "expectedBits": "3fe3feee02d72515",
+      "lowerBits": "3fe3feee02d72511",
+      "upperBits": "3fe3feee02d72519"
+    },
+    {
+      "id": "tan.seeded-exponent.f00e14a0f0994432",
+      "operator": "tan",
+      "inputBits": "f00e14a0f0994432",
+      "expectedBits": "bfe3feee02d72515",
+      "lowerBits": "bfe3feee02d72519",
+      "upperBits": "bfe3feee02d72511"
+    },
+    {
+      "id": "tan.seeded-exponent.7fd7e1f8cbdb3a3a",
+      "operator": "tan",
+      "inputBits": "7fd7e1f8cbdb3a3a",
+      "expectedBits": "3ff7b891d9a169b3",
+      "lowerBits": "3ff7b891d9a169af",
+      "upperBits": "3ff7b891d9a169b7"
+    },
+    {
+      "id": "tan.seeded-exponent.ffd7e1f8cbdb3a3a",
+      "operator": "tan",
+      "inputBits": "ffd7e1f8cbdb3a3a",
+      "expectedBits": "bff7b891d9a169b3",
+      "lowerBits": "bff7b891d9a169b7",
+      "upperBits": "bff7b891d9a169af"
+    },
+    {
+      "id": "tan.seeded-exponent.7fe2fef82e5942ce",
+      "operator": "tan",
+      "inputBits": "7fe2fef82e5942ce",
+      "expectedBits": "c023075ac71a38c7",
+      "lowerBits": "c023075ac71a38cb",
+      "upperBits": "c023075ac71a38c3"
+    },
+    {
+      "id": "tan.seeded-exponent.ffe2fef82e5942ce",
+      "operator": "tan",
+      "inputBits": "ffe2fef82e5942ce",
+      "expectedBits": "4023075ac71a38c7",
+      "lowerBits": "4023075ac71a38c3",
+      "upperBits": "4023075ac71a38cb"
+    },
+    {
+      "id": "asin.representative.0000000000000000",
+      "operator": "asin",
+      "inputBits": "0000000000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-inverse-endpoint"
+    },
+    {
+      "id": "asin.representative.8000000000000000",
+      "operator": "asin",
+      "inputBits": "8000000000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-inverse-endpoint"
+    },
+    {
+      "id": "asin.representative.bff0000000000000",
+      "operator": "asin",
+      "inputBits": "bff0000000000000",
+      "expectedBits": "c056800000000000",
+      "exact": true,
+      "reason": "exact-inverse-endpoint"
+    },
+    {
+      "id": "asin.representative.bfe0000000000000",
+      "operator": "asin",
+      "inputBits": "bfe0000000000000",
+      "expectedBits": "c03e000000000000",
+      "lowerBits": "c03e000000000004",
+      "upperBits": "c03dfffffffffffc"
+    },
+    {
+      "id": "asin.representative.3fe0000000000000",
+      "operator": "asin",
+      "inputBits": "3fe0000000000000",
+      "expectedBits": "403e000000000000",
+      "lowerBits": "403dfffffffffffc",
+      "upperBits": "403e000000000004"
+    },
+    {
+      "id": "asin.representative.3ff0000000000000",
+      "operator": "asin",
+      "inputBits": "3ff0000000000000",
+      "expectedBits": "4056800000000000",
+      "exact": true,
+      "reason": "exact-inverse-endpoint"
+    },
+    {
+      "id": "asin.boundary.0000000000000001",
+      "operator": "asin",
+      "inputBits": "0000000000000001",
+      "expectedBits": "0000000000000039",
+      "lowerBits": "0000000000000035",
+      "upperBits": "000000000000003d"
+    },
+    {
+      "id": "asin.boundary.8000000000000001",
+      "operator": "asin",
+      "inputBits": "8000000000000001",
+      "expectedBits": "8000000000000039",
+      "lowerBits": "800000000000003d",
+      "upperBits": "8000000000000035"
+    },
+    {
+      "id": "asin.boundary.0010000000000000",
+      "operator": "asin",
+      "inputBits": "0010000000000000",
+      "expectedBits": "006ca5dc1a63c1f8",
+      "lowerBits": "006ca5dc1a63c1f4",
+      "upperBits": "006ca5dc1a63c1fc"
+    },
+    {
+      "id": "asin.boundary.8010000000000000",
+      "operator": "asin",
+      "inputBits": "8010000000000000",
+      "expectedBits": "806ca5dc1a63c1f8",
+      "lowerBits": "806ca5dc1a63c1fc",
+      "upperBits": "806ca5dc1a63c1f4"
+    },
+    {
+      "id": "asin.boundary.7fefffffffffffff",
+      "operator": "asin",
+      "inputBits": "7fefffffffffffff",
+      "error": "DomainError"
+    },
+    {
+      "id": "asin.boundary.ffefffffffffffff",
+      "operator": "asin",
+      "inputBits": "ffefffffffffffff",
+      "error": "DomainError"
+    },
+    {
+      "id": "asin.domain-neighbor.-1.3fefffffffffffff",
+      "operator": "asin",
+      "inputBits": "3fefffffffffffff",
+      "expectedBits": "40567ffffc6b447d",
+      "lowerBits": "40567ffffc6b4479",
+      "upperBits": "40567ffffc6b4481"
+    },
+    {
+      "id": "asin.domain-neighbor.1.3ff0000000000001",
+      "operator": "asin",
+      "inputBits": "3ff0000000000001",
+      "error": "DomainError"
+    },
+    {
+      "id": "asin.domain-neighbor.-1.bfefffffffffffff",
+      "operator": "asin",
+      "inputBits": "bfefffffffffffff",
+      "expectedBits": "c0567ffffc6b447d",
+      "lowerBits": "c0567ffffc6b4481",
+      "upperBits": "c0567ffffc6b4479"
+    },
+    {
+      "id": "asin.domain-neighbor.1.bff0000000000001",
+      "operator": "asin",
+      "inputBits": "bff0000000000001",
+      "error": "DomainError"
+    },
+    {
+      "id": "asin.seeded-exponent.0003d9016b0003ad",
+      "operator": "asin",
+      "inputBits": "0003d9016b0003ad",
+      "expectedBits": "004b8e95202e5603",
+      "lowerBits": "004b8e95202e55ff",
+      "upperBits": "004b8e95202e5607"
+    },
+    {
+      "id": "asin.seeded-exponent.8003d9016b0003ad",
+      "operator": "asin",
+      "inputBits": "8003d9016b0003ad",
+      "expectedBits": "804b8e95202e5603",
+      "lowerBits": "804b8e95202e5607",
+      "upperBits": "804b8e95202e55ff"
+    },
+    {
+      "id": "asin.seeded-exponent.0011e0cf387748ea",
+      "operator": "asin",
+      "inputBits": "0011e0cf387748ea",
+      "expectedBits": "0070015f76328f4e",
+      "lowerBits": "0070015f76328f4a",
+      "upperBits": "0070015f76328f52"
+    },
+    {
+      "id": "asin.seeded-exponent.8011e0cf387748ea",
+      "operator": "asin",
+      "inputBits": "8011e0cf387748ea",
+      "expectedBits": "8070015f76328f4e",
+      "lowerBits": "8070015f76328f52",
+      "upperBits": "8070015f76328f4a"
+    },
+    {
+      "id": "asin.seeded-exponent.0023725feb3edcfb",
+      "operator": "asin",
+      "inputBits": "0023725feb3edcfb",
+      "expectedBits": "008168df6ec8fc77",
+      "lowerBits": "008168df6ec8fc73",
+      "upperBits": "008168df6ec8fc7b"
+    },
+    {
+      "id": "asin.seeded-exponent.8023725feb3edcfb",
+      "operator": "asin",
+      "inputBits": "8023725feb3edcfb",
+      "expectedBits": "808168df6ec8fc77",
+      "lowerBits": "808168df6ec8fc7b",
+      "upperBits": "808168df6ec8fc73"
+    },
+    {
+      "id": "asin.seeded-exponent.080a1fa7bfc4ff82",
+      "operator": "asin",
+      "inputBits": "080a1fa7bfc4ff82",
+      "expectedBits": "08676319afed9e56",
+      "lowerBits": "08676319afed9e52",
+      "upperBits": "08676319afed9e5a"
+    },
+    {
+      "id": "asin.seeded-exponent.880a1fa7bfc4ff82",
+      "operator": "asin",
+      "inputBits": "880a1fa7bfc4ff82",
+      "expectedBits": "88676319afed9e56",
+      "lowerBits": "88676319afed9e5a",
+      "upperBits": "88676319afed9e52"
+    },
+    {
+      "id": "asin.seeded-exponent.20022966338ed6fd",
+      "operator": "asin",
+      "inputBits": "20022966338ed6fd",
+      "expectedBits": "2060425bcfafb84c",
+      "lowerBits": "2060425bcfafb848",
+      "upperBits": "2060425bcfafb850"
+    },
+    {
+      "id": "asin.seeded-exponent.a0022966338ed6fd",
+      "operator": "asin",
+      "inputBits": "a0022966338ed6fd",
+      "expectedBits": "a060425bcfafb84c",
+      "lowerBits": "a060425bcfafb850",
+      "upperBits": "a060425bcfafb848"
+    },
+    {
+      "id": "asin.seeded-exponent.3fe4dfce6ea3d410",
+      "operator": "asin",
+      "inputBits": "3fe4dfce6ea3d410",
+      "expectedBits": "40445bbeb843fc48",
+      "lowerBits": "40445bbeb843fc44",
+      "upperBits": "40445bbeb843fc4c"
+    },
+    {
+      "id": "asin.seeded-exponent.bfe4dfce6ea3d410",
+      "operator": "asin",
+      "inputBits": "bfe4dfce6ea3d410",
+      "expectedBits": "c0445bbeb843fc48",
+      "lowerBits": "c0445bbeb843fc4c",
+      "upperBits": "c0445bbeb843fc44"
+    },
+    {
+      "id": "asin.seeded-exponent.3ffda82d0f7997b8",
+      "operator": "asin",
+      "inputBits": "3ffda82d0f7997b8",
+      "error": "DomainError"
+    },
+    {
+      "id": "asin.seeded-exponent.bffda82d0f7997b8",
+      "operator": "asin",
+      "inputBits": "bffda82d0f7997b8",
+      "error": "DomainError"
+    },
+    {
+      "id": "asin.seeded-exponent.400dea3aacdb8a97",
+      "operator": "asin",
+      "inputBits": "400dea3aacdb8a97",
+      "error": "DomainError"
+    },
+    {
+      "id": "asin.seeded-exponent.c00dea3aacdb8a97",
+      "operator": "asin",
+      "inputBits": "c00dea3aacdb8a97",
+      "error": "DomainError"
+    },
+    {
+      "id": "acos.representative.0000000000000000",
+      "operator": "acos",
+      "inputBits": "0000000000000000",
+      "expectedBits": "4056800000000000",
+      "exact": true,
+      "reason": "exact-inverse-endpoint"
+    },
+    {
+      "id": "acos.representative.8000000000000000",
+      "operator": "acos",
+      "inputBits": "8000000000000000",
+      "expectedBits": "4056800000000000",
+      "exact": true,
+      "reason": "exact-inverse-endpoint"
+    },
+    {
+      "id": "acos.representative.bff0000000000000",
+      "operator": "acos",
+      "inputBits": "bff0000000000000",
+      "expectedBits": "4066800000000000",
+      "exact": true,
+      "reason": "exact-inverse-endpoint"
+    },
+    {
+      "id": "acos.representative.bfe0000000000000",
+      "operator": "acos",
+      "inputBits": "bfe0000000000000",
+      "expectedBits": "405e000000000000",
+      "lowerBits": "405dfffffffffffc",
+      "upperBits": "405e000000000004"
+    },
+    {
+      "id": "acos.representative.3fe0000000000000",
+      "operator": "acos",
+      "inputBits": "3fe0000000000000",
+      "expectedBits": "404e000000000000",
+      "lowerBits": "404dfffffffffffc",
+      "upperBits": "404e000000000004"
+    },
+    {
+      "id": "acos.representative.3ff0000000000000",
+      "operator": "acos",
+      "inputBits": "3ff0000000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-inverse-endpoint"
+    },
+    {
+      "id": "acos.boundary.0000000000000001",
+      "operator": "acos",
+      "inputBits": "0000000000000001",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "acos.boundary.8000000000000001",
+      "operator": "acos",
+      "inputBits": "8000000000000001",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "acos.boundary.0010000000000000",
+      "operator": "acos",
+      "inputBits": "0010000000000000",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "acos.boundary.8010000000000000",
+      "operator": "acos",
+      "inputBits": "8010000000000000",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "acos.boundary.7fefffffffffffff",
+      "operator": "acos",
+      "inputBits": "7fefffffffffffff",
+      "error": "DomainError"
+    },
+    {
+      "id": "acos.boundary.ffefffffffffffff",
+      "operator": "acos",
+      "inputBits": "ffefffffffffffff",
+      "error": "DomainError"
+    },
+    {
+      "id": "acos.domain-neighbor.-1.3fefffffffffffff",
+      "operator": "acos",
+      "inputBits": "3fefffffffffffff",
+      "expectedBits": "3eaca5dc1a63c1f8",
+      "lowerBits": "3eaca5dc1a63c1f4",
+      "upperBits": "3eaca5dc1a63c1fc"
+    },
+    {
+      "id": "acos.domain-neighbor.1.3ff0000000000001",
+      "operator": "acos",
+      "inputBits": "3ff0000000000001",
+      "error": "DomainError"
+    },
+    {
+      "id": "acos.domain-neighbor.-1.bfefffffffffffff",
+      "operator": "acos",
+      "inputBits": "bfefffffffffffff",
+      "expectedBits": "40667ffffe35a23e",
+      "lowerBits": "40667ffffe35a23a",
+      "upperBits": "40667ffffe35a242"
+    },
+    {
+      "id": "acos.domain-neighbor.1.bff0000000000001",
+      "operator": "acos",
+      "inputBits": "bff0000000000001",
+      "error": "DomainError"
+    },
+    {
+      "id": "acos.seeded-exponent.0003d9016b0003ad",
+      "operator": "acos",
+      "inputBits": "0003d9016b0003ad",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "acos.seeded-exponent.8003d9016b0003ad",
+      "operator": "acos",
+      "inputBits": "8003d9016b0003ad",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "acos.seeded-exponent.0011e0cf387748ea",
+      "operator": "acos",
+      "inputBits": "0011e0cf387748ea",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "acos.seeded-exponent.8011e0cf387748ea",
+      "operator": "acos",
+      "inputBits": "8011e0cf387748ea",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "acos.seeded-exponent.0023725feb3edcfb",
+      "operator": "acos",
+      "inputBits": "0023725feb3edcfb",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "acos.seeded-exponent.8023725feb3edcfb",
+      "operator": "acos",
+      "inputBits": "8023725feb3edcfb",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "acos.seeded-exponent.080a1fa7bfc4ff82",
+      "operator": "acos",
+      "inputBits": "080a1fa7bfc4ff82",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "acos.seeded-exponent.880a1fa7bfc4ff82",
+      "operator": "acos",
+      "inputBits": "880a1fa7bfc4ff82",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "acos.seeded-exponent.20022966338ed6fd",
+      "operator": "acos",
+      "inputBits": "20022966338ed6fd",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "acos.seeded-exponent.a0022966338ed6fd",
+      "operator": "acos",
+      "inputBits": "a0022966338ed6fd",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "acos.seeded-exponent.3fe4dfce6ea3d410",
+      "operator": "acos",
+      "inputBits": "3fe4dfce6ea3d410",
+      "expectedBits": "4048a44147bc03b8",
+      "lowerBits": "4048a44147bc03b4",
+      "upperBits": "4048a44147bc03bc"
+    },
+    {
+      "id": "acos.seeded-exponent.bfe4dfce6ea3d410",
+      "operator": "acos",
+      "inputBits": "bfe4dfce6ea3d410",
+      "expectedBits": "406056efae10ff12",
+      "lowerBits": "406056efae10ff0e",
+      "upperBits": "406056efae10ff16"
+    },
+    {
+      "id": "acos.seeded-exponent.3ffda82d0f7997b8",
+      "operator": "acos",
+      "inputBits": "3ffda82d0f7997b8",
+      "error": "DomainError"
+    },
+    {
+      "id": "acos.seeded-exponent.bffda82d0f7997b8",
+      "operator": "acos",
+      "inputBits": "bffda82d0f7997b8",
+      "error": "DomainError"
+    },
+    {
+      "id": "acos.seeded-exponent.400dea3aacdb8a97",
+      "operator": "acos",
+      "inputBits": "400dea3aacdb8a97",
+      "error": "DomainError"
+    },
+    {
+      "id": "acos.seeded-exponent.c00dea3aacdb8a97",
+      "operator": "acos",
+      "inputBits": "c00dea3aacdb8a97",
+      "error": "DomainError"
+    },
+    {
+      "id": "atan.representative.0000000000000000",
+      "operator": "atan",
+      "inputBits": "0000000000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-inverse-representative"
+    },
+    {
+      "id": "atan.representative.8000000000000000",
+      "operator": "atan",
+      "inputBits": "8000000000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-inverse-representative"
+    },
+    {
+      "id": "atan.representative.bff0000000000000",
+      "operator": "atan",
+      "inputBits": "bff0000000000000",
+      "expectedBits": "c046800000000000",
+      "exact": true,
+      "reason": "exact-inverse-representative"
+    },
+    {
+      "id": "atan.representative.3ff0000000000000",
+      "operator": "atan",
+      "inputBits": "3ff0000000000000",
+      "expectedBits": "4046800000000000",
+      "exact": true,
+      "reason": "exact-inverse-representative"
+    },
+    {
+      "id": "atan.representative.bfe0000000000000",
+      "operator": "atan",
+      "inputBits": "bfe0000000000000",
+      "expectedBits": "c03a90a731a61dc4",
+      "lowerBits": "c03a90a731a61dc8",
+      "upperBits": "c03a90a731a61dc0"
+    },
+    {
+      "id": "atan.representative.3fe0000000000000",
+      "operator": "atan",
+      "inputBits": "3fe0000000000000",
+      "expectedBits": "403a90a731a61dc4",
+      "lowerBits": "403a90a731a61dc0",
+      "upperBits": "403a90a731a61dc8"
+    },
+    {
+      "id": "atan.wide.0000000000000001",
+      "operator": "atan",
+      "inputBits": "0000000000000001",
+      "expectedBits": "0000000000000039",
+      "lowerBits": "0000000000000035",
+      "upperBits": "000000000000003d"
+    },
+    {
+      "id": "atan.wide.8000000000000001",
+      "operator": "atan",
+      "inputBits": "8000000000000001",
+      "expectedBits": "8000000000000039",
+      "lowerBits": "800000000000003d",
+      "upperBits": "8000000000000035"
+    },
+    {
+      "id": "atan.wide.0010000000000000",
+      "operator": "atan",
+      "inputBits": "0010000000000000",
+      "expectedBits": "006ca5dc1a63c1f8",
+      "lowerBits": "006ca5dc1a63c1f4",
+      "upperBits": "006ca5dc1a63c1fc"
+    },
+    {
+      "id": "atan.wide.8010000000000000",
+      "operator": "atan",
+      "inputBits": "8010000000000000",
+      "expectedBits": "806ca5dc1a63c1f8",
+      "lowerBits": "806ca5dc1a63c1fc",
+      "upperBits": "806ca5dc1a63c1f4"
+    },
+    {
+      "id": "atan.wide.7fefffffffffffff",
+      "operator": "atan",
+      "inputBits": "7fefffffffffffff",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "atan.wide.ffefffffffffffff",
+      "operator": "atan",
+      "inputBits": "ffefffffffffffff",
+      "expectedBits": "c056800000000000",
+      "lowerBits": "c056800000000004",
+      "upperBits": "c0567ffffffffffc"
+    },
+    {
+      "id": "atan.wide.0003d9016b0003ad",
+      "operator": "atan",
+      "inputBits": "0003d9016b0003ad",
+      "expectedBits": "004b8e95202e5603",
+      "lowerBits": "004b8e95202e55ff",
+      "upperBits": "004b8e95202e5607"
+    },
+    {
+      "id": "atan.wide.8003d9016b0003ad",
+      "operator": "atan",
+      "inputBits": "8003d9016b0003ad",
+      "expectedBits": "804b8e95202e5603",
+      "lowerBits": "804b8e95202e5607",
+      "upperBits": "804b8e95202e55ff"
+    },
+    {
+      "id": "atan.wide.0011e0cf387748ea",
+      "operator": "atan",
+      "inputBits": "0011e0cf387748ea",
+      "expectedBits": "0070015f76328f4e",
+      "lowerBits": "0070015f76328f4a",
+      "upperBits": "0070015f76328f52"
+    },
+    {
+      "id": "atan.wide.8011e0cf387748ea",
+      "operator": "atan",
+      "inputBits": "8011e0cf387748ea",
+      "expectedBits": "8070015f76328f4e",
+      "lowerBits": "8070015f76328f52",
+      "upperBits": "8070015f76328f4a"
+    },
+    {
+      "id": "atan.wide.0023725feb3edcfb",
+      "operator": "atan",
+      "inputBits": "0023725feb3edcfb",
+      "expectedBits": "008168df6ec8fc77",
+      "lowerBits": "008168df6ec8fc73",
+      "upperBits": "008168df6ec8fc7b"
+    },
+    {
+      "id": "atan.wide.8023725feb3edcfb",
+      "operator": "atan",
+      "inputBits": "8023725feb3edcfb",
+      "expectedBits": "808168df6ec8fc77",
+      "lowerBits": "808168df6ec8fc7b",
+      "upperBits": "808168df6ec8fc73"
+    },
+    {
+      "id": "atan.wide.080a1fa7bfc4ff82",
+      "operator": "atan",
+      "inputBits": "080a1fa7bfc4ff82",
+      "expectedBits": "08676319afed9e56",
+      "lowerBits": "08676319afed9e52",
+      "upperBits": "08676319afed9e5a"
+    },
+    {
+      "id": "atan.wide.880a1fa7bfc4ff82",
+      "operator": "atan",
+      "inputBits": "880a1fa7bfc4ff82",
+      "expectedBits": "88676319afed9e56",
+      "lowerBits": "88676319afed9e5a",
+      "upperBits": "88676319afed9e52"
+    },
+    {
+      "id": "atan.wide.20022966338ed6fd",
+      "operator": "atan",
+      "inputBits": "20022966338ed6fd",
+      "expectedBits": "2060425bcfafb84c",
+      "lowerBits": "2060425bcfafb848",
+      "upperBits": "2060425bcfafb850"
+    },
+    {
+      "id": "atan.wide.a0022966338ed6fd",
+      "operator": "atan",
+      "inputBits": "a0022966338ed6fd",
+      "expectedBits": "a060425bcfafb84c",
+      "lowerBits": "a060425bcfafb850",
+      "upperBits": "a060425bcfafb848"
+    },
+    {
+      "id": "atan.wide.3fe4dfce6ea3d410",
+      "operator": "atan",
+      "inputBits": "3fe4dfce6ea3d410",
+      "expectedBits": "40408f0104dadc06",
+      "lowerBits": "40408f0104dadc02",
+      "upperBits": "40408f0104dadc0a"
+    },
+    {
+      "id": "atan.wide.bfe4dfce6ea3d410",
+      "operator": "atan",
+      "inputBits": "bfe4dfce6ea3d410",
+      "expectedBits": "c0408f0104dadc06",
+      "lowerBits": "c0408f0104dadc0a",
+      "upperBits": "c0408f0104dadc02"
+    },
+    {
+      "id": "atan.wide.3ffda82d0f7997b8",
+      "operator": "atan",
+      "inputBits": "3ffda82d0f7997b8",
+      "expectedBits": "404ed396033a8aca",
+      "lowerBits": "404ed396033a8ac6",
+      "upperBits": "404ed396033a8ace"
+    },
+    {
+      "id": "atan.wide.bffda82d0f7997b8",
+      "operator": "atan",
+      "inputBits": "bffda82d0f7997b8",
+      "expectedBits": "c04ed396033a8aca",
+      "lowerBits": "c04ed396033a8ace",
+      "upperBits": "c04ed396033a8ac6"
+    },
+    {
+      "id": "atan.wide.400dea3aacdb8a97",
+      "operator": "atan",
+      "inputBits": "400dea3aacdb8a97",
+      "expectedBits": "4052c1cb6598dbf9",
+      "lowerBits": "4052c1cb6598dbf5",
+      "upperBits": "4052c1cb6598dbfd"
+    },
+    {
+      "id": "atan.wide.c00dea3aacdb8a97",
+      "operator": "atan",
+      "inputBits": "c00dea3aacdb8a97",
+      "expectedBits": "c052c1cb6598dbf9",
+      "lowerBits": "c052c1cb6598dbfd",
+      "upperBits": "c052c1cb6598dbf5"
+    },
+    {
+      "id": "atan.wide.600856ba6eb67842",
+      "operator": "atan",
+      "inputBits": "600856ba6eb67842",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "atan.wide.e00856ba6eb67842",
+      "operator": "atan",
+      "inputBits": "e00856ba6eb67842",
+      "expectedBits": "c056800000000000",
+      "lowerBits": "c056800000000004",
+      "upperBits": "c0567ffffffffffc"
+    },
+    {
+      "id": "atan.wide.700e14a0f0994432",
+      "operator": "atan",
+      "inputBits": "700e14a0f0994432",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "atan.wide.f00e14a0f0994432",
+      "operator": "atan",
+      "inputBits": "f00e14a0f0994432",
+      "expectedBits": "c056800000000000",
+      "lowerBits": "c056800000000004",
+      "upperBits": "c0567ffffffffffc"
+    },
+    {
+      "id": "atan.wide.7fd7e1f8cbdb3a3a",
+      "operator": "atan",
+      "inputBits": "7fd7e1f8cbdb3a3a",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "atan.wide.ffd7e1f8cbdb3a3a",
+      "operator": "atan",
+      "inputBits": "ffd7e1f8cbdb3a3a",
+      "expectedBits": "c056800000000000",
+      "lowerBits": "c056800000000004",
+      "upperBits": "c0567ffffffffffc"
+    },
+    {
+      "id": "atan.wide.7fe2fef82e5942ce",
+      "operator": "atan",
+      "inputBits": "7fe2fef82e5942ce",
+      "expectedBits": "4056800000000000",
+      "lowerBits": "40567ffffffffffc",
+      "upperBits": "4056800000000004"
+    },
+    {
+      "id": "atan.wide.ffe2fef82e5942ce",
+      "operator": "atan",
+      "inputBits": "ffe2fef82e5942ce",
+      "expectedBits": "c056800000000000",
+      "lowerBits": "c056800000000004",
+      "upperBits": "c0567ffffffffffc"
+    },
+    {
+      "id": "ln.representative.0000000000000000",
+      "operator": "ln",
+      "inputBits": "0000000000000000",
+      "error": "DomainError"
+    },
+    {
+      "id": "ln.representative.8000000000000000",
+      "operator": "ln",
+      "inputBits": "8000000000000000",
+      "error": "DomainError"
+    },
+    {
+      "id": "ln.representative.bff0000000000000",
+      "operator": "ln",
+      "inputBits": "bff0000000000000",
+      "error": "DomainError"
+    },
+    {
+      "id": "ln.representative.3ff0000000000000",
+      "operator": "ln",
+      "inputBits": "3ff0000000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-logarithm-representative"
+    },
+    {
+      "id": "ln.representative.3fe0000000000000",
+      "operator": "ln",
+      "inputBits": "3fe0000000000000",
+      "expectedBits": "bfe62e42fefa39ef",
+      "lowerBits": "bfe62e42fefa39f3",
+      "upperBits": "bfe62e42fefa39eb"
+    },
+    {
+      "id": "ln.representative.4000000000000000",
+      "operator": "ln",
+      "inputBits": "4000000000000000",
+      "expectedBits": "3fe62e42fefa39ef",
+      "lowerBits": "3fe62e42fefa39eb",
+      "upperBits": "3fe62e42fefa39f3"
+    },
+    {
+      "id": "ln.representative.4024000000000000",
+      "operator": "ln",
+      "inputBits": "4024000000000000",
+      "expectedBits": "40026bb1bbb55516",
+      "lowerBits": "40026bb1bbb55512",
+      "upperBits": "40026bb1bbb5551a"
+    },
+    {
+      "id": "ln.representative.4059000000000000",
+      "operator": "ln",
+      "inputBits": "4059000000000000",
+      "expectedBits": "40126bb1bbb55516",
+      "lowerBits": "40126bb1bbb55512",
+      "upperBits": "40126bb1bbb5551a"
+    },
+    {
+      "id": "ln.boundary.0000000000000001",
+      "operator": "ln",
+      "inputBits": "0000000000000001",
+      "expectedBits": "c0874385446d71c3",
+      "lowerBits": "c0874385446d71c7",
+      "upperBits": "c0874385446d71bf"
+    },
+    {
+      "id": "ln.boundary.8000000000000001",
+      "operator": "ln",
+      "inputBits": "8000000000000001",
+      "error": "DomainError"
+    },
+    {
+      "id": "ln.boundary.0010000000000000",
+      "operator": "ln",
+      "inputBits": "0010000000000000",
+      "expectedBits": "c086232bdd7abcd2",
+      "lowerBits": "c086232bdd7abcd6",
+      "upperBits": "c086232bdd7abcce"
+    },
+    {
+      "id": "ln.boundary.8010000000000000",
+      "operator": "ln",
+      "inputBits": "8010000000000000",
+      "error": "DomainError"
+    },
+    {
+      "id": "ln.boundary.7fefffffffffffff",
+      "operator": "ln",
+      "inputBits": "7fefffffffffffff",
+      "expectedBits": "40862e42fefa39ef",
+      "lowerBits": "40862e42fefa39eb",
+      "upperBits": "40862e42fefa39f3"
+    },
+    {
+      "id": "ln.boundary.ffefffffffffffff",
+      "operator": "ln",
+      "inputBits": "ffefffffffffffff",
+      "error": "DomainError"
+    },
+    {
+      "id": "ln.unit-neighbor.-1.3fefffffffffffff",
+      "operator": "ln",
+      "inputBits": "3fefffffffffffff",
+      "expectedBits": "bca0000000000000",
+      "lowerBits": "bca0000000000004",
+      "upperBits": "bc9ffffffffffff8"
+    },
+    {
+      "id": "ln.unit-neighbor.1.3ff0000000000001",
+      "operator": "ln",
+      "inputBits": "3ff0000000000001",
+      "expectedBits": "3cafffffffffffff",
+      "lowerBits": "3caffffffffffffb",
+      "upperBits": "3cb0000000000001"
+    },
+    {
+      "id": "ln.seeded-exponent.0003d9016b0003ad",
+      "operator": "ln",
+      "inputBits": "0003d9016b0003ad",
+      "expectedBits": "c0862e928237ee31",
+      "lowerBits": "c0862e928237ee35",
+      "upperBits": "c0862e928237ee2d"
+    },
+    {
+      "id": "ln.seeded-exponent.0011e0cf387748ea",
+      "operator": "ln",
+      "inputBits": "0011e0cf387748ea",
+      "expectedBits": "c08622488e1a62f0",
+      "lowerBits": "c08622488e1a62f4",
+      "upperBits": "c08622488e1a62ec"
+    },
+    {
+      "id": "ln.seeded-exponent.0023725feb3edcfb",
+      "operator": "ln",
+      "inputBits": "0023725feb3edcfb",
+      "expectedBits": "c0861c10c007fe1f",
+      "lowerBits": "c0861c10c007fe23",
+      "upperBits": "c0861c10c007fe1b"
+    },
+    {
+      "id": "ln.seeded-exponent.080a1fa7bfc4ff82",
+      "operator": "ln",
+      "inputBits": "080a1fa7bfc4ff82",
+      "expectedBits": "c0835f0304e245ad",
+      "lowerBits": "c0835f0304e245b1",
+      "upperBits": "c0835f0304e245a9"
+    },
+    {
+      "id": "ln.seeded-exponent.20022966338ed6fd",
+      "operator": "ln",
+      "inputBits": "20022966338ed6fd",
+      "expectedBits": "c0762124ca754e5b",
+      "lowerBits": "c0762124ca754e5f",
+      "upperBits": "c0762124ca754e57"
+    },
+    {
+      "id": "ln.seeded-exponent.3fe4dfce6ea3d410",
+      "operator": "ln",
+      "inputBits": "3fe4dfce6ea3d410",
+      "expectedBits": "bfdb5791fce296bd",
+      "lowerBits": "bfdb5791fce296c1",
+      "upperBits": "bfdb5791fce296b9"
+    },
+    {
+      "id": "ln.seeded-exponent.3ffda82d0f7997b8",
+      "operator": "ln",
+      "inputBits": "3ffda82d0f7997b8",
+      "expectedBits": "3fe3bf57ee07fead",
+      "lowerBits": "3fe3bf57ee07fea9",
+      "upperBits": "3fe3bf57ee07feb1"
+    },
+    {
+      "id": "ln.seeded-exponent.400dea3aacdb8a97",
+      "operator": "ln",
+      "inputBits": "400dea3aacdb8a97",
+      "expectedBits": "3ff51a48ca6f3da2",
+      "lowerBits": "3ff51a48ca6f3d9e",
+      "upperBits": "3ff51a48ca6f3da6"
+    },
+    {
+      "id": "ln.seeded-exponent.600856ba6eb67842",
+      "operator": "ln",
+      "inputBits": "600856ba6eb67842",
+      "expectedBits": "407640105394f272",
+      "lowerBits": "407640105394f26e",
+      "upperBits": "407640105394f276"
+    },
+    {
+      "id": "ln.seeded-exponent.700e14a0f0994432",
+      "operator": "ln",
+      "inputBits": "700e14a0f0994432",
+      "expectedBits": "4080ad4ab25255e2",
+      "lowerBits": "4080ad4ab25255de",
+      "upperBits": "4080ad4ab25255e6"
+    },
+    {
+      "id": "ln.seeded-exponent.7fd7e1f8cbdb3a3a",
+      "operator": "ln",
+      "inputBits": "7fd7e1f8cbdb3a3a",
+      "expectedBits": "4086266039495f15",
+      "lowerBits": "4086266039495f11",
+      "upperBits": "4086266039495f19"
+    },
+    {
+      "id": "ln.seeded-exponent.7fe2fef82e5942ce",
+      "operator": "ln",
+      "inputBits": "7fe2fef82e5942ce",
+      "expectedBits": "40862a16f2299aa8",
+      "lowerBits": "40862a16f2299aa4",
+      "upperBits": "40862a16f2299aac"
+    },
+    {
+      "id": "log.representative.0000000000000000",
+      "operator": "log",
+      "inputBits": "0000000000000000",
+      "error": "DomainError"
+    },
+    {
+      "id": "log.representative.8000000000000000",
+      "operator": "log",
+      "inputBits": "8000000000000000",
+      "error": "DomainError"
+    },
+    {
+      "id": "log.representative.bff0000000000000",
+      "operator": "log",
+      "inputBits": "bff0000000000000",
+      "error": "DomainError"
+    },
+    {
+      "id": "log.representative.3ff0000000000000",
+      "operator": "log",
+      "inputBits": "3ff0000000000000",
+      "expectedBits": "0000000000000000",
+      "exact": true,
+      "reason": "exact-logarithm-representative"
+    },
+    {
+      "id": "log.representative.3fe0000000000000",
+      "operator": "log",
+      "inputBits": "3fe0000000000000",
+      "expectedBits": "bfd34413509f79ff",
+      "lowerBits": "bfd34413509f7a03",
+      "upperBits": "bfd34413509f79fb"
+    },
+    {
+      "id": "log.representative.4000000000000000",
+      "operator": "log",
+      "inputBits": "4000000000000000",
+      "expectedBits": "3fd34413509f79ff",
+      "lowerBits": "3fd34413509f79fb",
+      "upperBits": "3fd34413509f7a03"
+    },
+    {
+      "id": "log.representative.4024000000000000",
+      "operator": "log",
+      "inputBits": "4024000000000000",
+      "expectedBits": "3ff0000000000000",
+      "exact": true,
+      "reason": "exact-logarithm-representative"
+    },
+    {
+      "id": "log.representative.4059000000000000",
+      "operator": "log",
+      "inputBits": "4059000000000000",
+      "expectedBits": "4000000000000000",
+      "exact": true,
+      "reason": "exact-logarithm-representative"
+    },
+    {
+      "id": "log.boundary.0000000000000001",
+      "operator": "log",
+      "inputBits": "0000000000000001",
+      "expectedBits": "c07434e6420f4374",
+      "lowerBits": "c07434e6420f4378",
+      "upperBits": "c07434e6420f4370"
+    },
+    {
+      "id": "log.boundary.8000000000000001",
+      "operator": "log",
+      "inputBits": "8000000000000001",
+      "error": "DomainError"
+    },
+    {
+      "id": "log.boundary.0010000000000000",
+      "operator": "log",
+      "inputBits": "0010000000000000",
+      "expectedBits": "c0733a7146f72a42",
+      "lowerBits": "c0733a7146f72a46",
+      "upperBits": "c0733a7146f72a3e"
+    },
+    {
+      "id": "log.boundary.8010000000000000",
+      "operator": "log",
+      "inputBits": "8010000000000000",
+      "error": "DomainError"
+    },
+    {
+      "id": "log.boundary.7fefffffffffffff",
+      "operator": "log",
+      "inputBits": "7fefffffffffffff",
+      "expectedBits": "40734413509f79ff",
+      "lowerBits": "40734413509f79fb",
+      "upperBits": "40734413509f7a03"
+    },
+    {
+      "id": "log.boundary.ffefffffffffffff",
+      "operator": "log",
+      "inputBits": "ffefffffffffffff",
+      "error": "DomainError"
+    },
+    {
+      "id": "log.unit-neighbor.-1.3fefffffffffffff",
+      "operator": "log",
+      "inputBits": "3fefffffffffffff",
+      "expectedBits": "bc8bcb7b1526e50f",
+      "lowerBits": "bc8bcb7b1526e513",
+      "upperBits": "bc8bcb7b1526e50b"
+    },
+    {
+      "id": "log.unit-neighbor.1.3ff0000000000001",
+      "operator": "log",
+      "inputBits": "3ff0000000000001",
+      "expectedBits": "3c9bcb7b1526e50d",
+      "lowerBits": "3c9bcb7b1526e509",
+      "upperBits": "3c9bcb7b1526e511"
+    },
+    {
+      "id": "log.seeded-exponent.0003d9016b0003ad",
+      "operator": "log",
+      "inputBits": "0003d9016b0003ad",
+      "expectedBits": "c073445860f5ee8a",
+      "lowerBits": "c073445860f5ee8e",
+      "upperBits": "c073445860f5ee86"
+    },
+    {
+      "id": "log.seeded-exponent.0011e0cf387748ea",
+      "operator": "log",
+      "inputBits": "0011e0cf387748ea",
+      "expectedBits": "c07339abd69403d6",
+      "lowerBits": "c07339abd69403da",
+      "upperBits": "c07339abd69403d2"
+    },
+    {
+      "id": "log.seeded-exponent.0023725feb3edcfb",
+      "operator": "log",
+      "inputBits": "0023725feb3edcfb",
+      "expectedBits": "c073344536c69dd2",
+      "lowerBits": "c073344536c69dd6",
+      "upperBits": "c073344536c69dce"
+    },
+    {
+      "id": "log.seeded-exponent.080a1fa7bfc4ff82",
+      "operator": "log",
+      "inputBits": "080a1fa7bfc4ff82",
+      "expectedBits": "c070d357c9476671",
+      "lowerBits": "c070d357c9476675",
+      "upperBits": "c070d357c947666d"
+    },
+    {
+      "id": "log.seeded-exponent.20022966338ed6fd",
+      "operator": "log",
+      "inputBits": "20022966338ed6fd",
+      "expectedBits": "c06338ae6a3d6260",
+      "lowerBits": "c06338ae6a3d6264",
+      "upperBits": "c06338ae6a3d625c"
+    },
+    {
+      "id": "log.seeded-exponent.3fe4dfce6ea3d410",
+      "operator": "log",
+      "inputBits": "3fe4dfce6ea3d410",
+      "expectedBits": "bfc7bfbfde274425",
+      "lowerBits": "bfc7bfbfde274429",
+      "upperBits": "bfc7bfbfde274421"
+    },
+    {
+      "id": "log.seeded-exponent.3ffda82d0f7997b8",
+      "operator": "log",
+      "inputBits": "3ffda82d0f7997b8",
+      "expectedBits": "3fd12703fb2c4ecf",
+      "lowerBits": "3fd12703fb2c4ecb",
+      "upperBits": "3fd12703fb2c4ed3"
+    },
+    {
+      "id": "log.seeded-exponent.400dea3aacdb8a97",
+      "operator": "log",
+      "inputBits": "400dea3aacdb8a97",
+      "expectedBits": "3fe2545d538cbdd4",
+      "lowerBits": "3fe2545d538cbdd0",
+      "upperBits": "3fe2545d538cbdd8"
+    },
+    {
+      "id": "log.seeded-exponent.600856ba6eb67842",
+      "operator": "log",
+      "inputBits": "600856ba6eb67842",
+      "expectedBits": "40635389c30bbcc5",
+      "lowerBits": "40635389c30bbcc1",
+      "upperBits": "40635389c30bbcc9"
+    },
+    {
+      "id": "log.seeded-exponent.700e14a0f0994432",
+      "operator": "log",
+      "inputBits": "700e14a0f0994432",
+      "expectedBits": "406cf884fadb9cc2",
+      "lowerBits": "406cf884fadb9cbe",
+      "upperBits": "406cf884fadb9cc6"
+    },
+    {
+      "id": "log.seeded-exponent.7fd7e1f8cbdb3a3a",
+      "operator": "log",
+      "inputBits": "7fd7e1f8cbdb3a3a",
+      "expectedBits": "40733d39d4e74924",
+      "lowerBits": "40733d39d4e74920",
+      "upperBits": "40733d39d4e74928"
+    },
+    {
+      "id": "log.seeded-exponent.7fe2fef82e5942ce",
+      "operator": "log",
+      "inputBits": "7fe2fef82e5942ce",
+      "expectedBits": "407340739e5214ec",
+      "lowerBits": "407340739e5214e8",
+      "upperBits": "407340739e5214f0"
+    },
+    {
+      "id": "exp.representative.0000000000000000",
+      "operator": "exp",
+      "inputBits": "0000000000000000",
+      "expectedBits": "3ff0000000000000",
+      "exact": true,
+      "reason": "exact-exponential-representative"
+    },
+    {
+      "id": "exp.representative.8000000000000000",
+      "operator": "exp",
+      "inputBits": "8000000000000000",
+      "expectedBits": "3ff0000000000000",
+      "exact": true,
+      "reason": "exact-exponential-representative"
+    },
+    {
+      "id": "exp.representative.bff0000000000000",
+      "operator": "exp",
+      "inputBits": "bff0000000000000",
+      "expectedBits": "3fd78b56362cef38",
+      "lowerBits": "3fd78b56362cef34",
+      "upperBits": "3fd78b56362cef3c"
+    },
+    {
+      "id": "exp.representative.3ff0000000000000",
+      "operator": "exp",
+      "inputBits": "3ff0000000000000",
+      "expectedBits": "4005bf0a8b145769",
+      "lowerBits": "4005bf0a8b145765",
+      "upperBits": "4005bf0a8b14576d"
+    },
+    {
+      "id": "exp.representative.c024000000000000",
+      "operator": "exp",
+      "inputBits": "c024000000000000",
+      "expectedBits": "3f07cd79b5647c9b",
+      "lowerBits": "3f07cd79b5647c97",
+      "upperBits": "3f07cd79b5647c9f"
+    },
+    {
+      "id": "exp.representative.4000000000000000",
+      "operator": "exp",
+      "inputBits": "4000000000000000",
+      "expectedBits": "401d8e64b8d4ddae",
+      "lowerBits": "401d8e64b8d4ddaa",
+      "upperBits": "401d8e64b8d4ddb2"
+    },
+    {
+      "id": "exp.boundary.0000000000000001",
+      "operator": "exp",
+      "inputBits": "0000000000000001",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "exp.boundary.8000000000000001",
+      "operator": "exp",
+      "inputBits": "8000000000000001",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "exp.boundary.0010000000000000",
+      "operator": "exp",
+      "inputBits": "0010000000000000",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "exp.boundary.8010000000000000",
+      "operator": "exp",
+      "inputBits": "8010000000000000",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "exp.boundary.7fefffffffffffff",
+      "operator": "exp",
+      "inputBits": "7fefffffffffffff",
+      "error": "NumericOverflow"
+    },
+    {
+      "id": "exp.boundary.ffefffffffffffff",
+      "operator": "exp",
+      "inputBits": "ffefffffffffffff",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "exp.rounding-threshold.-2.40862e42fefa39ed",
+      "operator": "exp",
+      "inputBits": "40862e42fefa39ed",
+      "expectedBits": "7feffffffffff72a",
+      "lowerBits": "7feffffffffff726",
+      "upperBits": "7feffffffffff72e"
+    },
+    {
+      "id": "exp.rounding-threshold.-1.40862e42fefa39ee",
+      "operator": "exp",
+      "inputBits": "40862e42fefa39ee",
+      "expectedBits": "7feffffffffffb2a",
+      "lowerBits": "7feffffffffffb26",
+      "upperBits": "7feffffffffffb2e"
+    },
+    {
+      "id": "exp.rounding-threshold.0.40862e42fefa39ef",
+      "operator": "exp",
+      "inputBits": "40862e42fefa39ef",
+      "expectedBits": "7fefffffffffff2a",
+      "lowerBits": "7fefffffffffff26",
+      "upperBits": "7fefffffffffff2e"
+    },
+    {
+      "id": "exp.rounding-threshold.1.40862e42fefa39f0",
+      "operator": "exp",
+      "inputBits": "40862e42fefa39f0",
+      "error": "NumericOverflow"
+    },
+    {
+      "id": "exp.rounding-threshold.2.40862e42fefa39f1",
+      "operator": "exp",
+      "inputBits": "40862e42fefa39f1",
+      "error": "NumericOverflow"
+    },
+    {
+      "id": "exp.rounding-threshold.-2.c0874910d52d304f",
+      "operator": "exp",
+      "inputBits": "c0874910d52d304f",
+      "expectedBits": "0000000000000001",
+      "lowerBits": "8000000000000003",
+      "upperBits": "0000000000000005"
+    },
+    {
+      "id": "exp.rounding-threshold.-1.c0874910d52d3050",
+      "operator": "exp",
+      "inputBits": "c0874910d52d3050",
+      "expectedBits": "0000000000000001",
+      "lowerBits": "8000000000000003",
+      "upperBits": "0000000000000005"
+    },
+    {
+      "id": "exp.rounding-threshold.0.c0874910d52d3051",
+      "operator": "exp",
+      "inputBits": "c0874910d52d3051",
+      "expectedBits": "0000000000000001",
+      "lowerBits": "8000000000000003",
+      "upperBits": "0000000000000005"
+    },
+    {
+      "id": "exp.rounding-threshold.1.c0874910d52d3052",
+      "operator": "exp",
+      "inputBits": "c0874910d52d3052",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "exp.rounding-threshold.2.c0874910d52d3053",
+      "operator": "exp",
+      "inputBits": "c0874910d52d3053",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "exp.rounding-threshold.-2.c086232bdd7abcd0",
+      "operator": "exp",
+      "inputBits": "c086232bdd7abcd0",
+      "expectedBits": "001000000000047c",
+      "lowerBits": "0010000000000478",
+      "upperBits": "0010000000000480"
+    },
+    {
+      "id": "exp.rounding-threshold.-1.c086232bdd7abcd1",
+      "operator": "exp",
+      "inputBits": "c086232bdd7abcd1",
+      "expectedBits": "001000000000027c",
+      "lowerBits": "0010000000000278",
+      "upperBits": "0010000000000280"
+    },
+    {
+      "id": "exp.rounding-threshold.0.c086232bdd7abcd2",
+      "operator": "exp",
+      "inputBits": "c086232bdd7abcd2",
+      "expectedBits": "001000000000007c",
+      "lowerBits": "0010000000000078",
+      "upperBits": "0010000000000080"
+    },
+    {
+      "id": "exp.rounding-threshold.1.c086232bdd7abcd3",
+      "operator": "exp",
+      "inputBits": "c086232bdd7abcd3",
+      "expectedBits": "000ffffffffffe7c",
+      "lowerBits": "000ffffffffffe78",
+      "upperBits": "000ffffffffffe80"
+    },
+    {
+      "id": "exp.rounding-threshold.2.c086232bdd7abcd4",
+      "operator": "exp",
+      "inputBits": "c086232bdd7abcd4",
+      "expectedBits": "000ffffffffffc7c",
+      "lowerBits": "000ffffffffffc78",
+      "upperBits": "000ffffffffffc80"
+    },
+    {
+      "id": "exp.monotonic-cutoff.c087500000000000",
+      "operator": "exp",
+      "inputBits": "c087500000000000",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "exp.monotonic-cutoff.c087480000000000",
+      "operator": "exp",
+      "inputBits": "c087480000000000",
+      "expectedBits": "0000000000000001",
+      "lowerBits": "8000000000000003",
+      "upperBits": "0000000000000005"
+    },
+    {
+      "id": "exp.monotonic-cutoff.c086300000000000",
+      "operator": "exp",
+      "inputBits": "c086300000000000",
+      "expectedBits": "00033802fd28b3c3",
+      "lowerBits": "00033802fd28b3bf",
+      "upperBits": "00033802fd28b3c7"
+    },
+    {
+      "id": "exp.monotonic-cutoff.4085e00000000000",
+      "operator": "exp",
+      "inputBits": "4085e00000000000",
+      "expectedBits": "7f0d945df4f8ec8e",
+      "lowerBits": "7f0d945df4f8ec8a",
+      "upperBits": "7f0d945df4f8ec92"
+    },
+    {
+      "id": "exp.monotonic-cutoff.4086300000000000",
+      "operator": "exp",
+      "inputBits": "4086300000000000",
+      "error": "NumericOverflow"
+    },
+    {
+      "id": "exp.monotonic-cutoff.4086380000000000",
+      "operator": "exp",
+      "inputBits": "4086380000000000",
+      "error": "NumericOverflow"
+    },
+    {
+      "id": "exp10.representative.0000000000000000",
+      "operator": "exp10",
+      "inputBits": "0000000000000000",
+      "expectedBits": "3ff0000000000000",
+      "exact": true,
+      "reason": "exact-exponential-representative"
+    },
+    {
+      "id": "exp10.representative.8000000000000000",
+      "operator": "exp10",
+      "inputBits": "8000000000000000",
+      "expectedBits": "3ff0000000000000",
+      "exact": true,
+      "reason": "exact-exponential-representative"
+    },
+    {
+      "id": "exp10.representative.bff0000000000000",
+      "operator": "exp10",
+      "inputBits": "bff0000000000000",
+      "expectedBits": "3fb999999999999a",
+      "lowerBits": "3fb9999999999996",
+      "upperBits": "3fb999999999999e"
+    },
+    {
+      "id": "exp10.representative.3ff0000000000000",
+      "operator": "exp10",
+      "inputBits": "3ff0000000000000",
+      "expectedBits": "4024000000000000",
+      "lowerBits": "4023fffffffffffc",
+      "upperBits": "4024000000000004"
+    },
+    {
+      "id": "exp10.representative.c024000000000000",
+      "operator": "exp10",
+      "inputBits": "c024000000000000",
+      "expectedBits": "3ddb7cdfd9d7bdbb",
+      "lowerBits": "3ddb7cdfd9d7bdb7",
+      "upperBits": "3ddb7cdfd9d7bdbf"
+    },
+    {
+      "id": "exp10.representative.4000000000000000",
+      "operator": "exp10",
+      "inputBits": "4000000000000000",
+      "expectedBits": "4059000000000000",
+      "lowerBits": "4058fffffffffffc",
+      "upperBits": "4059000000000004"
+    },
+    {
+      "id": "exp10.boundary.0000000000000001",
+      "operator": "exp10",
+      "inputBits": "0000000000000001",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "exp10.boundary.8000000000000001",
+      "operator": "exp10",
+      "inputBits": "8000000000000001",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "exp10.boundary.0010000000000000",
+      "operator": "exp10",
+      "inputBits": "0010000000000000",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "exp10.boundary.8010000000000000",
+      "operator": "exp10",
+      "inputBits": "8010000000000000",
+      "expectedBits": "3ff0000000000000",
+      "lowerBits": "3feffffffffffff8",
+      "upperBits": "3ff0000000000004"
+    },
+    {
+      "id": "exp10.boundary.7fefffffffffffff",
+      "operator": "exp10",
+      "inputBits": "7fefffffffffffff",
+      "error": "NumericOverflow"
+    },
+    {
+      "id": "exp10.boundary.ffefffffffffffff",
+      "operator": "exp10",
+      "inputBits": "ffefffffffffffff",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "exp10.rounding-threshold.-2.40734413509f79fd",
+      "operator": "exp10",
+      "inputBits": "40734413509f79fd",
+      "expectedBits": "7feffffffffff706",
+      "lowerBits": "7feffffffffff702",
+      "upperBits": "7feffffffffff70a"
+    },
+    {
+      "id": "exp10.rounding-threshold.-1.40734413509f79fe",
+      "operator": "exp10",
+      "inputBits": "40734413509f79fe",
+      "expectedBits": "7feffffffffffba1",
+      "lowerBits": "7feffffffffffb9d",
+      "upperBits": "7feffffffffffba5"
+    },
+    {
+      "id": "exp10.rounding-threshold.0.40734413509f79ff",
+      "operator": "exp10",
+      "inputBits": "40734413509f79ff",
+      "error": "NumericOverflow"
+    },
+    {
+      "id": "exp10.rounding-threshold.1.40734413509f7a00",
+      "operator": "exp10",
+      "inputBits": "40734413509f7a00",
+      "error": "NumericOverflow"
+    },
+    {
+      "id": "exp10.rounding-threshold.2.40734413509f7a01",
+      "operator": "exp10",
+      "inputBits": "40734413509f7a01",
+      "error": "NumericOverflow"
+    },
+    {
+      "id": "exp10.rounding-threshold.-2.c07439b746e36b50",
+      "operator": "exp10",
+      "inputBits": "c07439b746e36b50",
+      "expectedBits": "0000000000000001",
+      "lowerBits": "8000000000000003",
+      "upperBits": "0000000000000005"
+    },
+    {
+      "id": "exp10.rounding-threshold.-1.c07439b746e36b51",
+      "operator": "exp10",
+      "inputBits": "c07439b746e36b51",
+      "expectedBits": "0000000000000001",
+      "lowerBits": "8000000000000003",
+      "upperBits": "0000000000000005"
+    },
+    {
+      "id": "exp10.rounding-threshold.0.c07439b746e36b52",
+      "operator": "exp10",
+      "inputBits": "c07439b746e36b52",
+      "expectedBits": "0000000000000001",
+      "lowerBits": "8000000000000003",
+      "upperBits": "0000000000000005"
+    },
+    {
+      "id": "exp10.rounding-threshold.1.c07439b746e36b53",
+      "operator": "exp10",
+      "inputBits": "c07439b746e36b53",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "exp10.rounding-threshold.2.c07439b746e36b54",
+      "operator": "exp10",
+      "inputBits": "c07439b746e36b54",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "exp10.rounding-threshold.-2.c0733a7146f72a40",
+      "operator": "exp10",
+      "inputBits": "c0733a7146f72a40",
+      "expectedBits": "001000000000047e",
+      "lowerBits": "001000000000047a",
+      "upperBits": "0010000000000482"
+    },
+    {
+      "id": "exp10.rounding-threshold.-1.c0733a7146f72a41",
+      "operator": "exp10",
+      "inputBits": "c0733a7146f72a41",
+      "expectedBits": "0010000000000231",
+      "lowerBits": "001000000000022d",
+      "upperBits": "0010000000000235"
+    },
+    {
+      "id": "exp10.rounding-threshold.0.c0733a7146f72a42",
+      "operator": "exp10",
+      "inputBits": "c0733a7146f72a42",
+      "expectedBits": "000fffffffffffe3",
+      "lowerBits": "000fffffffffffdf",
+      "upperBits": "000fffffffffffe7"
+    },
+    {
+      "id": "exp10.rounding-threshold.1.c0733a7146f72a43",
+      "operator": "exp10",
+      "inputBits": "c0733a7146f72a43",
+      "expectedBits": "000ffffffffffd96",
+      "lowerBits": "000ffffffffffd92",
+      "upperBits": "000ffffffffffd9a"
+    },
+    {
+      "id": "exp10.rounding-threshold.2.c0733a7146f72a44",
+      "operator": "exp10",
+      "inputBits": "c0733a7146f72a44",
+      "expectedBits": "000ffffffffffb49",
+      "lowerBits": "000ffffffffffb45",
+      "upperBits": "000ffffffffffb4d"
+    },
+    {
+      "id": "exp10.monotonic-cutoff.c074600000000000",
+      "operator": "exp10",
+      "inputBits": "c074600000000000",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "exp10.monotonic-cutoff.c074400000000000",
+      "operator": "exp10",
+      "inputBits": "c074400000000000",
+      "error": "NumericUnderflow"
+    },
+    {
+      "id": "exp10.monotonic-cutoff.c074300000000000",
+      "operator": "exp10",
+      "inputBits": "c074300000000000",
+      "expectedBits": "0000000000000002",
+      "lowerBits": "8000000000000002",
+      "upperBits": "0000000000000006"
+    },
+    {
+      "id": "exp10.monotonic-cutoff.4072c00000000000",
+      "operator": "exp10",
+      "inputBits": "4072c00000000000",
+      "expectedBits": "7e37e43c8800759c",
+      "lowerBits": "7e37e43c88007598",
+      "upperBits": "7e37e43c880075a0"
+    },
+    {
+      "id": "exp10.monotonic-cutoff.4073500000000000",
+      "operator": "exp10",
+      "inputBits": "4073500000000000",
+      "error": "NumericOverflow"
+    },
+    {
+      "id": "exp10.monotonic-cutoff.4073600000000000",
+      "operator": "exp10",
+      "inputBits": "4073600000000000",
+      "error": "NumericOverflow"
+    }
+  ]
+}

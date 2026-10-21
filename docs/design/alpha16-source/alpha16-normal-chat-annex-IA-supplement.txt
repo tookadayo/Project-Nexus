@@ -1,0 +1,163 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 02:07 UTC
+Normal ChatGPT reasoning: 極高. Design only; no code or tests. This supplement explicitly supersedes conflicting older statements; operational mappings still require code reconciliation.
+
+付録I-A追補：不足機能対応と旧記述の失効
+1. 旧記述の訂正・失効順位
+1.1 優先順位
+
+矛盾する記述が存在する場合、以下の順で優先する。
+
+本付録I-A追補
+
+付録I-B：新設・変更APIの具体契約
+
+付録I-A：全機能対応表
+
+それ以前のalpha16本文。ただし、本付録と矛盾しない部分のみ有効
+
+旧本文を実装判断の根拠として再解釈して、失効した例外を復活させてはならない。
+
+対象旧記述	失効・訂正内容	現行契約
+§30 / §55.D：idempotency または人間確認があれば RESULT_UNKNOWN を再実行可能と読める記述	失効	同一の外部副作用について自動再送は禁止。照合は外部効果を起こさないread-onlyのみ。照合不能ならRESULT_UNKNOWNを維持する。人間による明示的な新規操作は新しいintentとして記録し、元のUNKNOWNを消去・上書きしない。
+§30：Tunnel断によってDiscord outboundの応答が失われる例示	削除	TunnelはBrowser→BFFへの到達経路であり、PC→Discordのoutbound経路ではない。Tunnel断だけではDiscord operationをUNKNOWNにしない。
+§48 / §55.A：Run詳細30日、集計24か月等の保持案	失効	Run終了後の最小状態は7日以内に削除。backupも7日。30日/24か月は採用しない。Suggestion、Fact、audit等の別分類は一律7日とはせず、別途未承認候補として扱う。Run保持延長目的の複製は禁止。
+§12の品質改善提案 / §15の入力不良時抑止	統合訂正	DATA-001は欠測した業務指標を推測するルールではない。正常に確認されたsource health / coverage / last successful observation等の状態Factから品質警告を生成する。品質状態Fact自体が未確認なら断定せずUNKNOWNとする。
+COMM系指標を統計的に独立した指標として扱う記述	訂正	複数指標の統計的独立性は仮定・保証しない。minNや品質ラベルは信頼確率・匿名性・独立性の保証ではない。
+SuggestionのtargetVersionとdraft versionを同一視する記述	訂正	targetVersionは評価対象のlive/published版。draftVersionは作成先draftの版であり別物。draft作成だけではlive版は変わらず、元Suggestionを即時無効化しない。
+Suggestionの適用対象版を生成時だけ確認する設計	訂正	apply直前にlive版、draft版、Suggestion対象版、権限、guild、期限、削除状態、変更可能fieldを再検証する。
+engineVersion変更時に旧evidenceを更新して再利用する設計	訂正	旧evidenceは不変。新engineVersionでは新評価・新Suggestionを生成する。重複排除キーにもengineVersionを含める。
+rule/config version変更によって利用者のreject/dismissを復活させる可能性	禁止	設定版変更だけで利用者のreject/dismiss状態を無断復活させない。新Suggestionとして生成する場合も、旧Suggestionとの関係を追跡可能にする。
+2. 不足機能の追加・既存機能へのマッピング
+
+以下のID・API契約IDは、本追補で追加する設計上の提案IDである。既存コードの実在ID・route・table名ではない。
+既存コードで確認済みなのは、Automation editor/revision/Run/Scheduler、Operations、Analytics等の隣接領域であり、以下の専用画面・専用route・専用tableの実在は未確認である。
+
+共通UI状態
+
+loading：取得中。破壊的操作は開始しない。
+
+success：現在取得したデータと更新時刻を表示。
+
+empty：正常な空状態とエラーを区別。
+
+stale：最後に正常取得できた時刻を表示し、現在値として誤認させない。
+
+conflict：対象版・状態・権限等が変化した場合は409/412系として再取得・再確認を要求。
+
+stopped/unavailable：BFF/PC/Worker/Discord outbound等の停止原因を混同しない。
+
+認可はUI表示・ボタン有無ではなく、必ずserver-sideで再検査する。
+
+機能	画面操作	ID / API契約ID	権限・外部副作用	DB正本・版	移行Task	受入ID・合格条件	現状照合
+Control Panel / Settings	guild設定の一覧・閲覧・変更・保存。許可された設定項目のみ編集	追加提案: C-A16-CTRL-01 / C-A16-CTRL-01	guild設定変更権限。通常はDB変更のみ。設定保存を外部操作の認可代替にしない	guild設定domainの正本。変更時にversion更新	T-A16-ADD-01	A16-ADD-01：別guildを変更できず、許可fieldのみ変更、version競合を検出	専用画面/route/tableは未確認。既存settings系との照合が必要
+Lifecycle / Onboarding / First Response / Retention	onboarding状態・first-response対象・lifecycle設定の閲覧/変更、継続参加傾向の閲覧。Retentionはここではコミュニティ継続参加を指し、Privacy retentionとは別	追加提案: C-A16-LIFE-01 / C-A16-LIFE-01。実行部分は既存Automation/Operations/Analyticsへマッピング	guild管理権限。設定変更自体はDB。自動処理は承認済みAutomation Runtimeのみ。AI Suggestionから直接実行不可	lifecycle設定は設定版、実行状態は既存Automation/Run、傾向はAnalytics/Factを正本とし重複保存しない	T-A16-ADD-02	A16-ADD-02：onboarding/first-response/retentionが同一guild境界で動作し、実行はrevision/versionを固定	隣接するAutomation/Operations/Analyticsは監査で確認。ただし統合Lifecycle機能・routeは未確認
+Templates	template一覧・閲覧・作成・変更・複製・削除・templateからdraft作成	追加提案: C-A16-TPL-01 / C-A16-TPL-01	template管理権限。template保存・draft生成はDBのみ。live flowを直接変更しない	Template definition/versionを正本。適用時はAutomation draft/revisionを新規生成	T-A16-ADD-03	A16-ADD-03：template適用がlive revisionを直接変更せず、新draft/new revisionになる	専用template entity/routeは未確認。Automation editor/revisionとの対応照合が必要
+Preference Center	利用者自身の通知・Suggestion表示等の許可された個人設定を閲覧/変更/初期化	追加提案: C-A16-PREF-01 / C-A16-PREF-01	原則本人のみ。guild管理者による個人設定上書きを暗黙に許可しない	user/guild scoped preferenceの正本。version管理	T-A16-ADD-04	A16-ADD-04：他利用者の設定を変更できず、guildを跨いで参照不可	専用Preference Centerの存在・routeは未確認
+Managed Role Grants	管理対象roleの一覧・作成・変更・削除・適用履歴/状態の閲覧	追加提案: C-A16-ROLE-01 / C-A16-ROLE-01	role管理権限。実際のgrant/revokeはPC→Discord outboundの外部副作用。AI Suggestionから直接実行不可	role-grant policy/versionをDB正本。各外部操作はRun/operation記録に紐付ける	T-A16-ADD-05	A16-ADD-05：許可されたguild/roleだけ操作し、Discord効果とDB履歴が対応。認可失効時は実行不可	専用Managed Role Grant機能は未確認。Discord Gateway/REST基盤は監査で確認
+Readiness	guildの導入準備状況・未充足条件・利用可能機能を閲覧、read-only再確認	追加提案: C-A16-READY-01 / C-A16-READY-01	readiness閲覧権限。read-only。外部変更なし	readiness判定に使用した状態Fact/health状態。現在版・生成時刻を保持	T-A16-ADD-06	A16-ADD-06：権限・設定・必要接続の不足を区別し、古い判定を正常状態と表示しない	専用Readiness画面/routeは未確認
+Data Health	データ鮮度・coverage・last successful observation・欠測/抑制状態を閲覧、再取得可能な範囲のみ更新	追加提案: C-A16-DH-01 / C-A16-DH-01	health閲覧権限。原則read-only。品質Factを捏造・推測しない	source-health/coverage状態Factの正本。observation時刻とversion	T-A16-ADD-07	A16-ADD-07：未確認状態を正常と表示せず、DATA-001が健康状態Factの有無を正しく反映	source-health保存形態/専用routeは未確認
+Permission Health	Discord/NEXUSに必要な権限・scope・接続状態の閲覧、read-only再確認	追加提案: C-A16-PH-01 / C-A16-PH-01	health閲覧権限。再確認はPCからのread-only外部照会のみ。権限変更はこの画面から自動実行しない	permission observation/health状態。取得時刻付き	T-A16-ADD-08	A16-ADD-08：不足・期限切れ・未確認を区別し、別guildの権限情報を返さない	Discord Gateway/REST基盤は確認済みだが、Permission Health機能は未確認
+Test / Preview	flow/revisionを選択し、Fact/snapshotまたは許可されたpreview入力で実行結果を事前確認。結果・警告を閲覧	追加提案: C-A16-PREVIEW-01 / C-A16-PREVIEW-01	preview権限。外部副作用なし。Discord投稿、role変更、課金、公開、権限変更、automation activationを行わない	対象revision + preview入力snapshot + preview結果。通常Runの実行履歴と混同しない	T-A16-ADD-09	A16-ADD-09：同一revision/inputで再現可能、外部副作用ゼロ、live設定を変更しない	製品機能としてのTest/Previewは未確認。ここでいうTestは今実行するテストではない
+Flow Rollback	revision履歴閲覧・復元対象選択・差分確認・明示確認・rollback実行・結果閲覧	追加提案: C-A16-ROLL-01 / C-A16-ROLL-01	flow管理権限。DB上で新revisionを作成しlive pointerを更新。既存実行中Runを黙って差し替えない	Automation revisionの正本。rollbackは過去revisionを書き換えず新revisionを生成	T-A16-ADD-10	A16-ADD-10：履歴不変、rollbackが新revisionとして記録され、稼働中Runのrevisionが変化しない	revision/Run基盤は監査で確認。rollback仕様・専用routeは未確認
+3. 二重仕様を防ぐための明示的マッピング
+
+以下は新機能を既存domainから独立した別Runtimeとして増設しない。
+
+製品機能	正式な実行・データ責務
+Lifecycle / Onboarding / First Response	実行は既存Automation Runtime / Scheduler、受付・状態はOperations、分析はAnalytics/Factへ委譲
+Retention（継続参加）	Analytics/Factで集計し、Rule/Suggestionはその結果を入力として利用。独自の第二分析基盤を作らない
+Templates	Automation revision/draftの生成元。Template適用は新draft/new revision生成として扱う
+Preference Center	利用者設定。Suggestionのper-user stateやguild設定と混同しない
+Managed Role Grants	Discord operationとして扱い、外部効果は既存Run/operation安全契約へ接続
+Readiness	Data Health / Permission Health / Settings等の状態を集約表示するread-only層。個別domainの正本を複製しない
+Data Health	Fact/source-healthの状態表示。Rule DATA-001の入力契約と同一の事実を利用
+Permission Health	Discord/NEXUS権限のread-only観測結果。権限変更機能そのものではない
+Test / Preview	通常Runとは別の副作用なし評価経路。live Run状態を変更しない
+Flow Rollback	Automation revision管理の操作。履歴を書き換えず新revisionを生成する
+4. Flow Rollbackの固定契約
+
+Flow Rollbackについては、後続のRuntime/DB設計へ次を引き継ぐ。
+
+過去revisionそのものは変更・削除しない。
+
+rollback対象revisionを元に新しいrevisionを作成する。
+
+rollback操作自体を監査履歴へ記録する。
+
+expectedVersion等で現在のlive revisionが変わっていないことを確認する。
+
+競合時はrollbackを中止し、利用者へ最新revisionとの差分確認を要求する。
+
+既に実行中のRunは開始時に固定されたrevisionを継続する。
+
+Schedulerの将来実行はrollback後の新live revisionを対象とする。
+
+過去のRun結果・履歴を書き換えない。
+
+rollbackを理由に既存Suggestionのevidenceを改変しない。
+
+rollbackによる外部操作は即時に発生させず、通常のRuntime/authorization契約を通す。
+
+5. 今後のDB / Runtime / Rule個票への引継ぎ契約
+DBへ
+
+live/published targetVersion と作成先draftVersionを別管理。
+
+Suggestionのshared stateとper-user stateを分離。
+
+engineVersion/ruleVersion/configVersionを履歴の識別に使用。
+
+Run終了後最小状態は7日以内削除、backupは7日。
+
+Run保持を延長する目的でFact/Suggestion/audit/evidence等へRun情報を複製しない。
+
+その他の分類の保持期間は未承認候補として残す。
+
+Runtimeへ
+
+RESULT_UNKNOWNの同一外部副作用の自動再送は禁止。
+
+read-only照合不能ならUNKNOWNを維持。
+
+人による新規操作は別intentとして記録し、元UNKNOWNを消さない。
+
+Rollbackは新revision、稼働Runは既存revision固定。
+
+Tunnel断、PC停止、Worker停止、PC outbound断、Discord応答喪失を別状態として扱う。
+
+Rule個票へ
+
+DATA-001はsource-health等の確認済み状態Factのみを根拠とする。
+
+欠測値を推定して補完しない。
+
+ruleId/ruleVersion/engineVersionを評価結果へ固定。
+
+同一入力Fact＋同一版では同一結果となる。
+
+統計的独立性・匿名性・信頼確率をminNや品質ラベルから主張しない。
+
+SuggestionのtargetVersionはlive/published版、draftVersionとは分離。
+
+engineVersion/configVersion変更で旧evidenceを書き換えない。
+
+reject/dismissを版変更だけで無断復活させない。
+
+AI Suggestionは自動適用・自動activation・自動課金・自動投稿・自動権限変更を行わない。
+
+6. 本追補時点でまだ埋まらない情報
+
+残る未確認事項は、実装担当者が勝手に補完するのではなく、後続の照合・DB/Runtime設計で確定する。
+
+上記不足機能に対応する既存画面・route・table・permission実装の実名。
+
+Lifecycle/Template/Preference/Managed Role Grant/Health/Preview/Rollbackのうち、既存実装へ吸収できる範囲と新設が必要な範囲。
+
+上記新機能で使用する既存DB正本の具体schema、および新設tableが必要な箇所。
+
+Suggestion/Fact/audit等、Run以外の分類ごとの保持期間。
+
+Previewで利用可能なFact/snapshotの具体的入力源。
+
+これらは未確認事項であり、既存実装済み・検証済み・本番準備完了とは扱わない。

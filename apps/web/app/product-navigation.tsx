@@ -3,9 +3,10 @@ import { useRef, type ReactNode } from "react";
 export function NavIcon({
   kind,
 }: {
-  kind: "home" | "analysis" | "attention" | "history" | "settings" | "help";
+  kind: "home" | "analysis" | "attention" | "history" | "settings" | "help" | "automation";
 }) {
   const paths = {
+    automation: "M4 3h7v6H4Zm9 6h7v6h-7ZM4 15h7v6H4Zm3-6v6m4-9h6v3m0 6v3h-6",
     home: "m3 10 9-7 9 7v10h-6v-6H9v6H3Z",
     analysis: "M4 20V10m8 10V4m8 16v-7",
     attention: "m12 3 10 18H2Zm0 5v6m0 3v1",

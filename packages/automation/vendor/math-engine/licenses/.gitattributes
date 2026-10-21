@@ -1,0 +1,2 @@
+# Preserve original upstream copyright/license texts byte for byte on checkout.
+* -text whitespace=cr-at-eol

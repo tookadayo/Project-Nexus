@@ -1,0 +1,476 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 03:28 UTC
+Reasoning: 極高. Proposed rules and synthetic fixtures only; no tests executed. Thresholds are unvalidated and require approval. Source adapters are not verified in existing code.
+
+付録II-A：ONB-001 / HELP-001 / RET-001
+
+quality表記： SUFFICIENT / PARTIAL / STALE / MISSING / SUPPRESSED / UNKNOWN に統一する。旧 GOOD / FRESH は SUFFICIENT に対応させる。
+decimal表記： DBは numeric(38,18)、JSONは {"kind":"decimal","value":"正規化decimal文字列"} とし、表示丸めと判定を分離する。
+
+canonical hash固定案： canonical JSONはUTF-8、object keyをUnicode code point昇順、set意味の配列を規定キー順でソートする。dimension はkey昇順、Fact集合は (metricId, dimension, period_role, windowStart, windowEnd, sourceRevision, snapshotId)、source-health observation集合は (observationId, revision) でソートする。timestampはUTC RFC3339・小数6桁へ正規化し、それ以上の精度は入力時に拒否する。decimalは指数表記なし、先頭0・末尾の不要な小数0を除去し、-0 は 0 とする。null は省略せず明示する。未知fieldはhash前に拒否し、SHA-256をcanonical bytesへ適用する。
+
+共通fixture条件
+
+以下は3ルール共通の合成fixture用候補configである。数値は未検証・承認待ちであり、本番稼働設定ではない。実稼働ではconfig未承認時を DISABLED とする。fixtureのFIRE/NO_FIRE等は、候補configを仮想的に承認済みとして評価意味を確認するための設計例であり、実測・実行済みテストではない。
+
+項目	fixture設定
+evaluationAsOf	2026-10-15T12:00:00.000000Z
+CURRENT	[2026-10-08T00:00:00.000000Z, 2026-10-15T00:00:00.000000Z)
+PREVIOUS	[2026-10-01T00:00:00.000000Z, 2026-10-08T00:00:00.000000Z)
+engineVersion	RB-EVAL-1
+schemaVersion	FACT-1
+minN	20（未検証候補）
+coverage	≥0.95（未検証候補）
+cooldown	7暦日（未検証候補）
+
+minN、coverage、freshnessおよび各thresholdは匿名性保証・統計的信頼度・信頼確率を意味しない。privacy hard gateはこれらとは独立して適用する。
+
+ONB-001
+1. ID / version・目的
+項目	契約
+ID	ONB-001
+version	v1
+目的	構造化onboarding開始者のうち、onboardingおよび所定の初回行動まで完了した割合が低い状態を検出し、改善候補を提示する
+
+個人の意思・離脱理由・心理状態を推定しない。低率であることを「特定施策が原因」と断定しない。
+
+2. Input / source adapter
+
+metricId: ONB_FIRST_ACTION_COMPLETION_RATE
+
+提案adapter: ONBOARDING_AGGREGATE_V1
+
+必須source:
+
+構造化onboarding開始状態
+
+構造化onboarding完了状態
+
+定義済みfirst-action完了状態
+
+cohortの観測完了状態
+
+source revision
+
+immutable snapshot ID
+
+source-health observation ID＋version
+
+adapterは個人IDや投稿本文をFactへ渡さず、集計済みcountを返す。
+
+adapter自体が未確認、またはregistry未登録なら DISABLED。登録済みだが必要snapshotが存在しなければ MISSING。
+
+3. 対象集合・式
+
+対象: 対象guildの構造化onboarding cohort。
+
+denominator: onboarding開始後の所定観測期間を完了したcohort件数。
+
+numerator: そのcohortのうち、onboarding完了 かつ 所定first action完了の件数。
+
+rate = numerator / denominator
+
+同一onboarding_case_idはsource側の最新structured revisionのみ1件として集計。
+
+deleted/tombstoned/test/system対象はsource adapterの明示的除外規則に従い除外。
+
+個人IDによるNEXUS側の長期cohort再構成は行わない。
+
+4. Window / minN / freshness
+
+CURRENT/PREVIOUSとも7暦日window。ただしONBでは「観測期間が完了したcohortの観測終了日」をwindowへ割り当てる。
+
+minN ≥ 20：未検証候補
+
+source-health freshness：24時間以内、未検証候補
+
+coverage：95%以上、未検証候補
+
+必要な観測期間がRun保持7日を超える場合、認可済みaggregate sourceが必要。存在しなければblocked。
+
+5. Threshold / bounds
+
+FIRE条件: rate < 0.60
+
+境界0.60はNO_FIRE
+
+threshold単位: ratio [0,1]
+
+guild設定可能候補範囲: 0.30〜0.90
+
+上記threshold/boundsは未検証・承認待ち。
+
+6. null / quality / 0分母
+条件	結果
+SUFFICIENTかつdenominator>0かつminN充足	threshold評価
+MISSING	INELIGIBLE / MISSING
+STALE	INELIGIBLE / STALE
+PARTIAL	INELIGIBLE / PARTIAL
+SUPPRESSED	INELIGIBLE / PRIVACY_SUPPRESSED
+UNKNOWN	INELIGIBLE / UNKNOWN
+denominator=0	INELIGIBLE / ZERO_DENOMINATOR
+denominator<minN	INELIGIBLE / INSUFFICIENT_N
+numerator/value=null	INELIGIBLE / MISSING
+7. cooldown / 解消 / 再発 / priority
+
+priority: MEDIUM
+
+cooldown起点: Suggestion生成時刻。
+
+同一issue fingerprintがFIREを継続してもcooldown中は新Suggestionを生成しない。
+
+十分なFactによる後続NO_FIREを「解消」とする。
+
+解消後に再びFIREとなった場合のみ再発として新Suggestionを生成可能。
+
+rule/config version変更だけではreject/dismissを復活させない。
+
+8. Target / action / evidence
+
+targetType: ONBOARDING_FLOW
+
+targetId: adapterが返す既存onboarding flow ID。実ID形式は未照合。
+
+liveVersion: 評価時に取得した対象live version。
+
+action: CREATE_DRAFT
+
+提案draft field候補:
+
+welcome_message
+
+first_action_prompt
+
+target schemaに当該typed fieldが存在しない場合、Suggestion生成を抑止。
+
+permission変更、automation activation、投稿、課金、外部操作は行わない。
+
+evidence:
+
+numerator/denominator/rate
+
+CURRENT/PREVIOUS window
+
+snapshot ID
+
+source-health observation ID＋version
+
+quality
+
+説明template:
+
+「CURRENTの対象cohortでは、{numerator}/{denominator}（{rate}）が完了条件を満たしました。PREVIOUSは{previousRate}でした。データ品質は{quality}です。これは改善余地を示す集計上のシグナルであり、原因を特定するものではありません。」
+
+9. 合成fixture
+ID	入力	quality	期待結果	reason	action
+ONB-F01	54/100 = 0.54	SUFFICIENT	FIRE	—	CREATE_DRAFT
+ONB-F02	72/100 = 0.72	SUFFICIENT	NO_FIRE	—	NONE
+ONB-F03	60/100 = 0.60	SUFFICIENT	NO_FIRE	—	NONE
+ONB-F04	null/100	MISSING	INELIGIBLE	MISSING	NONE
+ONB-F05	8/10 = 0.80	SUFFICIENT	INELIGIBLE	INSUFFICIENT_N	NONE
+ONB-F06	30/100	SUPPRESSED	INELIGIBLE	PRIVACY_SUPPRESSED	NONE
+ONB-F07	0/0	SUFFICIENT	INELIGIBLE	ZERO_DENOMINATOR	NONE
+HELP-001
+1. ID / version・目的
+項目	契約
+ID	HELP-001
+version	v1
+目的	構造化help intakeのうち、回答されない／明示的にstalledとなった受付が一定割合存在する状態を検出する
+
+投稿本文、DM、自由文を判定材料にしない。「未回答」「stalled」は既存の構造化status・timestampから確認可能な場合だけ扱う。
+
+2. Input / source adapter
+
+metricId: HELP_UNANSWERED_STALLED_RATE
+
+提案adapter: INTAKE_STATUS_AGGREGATE_V1
+
+必須source:
+
+intake ID
+
+structured status
+
+createdAt
+
+first-response状態
+
+stalled状態
+
+現在のpolicy/SLA version
+
+source revision / snapshot / source-health observation
+
+NEXUSのFactにはraw intake本文を保存しない。
+
+adapter未登録・必要field不足ならDISABLEDまたはMISSING。
+
+3. 対象集合・式
+
+fixture上のresponse SLAは24時間とする未検証候補。
+
+denominator: CURRENT window内に作成され、evaluationAsOf時点でSLA到達済みのeligible intake件数。
+
+numerator:
+
+SLA到達後もfirst responseが存在しない、または
+
+structured statusがSTALLED
+のいずれかを満たす件数。
+
+rate = numerator / denominator
+
+同一intake IDは最新status revisionのみ1件。
+
+deleted/tombstoned/test/system対象は除外。
+
+本文内容から「助けを求めている」「困っている」等を新規推定しない。
+
+4. Window / minN / freshness
+
+CURRENT/PREVIOUSとも7暦日。SLA到達済みrecordのみ分母対象。
+
+minN ≥ 20：未検証候補
+
+freshness ≤24時間：未検証候補
+
+coverage ≥0.95：未検証候補
+
+これらはsource-health gateであり、匿名性保証ではない。
+
+5. Threshold / bounds
+
+FIRE条件: rate >= 0.25
+
+境界0.25はFIRE
+
+単位: ratio [0,1]
+
+guild設定可能候補範囲: 0.05〜0.80
+
+threshold/boundsは未検証・承認待ち。
+
+6. null / quality / 0分母
+
+ONB-001と同じ品質契約を適用し、SUPPRESSEDはPRIVACY_SUPPRESSED、denominator=0はZERO_DENOMINATOR、minN不足はINSUFFICIENT_Nとする。
+
+7. cooldown / 解消 / 再発 / priority
+
+priority: HIGH
+
+cooldown: 7暦日候補、未検証。
+
+起点はSuggestion生成。
+
+十分なFactによるNO_FIREを解消とし、後続FIREを再発とする。
+
+同一issue fingerprintの連続FIREはcooldown中に再生成しない。
+
+rule/config version変更だけでreject/dismissを復活させない。
+
+8. Target / action / evidence
+
+targetType: HELP_INTAKE_POLICY
+
+targetId: 既存intake policyのID。実ID形式・schemaは未照合。
+
+liveVersion: 評価時点のlive policy version。
+
+action: CREATE_DRAFT
+
+提案draft field候補:
+
+response_sla_hours
+
+escalation_after_hours
+
+fieldが実target schemaに存在しない場合は生成抑止。
+
+権限変更、勝手なassignment、投稿、外部操作は行わない。
+
+evidenceはaggregate count、window、SLA policy version、snapshot/source-health ID、qualityのみ。
+
+説明template:
+
+「CURRENTでは、SLA到達済みの{denominator}件中{numerator}件（{rate}）が未回答またはstalled状態でした。PREVIOUSは{previousRate}でした。本文内容を判定した結果ではありません。」
+
+9. 合成fixture
+ID	入力	quality	期待結果	reason	action
+HELP-F01	30/100 = 0.30	SUFFICIENT	FIRE	—	CREATE_DRAFT
+HELP-F02	20/100 = 0.20	SUFFICIENT	NO_FIRE	—	NONE
+HELP-F03	25/100 = 0.25	SUFFICIENT	FIRE	—	CREATE_DRAFT
+HELP-F04	null/100	MISSING	INELIGIBLE	MISSING	NONE
+HELP-F05	3/10 = 0.30	SUFFICIENT	INELIGIBLE	INSUFFICIENT_N	NONE
+HELP-F06	30/100	SUPPRESSED	INELIGIBLE	PRIVACY_SUPPRESSED	NONE
+HELP-F07	0/0	SUFFICIENT	INELIGIBLE	ZERO_DENOMINATOR	NONE
+RET-001
+1. ID / version・目的
+項目	契約
+ID	RET-001
+version	v1
+目的	許可された集計データから、前期間に参加したcohortが次期間にも継続参加した割合を検出し、コミュニティ全体の継続参加改善候補を提示する
+
+個人の離脱理由、興味、心理、関係性等は推定しない。継続率低下を特定原因の証拠とは扱わない。
+
+2. Input / source adapter
+
+metricId: ENGAGEMENT_CONTINUATION_RATE
+
+提案adapter: PERMITTED_ENGAGEMENT_AGGREGATE_V1
+
+必須source:
+
+PREVIOUS active cohort count
+
+CURRENTにも継続してactiveであるcohort count
+
+cohort definition/version
+
+許可済みparticipation signalのsource revision
+
+immutable snapshot
+
+source-health observation ID＋version
+
+adapterはcohort overlapを外部または既存許可データ側で集計し、NEXUSへ個人識別子を長期保存しない。
+
+実コードにこのadapterが存在するかは未確認。
+
+必要なaggregate sourceが成立しなければMISSING、またはrule自体をDISABLED/blockedとする。
+
+Run 7日保持を超える個人ID保存によって計算可能にすることは禁止。
+
+3. 対象集合・式
+
+PREVIOUS cohort: PREVIOUS window中に、許可されたstructured participation signalを1回以上持つ対象集合。
+
+denominator: PREVIOUS cohortの人数。
+
+numerator: そのcohortのうちCURRENT windowにも許可されたparticipation signalがある人数。
+
+retention = numerator / denominator
+
+同一participantはsource側で1回にdeduplicate。
+
+deleted/tombstoned対象はsource側の許可規則に従い除外。
+
+service/test対象を除外する場合も、source側で構造化された分類が提供される場合のみ。
+
+NEXUS側で個人の行動履歴から新しいcohortを長期再構成しない。
+
+4. Window / minN / freshness
+
+RETはCURRENT/PREVIOUSの連続7暦日を用いる。
+
+minN ≥ 20：未検証候補
+
+source-health freshness ≤48時間：未検証候補
+
+coverage ≥0.95：未検証候補
+
+7日を超える比較期間を必要とするcohort定義の場合、認可済みaggregate sourceがなければblocked。
+
+minNやqualityを匿名性保証・統計的信頼度とは扱わない。
+
+5. Threshold / bounds
+
+FIRE条件: retention < 0.40
+
+境界0.40はNO_FIRE
+
+単位: ratio [0,1]
+
+guild設定可能候補範囲: 0.10〜0.80
+
+threshold/boundsは未検証・承認待ち。
+
+6. null / quality / 0分母
+
+MISSING → INELIGIBLE / MISSING
+
+STALE → INELIGIBLE / STALE
+
+PARTIAL → INELIGIBLE / PARTIAL
+
+SUPPRESSED → INELIGIBLE / PRIVACY_SUPPRESSED
+
+UNKNOWN → INELIGIBLE / UNKNOWN
+
+denominator=0 → INELIGIBLE / ZERO_DENOMINATOR
+
+denominator<minN → INELIGIBLE / INSUFFICIENT_N
+
+numerator/value=null → INELIGIBLE / MISSING
+
+品質不足の結果を「継続率が低い」と断定しない。
+
+7. cooldown / 解消 / 再発 / priority
+
+priority: MEDIUM
+
+cooldown: 7暦日候補、未検証。
+
+Suggestion生成を起点としてcooldownを開始。
+
+十分なFactによるNO_FIREを解消とし、その後のFIREを再発とする。
+
+同一issue fingerprintについて継続FIRE中の重複Suggestionを生成しない。
+
+version変更だけで過去のreject/dismissを解除しない。
+
+8. Target / action / evidence
+
+targetType: COMMUNITY_ENGAGEMENT_POLICY
+
+targetId: 既存community engagement設定等のtyped target ID。実在schemaは未照合。
+
+liveVersion: 評価対象live version。
+
+action: CREATE_DRAFT
+
+提案draft field候補:
+
+engagement_prompt_enabled
+
+event_frequency_per_week
+
+実targetにfieldが存在しない場合、Suggestion生成を抑止。
+
+automation実行、イベント作成、投稿、権限変更、課金は行わない。
+
+evidence:
+
+numerator/denominator
+
+CURRENT/PREVIOUS window
+
+cohort definition version
+
+snapshot ID
+
+source-health observation ID＋version
+
+quality
+
+説明template:
+
+「許可された集計データでは、PREVIOUS cohortの{denominator}件中{numerator}件（{rate}）がCURRENTにも継続参加しました。この集計は継続状況を示すもので、個人の離脱理由や特定施策の因果を示すものではありません。」
+
+9. 合成fixture
+ID	入力	quality	期待結果	reason	action
+RET-F01	32/100 = 0.32	SUFFICIENT	FIRE	—	CREATE_DRAFT
+RET-F02	45/100 = 0.45	SUFFICIENT	NO_FIRE	—	NONE
+RET-F03	40/100 = 0.40	SUFFICIENT	NO_FIRE	—	NONE
+RET-F04	null/100	MISSING	INELIGIBLE	MISSING	NONE
+RET-F05	4/10 = 0.40	SUFFICIENT	INELIGIBLE	INSUFFICIENT_N	NONE
+RET-F06	30/100	SUPPRESSED	INELIGIBLE	PRIVACY_SUPPRESSED	NONE
+RET-F07	0/0	SUFFICIENT	INELIGIBLE	ZERO_DENOMINATOR	NONE
+3ルール共通の実装接続先
+Rule	Fact adapter	UI表示	Draft action	fixture
+ONB-001	ONBOARDING_AGGREGATE_V1（存在未確認）	Rule/Suggestion一覧・詳細	onboarding flowの許可fieldだけdraft化	ONB-F01〜F07
+HELP-001	INTAKE_STATUS_AGGREGATE_V1（存在未確認）	Rule/Suggestion一覧・詳細	intake policyの許可fieldだけdraft化	HELP-F01〜F07
+RET-001	PERMITTED_ENGAGEMENT_AGGREGATE_V1（存在未確認）	Rule/Suggestion一覧・詳細	engagement policyの許可fieldだけdraft化	RET-F01〜F07
+
+3ルールとも、Suggestion生成＝人への改善案提示であり、適用・有効化・投稿・automation実行・課金・権限変更を自動では行わない。liveVersionが取得できない場合も、後続Applyで安全に再検証できないためactionable Suggestionの生成を抑止する。
+
+未確認事項： 3つのsource adapterと、それらが要求するstructured/aggregate sourceが現行コード・既存正本に実在するかは未照合。存在しない場合に本文収集や新規個人ID長期保存で補完せず、該当ruleをMISSING/DISABLED/blockedとして扱う。7日を超える比較に必要な認可済みaggregate sourceも同様に未確認である。保持期間についてはRun終了後最小状態7日以内削除・backup 7日の既存制約のみ適用し、FactやSuggestionへ長期保存する期間は本個票では決定しない。

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, authenticatedSettingsOptions } from "./settings-auth-fixture";
 import { renderWithCss } from "../fixtures/render-with-css";
 import { navigateDashboard } from "./dashboard-navigation";
 test("seven community profiles adapt six Web and Discord views without irrelevant KPIs", async ({
@@ -99,6 +99,9 @@ test("seven community profiles adapt six Web and Discord views without irrelevan
     }
   }
 });
+test.describe(() => {
+  test.use(authenticatedSettingsOptions);
+
 test("community settings save multiple purposes with the current revision and queue manual discovery", async ({
   page,
 }) => {
@@ -131,4 +134,5 @@ test("community settings save multiple purposes with the current revision and qu
   await form.getByRole("button", { name: "Rediscover capabilities" }).click();
   expect((await refresh).ok()).toBe(true);
   await expect(form.getByRole("status")).toContainText("Rediscovery queued");
+});
 });

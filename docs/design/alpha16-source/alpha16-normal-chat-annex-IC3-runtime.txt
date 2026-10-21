@@ -1,0 +1,87 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 03:00 UTC
+Reasoning: 極高. Design only. No NEXUS implementation, configuration, or tests. Numeric runtime values are unvalidated proposals; UNKNOWN deadline and non-Run retention remain pending.
+
+付録I-C3：Runtime永続状態と復旧
+1. 提案logical schema
+
+table名は全て提案logical name、既存実tableは未照合。既存正本があれば論理差分のみ追加。FKはguild_id+idの複合scopeを原則とする。全table共通guild_id uuid!、created_at timestamptz!=now()、変更可能rowはupdated_at timestamptz!=now()。共通型：ID=uuid、時刻=timestamptz、版/fence=bigint、SHA-256=char(64)、固定乱数=bytea(32)。stateful rowはstate_version bigint!=1。!=NOT NULL、?=nullable、=x=default。enumはCHECK。payloadはpayload_type+payload_schema_version+typed jsonbのみ、未登録field拒否。raw投稿/DM/個人推測/secretは保存しない。
+
+operation_intent
+
+intent_id uuid! PK; run_id uuid? FK; step_id uuid? FK; suggestion_id uuid?; flow_revision_id uuid?; target_type varchar64!; target_id varchar128!; approved_suggestion_version bigint?; approved_live_target_version bigint?; approved_draft_id uuid?; approved_draft_revision_id uuid?; approved_draft_content_hash char64?; operation_kind varchar64!; payload_type varchar64!; payload_schema_version int!=1; payload jsonb!; approved_by_user_id uuid?; approved_at timestamptz?; state varchar32!=READY; terminal_at/unknown_resolution_deadline_at timestamptz?。Apply系はapproved_*全必須、承認内容immutable。Unique=guild+suggestion+draftRevision、有効予約=guild+target+liveVersion（有効state=READY|CLAIMED|EXECUTING|CANCEL_REQUESTED|RESULT_UNKNOWN）。Index=guild+state,run+state,target+state。Run系削除はRun→Intent→Attempt→Result/Idempotencyをcascade、cross-domain refはnonterminal中RESTRICT。
+
+operation_attempt
+
+attempt_id uuid! PK; intent_id uuid! FK; attempt_no int!; worker_id uuid?; fence_token bigint?; state varchar32!=CLAIMED; effect_descriptor_hash char64!; claimed_at/send_admitted_at/completed_at/request_deadline_at timestamptz?; failure_code varchar64?。Unique=intent+attempt_no、attempt_no>=1。Index=intent+state,guild+state+deadline。admission後はUNKNOWN。
+
+external_result
+
+external_result_id uuid! PK; attempt_id uuid! FK UNIQUE; provider varchar32!; result_state varchar32!; external_ref varchar256?; result_digest char64?; reconcile_method varchar64?; observed_at timestamptz!。state=CONFIRMED_SUCCESS|CONFIRMED_NO_EFFECT|UNKNOWN。read-only照合でのみUNKNOWN解消、不能なら維持。
+
+worker_lease
+
+lease_id uuid! PK; resource_type varchar32!; resource_id uuid!; worker_id uuid!; fence_token bigint!; state varchar16!=HELD; acquired_at/heartbeat_at/lease_expires_at timestamptz!。Unique=resource+resource_id。fence単調増加、heartbeat/更新はresource+worker+fence+HELDのCAS。旧WorkerのDB更新/admission拒否。
+
+outbox
+
+outbox_id uuid! PK; run_id uuid? FK CASCADE; aggregate_type varchar32!; aggregate_id uuid!; event_type varchar64!; event_version bigint!; payload_type varchar64!; payload_schema_version int!=1; payload jsonb!; dedupe_key char64! UNIQUE; state varchar16!=PENDING; available_at/published_at timestamptz?。正本変更と同transactionでcommit。queueは派生。Run由来はR-RUN7。
+
+idempotency_intent
+
+idempotency_id uuid! PK; operation_intent_id uuid! FK CASCADE; scope_hash/body_hash/idempotency_key_hash/operation_token_hash char64!; token_expires_at timestamptz!; state varchar16!=ACTIVE; response_status int?; response_ref_type varchar64?; response_ref_id uuid?; completed_at timestamptz?。Unique=guild+scopeHash+keyHashおよびtoken hash。同key異bodyは拒否、同key同bodyは同一intentを参照する。Applyはserver発行32-byte opaque tokenを一度返しhashのみ保存。期限/親Run削除後はtoken単独利用不可。Replayもtombstone/scope/permissionを再確認。無期限key墓標なし。
+
+Run由来のIntent/Attempt/Result/Outbox/Idempotencyはretention class=R-RUN7、leaseはR-EPHEMERAL。
+
+2. Run/Step/Wait/Schedule差分
+
+Runへflow_revision_id immutable、state_version、terminal_at、UNKNOWN期限。Stepへstep_revision、state_version、operation_intent_id、resume_at、固定乱数。Waitは期限付きresumeを保持し再開直前にtombstone/permission/plan/revision有効性を再確認。Rollbackは新revisionのみで既存Run不変。Scheduleはplanned fire/materialized Run/schedule revisionを区別、missed=SKIP。
+
+3. 状態遷移
+from→to	actor / 前提	同transaction	副作用 / 回復
+JOB Q→CLAIMED→RUNNING	Worker+lease	job+lease	内部jobのみexpiry後requeue
+RUN READY→RUNNING	Worker/Scheduler、認可+tombstone	Run+Step+outbox	revision不変
+STEP RUNNING→WAITING	Worker、wait成立	Step+resume+outbox	dueで再開
+INTENT READY→CLAIMED	Worker+fence	Attempt+lease	admission前cancel可
+CLAIMED→EXECUTING	fence一致、target/live/draft/version再確認	admission commit	commit後のみ外部call
+CLAIMED→CANCELLED	User/Worker、admission未commit	Intent+Attempt	無副作用
+EXECUTING→SUCCEEDED	Worker、成功確認	Result+Attempt+Intent+Run/Step	後続queue
+EXECUTING→FAILED_PRE_EFFECT	Worker、admission前の無効果確定	Attempt+Intent	条件時のみ再attempt
+EXECUTING→RESULT_UNKNOWN	Recovery/Worker、admission後不明	UNKNOWNをResult+Intent/Runへ	同一副作用自動再送禁止
+EXECUTING→CANCEL_REQUESTED→UNKNOWN	admission後・応答なし	Intent+Attempt	取消確約不可
+UNKNOWN→CONFIRMED_SUCCESS/NO_EFFECT	read-only reconcile	Result+Intent CAS	不能なら維持
+UNKNOWN→terminal	deadline	terminal_at	FAILEDへ偽装せず再実行不可
+
+send admissionのDB commitが線形化点。commit前のcancel/lease expiryなら送信不可、commit後は取消確約不可。Discordはfenceを検査しないためexactly-onceは保証せず、fenceは旧Workerの更新/admission拒否に使う。
+
+4. crash/recovery
+
+intent前=未commitなら無効果。intent後/queue前=PG+outboxから再構成。claim後・admission前のlease expiry=pre-effect。admission後のPC/Worker停止、外部送信前後、response前後、result commit前=UNKNOWN。commit後はPGから再開。PC outbound断もadmission後はUNKNOWN、前に無効果確定ならpre-effect。Discord応答喪失=UNKNOWN。Tunnel断単独はUNKNOWN原因にしない。UNKNOWN再queue禁止、reconcileはread-only。
+
+5. Apply reservation / tombstone
+
+同一guild+suggestion+immutableDraftRevisionに加え、異なるSuggestion/draftでも同一guild+target+approved_live_target_versionの有効予約を一件に制限する。成功でlive版が進み並行側はCAS競合。UNKNOWNはreservation保持、確実なpre-effect失敗だけ解除可。CONSUMEDは成功確定のみ。tombstoneはclaim/resume/admissionより優先し、restore後もtombstone再適用。
+
+6. lease等（未検証の推奨初期値）
+項目	候補	範囲	変更条件
+heartbeat	10s	5–15s	leaseの1/3以下
+lease	45s	30–90s	heartbeatの3倍以上、deadlineより長く
+request deadline	30s	15–60s	lease−heartbeat以下
+UNKNOWN解消期限	未設定	承認待ち	期限到達後UNKNOWN terminal
+
+数値は未検証。Run最小状態は7日以内削除、backup 7日、Run由来intent/result/idempotencyを複製で延長しない。その他保持は未承認。一律7日・30日・24か月は採用しない。
+
+7. Transaction / 受入
+
+lock順=Run/Step→Intent→Attempt→Lease。queueはoutbox commit後にIntentを取得し逆順lockしない。更新はstate_version/fence CAS、重複はunique。受入はalpha16実装完了後に一括。
+
+RT-01/ACC-RT-01 Run/Step：revision・resume。
+RT-02/ACC-RT-02 Intent/Attempt/Result：二重Apply・pre-effect・UNKNOWN。
+RT-03/ACC-RT-03 Lease/Fence：旧Worker拒否。
+RT-04/ACC-RT-04 Outbox：再起動・UNKNOWN非再queue。
+RT-05/ACC-RT-05 Crash/Cancel：境界・競合。
+RT-06/ACC-RT-06 Tombstone：削除優先・restore再適用。
+RT-07/ACC-RT-07 Wait/Schedule/Rollback：SKIP・固定revision。
+RT-08/ACC-RT-08 Apply CAS：live版並行予約を一件化。
+
+既存schemaへの対応箇所は未照合。実装・migration・設定変更・動作確認・テスト・修正は本付録では行わない。

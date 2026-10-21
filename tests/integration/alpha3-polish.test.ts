@@ -469,9 +469,10 @@ it.each(["8", "32", "manager", "unauthorized"])(
       ).toContain("Message detection");
   },
 );
-it("opens private settings, binds follow-up controls to the actor and panel, and rejects unauthorized and stale edits", async () => {
+it("keeps private settings controls bound while handing retired edits to Web and protecting safety stops", async () => {
   const ctx = await setup(),
-    revision = (await ctx.settings.get(ctx.s)).revision;
+    before = await ctx.settings.get(ctx.s),
+    revision = before.revision;
   const open = await ctx.tokens.issue(
     db,
     ctx.s,
@@ -498,6 +499,7 @@ it("opens private settings, binds follow-up controls to the actor and panel, and
     );
   }
   ids(view);
+  expect(controls.length).toBeGreaterThan(0);
   const followups = await Promise.all(
     controls.map((token) =>
       ctx.tokens.read(db, ctx.s, token, vault.hash(ctx.s, helper)),
@@ -523,21 +525,57 @@ it("opens private settings, binds follow-up controls to the actor and panel, and
     },
     vault.hash(ctx.s, helper),
   );
-  await ctx.worker.dispatch(ctx.s, {
+  const guide = await ctx.worker.dispatch(ctx.s, {
     ...job(),
     customId: save,
     fields: { minutes: "35", enabled: "ON" },
     privateResponse: true,
   });
+  expect(JSON.stringify(guide)).toContain("/setup?guild=" + ctx.s.guildId);
+  expect(JSON.stringify(guide)).toContain("Existing settings are preserved.");
+  expect(await ctx.settings.get(ctx.s)).toEqual(before);
+  // A stale configuration button may still show the public guide, but cannot
+  // repeat its old mutation or use modal values as a new Web configuration.
+  await ctx.worker.dispatch(ctx.s, {
+    ...job(),
+    customId: save,
+    fields: { minutes: "45", enabled: "OFF" },
+    privateResponse: true,
+  });
+  expect(await ctx.settings.get(ctx.s)).toEqual(before);
+  await expect(
+    ctx.worker.dispatch(ctx.s, {
+      ...job(newcomer),
+      customId: save,
+      privateResponse: true,
+    }),
+  ).rejects.toThrow("COMPONENT_OWNER");
+  const stop = await ctx.tokens.issue(
+    db,
+    ctx.s,
+    {
+      action: "controlHelperToggle",
+      value: false,
+      privateSettings: true,
+      panelMessageId: root,
+      revision,
+    },
+    vault.hash(ctx.s, helper),
+  );
+  await ctx.worker.dispatch(ctx.s, {
+    ...job(),
+    customId: stop,
+    privateResponse: true,
+  });
   expect(await ctx.settings.get(ctx.s)).toMatchObject({
-    firstResponseMinutes: 35,
+    firstResponseMinutes: before.firstResponseMinutes,
     helperEnabled: false,
+    revision: revision + 1,
   });
   await expect(
     ctx.worker.dispatch(ctx.s, {
       ...job(),
-      customId: save,
-      fields: { minutes: "45", enabled: "OFF" },
+      customId: stop,
       privateResponse: true,
     }),
   ).rejects.toThrow("REVISION_CONFLICT");

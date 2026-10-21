@@ -1,3 +1,4 @@
+import { publicApiHeaders } from "./auth/api-proof";
 import { dashboardView, dashboardFilters } from "./navigation-model";
 import { hostedBetaEnabled } from "../../../packages/config/src/hosted-beta";
 import Console, { type ProductData } from "./console";
@@ -80,13 +81,12 @@ export default async function Page({
     developmentAuth: authMode() === "development",
   };
   {
-    const headers = { Authorization: `Bearer ${context.token}` },
-      base = `${context.base}/v3/organizations/${context.organizationId}/guilds/${context.guildId}`;
+    const base = `${context.base}/v3/organizations/${context.organizationId}/guilds/${context.guildId}`;
     const read = async <T,>(path: string): Promise<T | null> => {
       const section = new URL(path).pathname.split("/").at(-1)!;
       try {
         const response = await fetch(path, {
-          headers,
+          headers: publicApiHeaders(context, sessionCookie, "GET", path),
           cache: "no-store",
           signal: AbortSignal.timeout(15000),
         });
@@ -175,26 +175,18 @@ export default async function Page({
     interactionTransport: health?.interaction?.transport ?? "unknown",
     lastInteractionResult: health?.interaction?.lastResult ?? "unknown",
   };
-  const eventUrl = `${context.base}/v3/organizations/${context.organizationId}/guilds/${context.guildId}/product-event`,
-    eventHeaders = {
-      Authorization: `Bearer ${context.token}`,
-      "Content-Type": "application/json",
-    };
+  const eventUrl = `${context.base}/v3/organizations/${context.organizationId}/guilds/${context.guildId}/product-event`;
   await Promise.allSettled(
-    ["web_dashboard_opened", "page_render_latency"].map((event) =>
-      fetch(eventUrl, {
+    ["web_dashboard_opened", "page_render_latency"].map((event) => {
+      const body = JSON.stringify({ event, ...(event === "page_render_latency" ? { durationMs: Date.now() - started } : {}) });
+      return fetch(eventUrl, {
         method: "POST",
-        headers: eventHeaders,
-        body: JSON.stringify({
-          event,
-          ...(event === "page_render_latency"
-            ? { durationMs: Date.now() - started }
-            : {}),
-        }),
+        headers: { ...publicApiHeaders(context, sessionCookie, "POST", eventUrl, body), "Content-Type": "application/json" },
+        body,
         cache: "no-store",
         signal: AbortSignal.timeout(3000),
-      }),
-    ),
+      });
+    }),
   );
   const saved = cookieStore.get("nexus_locale")?.value,
     preferred = String(data.admin?.settings.uiLanguage ?? ""),

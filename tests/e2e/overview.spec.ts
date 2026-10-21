@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, authenticatedSettingsOptions } from "./settings-auth-fixture";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -34,7 +34,7 @@ test("public product and pricing are readable without dashboard credentials", as
     ).toBe(200);
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(
-    "Review activity and reply status in your Discord community.",
+    "Review Discord activity and posts to check for replies.",
   );
   await page.keyboard.press("Tab");
   await expect(page.locator(":focus-visible")).toHaveCount(1);
@@ -324,6 +324,9 @@ test("persists Japanese web language across reload and shows the improvement flo
   ).toBeVisible();
 });
 
+test.describe(() => {
+  test.use(authenticatedSettingsOptions);
+
 test("explains an unusable notification channel with a direct fix", async ({
   page,
 }) => {
@@ -343,6 +346,10 @@ test("explains an unusable notification channel with a direct fix", async ({
     "Permission needed. Give NEXUS View Channel and Send Messages in the selected channels.",
   );
 });
+});
+
+test.describe(() => {
+  test.use(authenticatedSettingsOptions);
 
 test("chooses a goal, tests an improvement and sees a useful small-community comparison", async ({
   page,
@@ -404,6 +411,7 @@ test("chooses a goal, tests an improvement and sees a useful small-community com
     fullPage: true,
   });
 });
+});
 
 test("keeps forbidden technical terms out of normal English and Japanese pages", async ({
   page,
@@ -429,6 +437,9 @@ test("keeps forbidden technical terms out of normal English and Japanese pages",
     await expect(page.locator("main")).not.toContainText(forbidden);
   }
 });
+test.describe(() => {
+  test.use(authenticatedSettingsOptions);
+
 test("saves a multi-channel analysis scope and shows the community comparison pages", async ({
   page,
 }) => {
@@ -454,42 +465,94 @@ test("saves a multi-channel analysis scope and shows the community comparison pa
     "Channels NEXUS can observe: 2 · Server-wide total: 2",
   );
 });
+});
 
 test("acknowledges, snoozes, and resolves observed attention posts", async ({
   page,
-  request,
+  playwright,
   baseURL,
-}) => {
+}, testInfo) => {
   const guild = "321111111111111111",
     channelId = "621111111111111111";
   // Basic development authentication does not grant the OAuth operations session.
-  // Keep the real route's rejection covered; the stateful fixture below covers UI
-  // requests and rendering, not successful OAuth authorization or persistence.
-  for (const method of ["GET", "POST"] as const) {
-    const response = await request.fetch("/data/attention", {
-      method,
-      headers: {
-        "X-Nexus-Guild": guild,
-        Origin: baseURL!,
-        "Sec-Fetch-Site": "same-origin",
-      },
-      ...(method === "POST"
-        ? {
-            data: {
-              channelId,
-              messageId: "521111111111111999",
-              status: "ACKNOWLEDGED",
-              version: 1,
-            },
-          }
-        : {}),
-    });
-    expect(response.status()).toBe(401);
-    expect(await response.json()).toMatchObject({
-      error: "SESSION_EXPIRED",
-      failure: { effect: "NOT_STARTED" },
-    });
+  // The real proxy issues this context's anonymous binding and CSRF proof.
+  // Keep CSRF rejection separate from the handler's OAuth session rejection.
+  const httpCredentials = testInfo.project.use.httpCredentials;
+  if (
+    !baseURL ||
+    !httpCredentials ||
+    Array.isArray(httpCredentials) ||
+    !httpCredentials.username ||
+    !httpCredentials.password
+  )
+    throw new Error("TEST_ATTENTION_BASIC_PREREQUISITES_MISSING");
+  // Send configured Basic credentials up front so these assertions measure
+  // CSRF/OAuth rejection without an incidental Basic challenge retry.
+  const request = await playwright.request.newContext({
+    baseURL,
+    httpCredentials: {
+      ...httpCredentials,
+      origin: new URL(baseURL).origin,
+      send: "always",
+    },
+  });
+  try {
+    const issued = await request.get("/", { maxRedirects: 0 });
+    expect(issued.status()).toBe(200);
+    for (const method of ["GET", "POST"] as const) {
+      const options = {
+        method,
+        headers: {
+          "X-Nexus-Guild": guild,
+          Origin: baseURL!,
+          "Sec-Fetch-Site": "same-origin",
+        },
+        ...(method === "POST"
+          ? {
+              data: {
+                channelId,
+                messageId: "521111111111111999",
+                status: "ACKNOWLEDGED",
+                version: 1,
+              },
+            }
+          : {}),
+      };
+      let proofHeaders: Record<string, string> = {};
+      if (method === "POST") {
+        const missingProof = await request.fetch("/data/attention", options);
+        expect(missingProof.status()).toBe(403);
+        expect((await missingProof.json()).error === "CSRF_REJECTED").toBe(true);
+        const hostname = new URL(baseURL!).hostname;
+        const cookies = (await request.storageState()).cookies.filter(
+          (cookie) => cookie.domain.replace(/^\./, "") === hostname && cookie.path === "/",
+        );
+        const binding = cookies.find((cookie) => cookie.name === "nexus_browser")?.value;
+        const proof = cookies.find((cookie) => cookie.name === "nexus_csrf")?.value;
+        const proofIssued = Boolean(
+          binding && /^[A-Za-z0-9_-]{43}$/.test(binding) &&
+          proof && /^[A-Za-z0-9_-]{32}\.[A-Za-z0-9_-]{43}$/.test(proof),
+        );
+        expect(proofIssued).toBe(true);
+        expect(cookies.some((cookie) => cookie.name === "nexus_session")).toBe(false);
+        if (!proofIssued || !proof) throw new Error("TEST_ATTENTION_CSRF_NOT_ISSUED");
+        proofHeaders = { "X-Nexus-CSRF": proof };
+      }
+      const response = await request.fetch("/data/attention", {
+        ...options,
+        headers: { ...options.headers, ...proofHeaders },
+      });
+      expect(response.status()).toBe(401);
+      expect(await response.json()).toMatchObject({
+        error: "SESSION_EXPIRED",
+        failure: { effect: "NOT_STARTED" },
+      });
+    }
+  } finally {
+    await request.dispose();
   }
+  // The stateful fixture below covers UI requests and rendering, not successful
+  // OAuth authorization or persistence.
   const records = ["521111111111111999", "521111111111111998"].map(
     (messageId) => ({
       channelId,

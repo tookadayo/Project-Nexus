@@ -57,8 +57,8 @@ export function BetaNotice({
             )
           : text(
               locale,
-              "The normal plans below describe standard features and allowances separately from Beta access.",
-              "以下の通常プランは、Betaの利用権とは別に、標準的な機能と利用枠を示しています。",
+              "The normal plans describe standard features and allowances separately from Beta access.",
+              "通常プランは、Betaの利用権とは別に、標準的な機能と利用枠を示しています。",
             )}
       </p>
       <a href="/support">

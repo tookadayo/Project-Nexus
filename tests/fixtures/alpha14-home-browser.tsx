@@ -70,7 +70,7 @@ if (state === "collecting") {
 if (state === "paused" || state === "expired")
   data.betaState = state === "paused" ? "PAUSED" : "EXPIRED";
 createRoot(root).render(
-  <div className="product">
+  <div className="product nx-workspace">
     <main
       className="content"
       style={{

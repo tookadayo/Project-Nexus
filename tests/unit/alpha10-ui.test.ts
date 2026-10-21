@@ -160,7 +160,8 @@ it.each(["ja", "en"] as const)(
     walk(home, (o) => {
       if (o.type === ComponentType.Button) buttons++;
     });
-    expect(buttons).toBe(6);
+    // Three Section destinations plus Automation, history, settings and More.
+    expect(buttons).toBe(7);
     expect(JSON.stringify(panels[1])).not.toMatch(
       /Redis|Gateway|Transport|BullMQ|Build SHA|worker|queue|database/i,
     );

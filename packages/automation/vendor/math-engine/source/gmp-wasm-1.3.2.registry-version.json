@@ -1,0 +1,138 @@
+{
+  "name": "gmp-wasm",
+  "version": "1.3.2",
+  "description": "Arbitrary-precision Integer, Rational and Float types based on the GMP and MPFR libraries",
+  "main": "dist/index.umd.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/types/index.d.ts",
+  "scripts": {
+    "build-gmp": "sh -c ./binding/build-gmp.sh",
+    "build-mpfr": "sh -c ./binding/build-mpfr.sh",
+    "build-src": "sh -c ./binding/build-src.sh",
+    "build-wasm-ts": "node scripts/toBase64.js",
+    "build-bindings": "npm run build-gmp && npm run build-mpfr && npm run build-src && npm run build-wasm-ts",
+    "build-rollup": "rollup -c",
+    "build-types": "tsc --project types.tsconfig.json",
+    "build": "npm run build-bindings && npm run build-rollup && npm run build-types",
+    "test": "jest --coverage",
+    "typedoc": "typedoc ./src/index.ts",
+    "typedoc-serve": "npm run typedoc && npx serve -n docs"
+  },
+  "keywords": [
+    "gmp",
+    "mpfr",
+    "wasm",
+    "arbitrary",
+    "precision",
+    "multi",
+    "multiprecision",
+    "arithmetic",
+    "webassembly",
+    "fast",
+    "decimal",
+    "large",
+    "integer",
+    "big",
+    "rational",
+    "rationals",
+    "float",
+    "biginteger",
+    "bigdecimal",
+    "bignumber",
+    "bigint",
+    "bignum",
+    "math",
+    "mathematics"
+  ],
+  "bugs": {
+    "url": "https://github.com/Daninet/gmp-wasm/issues"
+  },
+  "homepage": "https://github.com/Daninet/gmp-wasm#readme",
+  "author": {
+    "name": "Dani Biró",
+    "email": "danibiro93@gmail.com",
+    "url": "https://danibiro.com"
+  },
+  "license": "LGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Daninet/gmp-wasm.git"
+  },
+  "devDependencies": {
+    "@rollup/plugin-alias": "^3.1.9",
+    "@rollup/plugin-commonjs": "^22.0.0",
+    "@rollup/plugin-json": "^4.1.0",
+    "@rollup/plugin-node-resolve": "^13.2.1",
+    "@rollup/plugin-typescript": "^8.3.2",
+    "@types/estree": "^0.0.51",
+    "@types/jest": "^27.4.1",
+    "@types/node": "^17.0.29",
+    "binaryen": "^106.0.0",
+    "fflate": "^0.7.3",
+    "jest": "^28.0.2",
+    "rollup": "^2.70.2",
+    "rollup-plugin-copy": "^3.4.0",
+    "rollup-plugin-license": "^2.7.0",
+    "rollup-plugin-terser": "^7.0.2",
+    "serve": "^13.0.2",
+    "ts-jest": "^28.0.0-next.1",
+    "ts-node": "^10.7.0",
+    "tslib": "^2.4.0",
+    "typedoc": "^0.22.15",
+    "typescript": "^4.6.3"
+  },
+  "_id": "gmp-wasm@1.3.2",
+  "contributors": [
+    {
+      "name": "Authors of this WebAssembly binding"
+    },
+    {
+      "name": "------------"
+    },
+    {
+      "name": "Dani Biró",
+      "email": "danibiro93@gmail.com"
+    },
+    {
+      "name": "------------"
+    },
+    {
+      "name": "The authors of the original GMP and MPFR libraries"
+    },
+    {
+      "name": "can be found in the source packages distributions of these libraries."
+    }
+  ],
+  "gitHead": "4e372e5a3c4a65f871e1bcaab63c78b29dc80ff8",
+  "_nodeVersion": "20.15.0",
+  "_npmVersion": "10.7.0",
+  "dist": {
+    "integrity": "sha512-8Y7qVLLX8/0YzeHYueCHaw9D7sdnGViiGu7KeP9wATmuayoXW/FlGMsV80aBU5ryS2OwKfaCyjCSSPdxoe3E4A==",
+    "shasum": "4c109d85459a692e227320a5692d9effbb744ea2",
+    "tarball": "https://registry.npmjs.org/gmp-wasm/-/gmp-wasm-1.3.2.tgz",
+    "fileCount": 57,
+    "unpackedSize": 3645060,
+    "signatures": [
+      {
+        "keyid": "SHA256:jl3bwswu80PjjokCgh0o2w5c2U4LhQAE57gj9cz1kzA",
+        "sig": "MEUCIQCPqmtNfzkeBNJo2IaTzOfgf/YRFBstdU62RWvy6HVzuwIgelHAMnOeuamwPX6g4FazloMOU+VUzEfGQx6RqeuxRK4="
+      }
+    ]
+  },
+  "_npmUser": {
+    "name": "daninet",
+    "email": "danibiro93@gmail.com"
+  },
+  "directories": {},
+  "maintainers": [
+    {
+      "name": "daninet",
+      "email": "danibiro93@gmail.com"
+    }
+  ],
+  "_npmOperationalInternal": {
+    "host": "s3://npm-registry-packages",
+    "tmp": "tmp/gmp-wasm_1.3.2_1720348991104_0.9035871974110705"
+  },
+  "_hasShrinkwrap": false
+}

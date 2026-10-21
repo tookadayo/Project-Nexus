@@ -4,6 +4,7 @@ import { assert, type Scope } from "../../shared/src/index";
 import { metricEvidence } from "../../shared/src/metric-evidence";
 import type { Actor } from "../../settings/src/index";
 import { operationsAccess, operationsAudit, operationsLock } from "./policy";
+import {assertMaintenanceAuthorization,type MaintenanceAuthorizationProof} from "./maintenance-authorization";
 import type { AttentionState } from "./attention";
 export const inboxStates = [
   "OPEN",
@@ -14,7 +15,7 @@ export const inboxStates = [
   "DISMISSED",
 ] as const;
 export class AttentionInbox {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: Database, private readonly maintenanceProof?:MaintenanceAuthorizationProof) {}
   async list(s: Scope, actor: Actor, limit = 100) {
     return this.db.transaction().execute(async (tx) => {
       await operationsAccess(tx, s, actor, "READ", "attention_inbox");
@@ -65,6 +66,7 @@ export class AttentionInbox {
           );
       }
       assert(data.state !== "SNOOZED", "USE_SNOOZE_CONTROL");
+      if(this.maintenanceProof){await operationsAccess(tx,s,actor,"OPERATE","attention_inbox");assertMaintenanceAuthorization(this.maintenanceProof,s,actor);}
       const changed = data.state !== item.status || data.teamId !== undefined;
       if (changed)
         await sql`UPDATE attention_items SET status=${data.state},assigned_team_id=CASE WHEN ${data.teamId !== undefined} THEN ${data.teamId ?? null}::uuid ELSE assigned_team_id END,last_actor_hash=${actor.key},acknowledged_at=CASE WHEN ${["ACKNOWLEDGED", "IN_PROGRESS"].includes(data.state)} THEN COALESCE(acknowledged_at,now()) ELSE acknowledged_at END,resolved_at=CASE WHEN ${["RESOLVED", "DISMISSED"].includes(data.state)} THEN now() ELSE NULL END,resolution_reason=CASE WHEN ${data.state === "DISMISSED"} THEN 'STAFF_DISMISSED' WHEN ${data.state === "RESOLVED"} THEN 'STAFF_RESOLVED' ELSE NULL END,snooze_until=NULL,version=version+1,updated_at=now() WHERE ${tenant(s)} AND message_id=${data.key}`.execute(

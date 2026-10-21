@@ -2,15 +2,8 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { MetricEvidence } from "../../shared/src/metric-evidence";
 import type { Plan } from "../../settings/src/plan-registry";
-export const analysisTypes = [
-  "OVERALL",
-  "NEW_MEMBERS",
-  "SUPPORT",
-  "EVENTS",
-  "VOICE",
-  "ANNOUNCEMENTS",
-  "SHOWCASE",
-] as const;
+import { analysisTypes } from "./catalog";
+export { analysisTypes } from "./catalog";
 export type AnalysisType = (typeof analysisTypes)[number];
 export const analysisRequest = z
   .object({

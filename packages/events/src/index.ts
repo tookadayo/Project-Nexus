@@ -5,10 +5,13 @@ import {
   MessageType,
   ChannelFlags,
 } from "discord-api-types/v10";
-import { scopeForGuild } from "../../security/src/index.js";
+import { scopeForGuild } from "../../security/src/index";
 import type { IdentityVault } from "../../identity/src/index.js";
 const id = z.string().regex(/^\d{17,20}$/);
 const hash = z.string().regex(/^[a-f\d]{64}$/);
+export const BOT_REPLY_REFERENCE_CONTRACT = "DIRECT_REPLY_V1" as const;
+export const MASS_MENTION_CONTRACT = "ROLE_EVERYONE_V1" as const;
+export const SCHEDULED_EVENT_TIME_CONTRACT = "NATIVE_SCHEDULE_V1" as const;
 export const eventSchema = z
   .object({
     organizationId: z.uuid(),
@@ -90,6 +93,10 @@ export const eventSchema = z
     messageType: z.number().int().optional(),
     referenceId: id.optional(),
     referenceType: z.number().int().optional(),
+    botReplyReferenceContract: z.literal(BOT_REPLY_REFERENCE_CONTRACT).optional(),
+    mentionEveryone: z.boolean().optional(),
+    roleMentionCount: z.number().int().min(0).max(1000).optional(),
+    massMentionContract: z.literal(MASS_MENTION_CONTRACT).optional(),
     channelObfuscated: z.boolean().optional(),
     observationSource: z.enum(["GATEWAY", "REST"]).optional(),
     roles: z.array(id).optional(),
@@ -114,6 +121,10 @@ export const eventSchema = z
     suppress: z.boolean().optional(),
     entityType: z.number().int().optional(),
     eventStatus: z.number().int().optional(),
+    scheduledStartAt: z.iso.datetime().nullable().optional(),
+    scheduledEndAt: z.iso.datetime().nullable().optional(),
+    scheduledMetadataObservedAt: z.iso.datetime().optional(),
+    eventScheduleContract: z.literal(SCHEDULED_EVENT_TIME_CONTRACT).optional(),
     ruleHash: hash.optional(),
     actionType: z.number().int().optional(),
     afkChannelId: id.nullable().optional(),
@@ -391,8 +402,15 @@ function normalizeManyInternal(
           MessageReferenceType.Default &&
         (!r?.channel_id || r.channel_id === d.channel_id) &&
         (!r?.guild_id || r.guild_id === s.guildId);
+    const mentionFields=z.object({mention_everyone:z.boolean(),mention_roles:z.array(id).max(1000)}).safeParse(packet.d);
+    const massMention=mentionFields.success?{
+      mentionEveryone:mentionFields.data.mention_everyone,roleMentionCount:new Set(mentionFields.data.mention_roles).size,massMentionContract:MASS_MENTION_CONTRACT}:{};
     if (d.author.bot || d.webhook_id) {
-      emit({kind:"channel.post_observed",at:d.timestamp,messageId:d.id,channelId:d.channel_id,messageType:d.type,authorKind:d.webhook_id ? "WEBHOOK" : "BOT"});
+      emit({kind:"channel.post_observed",at:d.timestamp,messageId:d.id,channelId:d.channel_id,messageType:d.type,authorKind:d.webhook_id ? "WEBHOOK" : "BOT",
+        // A malformed Reply without its reference cannot certify a zero. The
+        // known forward/cross-channel/guild cases are explicitly not direct.
+        botReplyReferenceContract:d.type===MessageType.Default||r?.message_id?BOT_REPLY_REFERENCE_CONTRACT:undefined,
+        referenceType:direct?(r?.type??MessageReferenceType.Default):undefined,referenceId:direct?r?.message_id:undefined,...massMention});
       return events;
     }
     emit({
@@ -405,6 +423,7 @@ function normalizeManyInternal(
       referenceType: r?.type,
       referenceId: direct ? r?.message_id : undefined,
       humanVerified: true,
+      ...massMention,
       mentionHashes: d.mentions
         ?.filter((m) => !m.bot && m.id !== d.author.id)
         .slice(0, 100)
@@ -540,7 +559,9 @@ function normalizeManyInternal(
         status: z.number().int(),
       })
       .safeParse(raw);
-    if (d.success)
+    if (d.success) {
+      const fields=z.object({scheduled_start_time:z.iso.datetime({offset:true}).transform(value=>new Date(value).toISOString()),scheduled_end_time:z.iso.datetime({offset:true}).transform(value=>new Date(value).toISOString()).nullable()}).safeParse(raw);
+      const scheduleKnown=fields.success&&(fields.data.scheduled_end_time===null||Date.parse(fields.data.scheduled_end_time)>=Date.parse(fields.data.scheduled_start_time));
       emit({
         kind: packet.t.endsWith("CREATE")
           ? "scheduled_event.created"
@@ -551,7 +572,11 @@ function normalizeManyInternal(
         channelId: d.data.channel_id,
         entityType: d.data.entity_type,
         eventStatus: d.data.status,
+        ...(fields.success&&scheduleKnown?{
+          scheduledStartAt:fields.data.scheduled_start_time,scheduledEndAt:fields.data.scheduled_end_time,
+          scheduledMetadataObservedAt:now.toISOString(),eventScheduleContract:SCHEDULED_EVENT_TIME_CONTRACT}:{}),
       });
+    }
     return events;
   }
   if (packet.t?.startsWith("STAGE_INSTANCE_")) {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RESTPostAPIChannelMessageJSONBody } from "discord-api-types/v10";
+import { ComponentType, type RESTPostAPIChannelMessageJSONBody } from "discord-api-types/v10";
 import { DiscordRest } from "../../packages/discord/src/rest";
 import { fallbackRejectedApplicationEmoji } from "../../packages/discord/src/emoji-fallback";
 import {
@@ -496,14 +496,22 @@ describe("message transport fallback", () => {
         {} as ControlData,
         locale,
       );
+      const children = (source.components![0] as unknown as {components: Record<string, unknown>[]}).components;
+      const attentionIndex = children.findIndex(child => child.type === ComponentType.Section && (child.accessory as {emoji?: {id?: string}} | undefined)?.emoji?.id === fixture.emojiId);
+      const rowIndex = children.findIndex(child => child.type === ComponentType.ActionRow && (child.components as {emoji?: {id?: string}}[]).some(button => button.emoji?.id === fixture.historyId));
+      expect(attentionIndex).toBeGreaterThanOrEqual(0); expect(rowIndex).toBeGreaterThanOrEqual(0);
+      const historyIndex = (children[rowIndex]!.components as {emoji?: {id?: string}}[]).findIndex(button => button.emoji?.id === fixture.historyId);
+      expect(historyIndex).toBeGreaterThanOrEqual(0);
+      // Automation is now the first row button. Discord's precise rejection
+      // path must still point to the configured History emoji, not that entry.
       const error = {
         code: 50035,
         errors: {
           components: {
             "0": {
               components: {
-                "2": { accessory: { emoji: { id: fieldError } } },
-                "5": { components: { "0": { emoji: fieldError } } },
+                [String(attentionIndex)]: { accessory: { emoji: { id: fieldError } } },
+                [String(rowIndex)]: { components: { [String(historyIndex)]: { emoji: fieldError } } },
               },
             },
           },
@@ -521,10 +529,10 @@ describe("message transport fallback", () => {
           components: Record<string, unknown>[];
         }
       ).components;
-      (components[2]!.accessory as Record<string, unknown>).emoji = {
+      (components[attentionIndex]!.accessory as Record<string, unknown>).emoji = {
         name: "🔎",
       };
-      (components[5]!.components as Record<string, unknown>[])[0]!.emoji = {
+      (components[rowIndex]!.components as Record<string, unknown>[])[historyIndex]!.emoji = {
         name: "🕘",
       };
       expect(fallback).toEqual(next);

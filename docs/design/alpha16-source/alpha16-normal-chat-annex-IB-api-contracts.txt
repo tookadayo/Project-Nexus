@@ -1,0 +1,2165 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 01:59 UTC
+Normal ChatGPT reasoning: 極高 (not Pro). Design only; implementation and tests not performed. Paths/schemas and numeric values are proposals pending code reconciliation and approval as marked.
+
+NEXUS alpha16 実装契約
+付録I-B：新設・変更APIの具体契約
+
+位置付け：設計契約のみ。コード実装・設定変更・動作試験・テスト・修正は行わない。
+重要：以下のHTTP pathはすべて提案pathであり、既存実装のroute名ではない。既存routeが存在する場合は、実route/schema/domain invariantとの照合後に、互換化・変更・置換のいずれかを確定する。
+A配置：Browser → same-origin Next.js BFF → 署名付きPC内部API。BrowserからPC API/DBへ直接接続しない。Operatorはloopback限定。
+
+B-1. 共通API契約
+B-1-1. 通信境界
+公開BFF
+
+提案する公開APIは原則として、
+
+Browser
+  ↓ same-origin
+Next.js BFF
+  ↓ server-side authorization
+  ↓ signed internal request
+PC API / domain service
+  ↓
+PostgreSQL / Worker / external service
+
+とする。
+
+Browserへ以下を返してはならない。
+
+DB接続情報
+
+PC APIの内部URL
+
+BFF→PC API署名秘密
+
+internal API credential
+
+Operator endpoint
+
+webhook credential secret
+
+Discord credential
+
+Stripe secret
+
+内部エラースタック
+
+他guildの存在を推測できる情報
+
+内部API
+
+提案する内部HTTP pathはすべて非公開。
+
+例：
+
+/__internal/v1/...
+
+はBrowserから到達可能な公開routeとして登録してはならない。
+
+内部APIは、少なくとも以下を検証する。
+
+内部caller identity
+
+signature
+
+timestamp
+
+nonce
+
+HTTP method
+
+path
+
+canonical query
+
+body hash
+
+request ID
+
+actor user ID
+
+guild ID
+
+operation ID
+
+署名方式はHMAC-SHA256を初期提案とするが、現在の署名実装が別方式なら実コード照合後に互換化する。これは既存実装確認済みの暗号方式を意味しない。
+
+B-1-2. 認証・認可判定順
+
+通常のBrowser→BFF要求では、以下を固定する。
+
+HTTP method/path/content-typeの基本検証
+
+session cookie検証
+
+session有効性確認
+
+状態変更要求ならCSRF検証
+
+URLのguild ID確認
+
+session userのguild membership確認
+
+必要permission確認
+
+対象resourceをそのguildのscope内で検索
+
+tombstone/deletion状態確認
+
+If-Match / targetVersion等の版確認
+
+現在state/domain invariant確認
+
+Idempotency-Key確認
+
+domain transaction
+
+必要ならqueue/outbox/operation intentを同一transactionで永続化
+
+response
+
+Idempotencyのreplay fast-path
+
+既に完了した同一Idempotency-Keyについては、認証・CSRF・guild・permissionの確認後に、
+
+key scope一致
+
+request fingerprint一致
+
+保存済みresponse存在
+
+を満たす場合だけ、保存済みresponseを返してよい。
+
+副作用を再実行してはならない。
+
+他guildへの情報漏えい
+
+URLのIDが別guildに属する場合は、resourceの存在を明らかにする情報を返さず、
+
+404 TARGET_NOT_FOUND
+
+とする。
+
+同一guild内で対象は存在するがpermissionがない場合は、
+
+403 PERMISSION_DENIED
+
+とする。
+
+permission情報が最新状態として確認できない場合はfail-openせず処理を許可しない。
+
+B-1-3. CSRF
+
+Cookie sessionを使用する状態変更BFF APIではCSRF防御を必須とする。
+
+提案契約：
+
+session cookie：host-only
+
+Secure
+
+HttpOnly
+
+Domain属性なし
+
+SameSiteは実際のsame-site/cross-site構成に応じて設定
+
+state-changing request：CSRF token必須
+
+CSRF tokenはsessionに結び付ける
+
+Origin/Referer等の補助検証を行う場合も、UI上のボタン有無を認可代わりにしない
+
+CSRF tokenの実際の取得routeは既存auth実装との照合が必要であり、本付録では新規route名を確定しない。
+
+B-1-4. JSON envelope
+Success
+
+すべてのJSON BFF APIは原則として以下。
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000001",
+  "data": {},
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:00:00.000Z"
+  }
+}
+
+dataは各APIのschemaで定義する。
+
+Error
+{
+  "ok": false,
+  "requestId": "req_01J00000000000000000000002",
+  "error": {
+    "code": "VERSION_MISMATCH",
+    "message": "The requested resource version no longer matches.",
+    "retryable": false,
+    "details": {
+      "expectedVersion": 12,
+      "currentVersion": 13
+    }
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:00:01.000Z"
+  }
+}
+
+messageはUIの認可・状態判断には使用しない。UIはstable codeを使用する。
+
+B-1-5. HTTP status → stable error code
+HTTP	stable code	意味
+400	INVALID_REQUEST	構文/validation不正
+400	UNKNOWN_FIELD	許可されていないfield
+400	INVALID_CURSOR	cursor不正
+400	INVALID_IDEMPOTENCY_KEY	Key形式不正
+401	AUTH_REQUIRED	sessionなし
+401	SESSION_EXPIRED	session失効
+403	PERMISSION_DENIED	権限不足
+403	AUTHZ_UNAVAILABLE	認可情報を安全に確認できない
+404	TARGET_NOT_FOUND	対象なし、または別guild
+404	OPERATION_NOT_FOUND	operation不存在
+409	STATE_CONFLICT	現在stateが操作を許可しない
+409	IDEMPOTENCY_IN_PROGRESS	同じ要求を処理中
+409	IDEMPOTENCY_KEY_REUSE	同Keyで異なるrequest
+409	IDEMPOTENCY_KEY_EXPIRED	Key期限切れ
+412	VERSION_MISMATCH	If-Match不一致
+412	TARGET_VERSION_MISMATCH	targetVersion不一致
+428	PRECONDITION_REQUIRED	必須版情報/If-Matchなし
+429	RATE_LIMITED	rate limit
+500	INTERNAL_ERROR	未分類内部失敗
+502	UPSTREAM_INVALID_RESPONSE	内部/外部上流から不正response
+503	PC_UNAVAILABLE	PC/API到達不能
+503	WORKER_UNAVAILABLE	Worker利用不能
+503	EXTERNAL_UNAVAILABLE	外部サービス利用不能
+504	UPSTREAM_TIMEOUT	上流response待ちtimeout
+
+409 / 412 / 428の区別
+
+428：必要なpreconditionを送っていない
+
+412：送ったpreconditionが現在状態と一致しない
+
+409：version条件は満たすが、現在のdomain state自体が操作を許さない
+
+B-1-6. 共通scalar型・未検証の提案値
+
+以下はalpha16 APIの提案初期値であり、既存コード・実環境で確認済みの制限ではない。
+
+型	契約
+Id	ASCII文字列、1～128文字、空白/control文字不可
+Version	JSON integer、1～2,147,483,647
+Count	JSON integer、0～2,147,483,647
+Timestamp	UTC timestamp string。初期案はYYYY-MM-DDTHH:mm:ss.SSSZ
+Decimal	JSON numberではなくdecimal string。最大38桁、scale最大18を初期案
+Boolean	JSON boolean
+nullable	schemaで明示したfieldだけnull許可
+unknown field	原則拒否、400 UNKNOWN_FIELD
+request JSON	初期256 KiB。許容範囲64 KiB～1 MiBを候補
+文字列	default最大4,000文字。field単位でより小さい値を指定可能
+配列	default最大100要素
+cursor	最大2,048文字
+list limit	初期1～100、default 50
+Idempotency-Key	1～128 ASCII文字
+SHA-256 hash	lowercase hexadecimal 64文字
+
+実装時には、既存APIやDB型がこれより狭い場合に勝手に広げず、domain側の制約を優先する。
+
+B-1-7. Idempotency-Key
+
+状態変更APIのIdempotency-Key scopeは、
+
+authenticatedActor
++ guildId
++ operationContractId
++ targetId
+
+を基本scopeとする。
+
+さらに同一Keyのrequest fingerprintとして、
+
+HTTP method
++ normalized path
++ canonical query
++ body canonical hash
++ If-Match
++ expected/targetVersion
+
+を固定する。
+
+body canonical hashは、JSON objectのkey順序・whitespace等による表現差を除いて同じ意味のrequestが同じhashになるよう、alpha16でcanonicalization ruleを固定する。
+
+同時要求
+
+同じscope＋Key＋fingerprintが同時到着した場合：
+
+先行要求：通常処理
+
+後続要求：409 IDEMPOTENCY_IN_PROGRESS
+
+後続要求は副作用を起こさない
+
+処理完了後の同一Key要求：
+
+保存済みresponseをそのまま返す
+
+domain処理を再実行しない
+
+同Keyでbody等が異なる：
+
+409 IDEMPOTENCY_KEY_REUSE
+
+新しい処理を開始しない
+
+期限切れKey：
+
+409 IDEMPOTENCY_KEY_EXPIRED
+
+古いKeyを新規操作として再利用しない
+
+Idempotency recordを理由としてRunの保存期間を延長しない。
+
+期限値は別途承認対象であり、本付録では採用済み保持期間を設定しない。
+
+B-1-8. If-Match / version
+
+共有resourceを変更するAPIでは原則としてIf-Matchを要求する。
+
+例：
+
+If-Match: "12"
+
+headerなし → 428 PRECONDITION_REQUIRED
+
+現在versionが12 → 処理可能
+
+現在versionが13 → 412 VERSION_MISMATCH
+
+If-Matchはresourceそのもののversionを保護する。
+
+一方、Suggestionが参照する対象resourceについてはbodyのtargetVersionを使用する。
+
+Suggestion version ≠ target version
+
+であることに注意する。
+
+Suggestion version不一致 → 412 VERSION_MISMATCH
+
+target version不一致 → 412 TARGET_VERSION_MISMATCH
+
+versionは一致するが現在stateが「実行不可」→ 409 STATE_CONFLICT
+
+B-1-9. Cursor pagination
+
+List APIはcursor paginationを基本とする。
+
+提案初期仕様：
+
+sort = createdAt DESC, resourceId DESC
+
+同一timestampをIDでtie-breakする。
+
+cursorはopaque signed tokenとし、少なくとも以下を結び付ける。
+
+guild scope
+
+endpoint
+
+filter
+
+sort
+
+snapshot boundary
+
+last sort position
+
+cursor version
+
+expiration metadata
+
+cursorを改変した場合は400 INVALID_CURSOR。
+
+別guild、別filter、別sortでcursorを再利用してはならない。
+
+snapshot
+
+最初のページ取得時にlogical snapshot boundaryを確定する。
+
+後から作成された新規recordを途中ページへ割り込ませない。
+
+削除/tombstoneされたrecordはprivacy/domain policyを優先して表示対象から除外する。削除されたrecordを復活表示するために履歴データを再公開してはならない。
+
+更新によってsort keyが変化する場合はcursor境界と矛盾しないように扱い、同一cursor走査中に重複・逆順が生じる設計を避ける。
+
+完全なDB歴史snapshotを長期間保持することは要求しない。
+
+B-1-10. Timeout / retry
+同期read
+
+初期提案：
+
+BFF read：10秒
+
+許容調整範囲：5～30秒
+
+同期DB mutation
+
+初期提案：
+
+15秒
+
+許容調整範囲：5～30秒
+
+enqueue/status
+
+初期提案：
+
+5～10秒
+
+長時間処理そのものをHTTP request中に待たない
+
+これらはCloudflare等の外部サービス制限値ではなく、NEXUS application timeoutの未検証提案値である。
+
+timeoutしたmutationについて、
+
+「responseを受け取れなかった」
+≠
+「処理されなかった」
+
+とする。
+
+したがって、
+
+status照会
+
+Idempotency状態照会
+
+read-only reconcile
+
+を優先し、未知の副作用をblind retryしない。
+
+特にRESULT_UNKNOWNの外部副作用を自動再送しないことは確定契約である。
+
+B-2. C-A16-SUG-01：Suggestion list / detail
+B-2-1. List
+
+提案BFF path
+
+GET /api/v1/guilds/{guildId}/suggestions
+
+提案内部操作
+
+PCINT-SUG-01-LIST
+Query
+field	type	required	validation
+cursor	string	no	signed opaque cursor
+limit	integer	no	1～100、初期default 50
+sharedState	enum	no	active, rejected, expired, invalidated, consumed
+targetType	Id	no	server-known target typeのみ
+includeEvidence	boolean	no	default false
+Success
+
+HTTP 200.
+
+List itemは以下を返す。
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000003",
+  "data": {
+    "items": [
+      {
+        "suggestionId": "sug_01",
+        "guildId": "guild_01",
+        "targetType": "automation",
+        "targetId": "auto_01",
+        "targetVersion": 12,
+        "suggestionVersion": 3,
+        "sharedState": "active",
+        "title": "Inactive automation may be worth reviewing",
+        "summary": "A recent usage pattern meets the configured rule condition.",
+        "ruleId": "R-001",
+        "ruleVersion": 2,
+        "engineVersion": "a16-engine-1",
+        "configVersion": 4,
+        "createdAt": "2026-10-15T07:00:00.000Z",
+        "expiresAt": "2026-10-22T07:00:00.000Z",
+        "dataQuality": {
+          "label": "fresh",
+          "observedAt": "2026-10-15T06:55:00.000Z"
+        },
+        "evidenceCount": 2,
+        "perUserState": {
+          "viewedAt": null,
+          "dismissedAt": null,
+          "savedAt": "2026-10-15T07:10:00.000Z"
+        },
+        "hasDraft": false,
+        "hasAppliedOperation": false
+      }
+    ],
+    "page": {
+      "limit": 50,
+      "nextCursor": "cur_01J00000000000000000000004",
+      "snapshotId": "snap_01J00000000000000000000005",
+      "snapshotAt": "2026-10-15T07:00:00.000Z"
+    }
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:00:00.000Z"
+  }
+}
+
+includeEvidence=trueの場合はdetail相当のauthorized evidenceを返してよいが、権限のないFactは返さない。
+
+Endpoint-specific errors
+
+400 INVALID_CURSOR
+
+403 PERMISSION_DENIED
+
+404 TARGET_NOT_FOUND
+
+503 PC_UNAVAILABLE
+
+504 UPSTREAM_TIMEOUT
+
+副作用：なし。
+
+transaction：read transactionのみ。
+
+B-2-2. Detail
+
+提案BFF path
+
+GET /api/v1/guilds/{guildId}/suggestions/{suggestionId}
+
+提案内部操作
+
+PCINT-SUG-01-DETAIL
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000006",
+  "data": {
+    "suggestionId": "sug_01",
+    "guildId": "guild_01",
+    "target": {
+      "targetType": "automation",
+      "targetId": "auto_01",
+      "targetVersion": 12
+    },
+    "suggestionVersion": 3,
+    "sharedState": "active",
+    "title": "Inactive automation may be worth reviewing",
+    "summary": "A recent usage pattern meets the configured rule condition.",
+    "rationale": "The configured rule condition was satisfied by the referenced community-level facts.",
+    "ruleId": "R-001",
+    "ruleVersion": 2,
+    "engineVersion": "a16-engine-1",
+    "configVersion": 4,
+    "createdAt": "2026-10-15T07:00:00.000Z",
+    "updatedAt": "2026-10-15T07:05:00.000Z",
+    "expiresAt": "2026-10-22T07:00:00.000Z",
+    "invalidationReason": null,
+    "dataQuality": {
+      "label": "fresh",
+      "observedAt": "2026-10-15T06:55:00.000Z"
+    },
+    "evidence": [
+      {
+        "factId": "fact_01",
+        "factSnapshotId": "snap_01",
+        "metricKey": "automation_usage_rate",
+        "valueType": "decimal",
+        "value": "0.230000",
+        "observedFrom": "2026-10-08T00:00:00.000Z",
+        "observedTo": "2026-10-15T00:00:00.000Z",
+        "qualityLabel": "fresh",
+        "permissionStatus": "visible",
+        "suppressionReason": null,
+        "sourceType": "analytics"
+      },
+      {
+        "factId": "fact_02",
+        "factSnapshotId": "snap_01",
+        "metricKey": "active_member_count",
+        "valueType": "integer",
+        "value": 42,
+        "observedFrom": "2026-10-08T00:00:00.000Z",
+        "observedTo": "2026-10-15T00:00:00.000Z",
+        "qualityLabel": "fresh",
+        "permissionStatus": "visible",
+        "suppressionReason": null,
+        "sourceType": "analytics"
+      }
+    ],
+    "proposedAction": {
+      "actionType": "draft_change",
+      "changeSet": [
+        {
+          "fieldId": "automation.enabled",
+          "valueType": "boolean",
+          "value": false
+        }
+      ],
+      "automaticApplicationAllowed": false
+    },
+    "perUserState": {
+      "viewedAt": null,
+      "dismissedAt": null,
+      "savedAt": null
+    },
+    "draft": {
+      "draftId": null,
+      "draftVersion": null
+    },
+    "application": {
+      "operationId": null,
+      "status": null
+    }
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:00:02.000Z"
+  }
+}
+
+副作用：なし。閲覧済み状態はSUG-02の別操作。
+
+B-3. C-A16-SUG-02：per-user state / shared reject
+
+4操作を別APIとして扱う。
+
+view
+
+dismiss
+
+save
+
+shared reject
+
+B-3-1. View
+
+提案path
+
+POST /api/v1/guilds/{guildId}/suggestions/{suggestionId}/view
+
+Bodyは空JSON objectのみ。
+
+{}
+
+Header：
+
+Idempotency-Key: sugview_01
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000007",
+  "data": {
+    "suggestionId": "sug_01",
+    "perUserState": {
+      "viewedAt": "2026-10-15T08:01:00.000Z",
+      "dismissedAt": null,
+      "savedAt": null
+    }
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:01:00.000Z"
+  }
+}
+
+transaction：per-user state update transaction。
+
+外部副作用：なし。
+
+B-3-2. Dismiss
+
+提案path
+
+POST /api/v1/guilds/{guildId}/suggestions/{suggestionId}/dismiss
+
+Body：
+
+{}
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000008",
+  "data": {
+    "suggestionId": "sug_01",
+    "perUserState": {
+      "viewedAt": "2026-10-15T08:01:00.000Z",
+      "dismissedAt": "2026-10-15T08:02:00.000Z",
+      "savedAt": null
+    }
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:02:00.000Z"
+  }
+}
+
+dismissはshared suggestion stateを変更しない。
+
+B-3-3. Save
+
+提案path
+
+POST /api/v1/guilds/{guildId}/suggestions/{suggestionId}/save
+
+Body：
+
+{}
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000009",
+  "data": {
+    "suggestionId": "sug_01",
+    "perUserState": {
+      "viewedAt": "2026-10-15T08:01:00.000Z",
+      "dismissedAt": null,
+      "savedAt": "2026-10-15T08:03:00.000Z"
+    }
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:03:00.000Z"
+  }
+}
+B-3-4. Shared reject
+
+提案path
+
+POST /api/v1/guilds/{guildId}/suggestions/{suggestionId}/reject
+
+Header：
+
+If-Match: "3"
+Idempotency-Key: sugreject_01
+Body
+{
+  "reasonCode": "not_applicable",
+  "note": null
+}
+
+reasonCode：
+
+incorrect
+not_applicable
+outdated
+duplicate
+unsafe
+other
+
+noteはnullable、初期提案最大1,000文字。
+
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000010",
+  "data": {
+    "suggestionId": "sug_01",
+    "suggestionVersion": 4,
+    "sharedState": "rejected",
+    "rejectedAt": "2026-10-15T08:04:00.000Z"
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:04:00.000Z"
+  }
+}
+Additional errors
+
+409 STATE_CONFLICT：既にrejected/invalidated/expired等
+
+412 VERSION_MISMATCH
+
+428 PRECONDITION_REQUIRED
+
+403 PERMISSION_DENIED
+
+transaction：permission・version・state確認とshared rejectを同一domain transactionで確定。
+
+外部副作用：なし。
+
+B-4. C-A16-SUG-03：Suggestion → Draft
+
+提案path
+
+POST /api/v1/guilds/{guildId}/suggestions/{suggestionId}/draft
+
+Header：
+
+If-Match: "3"
+Idempotency-Key: sugdraft_01
+Body
+{
+  "targetVersion": 12,
+  "changeSet": [
+    {
+      "fieldId": "automation.enabled",
+      "valueType": "boolean",
+      "value": false
+    }
+  ]
+}
+changeSet
+
+各changeは、
+
+fieldId: string
+valueType: "string" | "integer" | "decimal" | "boolean" | "stringList"
+value: 型対応値
+
+とする。
+
+fieldIdはserver-side target schema registryに存在するfieldだけを許可する。
+
+禁止対象：
+
+permission変更
+
+role変更
+
+credential/secret
+
+billing状態
+
+自動activation
+
+外部投稿内容の直接送信
+
+外部操作trigger
+
+SQL等の実行指示
+
+targetTypeに存在しないfield
+
+Validation
+
+targetVersion 必須
+
+現在target versionと一致しなければ処理中止
+
+Suggestionがactiveであること
+
+SuggestionのtargetType/targetIdとbody targetを一致させる
+
+changeSet 1～50要素
+
+fieldIdはallowlist内
+
+valueTypeとvalueの型一致
+
+nullable不可fieldへnullを渡さない
+
+不明field拒否
+
+permission変更等の禁止field拒否
+
+Success
+
+HTTP 201.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000011",
+  "data": {
+    "draftId": "draft_01",
+    "draftVersion": 1,
+    "suggestionId": "sug_01",
+    "targetType": "automation",
+    "targetId": "auto_01",
+    "baseTargetVersion": 12,
+    "changes": [
+      {
+        "fieldId": "automation.enabled",
+        "valueType": "boolean",
+        "value": false
+      }
+    ],
+    "createdAt": "2026-10-15T08:05:00.000Z"
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:05:00.000Z"
+  }
+}
+Additional errors
+
+412 TARGET_VERSION_MISMATCH
+
+412 VERSION_MISMATCH
+
+409 STATE_CONFLICT
+
+422はこの契約では基本使用せず、validationは400 INVALID_REQUEST
+
+403 PERMISSION_DENIED
+
+transaction：
+
+authorization
++ target version check
++ allowed field check
++ draft creation
++ history record
+
+を同一domain transactionで確定。
+
+外部副作用：なし。
+
+B-5. C-A16-SUG-04：人によるApply要求 / 結果照会
+B-5-1. Apply request
+
+提案path
+
+POST /api/v1/guilds/{guildId}/suggestions/{suggestionId}/apply
+
+Header：
+
+If-Match: "3"
+Idempotency-Key: sugapply_01
+Body
+{
+  "draftId": "draft_01",
+  "targetVersion": 12,
+  "executionMode": "apply_once"
+}
+
+executionModeはalpha16ではapply_onceのみ。
+
+以下のfieldはschemaに存在させない。
+
+activate
+autoActivate
+publish
+autoPublish
+charge
+autoCharge
+changePermission
+postAutomatically
+Apply直前再検証
+
+transaction/operation作成時に再度、
+
+session
+
+guild membership
+
+current permission
+
+target existence
+
+tombstone
+
+suggestion state
+
+suggestion expiry
+
+suggestion version
+
+target version
+
+draft version
+
+allowed field
+
+current target state
+
+billing/plan requirementがある場合の現在状態
+
+を確認する。
+
+Success
+
+外部副作用は非同期のためHTTP 202.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000012",
+  "data": {
+    "operationId": "op_01",
+    "suggestionId": "sug_01",
+    "draftId": "draft_01",
+    "targetType": "automation",
+    "targetId": "auto_01",
+    "targetVersion": 12,
+    "status": "queued",
+    "externalEffectState": "pending",
+    "requestedAt": "2026-10-15T08:06:00.000Z"
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:06:00.000Z"
+  }
+}
+transaction
+
+同一transactionで、
+
+operation intent
++ requested target/version
++ actor
++ suggestion reference
++ draft reference
++ idempotency record
++ queue/outbox record
+
+を確定する。
+
+Workerが実際の外部副作用を実行する。
+
+AI自身がこのAPIを自発的に呼び出すことは禁止。
+
+B-5-2. Apply result
+
+提案path
+
+GET /api/v1/guilds/{guildId}/operations/{operationId}
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000013",
+  "data": {
+    "operationId": "op_01",
+    "guildId": "guild_01",
+    "sourceType": "suggestion",
+    "sourceId": "sug_01",
+    "targetType": "automation",
+    "targetId": "auto_01",
+    "status": "succeeded",
+    "externalEffectState": "confirmed",
+    "requestedAt": "2026-10-15T08:06:00.000Z",
+    "startedAt": "2026-10-15T08:06:02.000Z",
+    "finishedAt": "2026-10-15T08:06:03.000Z",
+    "result": {
+      "resultCode": "APPLIED",
+      "targetVersionBefore": 12,
+      "targetVersionAfter": 13
+    },
+    "unknownReason": null
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:06:04.000Z"
+  }
+}
+
+UNKNOWNの場合は、
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000014",
+  "data": {
+    "operationId": "op_02",
+    "guildId": "guild_01",
+    "sourceType": "suggestion",
+    "sourceId": "sug_02",
+    "targetType": "automation",
+    "targetId": "auto_02",
+    "status": "unknown",
+    "externalEffectState": "unknown",
+    "requestedAt": "2026-10-15T08:07:00.000Z",
+    "startedAt": "2026-10-15T08:07:02.000Z",
+    "finishedAt": null,
+    "result": null,
+    "unknownReason": "external_response_lost"
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:07:10.000Z"
+  }
+}
+
+この状態から自動retryしてはならない。
+
+B-6. C-A16-RULE-01：Rule config取得 / 改訂 / history
+B-6-1. Current config
+
+提案path
+
+GET /api/v1/guilds/{guildId}/rules/config
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000015",
+  "data": {
+    "guildId": "guild_01",
+    "configVersion": 4,
+    "status": "active",
+    "engineVersion": "a16-engine-1",
+    "effectiveFrom": "2026-10-15T00:00:00.000Z",
+    "effectiveTo": null,
+    "rules": [
+      {
+        "ruleId": "R-001",
+        "ruleVersion": 2,
+        "enabled": true,
+        "parameters": [
+          {
+            "name": "parameter_example",
+            "valueType": "integer",
+            "value": 3
+          }
+        ]
+      }
+    ]
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:08:00.000Z"
+  }
+}
+
+R-001やparameter_exampleはwire-format例であり、13ルールの実名・parameter名を確定するものではない。
+
+status：
+
+draft
+approved
+active
+retired
+
+未承認configはactiveとして返してはならない。
+
+B-6-2. Config revision
+
+提案path
+
+POST /api/v1/guilds/{guildId}/rules/config/revisions
+
+Header：
+
+If-Match: "4"
+Idempotency-Key: rulecfg_01
+Body
+{
+  "baseConfigVersion": 4,
+  "changes": [
+    {
+      "ruleId": "R-001",
+      "enabled": true,
+      "parameters": [
+        {
+          "name": "parameter_example",
+          "valueType": "integer",
+          "value": 3
+        }
+      ]
+    }
+  ],
+  "note": "Review requested configuration change"
+}
+Validation
+
+baseConfigVersion必須
+
+current config versionと一致
+
+ruleIdはregistryに存在
+
+parameter名は当該ruleで許可
+
+valueType一致
+
+config revision作成のみ
+
+active化をrequest bodyから指定不可
+
+Success
+
+HTTP 201.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000016",
+  "data": {
+    "configVersion": 5,
+    "status": "draft",
+    "baseConfigVersion": 4,
+    "createdAt": "2026-10-15T08:09:00.000Z"
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:09:00.000Z"
+  }
+}
+
+外部副作用：なし。
+
+active化はこのAPIの責務外。
+
+B-6-3. Config history
+
+提案path
+
+GET /api/v1/guilds/{guildId}/rules/config/history
+
+Query：
+
+cursor?: string
+limit?: integer
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000017",
+  "data": {
+    "items": [
+      {
+        "configVersion": 5,
+        "status": "draft",
+        "engineVersion": "a16-engine-1",
+        "createdAt": "2026-10-15T08:09:00.000Z",
+        "effectiveFrom": null,
+        "effectiveTo": null
+      },
+      {
+        "configVersion": 4,
+        "status": "active",
+        "engineVersion": "a16-engine-1",
+        "createdAt": "2026-10-15T00:00:00.000Z",
+        "effectiveFrom": "2026-10-15T00:00:00.000Z",
+        "effectiveTo": null
+      }
+    ],
+    "page": {
+      "limit": 50,
+      "nextCursor": null,
+      "snapshotId": "snap_02",
+      "snapshotAt": "2026-10-15T08:10:00.000Z"
+    }
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:10:00.000Z"
+  }
+}
+B-7. C-A16-RULE-02：Evaluation enqueue / status / cancel
+B-7-1. Evaluation enqueue
+
+提案path
+
+POST /api/v1/guilds/{guildId}/rule-evaluations
+
+Header：
+
+Idempotency-Key: eval_01
+Body
+{
+  "factSnapshotId": "factsnap_01",
+  "engineVersion": "a16-engine-1",
+  "rules": [
+    {
+      "ruleId": "R-001",
+      "ruleVersion": 2,
+      "configVersion": 4
+    }
+  ],
+  "reason": "manual"
+}
+
+reason：
+
+manual
+scheduled
+data_refresh
+system
+Success
+
+HTTP 202.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000018",
+  "data": {
+    "evaluationJobId": "evaljob_01",
+    "status": "queued",
+    "deduplicated": false,
+    "factSnapshotId": "factsnap_01",
+    "engineVersion": "a16-engine-1",
+    "createdAt": "2026-10-15T08:11:00.000Z"
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:11:00.000Z"
+  }
+}
+Duplicate evaluation
+
+同一、
+
+guild
++ factSnapshotId
++ engineVersion
++ ruleId/ruleVersion/configVersion set
+
+のevaluationがすでにqueued/runningなら、新jobを作らない。
+
+既存jobを返す。
+
+transaction
+
+enqueue recordとidempotency recordを同一transactionで確定。
+
+外部副作用：なし。
+
+B-7-2. Evaluation status
+
+提案path
+
+GET /api/v1/guilds/{guildId}/rule-evaluations/{evaluationJobId}
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000019",
+  "data": {
+    "evaluationJobId": "evaljob_01",
+    "guildId": "guild_01",
+    "status": "succeeded",
+    "factSnapshotId": "factsnap_01",
+    "engineVersion": "a16-engine-1",
+    "startedAt": "2026-10-15T08:11:02.000Z",
+    "finishedAt": "2026-10-15T08:11:03.000Z",
+    "ruleCount": 1,
+    "suggestionCountCreated": 1,
+    "failureCode": null
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:11:04.000Z"
+  }
+}
+B-7-3. Evaluation cancel
+
+提案path
+
+POST /api/v1/guilds/{guildId}/rule-evaluations/{evaluationJobId}/cancel
+
+Header：
+
+Idempotency-Key: evalcancel_01
+
+Body：
+
+{}
+Success
+
+HTTP 200または202。
+
+workerがまだcancelを反映していない場合：
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000020",
+  "data": {
+    "evaluationJobId": "evaljob_01",
+    "status": "cancel_requested",
+    "cancelRequestedAt": "2026-10-15T08:12:00.000Z"
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:12:00.000Z"
+  }
+}
+
+terminal stateなら409 STATE_CONFLICT。
+
+外部副作用：なし。
+
+B-8. C-A16-FACT-01：Fact snapshot status / detail
+B-8-1. Snapshot status
+
+提案path
+
+GET /api/v1/guilds/{guildId}/fact-snapshots/{snapshotId}/status
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000021",
+  "data": {
+    "snapshotId": "factsnap_01",
+    "guildId": "guild_01",
+    "status": "ready",
+    "capturedAt": "2026-10-15T08:00:00.000Z",
+    "freshUntil": "2026-10-15T09:00:00.000Z",
+    "qualityLabel": "partial",
+    "missingCount": 1,
+    "suppressedCount": 2,
+    "detailAvailable": true,
+    "updatedAt": "2026-10-15T08:00:05.000Z"
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:12:00.000Z"
+  }
+}
+
+qualityLabelは、
+
+complete
+partial
+stale
+suppressed
+unavailable
+
+等をalpha16 Fact contractで固定する。
+
+これは信頼確率・匿名性保証・統計的独立性を意味しない。
+
+B-8-2. Snapshot detail
+
+提案path
+
+GET /api/v1/guilds/{guildId}/fact-snapshots/{snapshotId}
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000022",
+  "data": {
+    "snapshotId": "factsnap_01",
+    "guildId": "guild_01",
+    "capturedAt": "2026-10-15T08:00:00.000Z",
+    "freshUntil": "2026-10-15T09:00:00.000Z",
+    "qualityLabel": "partial",
+    "facts": [
+      {
+        "factId": "fact_01",
+        "key": "active_member_count",
+        "valueType": "integer",
+        "value": 42,
+        "observedFrom": "2026-10-08T00:00:00.000Z",
+        "observedTo": "2026-10-15T00:00:00.000Z",
+        "qualityLabel": "fresh",
+        "permissionStatus": "visible",
+        "suppressionReason": null,
+        "sourceType": "analytics"
+      },
+      {
+        "factId": "fact_02",
+        "key": "help_intake_unanswered_count",
+        "valueType": "integer",
+        "value": null,
+        "observedFrom": "2026-10-15T00:00:00.000Z",
+        "observedTo": "2026-10-15T08:00:00.000Z",
+        "qualityLabel": "suppressed",
+        "permissionStatus": "suppressed",
+        "suppressionReason": "privacy_threshold",
+        "sourceType": "intake"
+      }
+    ]
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:12:02.000Z"
+  }
+}
+
+権限のないFactはvalueを返さない。
+
+Factに存在しない情報を本文等から推測して補完しない。
+
+外部副作用：なし。
+
+B-9. C-A16-AUTO-03/04：Run status / cancel / read-only reconcile
+B-9-1. Run status
+
+提案path
+
+GET /api/v1/guilds/{guildId}/runs/{runId}
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000023",
+  "data": {
+    "runId": "run_01",
+    "guildId": "guild_01",
+    "automationId": "auto_01",
+    "revisionId": "rev_12",
+    "status": "running",
+    "currentStepId": "step_03",
+    "resultState": "pending",
+    "externalEffectState": "none",
+    "requestedAt": "2026-10-15T08:13:00.000Z",
+    "startedAt": "2026-10-15T08:13:01.000Z",
+    "finishedAt": null,
+    "lastDurableWriteAt": "2026-10-15T08:13:02.000Z",
+    "unknownReason": null
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:13:03.000Z"
+  }
+}
+
+lastDurableWriteAtは、通常動作中に永続化された状態を示すための設計項目であり、PC停止時に「checkpointを保存できる」と仮定するものではない。
+
+B-9-2. Run cancel
+
+提案path
+
+POST /api/v1/guilds/{guildId}/runs/{runId}/cancel
+
+Header：
+
+Idempotency-Key: runcancel_01
+
+Body：
+
+{}
+Success
+
+HTTP 200または202.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000024",
+  "data": {
+    "runId": "run_01",
+    "status": "cancel_requested",
+    "cancelRequestedAt": "2026-10-15T08:14:00.000Z"
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:14:00.000Z"
+  }
+}
+Cancel禁止状態
+
+terminal succeeded → 409 STATE_CONFLICT
+
+terminal failed → 409 STATE_CONFLICT
+
+cancelled → 409 STATE_CONFLICT
+
+result unknown → 409 STATE_CONFLICTまたはstatus照会を促す
+
+RESULT_UNKNOWNをcancelledへ書き換えてはならない。
+
+B-9-3. Read-only reconcile
+
+提案path
+
+GET /api/v1/guilds/{guildId}/runs/{runId}/reconcile
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000025",
+  "data": {
+    "runId": "run_01",
+    "checkedAt": "2026-10-15T08:15:00.000Z",
+    "overall": "unknown",
+    "attempts": [
+      {
+        "attemptId": "attempt_03",
+        "externalEffectState": "unknown",
+        "reconciliationMethod": "read_only_lookup",
+        "reconciliationResult": "not_confirmed",
+        "observedAt": "2026-10-15T08:15:00.000Z"
+      }
+    ]
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:15:00.000Z"
+  }
+}
+
+reconcileは、
+
+GET/read-only
+
+外部副作用なし
+
+operation再送なし
+
+queueへの新規投入なし
+
+UNKNOWNを書き換えない
+
+を固定する。
+
+照合不能ならunknownを維持する。
+
+人が新たに実行する場合は、元operationとは別の新しいintent/operationとして扱う。
+
+B-10. C-A16-ANN-01：Announcement publication
+
+Announcementの公開操作は、Browser→公開BFFの通常mutationとして直接公開しない。
+
+Operator loopbackまたは明示的に許可されたpublisher内部操作からのみ実行する。
+
+提案internal path：
+
+POST /__internal/v1/publications/announcements/publish
+POST /__internal/v1/publications/announcements/update
+POST /__internal/v1/publications/announcements/withdraw
+GET  /__internal/v1/publications/announcements/{announcementId}/status
+
+これらは公開routeではない。
+
+B-10-1. Publish
+Body
+{
+  "announcementId": "ann_01",
+  "sourceVersion": 7,
+  "publicationVersion": 3,
+  "locale": "ja-JP",
+  "title": "NEXUS maintenance notice",
+  "body": "NEXUS will undergo scheduled maintenance.",
+  "publishedAt": "2026-10-15T08:20:00.000Z",
+  "artifactHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+}
+Validation
+
+sourceVersionがPC DB正本と一致
+
+publicationVersionが現在版より新しい
+
+artifactに非公開情報が含まれない
+
+title/bodyの最大サイズ内
+
+hash一致
+
+publisher authorization確認
+
+Operator外部公開不可
+
+Success
+
+HTTP 201.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000026",
+  "data": {
+    "announcementId": "ann_01",
+    "sourceVersion": 7,
+    "publicationVersion": 3,
+    "publicationState": "published",
+    "artifactHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "publishedAt": "2026-10-15T08:20:00.000Z"
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:20:00.000Z"
+  }
+}
+publication contract
+
+PC DBを正本とする。
+
+静的公開物は、
+
+prepare artifact
+→ validate public-only content
+→ write new artifact
+→ verify hash
+→ atomic publication switch
+
+の順で公開する。
+
+旧公開版を新artifact作成途中の中間状態にしてはならない。
+
+B-10-2. Update
+
+提案path
+
+POST /__internal/v1/publications/announcements/update
+Body
+{
+  "announcementId": "ann_01",
+  "sourceVersion": 8,
+  "publicationVersion": 4,
+  "locale": "ja-JP",
+  "title": "NEXUS maintenance notice updated",
+  "body": "NEXUS maintenance time has been updated.",
+  "publishedAt": "2026-10-15T08:25:00.000Z",
+  "artifactHash": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+}
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000027",
+  "data": {
+    "announcementId": "ann_01",
+    "sourceVersion": 8,
+    "publicationVersion": 4,
+    "publicationState": "published",
+    "artifactHash": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+    "updatedAt": "2026-10-15T08:25:00.000Z"
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:25:00.000Z"
+  }
+}
+
+旧版を上書きして履歴を消すのではなく、publication versionを進める。
+
+B-10-3. Withdraw
+
+提案path
+
+POST /__internal/v1/publications/announcements/withdraw
+Body
+{
+  "announcementId": "ann_01",
+  "currentPublicationVersion": 4,
+  "reasonCode": "withdrawn",
+  "withdrawnAt": "2026-10-15T08:30:00.000Z"
+}
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000028",
+  "data": {
+    "announcementId": "ann_01",
+    "publicationVersion": 5,
+    "publicationState": "withdrawn",
+    "withdrawnAt": "2026-10-15T08:30:00.000Z"
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:30:00.000Z"
+  }
+}
+
+撤回時も公開版を更新する。
+
+「DBでは撤回済みだが静的公開版では公開中」という状態を最終状態として残さない。
+
+既存cacheに残る可能性を前提に、公開artifact側でversion/withdraw状態を明示できる構造とする。
+
+B-10-4. Publication status
+
+提案path
+
+GET /__internal/v1/publications/announcements/{announcementId}/status
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000029",
+  "data": {
+    "announcementId": "ann_01",
+    "sourceVersion": 8,
+    "publicationVersion": 5,
+    "publicationState": "withdrawn",
+    "artifactHash": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+    "publishedAt": "2026-10-15T08:25:00.000Z",
+    "withdrawnAt": "2026-10-15T08:30:00.000Z"
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:30:01.000Z"
+  }
+}
+B-11. C-A16-STATUS-01：静的Status snapshot
+
+StatusはPC側で生成し、静的公開物として配信する。
+
+提案公開path
+
+/status.json
+
+これはBFF APIではない。
+
+Schema
+{
+  "schemaVersion": "1",
+  "snapshotVersion": 12,
+  "generatedAt": "2026-10-15T08:30:00.000Z",
+  "validUntil": "2026-10-15T09:00:00.000Z",
+  "unknown": false,
+  "status": "operational",
+  "components": [
+    {
+      "componentId": "dashboard",
+      "status": "operational",
+      "observedAt": "2026-10-15T08:29:55.000Z",
+      "messageCode": null
+    },
+    {
+      "componentId": "automation_runtime",
+      "status": "degraded",
+      "observedAt": "2026-10-15T08:29:50.000Z",
+      "messageCode": "WORKER_DEGRADED"
+    }
+  ]
+}
+
+status：
+
+operational
+degraded
+unknown
+期限
+
+公開snapshotのvalidUntilを過ぎた場合、clientは、
+
+effective status = unknown
+
+として扱う。
+
+unknown=falseの古いsnapshotを「正常」と表示してはならない。
+
+非公開情報
+
+含めてはならない。
+
+guild ID
+
+user ID
+
+internal IP
+
+database connection
+
+Discord credential
+
+stack trace
+
+private operational data
+
+static artifact failure
+
+新しいartifactの生成に失敗した場合、既存公開版を勝手に「正常」と更新しない。
+
+期限切れ後はunknown表示になる。
+
+B-12. Privacy deletion request / status
+B-12-1. Deletion request
+
+提案path
+
+POST /api/v1/privacy/deletion-requests
+
+Header：
+
+Idempotency-Key: deletion_01
+Body
+{
+  "scopeType": "user",
+  "scopeId": "user_01"
+}
+
+提案scope：
+
+user
+guild
+
+ただし、実際に現在のprivacy contractが許可しているscopeより広げてはならない。既存実装がuser-only等であれば、未許可scopeは400 INVALID_REQUESTとする。
+
+Server-side confirmation
+
+scopeIdをclientが送ったこと自体を権限確認とみなさない。
+
+server側で、
+
+session user
+
+guild membership
+
+scope ownership
+
+permission
+
+tombstone状態
+
+を確認する。
+
+即時遮断
+
+deletion requestを受理するtransactionで、対象のtombstoneを先に有効化する。
+
+したがって、
+
+deletion requested
+→ access blocked
+→ asynchronous physical cleanup
+
+の順。
+
+cleanup失敗によって利用者データへの通常アクセスを復活させてはならない。
+
+Success
+
+HTTP 202.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000030",
+  "data": {
+    "deletionRequestId": "del_01",
+    "scopeType": "user",
+    "scopeId": "user_01",
+    "status": "processing",
+    "tombstoneActive": true,
+    "requestedAt": "2026-10-15T08:35:00.000Z",
+    "completedAt": null
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:35:00.000Z"
+  }
+}
+
+transaction：
+
+authorization
++ scope resolution
++ tombstone
++ deletion request
++ required queue/outbox state
++ idempotency
+
+をatomicに確定する。
+
+B-12-2. Deletion status
+
+提案path
+
+GET /api/v1/privacy/deletion-requests/{deletionRequestId}
+Success
+
+HTTP 200.
+
+{
+  "ok": true,
+  "requestId": "req_01J00000000000000000000031",
+  "data": {
+    "deletionRequestId": "del_01",
+    "scopeType": "user",
+    "scopeId": "user_01",
+    "status": "completed",
+    "tombstoneActive": true,
+    "requestedAt": "2026-10-15T08:35:00.000Z",
+    "completedAt": "2026-10-15T08:36:00.000Z",
+    "restoreProtection": "tombstone_reapplied"
+  },
+  "meta": {
+    "apiVersion": "1",
+    "serverTime": "2026-10-15T08:36:01.000Z"
+  }
+}
+
+restore処理が存在する場合も、
+
+backup restore
+→ tombstone再適用
+→ 削除対象を再びアクセス可能にしない
+
+を必須とする。
+
+B-13. 保持期間とAPI設計上の制約
+
+既存方針として以下を固定する。
+
+Run終了後の最小状態：7日以内に削除
+
+backup：7日
+
+30日保持：採用しない
+
+24か月保持：採用しない
+
+Run情報をevidence/history/idempotency等へ複製してRun保持を延長しない
+
+Fact、Suggestion、履歴、監査、Idempotency等は論理的に別分類となり得るが、保持期間は本付録では承認値にしない。
+
+未承認候補として過去に挙げた、
+
+Idempotency：24時間候補
+
+Suggestion/履歴：30日候補
+
+集計系：24か月候補
+
+はいずれも未採用である。
+
+別分類を設けても、Run終了後7日以内削除という制約を回避する目的でRun payloadを複製してはならない。
+
+B-14. I-Aの残り契約ID：既存API流用条件
+
+以下は、この付録で新APIを捏造する対象ではない。既存route/schemaとの照合後に流用する。
+
+契約ID	流用条件	必要な差分
+C-A16-AUTH-01/02/03	現行DB session/auth/server-accessを維持可能	host-only cookie、CSRF、guild/permission server再検査との整合
+C-A16-ANL-01/02	現行Basic/Detailed処理を維持	response envelope、権限、version/stale状態。Detailed HTTP bridgeの実接続箇所を照合
+C-A16-EXP-01/02	Next server-side DB readをA配置では維持可能	guild scope、domain invariant、mutation時version/CSRF
+C-A16-OPS-01 ～ 08	既存Next server-side DB処理を原則流用可能	各route/schema/domain invariantの照合。credential secretの非返却
+C-A16-AUTO-01/02	existing editor/revisionを維持可能	immutable revision、If-Match、draft/runtime境界
+C-A16-AUTO-05	existing Schedulerを維持可能	missed-run policy、過去予定の無断追送禁止、Runtimeとの状態整合
+C-A16-PLAN-01	existing Plan処理を流用	server-side permissionとの一致確認
+C-A16-BETA-01	existing Beta admissionを流用	admission stateと権限の一致確認
+C-A16-BILL-01	DB catalogを流用	BFF response contractとの整合
+C-A16-BILL-02	Next上のStripe Checkoutを流用	machine/external timeout、重複checkout防止、secret非露出
+C-A16-BILL-03	Next上のStripe webhookをmachine endpointとして維持	callback署名検証を個別契約化。Browser auth/CSRFと混同しない
+C-A16-HIST-01	existing historyがあれば流用	Suggestion/Rule/operationとの参照関係を追加。Run保持延長目的の複製は禁止
+C-A16-LEGAL-01	静的公開物として整理	現状未公開部分を完成扱いしない
+C-A16-CONTACT-01	Contactが実際に有効化される場合のみ	現在無効であるため成功送信UIを先に公開しない
+C-A16-OP-01/02	loopback Operatorを維持	Tunnel/BFF/public routeへ公開しない
+B-15. 実routeとの照合条件
+
+各提案APIを実装対象へ変換する前に、既存codeについて以下を照合する。
+
+同一機能の既存routeが存在するか
+
+methodが一致するか
+
+request body/schemaが一致するか
+
+response schemaが一致するか
+
+session取得方法が一致するか
+
+guild scopeをserver側で確認しているか
+
+permissionをserver側で確認しているか
+
+mutationにdomain invariantが通っているか
+
+version/optimistic concurrencyが存在するか
+
+既存のerror codeがあるか
+
+既存UIが想定するempty/loading/error状態
+
+DB transaction境界
+
+外部副作用の有無
+
+idempotencyの既存実装
+
+PC APIとの既存署名契約
+
+既存routeがあることだけを理由に、本付録の安全境界を弱めてはならない。
+
+逆に、既存routeが本付録と異なることだけを理由にrouteを全面新設することもしない。
+
+B-16. API上の未確定事項
+
+本付録でまだ確定できないのは、主に以下である。
+
+既存route/schemaとの正確な対応
+
+実route名
+
+実request/response型
+
+既存error code
+
+version field名
+
+既存内部署名方式
+
+現在のalgorithm
+
+header名
+
+canonicalization
+
+replay protection
+
+key rotation方式
+
+既存domain permissionの具体名
+
+各Operations/Automation/Analytics等のpermission mapping
+
+target schema registry
+
+targetType
+
+targetId
+
+各targetでSuggestionから変更可能なfield
+
+fieldごとの型・制約
+これは次回のRule/Suggestion関連設計および既存code照合で確定する。
+
+既存Idempotency実装
+
+現在のKey scope
+
+保存場所
+
+response replay方式
+
+expiry
+
+静的Announcement/Statusの実配置
+
+artifact path
+
+publication manifest
+
+cache構成
+
+現在の公開同期方法
+
+Privacyの既存scope
+
+user単位・guild単位等の実際の許可範囲
+
+これらは未確認情報を実装担当者が推測して埋める事項ではない。
+
+本付録は、alpha16実装時のAPI境界・安全性・状態遷移を固定するための具体設計契約であり、既存route/schemaとの照合および未検証の数値・保持期間・実環境情報が残っているため、現時点で「完全確定」「実装済み」「検証済み」とは扱わない。

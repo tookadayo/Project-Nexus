@@ -92,6 +92,9 @@ const interaction = z.object({
   message: z.object({ id: snowflake }).optional(),
 });
 export type InteractionJob = {
+  /** Set only by the verified Discord edge after acknowledgement. HTTP JSON
+   * fields never populate this transport receipt. No token or body is copied. */
+  discordProof?:{transport:'SIGNED_HTTP'|'AUTHENTICATED_GATEWAY';guildId:string;receivedAt:string;acknowledgedAt:string};
   betaGeneration?:number;
   id: string;
   applicationId: string;
@@ -377,6 +380,7 @@ export async function handleGatewayInteraction(
     guildLocale: input.guildLocale ?? undefined,
   };
   const acknowledgedAt = new Date();
+  job.discordProof={transport:'AUTHENTICATED_GATEWAY',guildId:s.guildId,receivedAt:receivedAt.toISOString(),acknowledgedAt:acknowledgedAt.toISOString()};
   try {
     await saveThenWake(
       () =>
@@ -672,6 +676,7 @@ export function createInteractionServer(opts: {
     // The response must finish before queueing can acquire a database connection.
     reply.raw.once("finish", () => {
       const acknowledgedAt = new Date();
+        job.discordProof={transport:'SIGNED_HTTP',guildId:s.guildId,receivedAt:receivedAt.toISOString(),acknowledgedAt:acknowledgedAt.toISOString()};
       opts.health?.acknowledged(acknowledgedAt);
       void saveThenWake(
         () =>

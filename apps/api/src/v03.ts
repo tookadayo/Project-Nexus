@@ -1,3 +1,4 @@
+import { publicApiContext } from '../../../packages/security/src/public-api';
 import {integrationOperations} from '../../../packages/operations/src/integration';
 import type {FastifyInstance} from 'fastify';
 import {z} from 'zod';
@@ -25,6 +26,15 @@ import {recipeCandidates} from '../../../packages/shared/src/measurement-recipes
 import {integrationHealth,collectionEpochs} from '../../../packages/lifecycle/src/observation.js';
 export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:DiscordPort,vault?:IdentityVault){
  const base='/v3/organizations/:organizationId/guilds/:guildId',presentation=new PresentationService(db);
+ const legacyPaths=new Set(["/integration-health","/community-model","/community-model/refresh","/settings/community-model","/product-event","/home","/community","/attention/action","/weekly-summary/status","/audit","/journey","/opportunities","/opportunities/dismiss","/actions","/results","/options","/setup/activation","/settings/notification","/settings/retention","/settings/weekly-summary","/settings/helper","/settings/goals","/settings/analysis-scope","/actions/draft","/actions/preflight","/actions/test","/setup/onboarding/recommended","/results/draft"].map(path=>base+path));
+ const actors=new WeakMap<object,Actor>();
+ const webActor=(req:object)=>{const actor=actors.get(req);assert(actor,'SESSION_REQUIRED',401);return actor;};
+ app.addHook('preHandler',async req=>{
+   if(!legacyPaths.has(req.routeOptions.url??''))return;
+   if(['GET','HEAD'].includes(req.method)&&!req.headers['x-nexus-user-proof'])return;
+   const permission=['GET','HEAD'].includes(req.method)||req.routeOptions.url===base+'/product-event'?'READ':req.routeOptions.url===base+'/attention/action'?'OPERATE':'CONFIGURE';
+   const current=await publicApiContext(req,db,key,discord,vault,permission);actors.set(req,current.actor);
+ });
  const optionsCache=new Map<string,{at:number;value:Awaited<ReturnType<NonNullable<DiscordPort['options']>>>}>();
  const roleCache=new Map<string,{at:number;ids:string[]}>();
  const automaticStaffRoles=async(scope:{organizationId:string;guildId:string})=>{const guildId=scope.guildId,cacheKey=scope.organizationId+':'+guildId,cached=roleCache.get(cacheKey);if(cached&&Date.now()-cached.at<1800000)return cached.ids;if(!discord)return [];try{const roles=await discord.roles(guildId),flags=PermissionFlagsBits.Administrator|PermissionFlagsBits.ManageGuild|PermissionFlagsBits.ManageMessages|PermissionFlagsBits.ModerateMembers,ids=roles.filter(role=>(BigInt(role.permissions)&flags)!==0n).map(role=>role.id);roleCache.set(cacheKey,{at:Date.now(),ids});return ids;}catch{return cached?.ids??[];}};
@@ -33,7 +43,7 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
  app.get(base+'/integration-health',async(req,reply)=>{const s=getScope(req,reply);return {...await integrationOperations(db,s),health:await integrationHealth(db,s),epochs:await collectionEpochs(db,s,new Date(Date.now()-30*86400000),new Date())};});
  app.get(base+'/community-model',async(req,reply)=>{const s=getScope(req,reply),current=await new SettingsService(db).get(s);const capabilities=await latestCapability(db,s);return {profile:current.communityModel,revision:current.revision,capabilities,recipe:await currentRecipe(db,s),candidates:recipeCandidates(capabilities,capabilities?.memberCount&&capabilities.memberCount>=10000?'HIGH_VOLUME':'STANDARD')};});
  app.post(base+'/community-model/refresh',async(req,reply)=>{const s=getScope(req,reply);await requestCapabilityRefresh(db,s,'manual');return {state:'PENDING'};});
- app.post(base+'/settings/community-model',async(req,reply)=>{const s=getScope(req,reply),input=z.object({profile:settingsSchema.shape.communityModel,revision:z.number().int().nonnegative()}).strict().parse(req.body);return new SettingsService(db).update(s,{key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id},input.revision,{communityModel:input.profile});});
+ app.post(base+'/settings/community-model',async(req,reply)=>{const s=getScope(req,reply),input=z.object({profile:settingsSchema.shape.communityModel,revision:z.number().int().nonnegative()}).strict().parse(req.body);return new SettingsService(db).update(s,webActor(req),input.revision,{communityModel:input.profile});});
  const actionInput=z.object({templateKey:z.enum(['reply_rescue','welcome_helper','inactive_follow_up','channel_recommendation','event_recommendation']),channelId:z.string().optional(),eventId:z.string().optional(),recommendedChannelIds:z.array(z.string()).optional(),safetyMode:z.enum(['suggest','approval','auto']).optional()}).strict();
  app.post(base+'/product-event',async(req,reply)=>{const s=getScope(req,reply),input=z.object({event:z.enum(['web_dashboard_opened','attention_opened','analysis_opened','settings_opened','page_render_latency']),durationMs:z.number().int().min(0).max(600000).optional()}).strict().parse(req.body);await recordProductEvent(db,s,input.event,input.durationMs);return {ok:true};});
  const preflight=async(guildId:string,input:z.infer<typeof actionInput>)=>{
@@ -77,26 +87,26 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
  app.get(base+'/results',async(req,reply)=>presentation.results(getScope(req,reply)));
  app.get(base+'/options',async(req,reply)=>{const s=getScope(req,reply);if(!discord?.options)return {channels:[],roles:[],events:[],available:false};try{const cached=optionsCache.get(s.organizationId+':'+s.guildId);if(cached&&Date.now()-cached.at<300000)return {...cached.value,available:true};const value=await discord.options(s.guildId);optionsCache.set(s.organizationId+':'+s.guildId,{at:Date.now(),value});return {...value,available:true};}catch{return {channels:[],roles:[],events:[],available:false};}});
  app.post(base+'/setup/activation',async(req,reply)=>{
-  const s=getScope(req,reply),input=z.object({preset:z.enum(['reply','event','message'])}).strict().parse(req.body),event={reply:'reply.received',event:'scheduled_event.subscribed',message:'message.sent'}[input.preset],definition={name:`${event} within 7d`,windowSeconds:604800,rule:{op:'event',event,withinSeconds:604800}},actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
+  const s=getScope(req,reply),input=z.object({preset:z.enum(['reply','event','message'])}).strict().parse(req.body),event={reply:'reply.received',event:'scheduled_event.subscribed',message:'message.sent'}[input.preset],definition={name:`${event} within 7d`,windowSeconds:604800,rule:{op:'event',event,withinSeconds:604800}},actor:Actor=webActor(req);
   assert(await new EntitlementService(db).canDefineActivation(s,definition),'ENTITLEMENT_REQUIRED',403);
   const revisions=domainRevisions(db),id=await revisions.draft(s,actor,'activation',definition);return revisions.preview(s,id);
  });
  app.post(base+'/settings/notification',async(req,reply)=>{
   const s=getScope(req,reply),input=z.object({channelId:z.string().regex(/^\d{17,20}$/),revision:z.number().int().nonnegative()}).strict().parse(req.body);
   assert(discord,'DISCORD_UNAVAILABLE',503);await discord.checkChannel(s.guildId,input.channelId);
-  const actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
+  const actor:Actor=webActor(req);
   return new SettingsService(db).update(s,actor,input.revision,{adminNotificationChannelId:input.channelId});
  });
  app.post(base+'/settings/retention',async(req,reply)=>{
   const s=getScope(req,reply),input=z.object({days:z.union([z.literal(7),z.literal(14),z.literal(30)]),revision:z.number().int().nonnegative()}).strict().parse(req.body);
-  const actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
+  const actor:Actor=webActor(req);
   return new SettingsService(db).update(s,actor,input.revision,{detailedRetentionDays:input.days});
  });
  app.post(base+'/settings/weekly-summary',async(req,reply)=>{
   const s=getScope(req,reply),input=z.object({enabled:z.boolean(),channelId:z.string().regex(/^\d{17,20}$/).nullable(),day:z.number().int().min(0).max(6).optional(),hour:z.number().int().min(0).max(23).optional(),timezone:settingsSchema.shape.timezone.optional(),revision:z.number().int().nonnegative()}).strict().parse(req.body);
   assert(!input.enabled||input.channelId,'CHANNEL_REQUIRED');
   if(input.enabled){assert(discord,'DISCORD_UNAVAILABLE',503);await discord.checkChannel(s.guildId,input.channelId!);}
-  const actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
+  const actor:Actor=webActor(req);
   return new SettingsService(db).update(s,actor,input.revision,{weeklySummaryEnabled:input.enabled,weeklySummaryChannelId:input.channelId,...(input.day===undefined?{}:{weeklySummaryDay:input.day}),...(input.hour===undefined?{}:{weeklySummaryHour:input.hour}),...(input.timezone===undefined?{}:{timezone:input.timezone})});
  });
  app.post(base+'/settings/helper',async(req,reply)=>{
@@ -104,24 +114,24 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
   assert(!input.enabled||input.channelId,'HELPER_CHANNEL_REQUIRED');
   if(input.channelId){assert(discord,'DISCORD_UNAVAILABLE',503);await discord.checkChannel(s.guildId,input.channelId);}
   if(input.roleId){assert(discord,'DISCORD_UNAVAILABLE',503);assert((await discord.roles(s.guildId)).some(role=>role.id===input.roleId),'HELPER_ROLE_NOT_FOUND');}
-  const actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
+  const actor:Actor=webActor(req);
   return new SettingsService(db).update(s,actor,input.revision,{helperEnabled:input.enabled,helperChannelId:input.channelId,helperRoleId:input.roleId,firstResponseMinutes:input.responseMinutes,helperAlertCooldownMinutes:input.cooldownMinutes});
  });
  app.post(base+'/settings/goals',async(req,reply)=>{
   const s=getScope(req,reply),input=z.object({preset:z.enum(['multiplayer','early_access','live_service']).nullable(),goals:settingsSchema.shape.newMemberGoals.optional(),channels:z.array(z.object({channelId:z.string().regex(/^\d{17,20}$/),purpose:z.enum(['lfg','feedback','bug','playtest','discussion'])})).max(20),revision:z.number().int().nonnegative()}).strict().parse(req.body);
   assert(new Set(input.channels.map(item=>item.channelId)).size===input.channels.length,'DUPLICATE_CHANNEL');
   if(discord?.options){const available=await discord.options(s.guildId);assert(input.channels.every(item=>available.channels.some(channel=>channel.id===item.channelId)),'CHANNEL_NOT_FOUND');}
-  const actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
+  const actor:Actor=webActor(req);
   const current=await new SettingsService(db).get(s);return new SettingsService(db).update(s,actor,input.revision,{goalPreset:input.preset,importantChannels:input.channels,...(input.goals===undefined?{}:{newMemberGoals:input.goals,setupSteps:{...current.setupSteps,goals:input.goals.length>0}})});
  });
  app.post(base+'/settings/analysis-scope',async(req,reply)=>{
   const s=getScope(req,reply),input=z.object({revision:z.number().int().nonnegative(),mode:z.enum(['all','include','exclude']),channelIds:z.array(z.string().regex(/^\d{17,20}$/)).max(100),staffRoleIds:z.array(z.string().regex(/^\d{17,20}$/)).max(30)}).strict().parse(req.body);
   assert(input.mode!=='include'||input.channelIds.length>0,'CHANNEL_REQUIRED');
-  const actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
+  const actor:Actor=webActor(req);
   return new SettingsService(db).update(s,actor,input.revision,{analysisScope:{mode:input.mode,channelIds:[...new Set(input.channelIds)]},staffRoleIds:[...new Set(input.staffRoleIds)]});
  });
  app.post(base+'/actions/draft',async(req,reply)=>{
-  const s=getScope(req,reply),input=actionInput.parse(req.body),actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};
+  const s=getScope(req,reply),input=actionInput.parse(req.body),actor:Actor=webActor(req);
   assert(await new EntitlementService(db).can(s,'interventions'),'ENTITLEMENT_REQUIRED',403);
   if(input.safetyMode==='auto')assert(await new EntitlementService(db).can(s,'automation_auto'),'ENTITLEMENT_REQUIRED',403);
   const definition=compileActionTemplate(input.templateKey as ActionTemplateKey,input);
@@ -141,11 +151,11 @@ export function registerV03(app:FastifyInstance,db:Database,key:string,discord?:
   return {status:'sent',context:'TEST'};
  });
  app.post(base+'/setup/onboarding/recommended',async(req,reply)=>{
-  const s=getScope(req,reply),actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id},cfg=await new SettingsService(db).get(s),capability=(await sql<{profile:{recommendedMode:'native'|'fallback';nativeOnboardingEnabled:boolean}}>`SELECT profile FROM guild_capabilities WHERE ${tenant(s)} ORDER BY checked_at DESC LIMIT 1`.execute(db)).rows[0];assert(capability,'CAPABILITY_CHECK_REQUIRED');assert(capability.profile.recommendedMode==='native'?capability.profile.nativeOnboardingEnabled:Boolean(cfg.startChannelId&&cfg.flowVersionId),'RECOMMENDED_SETUP_REQUIRES_CONFIGURATION');
+  const s=getScope(req,reply),actor:Actor=webActor(req),cfg=await new SettingsService(db).get(s),capability=(await sql<{profile:{recommendedMode:'native'|'fallback';nativeOnboardingEnabled:boolean}}>`SELECT profile FROM guild_capabilities WHERE ${tenant(s)} ORDER BY checked_at DESC LIMIT 1`.execute(db)).rows[0];assert(capability,'CAPABILITY_CHECK_REQUIRED');assert(capability.profile.recommendedMode==='native'?capability.profile.nativeOnboardingEnabled:Boolean(cfg.startChannelId&&cfg.flowVersionId),'RECOMMENDED_SETUP_REQUIRES_CONFIGURATION');
   const revisions=domainRevisions(db),id=await revisions.draft(s,actor,'onboarding',{onboardingMode:capability.profile.recommendedMode,hybrid:cfg.hybrid});return revisions.preview(s,id);
  });
  app.post(base+'/results/draft',async(req,reply)=>{
-  const s=getScope(req,reply),input=z.object({actionId:z.uuid(),primaryMetric:z.enum(['activation','connection','retention']).default('activation')}).strict().parse(req.body),actor:Actor={key:'web-admin',permissions:'32',roles:[],source:'WEB_DASHBOARD',requestId:req.id};assert(await new EntitlementService(db).can(s,'experiments'),'ENTITLEMENT_REQUIRED',403);
+  const s=getScope(req,reply),input=z.object({actionId:z.uuid(),primaryMetric:z.enum(['activation','connection','retention']).default('activation')}).strict().parse(req.body),actor:Actor=webActor(req);assert(await new EntitlementService(db).can(s,'experiments'),'ENTITLEMENT_REQUIRED',403);
   const activity=(await sql<{count:number}>`SELECT count(*)::integer AS count FROM membership_episodes WHERE ${tenant(s)} AND context='PRODUCTION' AND joined_at>=${new Date(Date.now()-30*86400000)}`.execute(db)).rows[0]?.count??0;assert(activity>=40,'MORE_ACTIVITY_NEEDED');
   const readiness=await new PresentationService(db).home(s);assert(readiness.dataHealth.status==='healthy','DATA_COLLECTION_INCOMPLETE');
   const action=(await sql<{id:string;definition:{name:string}}>`SELECT r.id,r.definition FROM guild_config_revisions r JOIN guild_config_heads h ON h.organization_id=r.organization_id AND h.guild_id=r.guild_id AND h.revision_id=r.id WHERE r.organization_id=${s.organizationId}::uuid AND r.guild_id=${s.guildId} AND r.id=${input.actionId}::uuid AND h.domain='intervention' AND r.state='published'`.execute(db)).rows[0];assert(action,'PUBLISHED_INTERVENTION_REQUIRED');

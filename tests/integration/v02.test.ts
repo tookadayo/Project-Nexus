@@ -40,6 +40,8 @@ import { PrivacyService } from "../../packages/security/src/privacy.js";
 import { AnalyticsService } from "../../packages/analytics/src/index.js";
 import { createApi } from "../../apps/api/src/server.js";
 import { apiToken } from "../../packages/security/src/index.js";
+import { PublicSessions } from "../../packages/security/src/public-sessions.js";
+import { createPublicApiProof } from "../../packages/security/src/public-api.js";
 import { normalize } from "../../packages/events/src/index.js";
 import type { Scope } from "../../packages/shared/src/index.js";
 import { DomainError } from "../../packages/shared/src/index.js";
@@ -52,7 +54,10 @@ import { HelperWorker } from "../../apps/worker/src/helpers.js";
 let infra: Awaited<ReturnType<typeof infrastructure>>, db: Database;
 const vault = new IdentityVault("aa".repeat(32), "bb".repeat(32));
 const user = "922222222222222222",
-  channel = "933333333333333333";
+  channel = "933333333333333333",
+  webAdmin = "922222222222222225",
+  sessionSecret = "v02-synthetic-session-secret-".repeat(3),
+  webOrigin = "https://nexus.example";
 let counter = 0;
 const actor: Actor = {
   key: "admin",
@@ -62,6 +67,8 @@ const actor: Actor = {
   requestId: "v02-test",
 };
 beforeAll(async () => {
+  vi.stubEnv("NEXUS_SESSION_SECRET", sessionSecret);
+  vi.stubEnv("NEXUS_WEB_URL", webOrigin);
   infra = await infrastructure();
   db = connect(infra.databaseUrl);
   await migrate(db);
@@ -69,6 +76,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await db?.destroy();
   await infra?.stop();
+  vi.unstubAllEnvs();
 });
 async function setup() {
   const s = scopeForGuild(String(911111111111111111n + BigInt(++counter)));
@@ -115,6 +123,44 @@ async function setup() {
     now,
     lifecycle: new LifecycleService(db, vault, settings, discord),
   };
+}
+async function publicMutationHeaders(
+  ctx: Awaited<ReturnType<typeof setup>>,
+  key: string,
+) {
+  ctx.discord.members.set(webAdmin, {
+    permissions: "32",
+    roles: [],
+    bot: false,
+    joinedAt: "2026-01-01T00:00:00Z",
+  });
+  await sql`INSERT INTO server_web_links(organization_id,guild_id,verified_at,updated_at,revision) VALUES(${ctx.s.organizationId}::uuid,${ctx.s.guildId},now(),now(),${randomUUID()}::uuid)`.execute(db);
+  const sessions = new PublicSessions(db, sessionSecret, async () => {
+    throw new Error("Unexpected OAuth refresh in a synthetic API fixture");
+  });
+  const sessionReference = await sessions.create(
+    webAdmin,
+    { accessToken: "v02-synthetic-oauth" },
+    3600,
+  );
+  // Sign exactly the payload supplied to Fastify; no separately copied body
+  // can silently drift from the v2 proof's canonical body hash.
+  return (path: string, payload: Record<string, unknown>) => ({
+    payload,
+    headers: {
+      authorization: `Bearer ${apiToken(key, ctx.s)}`,
+      origin: webOrigin,
+      "x-nexus-user-proof": createPublicApiProof({
+        scope: ctx.s,
+        userId: webAdmin,
+        sessionReference,
+        method: "POST",
+        path,
+        body: payload,
+        origin: webOrigin,
+      }),
+    },
+  });
 }
 async function publish(s: Scope, domain: ConfigDomain, definition: unknown) {
   const revisions = domainRevisions(db),
@@ -614,32 +660,32 @@ it("purges detail at 30 days without a destructive database reset", async () => 
 it("exposes only scoped v2 data and validates configuration mutations", async () => {
   const ctx = await setup(),
     key = "v02-test-api-key",
-    api = createApi(new AnalyticsService(db, ctx.settings), key, db),
+    api = createApi(new AnalyticsService(db, ctx.settings), key, db, ctx.discord, undefined, vault),
     base = `/v2/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}`;
   const headers = { authorization: `Bearer ${apiToken(key, ctx.s)}` };
+  const mutationHeaders = await publicMutationHeaders(ctx, key);
   const result = await api.inject({ url: base + "/dashboard", headers });
   expect(result.statusCode).toBe(200);
   expect(result.json().metrics.new_members.value).toBeNull();
   expect(result.body).not.toContain(user);
+  expect((await api.inject({method:"POST",url:base+"/configuration",headers,payload:{action:"draft",domain:"activation",definition:{}}})).statusCode).toBe(401);
   expect(
     (
       await api.inject({
         method: "POST",
         url: base + "/configuration",
-        headers,
-        payload: {
+        ...mutationHeaders(base + "/configuration", {
           action: "draft",
           domain: "activation",
           definition: { sql: "SELECT *" },
-        },
+        }),
       })
     ).statusCode,
   ).toBe(400);
   const response = await api.inject({
     method: "POST",
     url: base + "/configuration",
-    headers,
-    payload: {
+    ...mutationHeaders(base + "/configuration", {
       action: "draft",
       domain: "activation",
       definition: {
@@ -647,7 +693,7 @@ it("exposes only scoped v2 data and validates configuration mutations", async ()
         windowSeconds: 604800,
         rule: { op: "scheduled_event_subscribed", withinSeconds: 604800 },
       },
-    },
+    }),
   });
   expect(response.statusCode).toBe(200);
   expect(response.json().confirmationHash).toBeTruthy();
@@ -945,9 +991,10 @@ it("serves 7D, 30D and 90D Journey ranges and creates a test from a published Ac
   const ctx = await setup(),
     actionId = await publish(ctx.s, "intervention", intervention("approval")),
     key = "v03-test-api-key",
-    api = createApi(new AnalyticsService(db, ctx.settings), key, db),
+    api = createApi(new AnalyticsService(db, ctx.settings), key, db, ctx.discord, undefined, vault),
     base = `/v3/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}`,
     headers = { authorization: `Bearer ${apiToken(key, ctx.s)}` };
+  const mutationHeaders = await publicMutationHeaders(ctx, key);
   for (const range of [7, 30, 90]) {
     const response = await api.inject({
       url: `${base}/journey?range=${range}`,
@@ -959,8 +1006,7 @@ it("serves 7D, 30D and 90D Journey ranges and creates a test from a published Ac
   const tooSmall = await api.inject({
     method: "POST",
     url: base + "/results/draft",
-    headers,
-    payload: { actionId, primaryMetric: "activation" },
+    ...mutationHeaders(base + "/results/draft", { actionId, primaryMetric: "activation" }),
   });
   expect(tooSmall.statusCode).toBe(400);
   const goalId = await publish(ctx.s, "activation", {
@@ -996,8 +1042,7 @@ it("serves 7D, 30D and 90D Journey ranges and creates a test from a published Ac
   const draft = await api.inject({
     method: "POST",
     url: base + "/results/draft",
-    headers,
-    payload: { actionId, primaryMetric: "activation" },
+    ...mutationHeaders(base + "/results/draft", { actionId, primaryMetric: "activation" }),
   });
   expect(draft.statusCode, JSON.stringify(draft.json())).toBe(200);
   const preview = draft.json();
@@ -1011,13 +1056,12 @@ it("serves 7D, 30D and 90D Journey ranges and creates a test from a published Ac
   const publishResponse = await api.inject({
     method: "POST",
     url: `/v2/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}/configuration`,
-    headers,
-    payload: {
+    ...mutationHeaders(`/v2/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}/configuration`, {
       action: "publish",
       id: preview.after.id,
       expectedHead: null,
       confirmationHash: preview.confirmationHash,
-    },
+    }),
   });
   expect(publishResponse.statusCode).toBe(200);
   const results = await api.inject({ url: base + "/results", headers });
@@ -1040,23 +1084,21 @@ it("rechecks selected channels and events before enabling an improvement", async
       events,
     }),
   });
-  const api = createApi(new AnalyticsService(db, ctx.settings), key, db, port),
-    base = `/v3/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}`,
-    headers = { authorization: `Bearer ${apiToken(key, ctx.s)}` };
+  const api = createApi(new AnalyticsService(db, ctx.settings), key, db, port, undefined, vault),
+    base = `/v3/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}`;
+  const mutationHeaders = await publicMutationHeaders(ctx, key);
   ctx.discord.failure = new DomainError("CHANNEL_PERMISSION_MISSING");
   const blocked = await api.inject({
     method: "POST",
     url: base + "/actions/draft",
-    headers,
-    payload: { templateKey: "reply_rescue", channelId: channel },
+    ...mutationHeaders(base + "/actions/draft", { templateKey: "reply_rescue", channelId: channel }),
   });
   expect(blocked.statusCode).not.toBe(200);
   ctx.discord.failure = null;
   const draft = await api.inject({
     method: "POST",
     url: base + "/actions/draft",
-    headers,
-    payload: { templateKey: "reply_rescue", channelId: channel },
+    ...mutationHeaders(base + "/actions/draft", { templateKey: "reply_rescue", channelId: channel }),
   });
   expect(draft.statusCode).toBe(200);
   ctx.discord.failure = new DomainError("CHANNEL_PERMISSION_MISSING");
@@ -1064,25 +1106,23 @@ it("rechecks selected channels and events before enabling an improvement", async
     deleted = await api.inject({
       method: "POST",
       url: `/v2/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}/configuration`,
-      headers,
-      payload: {
+      ...mutationHeaders(`/v2/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}/configuration`, {
         action: "publish",
         id: preview.after.id,
         expectedHead: null,
         confirmationHash: preview.confirmationHash,
-      },
+      }),
     });
   expect(deleted.json().error).toBe("CHANNEL_PERMISSION_MISSING");
   ctx.discord.failure = null;
   const eventDraft = await api.inject({
     method: "POST",
     url: base + "/actions/draft",
-    headers,
-    payload: {
+    ...mutationHeaders(base + "/actions/draft", {
       templateKey: "event_recommendation",
       channelId: channel,
       eventId: events[0]!.id,
-    },
+    }),
   });
   expect(eventDraft.statusCode).toBe(200);
   events.length = 0;
@@ -1090,13 +1130,12 @@ it("rechecks selected channels and events before enabling an improvement", async
     removed = await api.inject({
       method: "POST",
       url: `/v2/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}/configuration`,
-      headers,
-      payload: {
+      ...mutationHeaders(`/v2/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}/configuration`, {
         action: "publish",
         id: eventPreview.after.id,
         expectedHead: null,
         confirmationHash: eventPreview.confirmationHash,
-      },
+      }),
     });
   expect(removed.json().error).toBe("EVENT_NOT_AVAILABLE");
   const original = await ctx.settings.get(ctx.s);
@@ -1104,24 +1143,21 @@ it("rechecks selected channels and events before enabling an improvement", async
   const invalidDestination = await api.inject({
     method: "POST",
     url: base + "/settings/notification",
-    headers,
-    payload: { channelId: channel, revision: original.revision },
+    ...mutationHeaders(base + "/settings/notification", { channelId: channel, revision: original.revision }),
   });
   expect(invalidDestination.statusCode).not.toBe(200);
   ctx.discord.failure = null;
   const destination = await api.inject({
     method: "POST",
     url: base + "/settings/notification",
-    headers,
-    payload: { channelId: channel, revision: original.revision },
+    ...mutationHeaders(base + "/settings/notification", { channelId: channel, revision: original.revision }),
   });
   expect(destination.statusCode).toBe(200);
   expect(destination.json().adminNotificationChannelId).toBe(channel);
   const retention = await api.inject({
     method: "POST",
     url: base + "/settings/retention",
-    headers,
-    payload: { days: 14, revision: destination.json().revision },
+    ...mutationHeaders(base + "/settings/retention", { days: 14, revision: destination.json().revision }),
   });
   expect(retention.statusCode).toBe(200);
   expect(retention.json().detailedRetentionDays).toBe(14);
@@ -1197,31 +1233,30 @@ it("validates each improvement and sends a fully isolated setup test", async () 
       key,
       db,
       ctx.discord,
+      undefined,
+      vault,
     ),
     base = `/v3/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}`,
-    headers = { authorization: `Bearer ${apiToken(key, ctx.s)}` },
     input = { templateKey: "reply_rescue", channelId: channel };
+  const mutationHeaders = await publicMutationHeaders(ctx, key);
   ctx.discord.failure = new DomainError("CHANNEL_PERMISSION_MISSING");
   const denied = await api.inject({
     method: "POST",
     url: base + "/actions/preflight",
-    headers,
-    payload: input,
+    ...mutationHeaders(base + "/actions/preflight", input),
   });
   expect(denied.json().status).toBe("permission_needed");
   ctx.discord.failure = null;
   const ready = await api.inject({
     method: "POST",
     url: base + "/actions/preflight",
-    headers,
-    payload: input,
+    ...mutationHeaders(base + "/actions/preflight", input),
   });
   expect(ready.json().status).toBe("ready");
   const sent = await api.inject({
     method: "POST",
     url: base + "/actions/test",
-    headers,
-    payload: input,
+    ...mutationHeaders(base + "/actions/test", input),
   });
   expect(sent.json()).toMatchObject({ status: "sent", context: "TEST" });
   expect(ctx.discord.calls.filter((call) => call === "sendPanel")).toHaveLength(
@@ -1282,14 +1317,15 @@ it("records optional suggestion feedback without member identifiers", async () =
       key,
       db,
       ctx.discord,
+      undefined,
+      vault,
     ),
-    base = `/v3/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}`,
-    headers = { authorization: `Bearer ${apiToken(key, ctx.s)}` };
+    base = `/v3/organizations/${ctx.s.organizationId}/guilds/${ctx.s.guildId}`;
+  const mutationHeaders = await publicMutationHeaders(ctx, key);
   const result = await api.inject({
     method: "POST",
     url: base + "/opportunities/dismiss",
-    headers,
-    payload: { suggestionType: "CONNECTION_DROP", reason: "already_handled" },
+    ...mutationHeaders(base + "/opportunities/dismiss", { suggestionType: "CONNECTION_DROP", reason: "already_handled" }),
   });
   expect(result.statusCode).toBe(200);
   const rows = (

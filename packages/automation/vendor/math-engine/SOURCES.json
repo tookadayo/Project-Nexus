@@ -1,0 +1,315 @@
+{
+  "schemaVersion": 1,
+  "collectedAt": "2026-10-15T11:12:12.9015225Z",
+  "documentation": "docs/design/alpha15-math-engine-distribution.md",
+  "upstream": {
+    "dockerImage": "emscripten/emsdk:3.1.58",
+    "gmpVersion": "6.3.0",
+    "submoduleCount": 0,
+    "package": "gmp-wasm",
+    "commit": "4e372e5a3c4a65f871e1bcaab63c78b29dc80ff8",
+    "ciNode": "20.x",
+    "jsDependencyLockGitBlob": "f9f8e4cb784b663239187220e72186d15f2c6fa9",
+    "gmpVersionEvidence": "binding/build-gmp.sh exact archive URL, not a runtime version API",
+    "repository": "https://github.com/Daninet/gmp-wasm",
+    "mpfrVersion": "4.2.1",
+    "packageVersion": "1.3.2"
+  },
+  "artifact": {
+    "wasmSha256": "ca1f8def552c30d44c67247d0a959bbf17e022d1e5999889ce4b9922f5211909",
+    "wasmBytes": 522561,
+    "bundlePath": "gmp-wasm-1.3.2/index.cjs",
+    "bundleSha256": "76af404a6521699a9f2a0dd3fc34a48368b470cc5044e1fa8e5e480a3deae55a"
+  },
+  "verification": {
+    "publishedLibraryRecipeInputsPresent": true,
+    "rebuildExecuted": false,
+    "npmIntegrityChecks": 3,
+    "exactBinaryRebuildVerified": false,
+    "modifiedLibraryRelinkDemonstrated": false,
+    "sourceSharedFileCount": 38,
+    "externalDistributionPerformed": false,
+    "detachedSignaturesVerified": false,
+    "offlineBuildEnvironmentComplete": false,
+    "distributionComplianceCertified": false,
+    "runtimeBundleByteIdenticalToNpm": true,
+    "sharedNpmCommitFilesByteIdentical": true
+  },
+  "upstreamGmpChanges": [
+    "configure ABI=longlong sed; exact recipe in binding/gmp/Dockerfile",
+    "mpn/generic/gmp-mparam.h replacement from git blob 4278900f7deedbed580037971b370ba0bd6a752c"
+  ],
+  "localRecipeChanges": [
+    "Use verified local MPFR tar COPY instead of upstream Dockerfile RUN wget; no library source change",
+    "Workspaces/cache/results only under ignored .local; no runtime artifact replacement"
+  ],
+  "remaining": [
+    "Docker/emcc/gpg not found on collection host; no installation performed",
+    "No detached-signature verification or rebuilt binary comparison",
+    "Original Docker image digest, runner/apt/Node patch versions not independently pinned",
+    "Recipient application-code/relink permissions and source/notice packaging require verification for an actual external distribution",
+    "No modified-library relink demonstration"
+  ],
+  "originalLicenseWhitespaceExceptions": [
+    {
+      "path": "licenses/Emscripten-3.1.58-LICENSE.txt",
+      "line": 60,
+      "reason": "Original upstream license bytes retained verbatim",
+      "sha256": "620a78084fc7ca97c0b5dea9abf891f3ffcadfdbf305276f099c9c4e12fc1d86",
+      "kind": "trailing-whitespace"
+    },
+    {
+      "path": "licenses/gmp-6.3.0/COPYING.LESSERv3",
+      "line": 13,
+      "reason": "Original upstream license bytes retained verbatim",
+      "sha256": "a853c2ffec17057872340eee242ae4d96cbf2b520ae27d903e1b2fef1a5f9d1c",
+      "kind": "trailing-whitespace"
+    },
+    {
+      "path": "licenses/gmp-6.3.0/COPYING.LESSERv3",
+      "line": 114,
+      "reason": "Original upstream license bytes retained verbatim",
+      "sha256": "a853c2ffec17057872340eee242ae4d96cbf2b520ae27d903e1b2fef1a5f9d1c",
+      "kind": "trailing-whitespace"
+    },
+    {
+      "path": "licenses/Emscripten-3.1.58-LICENSE.txt",
+      "line": 102,
+      "kind": "blank-at-eof",
+      "reason": "Original upstream license bytes retained verbatim",
+      "sha256": "620a78084fc7ca97c0b5dea9abf891f3ffcadfdbf305276f099c9c4e12fc1d86"
+    },
+    {
+      "path": "licenses/tslib-2.4.0/CopyrightNotice.txt",
+      "line": 15,
+      "kind": "blank-at-eof",
+      "reason": "Original upstream license bytes retained verbatim",
+      "sha256": "da16ddb65f8ca390998fb99223d0112498b56b45784d00afd77ff8ce1ac4de8b"
+    }
+  ],
+  "files": [
+    {
+      "path": "licenses/.gitattributes",
+      "bytes": 109,
+      "sha256": "d3aea16a26606d62b4ed0090c6c9ebbd14c587a6478f1190ce1add046c81b007",
+      "origin": "NEXUS local source inventory, notice, verification or rebuild recipe"
+    },
+    {
+      "path": "licenses/Emscripten-3.1.58-compiler-rt-LICENSE.txt",
+      "bytes": 16708,
+      "sha256": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d",
+      "originUrl": "https://raw.githubusercontent.com/emscripten-core/emscripten/3.1.58/system/lib/compiler-rt/LICENSE.TXT"
+    },
+    {
+      "path": "licenses/Emscripten-3.1.58-LICENSE.txt",
+      "bytes": 5093,
+      "sha256": "620a78084fc7ca97c0b5dea9abf891f3ffcadfdbf305276f099c9c4e12fc1d86",
+      "originUrl": "https://raw.githubusercontent.com/emscripten-core/emscripten/3.1.58/LICENSE"
+    },
+    {
+      "path": "licenses/Emscripten-3.1.58-musl-COPYRIGHT.txt",
+      "bytes": 6204,
+      "sha256": "f9bc4423732350eb0b3f7ed7e91d530298476f8fec0c6c427a1c04ade22655af",
+      "originUrl": "https://raw.githubusercontent.com/emscripten-core/emscripten/3.1.58/system/lib/libc/musl/COPYRIGHT"
+    },
+    {
+      "path": "licenses/fflate-0.7.3/LICENSE",
+      "bytes": 1069,
+      "sha256": "62249119bb7df6e54300f37a37145c26a6d4420410aac8881a119c5b427cf751",
+      "archive": "source/fflate-0.7.3.tgz",
+      "member": "package/LICENSE"
+    },
+    {
+      "path": "licenses/gmp-6.3.0/AUTHORS",
+      "bytes": 4098,
+      "sha256": "da5870e2f0482c5dc15b4cfed8bbfb51ce1279c8f8fc52bdb8c13c7cee949c32",
+      "archive": "source/gmp-6.3.0.tar.xz",
+      "member": "gmp-6.3.0/AUTHORS"
+    },
+    {
+      "path": "licenses/gmp-6.3.0/COPYING",
+      "bytes": 35147,
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+      "archive": "source/gmp-6.3.0.tar.xz",
+      "member": "gmp-6.3.0/COPYING"
+    },
+    {
+      "path": "licenses/gmp-6.3.0/COPYING.LESSERv3",
+      "bytes": 7639,
+      "sha256": "a853c2ffec17057872340eee242ae4d96cbf2b520ae27d903e1b2fef1a5f9d1c",
+      "archive": "source/gmp-6.3.0.tar.xz",
+      "member": "gmp-6.3.0/COPYING.LESSERv3"
+    },
+    {
+      "path": "licenses/gmp-6.3.0/COPYINGv2",
+      "bytes": 18092,
+      "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643",
+      "archive": "source/gmp-6.3.0.tar.xz",
+      "member": "gmp-6.3.0/COPYINGv2"
+    },
+    {
+      "path": "licenses/gmp-6.3.0/COPYINGv3",
+      "bytes": 35150,
+      "sha256": "e6037104443f9a7829b2aa7c5370d0789a7bda3ca65a0b904cdc0c2e285d9195",
+      "archive": "source/gmp-6.3.0.tar.xz",
+      "member": "gmp-6.3.0/COPYINGv3"
+    },
+    {
+      "path": "licenses/gmp-6.3.0/README",
+      "bytes": 4051,
+      "sha256": "5e9f9325fd702bc4bcda27d7a78fea88a2a09fa39b4b15ac7b9b205e0863dc7e",
+      "archive": "source/gmp-6.3.0.tar.xz",
+      "member": "gmp-6.3.0/README"
+    },
+    {
+      "path": "licenses/gmp-wasm-1.3.2/AUTHORS",
+      "bytes": 221,
+      "sha256": "dcb3cdb74ce76bb2501a545af9b82222c08eec67bf02bcc14e8091f48fc727e8",
+      "archive": "source/gmp-wasm-4e372e5a3c4a65f871e1bcaab63c78b29dc80ff8.tar.gz",
+      "member": "gmp-wasm-4e372e5a3c4a65f871e1bcaab63c78b29dc80ff8/AUTHORS"
+    },
+    {
+      "path": "licenses/gmp-wasm-1.3.2/LICENSE",
+      "bytes": 7652,
+      "sha256": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118",
+      "archive": "source/gmp-wasm-4e372e5a3c4a65f871e1bcaab63c78b29dc80ff8.tar.gz",
+      "member": "gmp-wasm-4e372e5a3c4a65f871e1bcaab63c78b29dc80ff8/LICENSE"
+    },
+    {
+      "path": "licenses/mpfr-4.2.1/AUTHORS",
+      "bytes": 1375,
+      "sha256": "dc8a7d86b688287ea3f6f20b3d7aa1f6f757253c1b9dc100d7e5dc5eb7b0058d",
+      "archive": "source/mpfr-4.2.1.tar.xz",
+      "member": "mpfr-4.2.1/AUTHORS"
+    },
+    {
+      "path": "licenses/mpfr-4.2.1/COPYING",
+      "bytes": 35149,
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "archive": "source/mpfr-4.2.1.tar.xz",
+      "member": "mpfr-4.2.1/COPYING"
+    },
+    {
+      "path": "licenses/mpfr-4.2.1/COPYING.LESSER",
+      "bytes": 7652,
+      "sha256": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118",
+      "archive": "source/mpfr-4.2.1.tar.xz",
+      "member": "mpfr-4.2.1/COPYING.LESSER"
+    },
+    {
+      "path": "licenses/mpfr-4.2.1/README",
+      "bytes": 3431,
+      "sha256": "c19417cd2dfcb4e3a3172c364a6482e20c21924f4b3583d5c28a67abb2fb1f87",
+      "archive": "source/mpfr-4.2.1.tar.xz",
+      "member": "mpfr-4.2.1/README"
+    },
+    {
+      "path": "licenses/mpfr-4.2.1/VERSION",
+      "bytes": 6,
+      "sha256": "e5d77a995a7d89c4b24498cb8947c3b40e53f4d2c0ba2380796cdb059d237848",
+      "archive": "source/mpfr-4.2.1.tar.xz",
+      "member": "mpfr-4.2.1/VERSION"
+    },
+    {
+      "path": "licenses/NOTICE.md",
+      "bytes": 2938,
+      "sha256": "68e71d395d90539099e9333fa9b33b35b1ace9f95f7e0b1877ee2d575b739dc7",
+      "origin": "NEXUS local source inventory, notice, verification or rebuild recipe"
+    },
+    {
+      "path": "licenses/tslib-2.4.0/CopyrightNotice.txt",
+      "bytes": 822,
+      "sha256": "da16ddb65f8ca390998fb99223d0112498b56b45784d00afd77ff8ce1ac4de8b",
+      "archive": "source/tslib-2.4.0.tgz",
+      "member": "package/CopyrightNotice.txt"
+    },
+    {
+      "path": "licenses/tslib-2.4.0/LICENSE.txt",
+      "bytes": 655,
+      "sha256": "210b19e543130388c68654b7497e967119ce17145f66ab7d85688fbd70f08751",
+      "archive": "source/tslib-2.4.0.tgz",
+      "member": "package/LICENSE.txt"
+    },
+    {
+      "path": "source/.gitattributes",
+      "bytes": 90,
+      "sha256": "ab7a6b6d1484a71cde94e2f929795dc58c7666d42713e036f379c81680502a23",
+      "origin": "NEXUS local source inventory, notice, verification or rebuild recipe"
+    },
+    {
+      "path": "source/compare-source.mjs",
+      "bytes": 1872,
+      "sha256": "94a6edfbda4093c11612e69eca688200e402e9e33616e89e5be88aef468e9ad6",
+      "origin": "NEXUS local source inventory, notice, verification or rebuild recipe"
+    },
+    {
+      "path": "source/fflate-0.7.3.tgz",
+      "bytes": 131683,
+      "sha256": "10c8fb3d872af872fd1d6fe2ba6499df79028239f8f8ba681446edabf8e517ae",
+      "originUrl": "https://registry.npmjs.org/fflate/-/fflate-0.7.3.tgz",
+      "integrity": "sha512-0Zz1jOzJWERhyhsimS54VTqOteCNwRtIlh8isdL0AXLo0g7xNTfTL7oWrkmCnPhZGocKIkWHBistBrrpoNH3aw=="
+    },
+    {
+      "path": "source/gmp-6.3.0.tar.xz",
+      "bytes": 2094196,
+      "sha256": "a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898",
+      "originUrl": "https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz"
+    },
+    {
+      "path": "source/gmp-6.3.0.tar.xz.sig",
+      "bytes": 374,
+      "sha256": "94def8c1a731854de684689126046ec93589147abd4cd0025f12d741d323aa82",
+      "originUrl": "https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz.sig"
+    },
+    {
+      "path": "source/gmp-wasm-1.3.2.npm.tgz",
+      "bytes": 1953318,
+      "sha256": "e417809469b6139e420f31e01a4fe64168c229499e5798ac037f683d6877261a",
+      "originUrl": "https://registry.npmjs.org/gmp-wasm/-/gmp-wasm-1.3.2.tgz",
+      "integrity": "sha512-8Y7qVLLX8/0YzeHYueCHaw9D7sdnGViiGu7KeP9wATmuayoXW/FlGMsV80aBU5ryS2OwKfaCyjCSSPdxoe3E4A=="
+    },
+    {
+      "path": "source/gmp-wasm-1.3.2.registry-version.json",
+      "bytes": 3977,
+      "sha256": "f14cb56644c5fce3be43134b4d947331345a00f2ddadfcdd10a277d4b0b54ec2",
+      "originUrl": "https://registry.npmjs.org/gmp-wasm"
+    },
+    {
+      "path": "source/gmp-wasm-4e372e5a3c4a65f871e1bcaab63c78b29dc80ff8.tar.gz",
+      "bytes": 159907,
+      "sha256": "10e16b7ce662d505c07f019b7efa8abefeda3202c33186b1063e65fe10da4de2",
+      "originUrl": "https://codeload.github.com/Daninet/gmp-wasm/tar.gz/4e372e5a3c4a65f871e1bcaab63c78b29dc80ff8"
+    },
+    {
+      "path": "source/mpfr-4.2.1.tar.xz",
+      "bytes": 1493608,
+      "sha256": "277807353a6726978996945af13e52829e3abd7a9a5b7fb2793894e18f1fcbb2",
+      "originUrl": "https://ftp.gnu.org/gnu/mpfr/mpfr-4.2.1.tar.xz"
+    },
+    {
+      "path": "source/mpfr-4.2.1.tar.xz.asc",
+      "bytes": 228,
+      "sha256": "0282b0d59da3546f6175ff6218a43e8779bb31de6dbbc47b708e808ee94d11ff",
+      "originUrl": "https://www.mpfr.org/mpfr-4.2.1/mpfr-4.2.1.tar.xz.asc"
+    },
+    {
+      "path": "source/rebuild.sh",
+      "bytes": 4309,
+      "sha256": "d636d3171b59e4479a8d6820f620f9c8a0f0f991b0e8f0cb3809810d1d84e39e",
+      "origin": "NEXUS local source inventory, notice, verification or rebuild recipe"
+    },
+    {
+      "path": "source/tslib-2.4.0.tgz",
+      "bytes": 10089,
+      "sha256": "eb5584df2a0098a11ea92745634ea55dd65db0d36801b22c62c9a47836596149",
+      "originUrl": "https://registry.npmjs.org/tslib/-/tslib-2.4.0.tgz",
+      "integrity": "sha512-d6xOpEDfsi2CZVlPQzGeux8XMwLT9hssAsaPYExaQMuYskwb+x1x7J371tWlbBdWHroy99KnVB6qIkUbs5X3UQ=="
+    },
+    {
+      "path": "source/verify-sources.mjs",
+      "bytes": 1355,
+      "sha256": "8eef937f9c8a600360684269f83a1ecee5cf4f3decfcfb5d6965a2ec61ac9723",
+      "origin": "NEXUS local source inventory, notice, verification or rebuild recipe"
+    }
+  ]
+}

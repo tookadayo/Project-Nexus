@@ -21,6 +21,12 @@ export default async function Support() {
           className="support-intro-links"
           aria-label={copy(locale, "サポートの案内", "Support guidance")}
         >
+          <a href="#invitation-beta">
+            {copy(locale, "Beta参加案内", "Beta participation")}
+          </a>
+          <a href="#setup-support">
+            {copy(locale, "導入・設定", "Setup guidance")}
+          </a>
           <a href="#general-support">
             {copy(locale, "一般サポート", "General support")}
           </a>
@@ -36,6 +42,32 @@ export default async function Support() {
           </a>
         </nav>
         <BetaNotice locale={locale} />
+        <section aria-labelledby="setup-support">
+          <h2 id="setup-support" tabIndex={-1}>
+            {copy(locale, "導入・設定の確認", "Getting started and setup")}
+          </h2>
+          <p>
+            {copy(
+              locale,
+              "利用開始までの流れと収集範囲は使い方の案内で、画面の操作は合成データのデモで確認できます。",
+              "Review the setup steps and collection scope in our guide, and explore the controls with the synthetic-data demo.",
+            )}
+          </p>
+          <nav
+            className="support-intro-links"
+            aria-label={copy(locale, "導入に役立つ情報", "Setup resources")}
+          >
+            <a href="/#how-it-works">
+              {copy(locale, "使い方を見る", "Read the setup guide")}
+            </a>
+            <a href="/#demo">
+              {copy(locale, "操作デモを試す", "Try the demo")}
+            </a>
+            <a href="/product">
+              {copy(locale, "製品の機能を見る", "Explore features")}
+            </a>
+          </nav>
+        </section>
         <section aria-labelledby="general-support">
           <h2 id="general-support" tabIndex={-1}>
             {copy(locale, "一般サポート", "General support")}

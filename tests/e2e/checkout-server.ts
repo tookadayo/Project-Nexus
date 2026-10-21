@@ -1,5 +1,7 @@
 import EmbeddedPostgres from "embedded-postgres";
+import { fixtureShutdown, installFixtureShutdown, waitForOwnedDatabaseClients } from "./alpha17-fixture-shutdown";
 import Fastify from "fastify";
+import { noCompletedCheckoutSession, relayCheckoutWebhook, writeCheckoutWebhookDiagnostic } from "./checkout-webhook-relay";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createServer } from "node:net";
@@ -87,7 +89,7 @@ const price = {
 };
 const app = Fastify({ logger: false });
 app.addHook("onRequest", async (req, reply) => {
-  reply.header("Access-Control-Allow-Origin", `http://127.0.0.1:${web}`);
+  reply.header("Access-Control-Allow-Origin", `https://checkout.nexus.test:${web}`);
   reply.header("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return reply.code(204).send();
 });
@@ -284,7 +286,7 @@ const env = {
   NEXUS_STRIPE_MODE: "SANDBOX",
   STRIPE_SECRET_KEY: "sk_test_fixture_checkout",
   STRIPE_WEBHOOK_SECRET: "whsec_fixture_checkout",
-  NEXUS_WEB_URL: `http://127.0.0.1:${web}`,
+  NEXUS_WEB_URL: `https://checkout.nexus.test:${web}`,
   NEXUS_BILLING_DEVELOPER_COUNTRY: "JP",
 };
 const sdk = new Stripe(env.STRIPE_SECRET_KEY, {
@@ -304,11 +306,12 @@ const providerClient = new Stripe(env.STRIPE_SECRET_KEY, {
 });
 const provider = new StripeBillingProvider({ env, client: providerClient }),
   billing = new BillingService(db, vault);
-app.post("/fixture/payment", async (req) => {
-  const { clientSecret } = req.body as { clientSecret: string },
-    session = [...sessions.values()].find(
+app.post("/fixture/payment", async (req, reply) => {
+  const { clientSecret } = (req.body ?? {}) as { clientSecret?: unknown },
+    session = typeof clientSecret === "string" ? [...sessions.values()].find(
       (s) => s.client_secret === clientSecret,
-    )!;
+    ) : undefined;
+  if (!session) return reply.code(404).send({ error: "CHECKOUT_FIXTURE_SESSION_NOT_FOUND" });
   session.status = "complete";
   session.subscription = "sub_fixture_" + session.id;
   const now = Math.floor(Date.now() / 1000),
@@ -342,8 +345,13 @@ app.post("/fixture/payment", async (req) => {
   subscriptions.set(String(sub.id), sub);
   return { ok: true };
 });
-app.post("/fixture/webhook", async (_req) => {
-  const session = [...sessions.values()].find((s) => s.status === "complete")!;
+app.post("/fixture/webhook", async (_req, reply) => {
+  const session = [...sessions.values()].find((s) => s.status === "complete");
+  if (!session) {
+    const result = noCompletedCheckoutSession();
+    writeCheckoutWebhookDiagnostic(result);
+    return reply.code(409).send(result);
+  }
   const body = JSON.stringify({
       id: "evt_fixture_" + session.id,
       object: "event",
@@ -355,18 +363,9 @@ app.post("/fixture/webhook", async (_req) => {
       payload: body,
       secret: env.STRIPE_WEBHOOK_SECRET,
     });
-  const response = await fetch(
-    `http://127.0.0.1:${web}/billing/webhooks/stripe`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Stripe-Signature": signature,
-      },
-      body,
-    },
-  );
-  return { status: response.status, body: await response.json() };
+  const result = await relayCheckoutWebhook(body, signature);
+  writeCheckoutWebhookDiagnostic(result);
+  return result;
 });
 app.post("/fixture/reconcile", async () => {
   for (const guildId of ids) {
@@ -399,13 +398,8 @@ app.get("/fixture/count", async () => ({
   cancelCalls,
 }));
 await app.listen({ host: "127.0.0.1", port });
-let stopping = false;
-async function stop() {
-  if (stopping) return;
-  stopping = true;
-  await app.close();
-  await db.destroy();
-  await pg.stop();
-}
-process.on("SIGTERM", () => void stop());
-process.on("SIGINT", () => void stop());
+const stop = fixtureShutdown({
+  closeFixture: () => app.close(), closeApi: async () => {}, destroyDatabase: () => db.destroy(),
+  drainDatabase: () => waitForOwnedDatabaseClients(databaseUrl), stopDatabase: () => pg.stop(), markClosed: async () => {},
+});
+installFixtureShutdown(stop);

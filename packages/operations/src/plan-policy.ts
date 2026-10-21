@@ -9,8 +9,10 @@ import type { Scope } from "../../shared/src/index";
 import { EntitlementService } from "../../settings/src/billing/entitlements";
 import { featureAvailability } from "../../settings/src/plan-registry";
 import { operationsLock } from "./policy";
+import { acquireRuleScopeLocks, ruleScopeLockSet } from "../../rules/src/locks";
 export async function enforceOperationsPlan(db: Database, s: Scope) {
   return db.transaction().execute(async (tx) => {
+    await acquireRuleScopeLocks(tx, ruleScopeLockSet(s));
     await privacyReadLock(tx, s);
     const entitlements = new EntitlementService(tx),
       state = await entitlements.effective(s),
@@ -51,10 +53,22 @@ export async function enforceOperationsPlan(db: Database, s: Scope) {
         tx,
       );
     if (!webhooks) {
+      // Delivery admission is irreversible. A plan loss cannot reset an
+      // admitted POST to a resumable queue state or roll back all other pauses.
+      // Keep the canonical/domain order and lock every endpoint before children.
+      await sql`SELECT id FROM webhook_endpoints WHERE ${tenant(s)} ORDER BY id FOR UPDATE`.execute(tx);
+      const uncertain = (await sql<{ endpoint_id: string }>`UPDATE webhook_deliveries
+        SET state='UNKNOWN',last_error='PLAN_UNAVAILABLE_RESULT_UNKNOWN',
+          completed_at=coalesce(completed_at,clock_timestamp()),lease_until=NULL,lease_token=NULL
+        WHERE ${tenant(s)} AND state='RUNNING' AND send_admitted_at IS NOT NULL
+        RETURNING endpoint_id`.execute(tx)).rows;
+      for (const id of [...new Set(uncertain.map(row => row.endpoint_id))].sort())
+        await sql`UPDATE webhook_endpoints SET delivery_gate='UNKNOWN_BLOCKED',safety_epoch=safety_epoch+1
+          WHERE ${tenant(s)} AND id=${id}::uuid AND delivery_gate<>'UNKNOWN_BLOCKED'`.execute(tx);
       await sql`UPDATE webhook_endpoints SET state='PAUSED_PLAN_LIMIT' WHERE ${tenant(s)} AND state='ENABLED'`.execute(
         tx,
       );
-      await sql`UPDATE webhook_deliveries SET state='PAUSED_PLAN_LIMIT',lease_until=NULL,lease_token=NULL WHERE ${tenant(s)} AND state IN ('PENDING','RUNNING')`.execute(
+      await sql`UPDATE webhook_deliveries SET state='PAUSED_PLAN_LIMIT',lease_until=NULL,lease_token=NULL WHERE ${tenant(s)} AND state IN ('PENDING','RUNNING') AND send_admitted_at IS NULL`.execute(
         tx,
       );
     } else

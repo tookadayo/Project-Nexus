@@ -2,9 +2,13 @@ import {betaAccess,requestBetaDeletion} from '../../../packages/security/src/hos
 import {hostedBetaEnabled} from '../../../packages/config/src/hosted-beta';
 import {traceStep} from '../../../packages/shared/src/observability.js';
 import {Client,GatewayIntentBits,Events,type Interaction} from 'discord.js';
+import {InstallNotices} from './install-notices';
+import {DiscordRest} from '../../../packages/discord/src/rest';
+import {observeRoleCoverage,disconnectRoleCoverage,resetRoleCoverage} from '../../../packages/discord/src/role-coverage';
+import {sanitizeBotPostReference,withoutBotPostReference} from '../../../packages/lifecycle/src/alpha16-reference-privacy';
 import {Redis} from 'ioredis';
 import {randomUUID} from 'node:crypto';
-import {normalizeMany,eventSchema,dedupeKey,type Envelope,type Dispatch} from '../../../packages/events/src/index.js';
+import {normalizeMany,eventSchema,dedupeKey,BOT_REPLY_REFERENCE_CONTRACT,type Envelope,type Dispatch} from '../../../packages/events/src/index.js';
 import {scopeForGuild} from '../../../packages/security/src/index.js';
 import type {IdentityVault} from '../../../packages/identity/src/index.js';
 import {sql,tenant,json,ensureGuild,privacyReadLock,type Database,type Tx} from '../../../packages/db/src/index.js';
@@ -16,13 +20,16 @@ export class GatewayPublisher {
  async publish(event:Envelope){return traceStep('event.persist',{'signal.kind':event.kind},()=>this.persist(event));}
  private async persist(event:Envelope){
   event=eventSchema.parse(event);
-  if(!this.db){if(hostedBetaEnabled())throw new Error('BETA_STATE_REQUIRED');return this.publishOnce(event);}
+  if(!this.db){if(hostedBetaEnabled())throw new Error('BETA_STATE_REQUIRED');return this.publishOnce(withoutBotPostReference(event));}
   let streamUnavailable=false;
   await this.db.transaction().execute(async tx=>{
    const s={organizationId:event.organizationId,guildId:event.guildId};
    await privacyReadLock(tx,s);
    try{const beta=await betaAccess(tx,s,'work',event.betaGeneration);if(beta)event={...event,betaGeneration:beta.generation};}
    catch(error){if(error instanceof Error&&error.message==='BETA_UNAVAILABLE')return;throw error;}
+   const priorReference=event.referenceId;
+   event=await sanitizeBotPostReference(tx,s,event);
+   if(priorReference&&!event.referenceId&&event.kind==='channel.post_observed')await sql`UPDATE gateway_ingest SET payload=payload-'referenceId'-'referenceType'-'botReplyReferenceContract' WHERE ${tenant(s)} AND dedupe_key=${dedupeKey(event)}`.execute(tx);
    try{await this.publishOnce(event,tx);}catch(error){if(error instanceof Error&&error.message==='Gateway stream unavailable')streamUnavailable=true;else throw error;}
   });
   if(streamUnavailable)throw new Error('Gateway stream unavailable');
@@ -53,27 +60,31 @@ export class GatewayPublisher {
 export function createGateway(redis:Redis,vault:IdentityVault,onError:()=>void=()=>{},db?:Database,onInteraction?:(interaction:Interaction)=>Promise<void>){
  const client=new Client({intents:gatewayIntents});const publisher=new GatewayPublisher(redis,db,vault);const sessions=new Map<number,string>(),pending=new Map<string,Promise<void>>();let healthSequence=0;
  const healthSession=randomUUID();const disconnected=new Set<number>(),intentDenied=new Set<number>();
- const registerGuild=async(guildId:string)=>{if(!db)return;const scope=scopeForGuild(guildId);await db.transaction().execute(async tx=>{if(hostedBetaEnabled()){try{await betaAccess(tx,scope);}catch(error){if(error instanceof Error&&error.message==='BETA_UNAVAILABLE')return;throw error;}}await ensureGuild(tx,scope);});};
+ const notices=db&&process.env.DISCORD_TOKEN&&process.env.DISCORD_APPLICATION_ID?new InstallNotices(db,new DiscordRest(process.env.DISCORD_TOKEN,process.env.DISCORD_APPLICATION_ID)):undefined;
+ const registerGuild=async(guildId:string)=>{if(!db)return false;const scope=scopeForGuild(guildId);return db.transaction().execute(async tx=>{if(hostedBetaEnabled()){try{await betaAccess(tx,scope);}catch(error){if(error instanceof Error&&error.message==='BETA_UNAVAILABLE')return false;throw error;}}const existed=(await sql`SELECT guild_id FROM guilds WHERE ${tenant(scope)}`.execute(tx)).rows.length>0;await ensureGuild(tx,scope);return !existed;});};
  const health=async(kind:Envelope['kind'],shardId?:number,reason:Envelope['healthReason']='GATEWAY_CONNECTED')=>{
   for(const guild of client.guilds.cache.values())if(shardId===undefined||guild.shardId===shardId){
    if(kind==='telemetry.heartbeat'&&disconnected.has(guild.shardId))continue;
    await registerGuild(guild.id);
-   const event:Envelope={...scopeForGuild(guild.id),shardId:guild.shardId,gatewaySessionId:healthSession,sequence:healthSequence++,kind,healthReason:reason,requestedIntents:intentDenied.has(guild.shardId)?['messages','reactions','polls','voice','scheduledEvents','autoMod']:['members','messages','reactions','polls','voice','scheduledEvents','autoMod'],at:new Date().toISOString(),context:'PRODUCTION'};
+   const event:Envelope={...scopeForGuild(guild.id),shardId:guild.shardId,gatewaySessionId:healthSession,sequence:healthSequence++,kind,healthReason:reason,botReplyReferenceContract:BOT_REPLY_REFERENCE_CONTRACT,requestedIntents:intentDenied.has(guild.shardId)?['messages','reactions','polls','voice','scheduledEvents','autoMod']:['members','messages','reactions','polls','voice','scheduledEvents','autoMod'],at:new Date().toISOString(),context:'PRODUCTION'};
    await publisher.publish(event).catch(onError);
   }
  };
  client.on('raw',(packet:Dispatch,shardId:number)=>{
+  observeRoleCoverage(packet,shardId);
   if(packet.t==='READY'){const data=packet.d as {session_id:string};sessions.set(shardId,data.session_id);}
   const session=sessions.get(shardId);if(!session)return;
   try{const events=normalizeMany(packet,shardId,session,vault);for(const event of events)if((event.kind==='message.sent'||event.kind==='channel.post_observed')&&event.channelId){const channel=client.channels.cache.get(event.channelId);if(channel&&'guildId' in channel&&channel.guildId===event.guildId){event.channelType=channel.type;event.parentId='parentId' in channel?channel.parentId:null;}}if(events.length){const guildId=events[0]!.guildId,next=(pending.get(guildId)??Promise.resolve()).then(()=>registerGuild(guildId)).then(async()=>{for(const event of events)await publisher.publish(event);}).catch(onError);pending.set(guildId,next);void next.finally(()=>{if(pending.get(guildId)===next)pending.delete(guildId);});}}catch{onError();}
  });
  client.on(Events.GuildDelete,guild=>{if(db&&hostedBetaEnabled())void db.transaction().execute(tx=>requestBetaDeletion(tx,scopeForGuild(guild.id),'BOT_REMOVED')).catch(onError);});
- client.on(Events.GuildCreate,guild=>{void registerGuild(guild.id).then(()=>health('telemetry.connected',guild.shardId,'BOT_INSTALLED')).catch(onError);});
- client.on(Events.ClientReady,()=>{void health('telemetry.connected',undefined,'PROCESS_RESTART');});
+ // SDK14.27 only emits GuildCreate for an uncached guild while Ready;
+ // availability/reconnect is separate. Neither is itself proof of first install.
+ client.on(Events.GuildCreate,guild=>{void registerGuild(guild.id).then(async firstRegistration=>{if(guild.available)await notices?.observe(scopeForGuild(guild.id),{source:'created',botJoinedAt:guild.joinedTimestamp,firstRegistration,systemChannelId:guild.systemChannelId});await health('telemetry.connected',guild.shardId,'BOT_INSTALLED');}).catch(onError);});
+ client.on(Events.ClientReady,()=>{void (async()=>{await health('telemetry.connected',undefined,'PROCESS_RESTART');for(const guild of client.guilds.cache.values())if(guild.available)await notices?.observe(scopeForGuild(guild.id),{source:'ready',botJoinedAt:guild.joinedTimestamp,firstRegistration:false,systemChannelId:guild.systemChannelId});})().catch(onError);});
  client.on(Events.ShardReady,shardId=>{disconnected.delete(shardId);const restored=intentDenied.delete(shardId);void health('telemetry.connected',shardId,restored?'INTENT_RESTORED':'GATEWAY_CONNECTED');});
  client.on(Events.ShardResume,shardId=>{disconnected.delete(shardId);void health('telemetry.connected',shardId,'GATEWAY_RESUMED');});
- client.on(Events.ShardDisconnect,(close,shardId)=>{disconnected.add(shardId);if(close.code===4014)intentDenied.add(shardId);void health('telemetry.disconnected',shardId,close.code===4014?'INTENT_UNAVAILABLE':'GATEWAY_CONNECTED');});
+ client.on(Events.ShardDisconnect,(close,shardId)=>{disconnectRoleCoverage(shardId);disconnected.add(shardId);if(close.code===4014)intentDenied.add(shardId);void health('telemetry.disconnected',shardId,close.code===4014?'INTENT_UNAVAILABLE':'GATEWAY_CONNECTED');});
  if(onInteraction)client.on(Events.InteractionCreate,interaction=>{void onInteraction(interaction).catch(onError);});
  const heartbeat=setInterval(()=>{void health('telemetry.heartbeat');},30000);heartbeat.unref();
- return {client,publisher,stop:async()=>{clearInterval(heartbeat);await client.destroy();}};
+ return {client,publisher,stop:async()=>{clearInterval(heartbeat);resetRoleCoverage();await client.destroy();}};
 }

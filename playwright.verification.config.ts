@@ -1,6 +1,12 @@
-import {defineConfig} from '@playwright/test';
-const web=Number(process.env.NEXUS_VERIFICATION_WEB_PORT??3150),api=Number(process.env.NEXUS_VERIFICATION_API_PORT??3151);
-export default defineConfig({testDir:'tests/e2e',testMatch:'verification.spec.ts',workers:1,fullyParallel:false,use:{baseURL:`http://127.0.0.1:${web}`,screenshot:'off',trace:'off'},webServer:[
- {command:'corepack pnpm exec tsx tests/e2e/verification-server.ts',url:`http://127.0.0.1:${api}/health`,timeout:60000,reuseExistingServer:false},
- {command:'corepack pnpm exec tsx tests/e2e/verification-web.ts',url:`http://127.0.0.1:${web}`,timeout:60000,reuseExistingServer:false}
-]});
+import { defineConfig } from "@playwright/test";
+import alpha17 from "./playwright.alpha17.config";
+
+// The legacy verification spec imports the same isolated browser fixture.
+export default defineConfig({
+  ...alpha17,
+  projects: undefined,
+  testMatch: "verification.spec.ts",
+  outputDir: "test-results",
+  timeout: 30000,
+  use: { ...alpha17.use, screenshot: "off", trace: "off" },
+});

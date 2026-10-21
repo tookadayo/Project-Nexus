@@ -18,6 +18,7 @@ import {
 } from "./navigation-model";
 import { AccessNotice, type AccessState } from "./access-notice";
 import { HomeSummary } from "./home-summary";
+import { Alpha15Dashboard } from "./alpha15-dashboard";
 import { Measurements, AnalysisSummary } from "./measurements";
 import { ServerConnection } from "./link/connection";
 import { FailureNotice } from "./failure-ui";
@@ -56,6 +57,7 @@ import {
   ResponseDistributionChart,
   TrendChart,
 } from "./charts";
+import "./workspace.css";
 
 type Locale = "en" | "ja";
 const navPages = [
@@ -1672,7 +1674,7 @@ export default function Console({
       <div className="page-head">
         <div>
           <p className="eyebrow">{t(locale, "web.measure_what_worked")}</p>
-          <h1>{c.results}</h1>
+          <h2>{c.results}</h2>
           <p className="orientation">
             {t(locale, "web.compare_usual_operation_with_the_improvement")}
           </p>
@@ -2772,11 +2774,14 @@ export default function Console({
         {(
           [
             [0, "home", "ホーム", "Home"],
-            [5, "analysis", "分析", "Analysis"],
-            [8, "attention", "要確認", "Needs attention"],
+            [-1, "automation", "自動化", "Automation"],
+            [5, "analysis", "分析", "Analytics"],
+            [8, "attention", "対応", "Tasks"],
             [3, "history", "履歴", "History"],
           ] as const
-        ).map(([view, kind, ja, en]) => (
+        ).map(([view, kind, ja, en]) => view === -1 ? (
+          <a key="automation" href="/automation"><NavIcon kind="automation" />{locale === "ja" ? ja : en}</a>
+        ) : (
           <button
             key={view}
             aria-current={page === view ? "page" : undefined}
@@ -2786,6 +2791,7 @@ export default function Console({
             {locale === "ja" ? ja : en}
           </button>
         ))}
+        <a href={data.selectedGuildId ? `/setup?guild=${encodeURIComponent(data.selectedGuildId)}&edit=1` : "/servers"}><NavIcon kind="settings" />{locale === "ja" ? "設定" : "Settings"}</a>
       </nav>
       <details className="nav-group">
         <summary>{locale === "ja" ? "分析の詳細" : "Analysis details"}</summary>
@@ -2794,6 +2800,7 @@ export default function Console({
           <a href="/explore">
             {locale === "ja" ? "分析と保存ビュー" : "Explore & saved views"}
           </a>
+          <a href="/analysis">{locale === "ja" ? "詳細分析" : "Detailed analysis"}</a>
         </nav>
       </details>
       <details className="nav-group">
@@ -2807,6 +2814,11 @@ export default function Console({
               ? "対応・自動化・レポート"
               : "Attention, automation & reports"}
           </a>
+          <a href="/rules">{locale === "ja" ? "ルールからの提案" : "Rule suggestions"}</a>
+          <a href="/onboarding-flows">{locale === "ja" ? "参加案内のフロー" : "Onboarding flows"}</a>
+          <a href="/lifecycle-interventions">{locale === "ja" ? "参加の支援" : "Lifecycle interventions"}</a>
+          <a href="/experiments">{locale === "ja" ? "改善の比較" : "Experiments"}</a>
+          <a href="/reports/definitions">{locale === "ja" ? "レポートの定義" : "Report definitions"}</a>
         </nav>
       </details>
       <details className="nav-group">
@@ -2816,6 +2828,16 @@ export default function Console({
         </summary>
         <nav>
           {group([4, 9, 11, 12, 13, 14])}
+          <a href="/health">{locale === "ja" ? "準備状況とデータの状態" : "Readiness and data health"}</a>
+          <a href="/rules/issues">{locale === "ja" ? "課題と対応の一覧" : "Issue mappings"}</a>
+          <a href="/rules/sources">{locale === "ja" ? "ルールの計測対象設定" : "Rule source settings"}</a>
+          <a href="/rules/config">{locale === "ja" ? "ルールの評価設定" : "Rule evaluation settings"}</a>
+          <a href="/rules/context">{locale === "ja" ? "運営状況の設定" : "Operating context"}</a>
+          <a href="/rules/evaluations">{locale === "ja" ? "ルール評価とsource確認" : "Rule evaluation and source health"}</a>
+          <a href="/templates">{locale === "ja" ? "テンプレート" : "Templates"}</a>
+          <a href="/preferences">{locale === "ja" ? "自分の設定" : "My preferences"}</a>
+          <a href="/automation/managed-roles">{locale === "ja" ? "ロール操作の設定" : "Managed role policies"}</a>
+          <a href="/operations/maintenance">{locale === "ja" ? "保存済みの運用を管理" : "Manage saved operations"}</a>
           <a href="/operations?view=organization">
             {locale === "ja" ? "組織とチーム" : "Organization & teams"}
           </a>
@@ -2864,14 +2886,17 @@ export default function Console({
       </main>
     );
   return (
-    <div className="product">
+    <div className="product nx-workspace">
+      <a className="workspace-skip" href="#workspace-content">
+        {locale === "ja" ? "本文へ移動" : "Skip to content"}
+      </a>
       <aside className="sidebar">
         <a className="brand" href="/">
           <BrandAsset />
         </a>
         {navigation}
       </aside>
-      <main className="content">
+      <main className="content" id="workspace-content" tabIndex={-1}>
         <div className="mobile-head">
           <a className="brand" href="/">
             <BrandAsset variant="blue" />
@@ -2937,6 +2962,9 @@ export default function Console({
             locale={locale}
             onSettings={() => setPage(4)}
           />
+        )}
+        {page === 0 && (
+          <Alpha15Dashboard guildId={data.selectedGuildId ?? ""} locale={locale} />
         )}
         {page === 0 && (
           <HomeSummary

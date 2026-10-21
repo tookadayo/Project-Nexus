@@ -87,8 +87,8 @@ export function ServerConnection({
                   "Unlinking stops collection, revokes this server’s access, and promptly requests deletion of analytics, history and settings.",
                 )
               : c(
-                  "解除してもBot、分析データ、履歴、設定は保持されます。再接続には /nexus link が必要です。",
-                  "Disconnecting preserves the bot, analytics, history, and settings. Run /nexus link to reconnect.",
+                  "解除してもBot、分析データ、履歴、設定は保持されます。再接続はサーバー一覧からWeb設定を開き、現在の権限を確認して行えます。",
+                  "Disconnecting preserves the bot, analytics, history, and settings. Reconnect through web setup from the server list after checking your current permissions.",
                 )}
           </p>
           {confirmation ? (

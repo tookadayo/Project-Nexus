@@ -9,9 +9,26 @@ export function OperationsNavigation({
     ["/dashboard", "Home", "ホーム"],
     ["/operations?view=attention", "Needs attention", "要確認"],
     ["/explore", "Explore", "分析"],
+    ["/analysis", "Detailed analysis", "詳細分析"],
+    ["/automation", "Automation", "自動化"],
+    ["/automation/managed-roles", "Managed role policies", "ロール操作の設定"],
+    ["/onboarding-flows", "Onboarding flows", "参加案内のフロー"],
+    ["/templates", "Templates", "テンプレート"],
+    ["/experiments", "Experiments", "実験"],
+    ["/lifecycle-interventions", "Lifecycle interventions", "参加の支援"],
+    ["/preferences", "My preferences", "自分の設定"],
+    ["/health", "Readiness and data health", "準備状況とデータの状態"],
+    ["/operations/maintenance", "Manage saved operations", "保存済みの運用を管理"],
     ["/operations?view=reports", "Reports", "レポート"],
+    ["/reports/definitions", "Report definitions", "レポートの定義"],
     ["/operations?view=playbooks", "Playbooks", "Playbook"],
     ["/operations?view=improvements", "Improvements", "改善"],
+    ["/rules", "Rule suggestions", "ルールからの提案"],
+    ["/rules/issues", "Issue mappings", "課題と施策の対応表"],
+    ["/rules/sources", "Rule source settings", "ルールの計測対象設定"],
+    ["/rules/config", "Rule evaluation settings", "ルールの評価設定"],
+    ["/rules/context", "Operating context", "運営状況の設定"],
+    ["/rules/evaluations", "Rule evaluation and source health", "ルール評価とsource確認"],
     ["/operations?view=intake", "Intake", "相談"],
     ["/operations?view=events", "Events", "イベント"],
     ["/operations?view=organization", "Organization", "組織"],
@@ -52,7 +69,7 @@ export function OperationsNavigation({
                 key={href}
                 href={href}
                 aria-current={
-                  href === "/operations?view=" + active ? "page" : undefined
+                  href === "/operations?view=" + active || href === "/" + active || (active === "maintenance" && href === "/operations/maintenance") || (active === "managed-roles" && href === "/automation/managed-roles") || (active === "report-definitions" && href === "/reports/definitions") || (active === "rule-issues" && href === "/rules/issues") || (active === "rule-sources" && href === "/rules/sources") || (active === "rule-config" && href === "/rules/config") || (active === "rule-context" && href === "/rules/context") || (active === "rule-evaluations" && href === "/rules/evaluations") ? "page" : undefined
                 }
               >
                 {locale === "ja" ? ja : en}

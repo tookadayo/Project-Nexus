@@ -1,6 +1,7 @@
-import { test, expect, type BrowserContext } from "@playwright/test";
+import { test, expect, type BrowserContext } from "./alpha17-verification-fixture";
 import { navigateDashboard } from "./dashboard-navigation";
-const base = `http://127.0.0.1:${process.env.NEXUS_VERIFICATION_WEB_PORT ?? 3150}`,
+import type { APIResponse, Page } from "@playwright/test";
+const base = process.env.NEXUS_VERIFICATION_WEB_ORIGIN ?? `http://127.0.0.1:${process.env.NEXUS_VERIFICATION_WEB_PORT ?? 3150}`,
   fixture = `http://127.0.0.1:${process.env.NEXUS_VERIFICATION_API_PORT ?? 3151}`;
 const ids = [
     "931111111111111111",
@@ -29,6 +30,30 @@ async function signIn(context: BrowserContext, userId = user, locale = "en") {
     },
     { name: "nexus_locale", value: locale, url: base },
   ]);
+}
+// Obtain the real session-bound proof through Next; never synthesize a token or
+// install a global header that would bypass the intentional rejection tests.
+async function sessionCsrfHeaders(context: BrowserContext, guildId: string) {
+  const issued = await context.request.get(base + "/servers", { maxRedirects: 0 });
+  expect(issued.status()).toBe(200);
+  const token = (await context.cookies(base)).find(cookie => cookie.name === "nexus_csrf")?.value;
+  expect(Boolean(token && /^[A-Za-z0-9_-]{32}\.[A-Za-z0-9_-]{43}$/.test(token))).toBe(true);
+  if (!token) throw new Error("TEST_SESSION_CSRF_NOT_ISSUED");
+  return { origin: base, "sec-fetch-site": "same-origin", "X-Nexus-Guild": guildId, "X-Nexus-CSRF": token };
+}
+async function confirmSelectedGuild(page: Page, guildId: string) {
+  expect(new URL(page.url()).pathname).toBe("/auth/select");
+  expect(new URL(page.url()).searchParams.get("guild")).toBe(guildId);
+  const confirmed = page.waitForResponse(response => new URL(response.url()).pathname === "/auth/select" && response.request().method() === "POST");
+  await page.getByRole("button", { name: /Open$/ }).click();
+  expect((await confirmed).status()).toBe(303);
+}
+async function safeResponseStatus(response: APIResponse) {
+  if (response.ok()) return "status=" + response.status();
+  const body: unknown = await response.json().catch(() => undefined);
+  const value = body && typeof body === "object" && "error" in body ? body.error : undefined;
+  const code = typeof value === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : "UNCLASSIFIED";
+  return "status=" + response.status() + " error=" + code;
 }
 for (const locale of ["en", "ja"])
   test(`verification pages show four real states and fit mobile (${locale})`, async ({
@@ -86,18 +111,37 @@ test("logged-out /link returns through OAuth and GET cannot redeem", async ({
   });
   expect(login.headers().location).toContain("discord.com/oauth2/authorize");
   expect(login.headers()["set-cookie"]).toContain("nexus_oauth_next");
-  const sessionResponse = await request.post("/link/redeem", {
+  // Missing CSRF and missing session are separate rejections. Keep the real
+  // anonymous cookie binding issued by the preceding /auth/login GET.
+  const csrfRejected = await request.post("/link/redeem", {
     headers: { origin: base, "sec-fetch-site": "same-origin" },
     data: { code: "invalid" },
   });
+  expect(csrfRejected.status()).toBe(403);
+  expect(await csrfRejected.json()).toEqual({ error: "CSRF_REJECTED" });
+  const state = await request.storageState();
+  const originCookies = state.cookies.filter(cookie => cookie.domain === new URL(base).hostname && cookie.path === "/");
+  expect(originCookies.some(cookie => cookie.name === "nexus_session")).toBe(false);
+  const csrf = originCookies.find(cookie => cookie.name === "nexus_csrf")?.value;
+  expect(Boolean(csrf && /^[A-Za-z0-9_-]{32}[.][A-Za-z0-9_-]{43}$/.test(csrf))).toBe(true);
+  if (!csrf) throw new Error("TEST_ANONYMOUS_CSRF_NOT_ISSUED");
+  const sessionResponse = await request.post("/link/redeem", {
+    headers: { origin: base, "sec-fetch-site": "same-origin", "X-Nexus-CSRF": csrf },
+    data: { code: "invalid" },
+  });
   expect(sessionResponse.status()).toBe(401);
+  expect(await sessionResponse.json()).toEqual({ error: "SESSION_REQUIRED" });
 });
 test("unverified and arbitrary URLs cannot expose dashboard data", async ({
   page,
   context,
 }) => {
   await signIn(context);
-  for (const guildId of [ids[1], ids[2], "999111111111111112"]) {
+  for (const guildId of [ids[1]!, ids[2]!, "999111111111111112"]) {
+    await page.goto(`/dashboard/${guildId}`);
+    await confirmSelectedGuild(page, guildId);
+    // Selection is a real CSRF-protected POST; it does not authorize an
+    // unverified or arbitrary guild to read the dashboard.
     await page.goto(`/dashboard/${guildId}`);
     await expect(page).toHaveURL(/\/servers$/);
   }
@@ -145,6 +189,11 @@ test("issuer-only redemption and confirmed disconnect preserve settings while Be
   await expect(page.getByRole("heading", { name: "Connected" })).toBeVisible();
   expect(capturedUrls.every((url) => !url.includes(code))).toBe(true);
   await page.getByRole("link", { name: "Open Dashboard", exact: true }).click();
+  await confirmSelectedGuild(page, ids[1]!);
+  await expect(page).toHaveURL(base + "/setup?guild=" + ids[1]);
+  // The fixture has not completed setup. Selection still requires its real
+  // confirmation POST before an explicit Dashboard request is authorized.
+  await page.goto(`/dashboard/${ids[1]}`);
   await expect(page).toHaveURL(new RegExp(`/dashboard/${ids[1]}$`));
   const before = await (
     await request.get(`${fixture}/fixture/data/${ids[1]}`)
@@ -204,8 +253,14 @@ test("permission loss blocks a verified dashboard on revalidation", async ({
   context,
   request,
 }) => {
+  const completed = await request.post(fixture + "/fixture/setup-complete", { data: { guildId: ids[0] } });
+  expect(completed.status()).toBe(200);
+  const stored = await request.get(fixture + "/fixture/data/" + ids[0]);
+  expect(stored.status()).toBe(200);
+  expect((await stored.json()).settings.setupVersion).toBe(3);
   await signIn(context);
   await page.goto(`/dashboard/${ids[0]}`);
+  await confirmSelectedGuild(page, ids[0]!);
   await expect(page).toHaveURL(new RegExp(`/dashboard/${ids[0]}$`));
   await request.post(`${fixture}/fixture/permission`, {
     data: { guildId: ids[0], allowed: false },
@@ -236,7 +291,9 @@ for (const locale of ["en", "ja"])
     await page.goto("/billing/manage");
     const statusResponse = await page.request.get("/billing/status");
     expect(statusResponse.status()).toBe(200);
-    expect(statusResponse.headers()["cache-control"]).toBe("no-store");
+    const cacheDirectives = statusResponse.headers()["cache-control"]?.split(",").map(value => value.trim().toLowerCase()) ?? [];
+    expect(cacheDirectives).toContain("no-store");
+    expect(cacheDirectives.every(value => value === "no-store" || value === "max-age=0")).toBe(true);
     const model = await statusResponse.json();
     expect(model.canManage).toBe(false);
     expect(model.presentation.revision).toBe(1);
@@ -275,12 +332,19 @@ for (const locale of ["en", "ja"])
         () => document.documentElement.scrollWidth <= innerWidth + 1,
       ),
     ).toBe(true);
-    const headers = { origin: base, "sec-fetch-site": "same-origin" };
+    const missingProof = await page.request.post("/billing/actions", {
+      headers: { origin: base, "sec-fetch-site": "same-origin" },
+      data: { action: "redeem", code: "invalid" },
+    });
+    expect(missingProof.status()).toBe(403);
+    expect(await missingProof.json()).toEqual({ error: "CSRF_REJECTED" });
+    const headers = await sessionCsrfHeaders(context, ids[0]!);
     const denied = await page.request.post("/billing/actions", {
       headers,
       data: { action: "redeem", code: "invalid" },
     });
     expect(denied.status()).toBe(403);
+    expect((await denied.json()).error).toBe("BILLING_AUTHORIZATION_REQUIRED");
     await request.post(`${fixture}/fixture/billing-authority`, {
       data: { guildId: ids[0], enabled: true },
     });
@@ -365,6 +429,7 @@ for (const locale of ["en", "ja"])
         data: { action: "redeem", code: "invalid" },
       });
       expect(stale.status()).toBe(403);
+      expect((await stale.json()).error).toBe("BILLING_AUTHORIZATION_REQUIRED");
       expect((await page.request.get("/billing/status")).status()).toBe(403);
     } finally {
       await request.post(`${fixture}/fixture/permission`, {
@@ -382,19 +447,30 @@ for (const locale of ["en", "ja"])
     context,
     request,
   }) => {
+    const started = performance.now();
+    const checkpoint = (phase: string, details: Record<string, string | number> = {}) =>
+      console.info(JSON.stringify({ kind: "operations-test-timing", locale, phase, routeClass: new URL(page.url()).pathname === "/auth/select" ? "AUTH_SELECT" : new URL(page.url()).pathname === "/operations" ? "OPERATIONS" : "OTHER", elapsedMs: Math.round(performance.now() - started), ...details }));
     const guildId = locale === "ja" ? ids[2]! : ids[0]!;
     await signIn(context, user, locale);
     await context.addCookies([
       { name: "nexus_guild", value: guildId, url: base },
     ]);
     await page.setViewportSize({ width: 360, height: 800 });
-    const headers = {
-      origin: base,
-      "sec-fetch-site": "same-origin",
-      "X-Nexus-Guild": guildId,
+    const headers = await sessionCsrfHeaders(context, guildId);
+    const get = async (path: string) => {
+      const url = new URL(path, base), view = url.searchParams.get("view") ?? "NONE";
+      const route = ["/operations/data", "/explore/data"].includes(url.pathname) ? url.pathname : "OTHER";
+      const label = ["attention", "intake", "calendar", "jobs", "reports", "organization", "credentials", "integrations", "NONE"].includes(view) ? view : "OTHER";
+      const began = performance.now();
+      try {
+        const response = await page.request.get(path, { headers: { "X-Nexus-Guild": guildId } });
+        checkpoint("READ", { route, view: label, status: response.status(), requestMs: Math.round(performance.now() - began) });
+        return response;
+      } catch (error) {
+        checkpoint("READ_NO_RESPONSE", { route, view: label, requestMs: Math.round(performance.now() - began) });
+        throw error;
+      }
     };
-    const get = (path: string) =>
-      page.request.get(path, { headers: { "X-Nexus-Guild": guildId } });
     // Reuse the earlier verified connection in the full suite. A filtered run
     // establishes its own connection instead of consuming redundant redemption
     // attempts and tripping the real user-wide verification rate limit.
@@ -402,13 +478,11 @@ for (const locale of ["en", "ja"])
       const { code } = await (
         await request.post(`${fixture}/fixture/code`, { data: { guildId } })
       ).json();
-      expect(
-        (
-          await page.request.post("/link/redeem", { headers, data: { code } })
-        ).ok(),
-      ).toBe(true);
+      const redeemed = await page.request.post("/link/redeem", { headers, data: { code } });
+      expect(redeemed.ok(), await safeResponseStatus(redeemed)).toBe(true);
     }
     async function tier(plan: string) {
+      checkpoint("TIER_BEGIN", { plan: ["FREE", "STARTER", "GROWTH", "SCALE"].includes(plan) ? plan : "OTHER" });
       expect(
         (
           await request.post(`${fixture}/fixture/operations-plan`, {
@@ -615,6 +689,7 @@ for (const locale of ["en", "ja"])
       "integrations",
     ]) {
       await page.goto(`/operations?view=${view}`);
+      checkpoint("SCALE_UI_LOADED", { view: ["attention", "intake", "calendar", "jobs", "reports", "organization", "credentials", "integrations"].includes(view) ? view : "OTHER" });
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       await expect(page.locator(".page-head")).toContainText("SCALE");
       expect(
@@ -676,19 +751,12 @@ test("explicit Viewer reads operations but cannot configure despite a Discord ma
   await context.addCookies([
     { name: "nexus_guild", value: ids[0]!, url: base },
   ]);
-  const headers = {
-    origin: base,
-    "sec-fetch-site": "same-origin",
-    "X-Nexus-Guild": ids[0]!,
-  };
-  expect(
-    (
-      await page.request.post("/operations/data", {
-        headers,
-        data: { action: "organization", input: { name: "Operations QA" } },
-      })
-    ).status(),
-  ).toBe(200);
+  const headers = await sessionCsrfHeaders(context, ids[0]!);
+  const organization = await page.request.post("/operations/data", {
+    headers,
+    data: { action: "organization", input: { name: "Operations QA" } },
+  });
+  expect(organization.status(), await safeResponseStatus(organization)).toBe(200);
   expect(
     (
       await page.request.post("/operations/data", {
@@ -711,18 +779,16 @@ test("explicit Viewer reads operations but cannot configure despite a Discord ma
         data: { guildId: ids[0], userId: other },
       })
     ).json();
-    expect(
-      (
-        await reader.request.post("/link/redeem", { headers, data: { code } })
-      ).ok(),
-    ).toBe(true);
+    const readerHeaders = await sessionCsrfHeaders(reader, ids[0]!);
+    const redeemed = await reader.request.post("/link/redeem", { headers: readerHeaders, data: { code } });
+    expect(redeemed.ok(), await safeResponseStatus(redeemed)).toBe(true);
     const model = await reader.request.get("/operations/data?view=reports", {
-      headers,
+      headers: { "X-Nexus-Guild": ids[0]! },
     });
     expect(model.status()).toBe(200);
     expect((await model.json()).access.permissions).toEqual(["READ"]);
     const write = await reader.request.post("/operations/data", {
-      headers,
+      headers: readerHeaders,
       data: {
         action: "intake",
         input: { title: "Should be denied", category: "workflow" },

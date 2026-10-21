@@ -8,3 +8,14 @@ export function discordInstallUrl(applicationId:string,guildId?:string){
  if(guildId){url.searchParams.set('guild_id',guildId);url.searchParams.set('disable_guild_select','true');}
  return url.toString();
 }
+
+/** A public destination only. This URL never conveys identity, state or authority. */
+export function discordSetupUrl(origin:string,guildId:string,complete=false){
+ if(!/^\d{17,20}$/.test(guildId))throw new Error('INVALID_GUILD_ID');
+ const base=new URL(origin);
+ if(base.username||base.password||base.pathname!=='/'||base.search||base.hash||
+   !(base.protocol==='https:'||base.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(base.hostname)))throw new Error('INVALID_WEB_ORIGIN');
+ const url=new URL(complete?`/dashboard/${guildId}`:'/setup',base);
+ if(!complete)url.searchParams.set('guild',guildId);
+ return url.toString();
+}

@@ -326,7 +326,7 @@ function clearPrivateState() {
   $("logout").hidden = true;
   $("login").hidden = false;
 }
-async function api(path, body, requestCsrf = csrf) {
+async function api(path, body, requestCsrf = csrf, permissionUnavailable = false) {
   const generation = authGeneration;
   let response, value;
   try {
@@ -346,6 +346,7 @@ async function api(path, body, requestCsrf = csrf) {
   }
   if (generation !== authGeneration) throw new Error("STALE_RESPONSE");
   if (!response.ok) {
+    if (permissionUnavailable && response.status === 403 && value.error === "PERMISSION_DENIED") return null;
     if (response.status === 401 || value.error === "OPERATOR_LOGIN_REQUIRED")
       clearPrivateState();
     notice(errorKey(value.error));
@@ -396,7 +397,7 @@ function table(heads, rows) {
   return wrap;
 }
 async function reload() {
-  const [data, overview] = await Promise.all([api("guilds"), api("overview")]);
+  const [data, overview] = await Promise.all([api("guilds"), api("overview", undefined, csrf, true)]);
   $("guild-list").replaceChildren();
   if (!data.guilds.length) $("guild-list").append(element("p", t("empty")));
   data.guilds.forEach((g) => {
@@ -415,6 +416,9 @@ async function reload() {
     $("guild-list").append(button);
   });
   $("overview").replaceChildren();
+  if (!overview) {
+    $("overview").append(element("p", language === "ja" ? "この権限では全体集計を表示できません。" : "Global overview is unavailable for this grant."));
+  } else {
   const active = data.guilds.filter(
     (g) => g.status === "ACTIVE" && new Date(g.expires_at) > new Date(),
   ).length;
@@ -457,6 +461,7 @@ async function reload() {
       list.append(button);
     });
     $("overview").append(list);
+  }
   }
   if (selected) await detail(selected);
   else $("guild-detail").replaceChildren(element("p", t("select")));

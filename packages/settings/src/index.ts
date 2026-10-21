@@ -1,5 +1,6 @@
 import {betaAccess,betaLock} from '../../security/src/hosted-beta';
 import {privacyReadLock} from '../../db/src/index';
+import { acquireRuleScopeLocks, ruleScopeLockSet } from "../../rules/src/locks";
 export * from "./billing/index";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
@@ -233,8 +234,23 @@ export class SettingsService {
     revision: number,
     change: (current: Settings, tx: Tx) => Promise<Settings>,
     redactAudit = false,
+    beforeWrite?: (tx: Tx) => Promise<void>,
   ): Promise<SettingsView> {
-    return this.db.transaction().execute(async (tx) => {
+    return this.db.transaction().execute((tx) => this.mutateInTransaction(tx, s, actor, revision, change, redactAudit, beforeWrite));
+  }
+  /** Native configuration writers may join an existing transaction; settings,
+   * published flow and authoring receipt then commit or roll back together. */
+  async mutateInTransaction(
+    tx: Tx,
+    s: Scope,
+    actor: Actor,
+    revision: number,
+    change: (current: Settings, tx: Tx) => Promise<Settings>,
+    redactAudit = false,
+    beforeWrite?: (tx: Tx) => Promise<void>,
+  ): Promise<SettingsView> {
+      assert(tx.isTransaction, "CONFIG_TRANSACTION_REQUIRED", 500);
+      await acquireRuleScopeLocks(tx, ruleScopeLockSet(s));
       if(redactAudit){
         // All mutating paths acquire privacy, Beta, then settings locks.
         // A deletion must never wait for privacy while owning the settings lock.
@@ -323,6 +339,7 @@ export class SettingsService {
             next.memberStages,
           ),
         );
+      await beforeWrite?.(tx);
       if (next.enabled && !before.enabled)
         await sql`DELETE FROM deletion_requests WHERE ${tenant(s)} AND lookup_hash IS NULL`.execute(
           tx,
@@ -331,10 +348,12 @@ export class SettingsService {
         !next.onboardingEnabled || (next.startChannelId && next.flowVersionId),
         "ONBOARDING_NOT_CONFIGURED",
       );
+      await beforeWrite?.(tx);
       await sql`INSERT INTO guild_settings(organization_id,guild_id,revision,settings) VALUES(${s.organizationId}::uuid,${s.guildId},${revision + 1},${json(next)})
     ON CONFLICT(organization_id,guild_id) DO UPDATE SET revision=EXCLUDED.revision,settings=EXCLUDED.settings`.execute(
         tx,
       );
+      await beforeWrite?.(tx);
       await audit(
         tx,
         s,
@@ -345,17 +364,18 @@ export class SettingsService {
         redactAudit ? null : before,
         redactAudit ? { enabled: false } : next,
       );
+      await beforeWrite?.(tx);
       return { ...next, revision: revision + 1 };
-    });
   }
   async update(
     s: Scope,
     actor: Actor,
     revision: number,
     patch: Partial<Settings>,
+    beforeWrite?: (tx: Tx) => Promise<void>,
   ) {
     return this.mutate(s, actor, revision, async (current) =>
-      settingsSchema.parse({ ...current, ...patch }),
+      settingsSchema.parse({ ...current, ...patch }), false, beforeWrite,
     );
   }
 }

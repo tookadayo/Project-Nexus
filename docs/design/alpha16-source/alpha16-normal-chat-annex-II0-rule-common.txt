@@ -1,0 +1,120 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 03:23 UTC
+Reasoning: 極高. Design only, tool-free response requested. No implementation or tests. Runtime budgets are unvalidated candidates.
+
+付録II-0：ルール共通評価契約
+0. 適用範囲・契約区分
+
+本契約はalpha16のルールベース評価エンジン、Fact入力、評価結果、後続Suggestion生成に共通して適用する。現在コードで確認されているのは「固定閾値方式のルール診断」であり、以下の評価エンジン契約はalpha16で追加する設計である。threshold、budget等の数値は未検証の設計候補であり、承認前は稼働設定として扱わない。
+
+1. Fact入力契約
+
+評価対象Factは、少なくとも次の型付き項目を持つ。
+
+項目	契約
+metricId	許可済みmetric registryに存在する識別子。自由なmetric名は禁止
+dimension	許可された対象軸の構造化値。未定義軸は禁止
+period_role	CURRENT / PREVIOUS 等の固定enum
+windowStart / windowEnd	UTC timestamp。windowStart < windowEnd
+sourceRevision	source adapter側の観測・集計版
+snapshotId	immutable Fact snapshot識別子
+sourceHealthObservationIds	immutable source-health observation IDの集合＋対応版集合
+value	nullable typed value。metric registryで許可された型だけ
+quality	SUFFICIENT / MISSING / STALE / PARTIAL / SUPPRESSED 等の固定enum
+
+valueは型判別子と値を組み合わせたdiscriminated typeとし、文字列化された数値等で型を曖昧にしない。業務Factにはraw投稿、DM、自由文、secret、不要な個人ID、個人の心理・属性・人間関係の推測を格納しない。個人別scoreや機械学習の訓練データとして利用しない。
+
+Factのsource-health情報は業務Factと混在させず、sourceHealthObservationIdsによって観測事実を参照する。DATA-001等の品質判定は、業務指標そのものが欠測しているのか、source health/coverage/last successful observationが未確認なのかを区別する。
+
+2. 時刻契約
+
+evaluationAsOfは最初のenqueue時にserverが固定する。初回評価時刻、対象Fact snapshot集合、source-health observation ID＋版集合を同時に固定し、job・dedupe・input hashに含める。
+
+評価windowはUTCの半開区間 [windowStart, windowEnd) とする。暦日等の境界を必要とする場合は、保存されたIANA time zoneを用いて暦上の境界をUTCへ変換してから評価する。経過時間windowと暦日windowを同一視しない。DSTによって暦日の実時間長が変化しても、暦日指定はそのIANA zone上の暦日境界を優先する。
+
+遅着データや訂正データは既存snapshotを書き換えず、新しいsnapshot／source revisionとして扱う。retry、resume、worker再起動ではevaluationAsOf、Fact集合、source-health集合を現在時刻のものへ差し替えない。同一jobの再処理は同一入力契約を維持し、新しい明示的評価要求だけが新しいevaluationAsOfを持つ。
+
+3. 数値・比較契約
+
+比率系ruleは、可能な限り明示的な
+
+numerator / denominator
+
+として定義する。denominator = 0 は0%とは扱わず、判定不能とする。
+
+decimal計算を使用し、比較判定は丸め前の値で行う。表示用丸めと判定用値を分離する。percent（例：12.5%）とpercentage point（例：+3.0 percentage points）は別単位として扱い、増減比較で混同しない。
+
+thresholdは各ruleのversioned configに属し、比較演算子も固定する。threshold値・minN等はすべて未検証の設計候補であり、configが承認されるまで稼働評価には使用しない。
+
+4. 決定論契約
+
+評価結果を再現するため、評価時点で以下を固定する。
+
+ruleId
+
+ruleVersion
+
+engineVersion
+
+configVersion
+
+schemaVersion
+
+evaluationAsOf
+
+評価対象Factのcanonical serialization
+
+canonical input hash
+
+source-health observation ID＋版集合
+
+rule評価順序および依存DAG
+
+canonical serializationはfield順、enum表現、数値表現、nullable値等を一意に定め、同一入力・同一version集合なら同一評価結果になることを契約とする。
+
+複数指標を統計的に「独立」とは扱わない。qualityやminNも信頼確率・統計的信頼度・匿名性保証を意味しない。
+
+問題解消済みとして後続処理に利用できるのは、必要なFact品質条件を満たしたNO_FIREだけとする。MISSING、STALE、INSUFFICIENT_N、PRIVACY_SUPPRESSED等を伴う結果を「問題なし」の根拠にはしない。
+
+5. 結果契約
+
+ruleの評価結果enumは次の4値に固定する。
+
+result	意味
+FIRE	rule条件を満たし、改善提案生成の対象となる
+NO_FIRE	必要なFactが十分に利用可能で、rule条件を満たさない
+INELIGIBLE	対象条件・データ条件等により評価対象外
+DISABLED	rule/configが承認済み稼働状態ではない
+
+reasonCodeによって少なくともMISSING、STALE、INSUFFICIENT_N、PRIVACY_SUPPRESSED、ZERO_DENOMINATOR、DISABLED_CONFIG等を区別する。
+
+FIREであっても、それだけでSuggestionの自動適用を意味しない。Suggestionは人が読む改善案であり、自動適用、automation activation、課金、投稿、権限変更等を行わない。
+
+6. Bounded evaluator契約
+
+Rule本体から任意コード実行、任意SQL、network accessを禁止する。評価エンジンは許可されたmetric registry、Fact adapter、固定演算子、固定DAGだけを利用する。
+
+初期budgetは設計候補として以下を採用する。
+
+budget	初期候補	許容変更範囲
+rule数	50	1〜200
+Fact数	500	50〜2,000
+target数	100	10〜500
+evaluator実行時間	5秒	1〜30秒
+計算ステップ	10,000	1,000〜100,000
+
+これらは未検証の設計候補であり、既存Automation Runtimeの実行予算を変更するものではない。alpha16のrule evaluator budgetはAutomation評価budgetとは独立して管理する。
+
+budget超過、deadline到達、cancel、tombstone検知等が発生した場合、部分的に得られた結果を正常な評価結果として公開しない。評価jobは失敗・中断等の非正常状態として扱い、部分結果をNO_FIREやFIREの根拠に利用しない。
+
+7. 承認・保持契約
+
+thresholdその他のconfigは、承認済みversionだけが稼働対象となる。未承認configを評価engineへ有効設定として投入してはならず、該当ruleはDISABLEDとする。
+
+既存の許可済みsource adapterから必要Factを取得できない場合は、本文収集や新規個人ID保存で補完せず、MISSINGまたは利用不能な場合はDISABLED／blockedとして扱う。
+
+Run終了後の最小状態は既存契約どおり7日以内に削除し、backup保持は7日とする。Factやevaluationを別保存先へ複製してRun保持を延長してはならない。7日を超える比較期間を必要とするruleは、既存Runを延命せず、別途認可された長期aggregate sourceが存在する場合のみ成立させる。該当sourceが存在しない場合、そのruleはblockedとする。
+
+その他のFact・evaluation・Suggestion等の個別保持期間は本契約では決定せず、未検証・承認待ちとして別途判断する。旧30日／24か月案や一律7日を新たに採用しない。
+
+以上をalpha16の全ルール個票に共通する評価contractとし、個別ruleではこの契約を上書きせず、metric・source・対象・window・threshold・action等の差分だけを定義する。

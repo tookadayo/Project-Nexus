@@ -1,12 +1,12 @@
-import { sql, tenant, json, type Database } from "../../db/src/index.js";
+import { sql, tenant, json, type Database } from "../../db/src/index";
 import type { Scope } from "../../shared/src/index.js";
-import { SettingsService } from "../../settings/src/index.js";
+import { SettingsService } from "../../settings/src/index";
 import {
   canonicalMetrics,
   inputCoverage,
   metricRegistry,
   type CoverageMetric,
-} from "./registry.js";
+} from "./registry";
 export type MetricValue = {
   value: number | null;
   sampleSize: number;
@@ -23,9 +23,9 @@ export type MetricEvent = {
   data: Record<string, unknown>;
 };
 export type Overview = Record<string, MetricValue>;
-import { latestCapability, analysisChannelScope } from "../../lifecycle/src/discovery.js";
+import { latestCapability, analysisChannelScope } from "../../lifecycle/src/discovery";
 import type { MetricEvidence } from "../../shared/src/metric-evidence.js";
-import { buildMetricEvidence, evidenceContext } from "./evidence.js";
+import { buildMetricEvidence, evidenceContext } from "./evidence";
 const day = 86400000;
 function quantile(values: number[], p: number) {
   if (!values.length) return null;

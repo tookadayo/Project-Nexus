@@ -66,7 +66,7 @@ type Data = {
     features: Record<string, boolean>;
     limits: { historyDays: number | null; intakePanels: number | null };
   };
-  destinations: (Named & { kind: string; channel_id: string | null })[];
+  destinations: (Named & { kind: string; channel_id: string | null; revision: number })[];
   teams: Named[];
   items?: {
     message_id: string;
@@ -150,6 +150,7 @@ type Data = {
     change: ChartSpec["comparison"];
   }[];
   credentials?: (Named & {
+    revision: number;
     prefix: string;
     scopes: string[];
     kind: string;
@@ -157,9 +158,11 @@ type Data = {
   })[];
   webhooks?: {
     endpoints: (Named & {
-      url: string;
+      urlDisplay: string;
+      revision: number;
       secret_version: number;
       failures: number;
+      delivery_gate?: "UNVERIFIED" | "OPEN" | "UNKNOWN_BLOCKED";
     })[];
     deliveries: {
       id: string;
@@ -2045,7 +2048,7 @@ export function OperationsControls({
                   <button
                     disabled={busy}
                     onClick={() =>
-                      void send("destinationDisable", { id: destination.id })
+                      void send("destinationDisable", { id: destination.id, expectedRevision: destination.revision })
                     }
                   >
                     {t("Disable", "停止")}
@@ -2055,7 +2058,7 @@ export function OperationsControls({
                   <button
                     disabled={busy}
                     onClick={() =>
-                      void send("destinationResume", { id: destination.id })
+                      void send("destinationResume", { id: destination.id, expectedRevision: destination.revision })
                     }
                   >
                     {t("Verify & reactivate", "確認して再開")}
@@ -2122,7 +2125,7 @@ export function OperationsControls({
                     busy || !configure || credential.state === "REVOKED"
                   }
                   onClick={() =>
-                    void send("credentialRevoke", { id: credential.id })
+                    void send("credentialRevoke", { id: credential.id, expectedRevision: credential.revision })
                   }
                 >
                   {t("Revoke", "無効化")}
@@ -2131,7 +2134,7 @@ export function OperationsControls({
                   <button
                     disabled={busy || !can("api")}
                     onClick={() =>
-                      void send("credentialResume", { id: credential.id })
+                      void send("credentialResume", { id: credential.id, expectedRevision: credential.revision })
                     }
                   >
                     {t("Review & resume", "確認して再開")}
@@ -2183,28 +2186,40 @@ export function OperationsControls({
                 </Button>
               </form>
             </Gate>
+            <p>{t(
+              "Enabling an endpoint does not confirm that its queued deliveries were sent. Sending also requires current authorization and sender readiness.",
+              "送信先を有効にしても、待機中の送信が完了したことにはなりません。送信には現在の認可と送信処理の準備も必要です。",
+            )}</p>
             {data?.webhooks?.endpoints.map((endpoint) => (
               <article key={endpoint.id}>
                 <h3>
                   {endpoint.name} · {state(endpoint.state ?? "")}
                 </h3>
                 <p>
-                  {endpoint.url} · {t("Key version", "鍵の版")}:{" "}
+                  {endpoint.urlDisplay} · {t("Key version", "鍵の版")}:{" "}
                   {endpoint.secret_version}
+                </p>
+                <p role={endpoint.delivery_gate === "UNKNOWN_BLOCKED" ? "alert" : "status"}>
+                  {endpoint.delivery_gate === "UNKNOWN_BLOCKED"
+                    ? t("A previous delivery has an unknown result. Sending remains stopped; enabling or rotating the secret does not resolve it.", "以前の送信結果が不明なため、送信を停止しています。有効化や秘密鍵の更新では解除されません。")
+                    : endpoint.delivery_gate === "OPEN"
+                      ? t("The destination gate is open. Every send still requires current safety and sender readiness.", "送信先の制限は開いています。各送信時にも現在の安全条件と送信処理の準備を確認します。")
+                      : t("Sending remains stopped until this destination's safety conditions are verified.", "この送信先の安全条件を確認できるまで、送信を停止します。")}
                 </p>
                 <button
                   disabled={busy || !can("webhooks")}
                   onClick={() =>
-                    void send("webhookRotate", { id: endpoint.id })
+                    void send("webhookRotate", { id: endpoint.id, expectedRevision: endpoint.revision })
                   }
                 >
                   {t("Rotate secret", "秘密鍵を更新")}
                 </button>
                 <button
-                  disabled={busy || !configure}
+                  disabled={busy || !configure || endpoint.state !== "ENABLED" && endpoint.delivery_gate === "UNKNOWN_BLOCKED"}
                   onClick={() =>
                     void send("webhookEnabled", {
                       id: endpoint.id,
+                      expectedRevision: endpoint.revision,
                       enabled: endpoint.state !== "ENABLED",
                     })
                   }

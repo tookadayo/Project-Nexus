@@ -1,0 +1,111 @@
+.automation-definition-manager {
+  min-width: 0;
+  margin: 1rem 0;
+  border: 1px solid #ccd8df;
+  border-radius: 0.65rem;
+  padding: 1rem;
+  background: #f8fafc;
+  color: #1b3440;
+}
+.automation-definition-manager summary {
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 2rem;
+  overflow-wrap: anywhere;
+}
+.automation-definition-manager p,
+.automation-definition-manager small,
+.automation-definition-manager span {
+  overflow-wrap: anywhere;
+}
+.automation-definition-create {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+.automation-definition-list {
+  list-style: none;
+  margin: 1rem 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+.automation-definition-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.automation-definition-list button {
+  text-align: left;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+.automation-definition-manager fieldset,
+.automation-definition-version {
+  min-width: 0;
+  border: 1px solid #c7d5dc;
+  border-radius: 0.4rem;
+  padding: 0.8rem;
+  margin: 0.75rem 0;
+}
+.automation-definition-manager label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+  min-width: 0;
+}
+.automation-definition-manager label > small {
+  flex-basis: 100%;
+  font-size: 0.75rem;
+}
+.automation-definition-manager input:not([type="checkbox"]),
+.automation-definition-manager select {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.automation-definition-manager input[type="checkbox"] {
+  flex: none;
+  min-width: 1.1rem;
+  min-height: 1.1rem;
+}
+.automation-definition-manager button {
+  min-height: 2.5rem;
+  white-space: normal;
+}
+.automation-definition-parameter {
+  padding: 0.65rem 0;
+  border-bottom: 1px solid #d9e3e9;
+}
+.automation-definition-diff ul {
+  padding-left: 1.1rem;
+}
+.automation-definition-diff li {
+  padding: 0.4rem 0;
+  overflow-wrap: anywhere;
+}
+.automation-definition-diff strong {
+  display: block;
+}
+.automation-definition-manager [role="alert"] {
+  color: #8b2030;
+  background: #fff0f1;
+  padding: 0.6rem;
+}
+@media (max-width: 480px) {
+  .automation-definition-manager {
+    padding: 0.65rem;
+  }
+  .automation-definition-manager fieldset {
+    padding: 0.5rem;
+  }
+  .automation-definition-manager input:not([type="checkbox"]),
+  .automation-definition-manager select {
+    width: 100%;
+  }
+}

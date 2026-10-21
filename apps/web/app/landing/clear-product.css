@@ -1,0 +1,675 @@
+/* Phase A: public surfaces only. Product/dashboard tokens are untouched. */
+.nexus-site.nx-clear-product {
+  --nx-text: #17212b;
+  --nx-secondary: #526171;
+  --nx-accent: #2758ca;
+  --nx-accent-hover: #1f47a8;
+  --nx-border: #dbe1e8;
+  --nx-surface: #f7f9fc;
+}
+.nx-clear-product .nx-container {
+  width: min(1200px, calc(100% - 64px));
+}
+.nx-clear-product :is(main, section[id], h2[id]) {
+  scroll-margin-top: 88px;
+}
+.nx-clear-product :is(a, button, summary, select):focus-visible {
+  outline: 3px solid #2758ca;
+  outline-offset: 4px;
+}
+.nexus-site.nx-clear-product[lang="ja"] :is(h1, h2, h3) {
+  letter-spacing: 0;
+  line-break: strict;
+}
+.nexus-site.nx-clear-product :is(.nx-hero, .nx-product-hero) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 48px;
+  padding-block: 72px 80px;
+}
+.nx-clear-product .nx-hero-copy {
+  width: 100%;
+  max-width: 1060px;
+  text-align: center;
+}
+.nexus-site.nx-clear-product .nx-hero h1 {
+  max-width: 1000px;
+  margin-inline: auto;
+  font-size: clamp(40px, 4vw, 54px);
+  line-height: 1.18;
+  font-weight: 550;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+.nexus-site.nx-clear-product[lang="ja"] .nx-hero h1 {
+  font-size: clamp(36px, 3.4vw, 48px);
+  line-height: 1.5;
+}
+.nx-clear-product .nx-hero .nx-heading-phrase {
+  display: inline-block;
+}
+.nx-clear-product .nx-hero .nx-heading-phrase:first-child {
+  display: block;
+}
+.nexus-site.nx-clear-product .nx-lead {
+  max-width: 700px;
+  margin: 24px auto 0;
+  font-size: 17px;
+  line-height: 1.8;
+  color: var(--nx-secondary);
+}
+.nx-clear-product .nx-hero .nx-cta-row {
+  justify-content: center;
+  margin-top: 28px;
+}
+.nexus-site.nx-clear-product .nx-button {
+  min-height: 48px;
+  border-radius: 7px;
+  font-size: 15px;
+  transition:
+    background-color 140ms,
+    border-color 140ms;
+}
+.nx-clear-product .nx-availability {
+  margin-top: 20px;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--nx-secondary);
+}
+.nx-clear-product .nx-availability a {
+  color: var(--nx-accent);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.nexus-site.nx-clear-product .nx-hero-example {
+  width: 100%;
+  max-width: 1140px;
+  margin: 0;
+  overflow: hidden;
+  text-align: left;
+  background: var(--nx-surface);
+  border: 1px solid var(--nx-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px #17212b09;
+}
+.nx-clear-product .nx-preview-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 28px;
+  border-bottom: 1px solid var(--nx-border);
+  background: #fff;
+  font-size: 14px;
+}
+.nx-clear-product .nx-preview-bar .nx-brand {
+  padding-right: 16px;
+  border-right: 1px solid var(--nx-border);
+}
+.nx-clear-product .nx-preview-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--nx-secondary);
+}
+.nx-clear-product .nx-preview-body {
+  padding: 28px;
+}
+.nx-clear-product .nx-preview-heading {
+  display: block;
+}
+.nexus-site.nx-clear-product .nx-preview-heading h2 {
+  font-size: 26px;
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+.nx-clear-product .nx-preview-heading p {
+  color: var(--nx-secondary);
+  font-size: 14px;
+  margin-top: 4px;
+}
+.nx-clear-product .nx-preview-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-block: 24px;
+}
+.nx-clear-product .nx-preview-cards article {
+  padding: 24px;
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+  background: white;
+}
+.nexus-site.nx-clear-product .nx-preview-cards h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  line-height: 1.6;
+  letter-spacing: 0;
+  font-weight: 550;
+}
+.nx-clear-product .nx-preview-cards h3 svg {
+  color: var(--nx-secondary);
+}
+.nx-clear-product .nx-preview-cards article > p:last-child {
+  font-size: 14px;
+  color: var(--nx-secondary);
+  line-height: 1.75;
+  margin-top: 12px;
+}
+.nx-clear-product .nx-preview-count {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 12px;
+}
+.nx-clear-product .nx-preview-count strong {
+  font-size: 38px;
+  line-height: 1.3;
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+.nx-clear-product .nx-preview-count span {
+  font-size: 14px;
+  color: var(--nx-secondary);
+}
+.nx-clear-product .nx-preview-state {
+  display: inline-block;
+  font-size: 23px;
+  font-weight: 550;
+  line-height: 1.6;
+  margin-top: 16px;
+  color: #805100;
+}
+.nx-clear-product .nx-preview-recent {
+  padding: 20px 24px;
+  background: white;
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+}
+.nexus-site.nx-clear-product .nx-preview-recent h3 {
+  font-size: 16px;
+  line-height: 1.6;
+  letter-spacing: 0;
+}
+.nx-clear-product .nx-preview-recent ul {
+  list-style: none;
+  padding: 0;
+}
+.nx-clear-product .nx-preview-recent li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  border-top: 1px solid var(--nx-border);
+  margin-top: 16px;
+  padding-top: 16px;
+}
+.nx-clear-product .nx-preview-recent li > div {
+  flex: 1;
+  min-width: 180px;
+}
+.nx-clear-product .nx-preview-recent li > div strong {
+  overflow-wrap: anywhere;
+}
+.site.nx-clear-product .site-section.nx-pricing-beta {
+  padding-block: 16px 32px;
+}
+.nx-clear-product .nx-preview-recent strong {
+  font-size: 16px;
+  font-weight: 550;
+}
+.nx-clear-product .nx-preview-recent p,
+.nx-clear-product .nx-preview-recent time {
+  font-size: 14px;
+  color: var(--nx-secondary);
+  line-height: 1.75;
+}
+.nx-clear-product .nx-preview-record-state {
+  padding: 4px 10px;
+  border-radius: 4px;
+  background: #f0f4fb;
+  color: #365581;
+  font-size: 14px;
+}
+.nx-clear-product .nx-example-footnote {
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--nx-secondary);
+  margin-top: 16px;
+}
+.nexus-site.nx-clear-product :is(.nx-section, .nx-demo-section) {
+  padding-block: 80px;
+}
+.nx-clear-product .nx-section-heading {
+  max-width: 760px;
+}
+.nexus-site.nx-clear-product .nx-section-heading h2 {
+  margin-top: 0;
+  font-size: clamp(28px, 3vw, 38px);
+  line-height: 1.45;
+  font-weight: 550;
+  letter-spacing: -0.025em;
+}
+.nx-clear-product .nx-section-heading > p {
+  max-width: 680px;
+  font-size: 17px;
+  line-height: 1.8;
+  margin-top: 20px;
+}
+.nx-clear-product .nx-demo-section {
+  background: var(--nx-surface);
+  border-block: 1px solid #e9edf2;
+}
+.nx-clear-product .nx-demo-intro {
+  gap: 48px;
+  align-items: start;
+  margin-bottom: 32px;
+}
+.nx-clear-product .nx-demo-intro > p {
+  max-width: 640px;
+  line-height: 1.8;
+}
+.nx-clear-product .nx-demo-section .nx-interactive-preview {
+  background: white;
+  padding: 28px;
+  border-color: var(--nx-border);
+  box-shadow: none;
+}
+.nx-clear-product .nx-demo-controls {
+  padding-block: 16px;
+  border-bottom: 1px solid var(--nx-border);
+}
+.nx-clear-product .nx-demo-card {
+  padding: 16px 0 0;
+}
+.nx-clear-product .nx-workflow {
+  padding: 0;
+  list-style: none;
+  margin-block: 40px 0;
+}
+.nx-clear-product .nx-workflow > li {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 48px;
+  align-items: center;
+  padding-block: 48px;
+  border-bottom: 1px solid var(--nx-border);
+}
+.nx-clear-product .nx-workflow > li:first-child {
+  padding-top: 16px;
+}
+.nx-clear-product .nx-workflow > li:nth-child(2) {
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+}
+.nx-clear-product .nx-workflow > li:nth-child(2) .nx-workflow-main {
+  grid-column: 2;
+  grid-row: 1;
+}
+.nx-clear-product .nx-workflow > li:nth-child(2) .nx-feature-screen {
+  grid-column: 1;
+  grid-row: 1;
+}
+.nexus-site.nx-clear-product .nx-workflow h3 {
+  margin: 0 0 20px;
+  font-size: clamp(23px, 2.2vw, 28px);
+  line-height: 1.5;
+  font-weight: 550;
+}
+.nx-clear-product .nx-workflow-main > p {
+  font-size: 16px;
+  line-height: 1.8;
+  color: var(--nx-secondary);
+}
+.nx-clear-product .nx-workflow-main .nx-workflow-detail {
+  margin-top: 20px;
+  padding: 0;
+  border: 0;
+  font-size: 14px;
+  line-height: 1.8;
+}
+.nx-clear-product .nx-feature-screen {
+  min-width: 0;
+  margin: 0;
+  padding: 16px;
+  background: var(--nx-surface);
+  border-radius: 8px;
+}
+.nx-clear-product .nx-feature-screen-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--nx-border);
+  border-radius: 5px;
+  background: #fff;
+}
+.nx-clear-product .nx-feature-screen img {
+  display: block;
+  width: 100%;
+  min-width: 580px;
+  height: auto;
+}
+.nx-clear-product .nx-feature-screen figcaption {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding-top: 12px;
+  font-size: 14px;
+  color: var(--nx-secondary);
+}
+.nx-clear-product .nx-feature-screen a {
+  color: var(--nx-accent);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.nx-clear-product .nx-workflow-onboarding {
+  max-width: 760px;
+  padding-block: 32px;
+  font-size: 16px;
+  line-height: 1.8;
+  color: var(--nx-secondary);
+}
+.nx-clear-product .nx-tinted-section {
+  background: #fff;
+  border-block: 1px solid var(--nx-border);
+}
+.nx-clear-product .nx-setup-steps {
+  gap: 40px;
+  margin-block: 32px;
+}
+.nexus-site.nx-clear-product .nx-setup-steps h3 {
+  font-size: 22px;
+  line-height: 1.5;
+}
+.nx-clear-product .nx-setup-steps p {
+  font-size: 16px;
+  line-height: 1.8;
+}
+.nx-clear-product .nx-step-number {
+  font-size: 16px;
+}
+.nx-clear-product .nx-privacy-section {
+  gap: 64px;
+}
+.nexus-site.nx-clear-product .nx-privacy-list h3 {
+  font-size: 21px;
+  line-height: 1.5;
+}
+.nx-clear-product .nx-privacy-list p {
+  line-height: 1.8;
+}
+.nx-clear-product .nx-beta-section {
+  padding-bottom: 32px;
+}
+.nx-clear-product .nx-beta-notice {
+  background: var(--nx-surface);
+  border: 1px solid var(--nx-border);
+  border-radius: 8px;
+  padding: 32px;
+}
+.nexus-site.nx-clear-product .nx-beta-notice h2 {
+  font-size: 26px;
+  line-height: 1.5;
+}
+.nx-clear-product .nx-beta-notice p {
+  max-width: 80ch;
+  font-size: 16px;
+  line-height: 1.8;
+}
+.nx-clear-product .nx-beta-notice a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  margin-top: 8px;
+}
+.nx-clear-product .nx-plan-note {
+  border: 0;
+  border-bottom: 1px solid var(--nx-border);
+  border-radius: 0;
+  padding: 24px 0 56px;
+  gap: 48px;
+  background: #fff;
+}
+.nexus-site.nx-clear-product :is(.nx-plan-note, .nx-news-entry) h2 {
+  font-size: 28px;
+  line-height: 1.5;
+  font-weight: 550;
+}
+.nx-clear-product :is(.nx-plan-note, .nx-news-entry) p {
+  max-width: 760px;
+  margin-top: 16px;
+  color: var(--nx-secondary);
+  line-height: 1.8;
+}
+.nx-clear-product .nx-news-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 40px;
+  padding-block: 56px;
+  border-bottom: 1px solid var(--nx-border);
+}
+.nx-clear-product .nx-news-entry > a {
+  flex-shrink: 0;
+}
+.nx-clear-product .nx-faq {
+  grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
+  gap: 64px;
+}
+.nx-clear-product .nx-faq summary {
+  min-height: 64px;
+  font-size: 17px;
+  line-height: 1.7;
+}
+.nx-clear-product .nx-faq details p {
+  font-size: 16px;
+  line-height: 1.8;
+}
+.nx-clear-product .nx-final-cta {
+  padding-block: 64px;
+  background: var(--nx-surface);
+  color: var(--nx-text);
+}
+.nexus-site.nx-clear-product .nx-final-cta h2 {
+  font-size: clamp(26px, 3vw, 36px);
+  line-height: 1.5;
+  font-weight: 550;
+}
+.nx-clear-product .nx-final-cta p {
+  max-width: 680px;
+  font-size: 16px;
+  line-height: 1.8;
+  color: var(--nx-secondary);
+  margin-top: 16px;
+}
+.nx-clear-product .nx-final-cta .nx-cta-row {
+  margin-top: 24px;
+}
+.site.nx-clear-product :is(.site-section, .pricing-grid) {
+  max-width: 1264px;
+  padding-inline: 32px;
+}
+.site.nx-clear-product
+  :is(.news-page, .legal-page.support-page, .publication-status-page) {
+  max-width: 864px;
+  padding: 64px 32px 80px;
+}
+.site.nx-clear-product
+  :is(.pricing-intro, .news-page, .support-page, .publication-status-page)
+  h1 {
+  font-size: clamp(32px, 4vw, 46px);
+  line-height: 1.4;
+  letter-spacing: -0.025em;
+}
+.site.nx-clear-product .button {
+  font-size: 14px;
+  min-height: 48px;
+}
+.nx-clear-product .site-footer.nx-site-footer {
+  max-width: 1264px;
+  padding-inline: 32px;
+}
+.nx-clear-product .nx-footer-group a {
+  min-height: 44px;
+}
+@media (max-width: 960px) {
+  .nx-clear-product .nx-demo-intro {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .nx-clear-product .nx-preview-cards {
+    gap: 12px;
+  }
+  .nx-clear-product .nx-preview-cards article {
+    padding: 18px;
+  }
+  .nx-clear-product .nx-workflow > li,
+  .nx-clear-product .nx-workflow > li:nth-child(2) {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  .nx-clear-product
+    .nx-workflow
+    > li:nth-child(2)
+    :is(.nx-workflow-main, .nx-feature-screen) {
+    grid-column: auto;
+    grid-row: auto;
+  }
+  .nx-clear-product .nx-workflow-main > p {
+    max-width: 680px;
+  }
+  .nx-clear-product .nx-feature-screen img {
+    min-width: 0;
+  }
+  .nx-clear-product :is(.nx-plan-note, .nx-news-entry) {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 24px;
+  }
+  .nx-clear-product :is(.nx-faq, .nx-privacy-section) {
+    gap: 36px;
+  }
+}
+@media (max-width: 640px) {
+  .nx-clear-product .nx-container {
+    width: calc(100% - 40px);
+  }
+  .nexus-site.nx-clear-product :is(.nx-hero, .nx-product-hero) {
+    padding-block: 44px 48px;
+    gap: 32px;
+  }
+  .nexus-site.nx-clear-product .nx-hero h1,
+  .nexus-site.nx-clear-product[lang="ja"] .nx-hero h1 {
+    font-size: clamp(28px, 7.6vw, 36px);
+    line-height: 1.45;
+  }
+  .nexus-site.nx-clear-product .nx-lead {
+    font-size: 16px;
+    text-align: left;
+    margin-top: 20px;
+  }
+  .nx-clear-product .nx-hero .nx-cta-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .nx-clear-product .nx-availability {
+    text-align: left;
+    font-size: 14px;
+  }
+  .nx-clear-product .nx-preview-bar {
+    padding: 16px;
+    gap: 8px 12px;
+  }
+  .nx-clear-product .nx-preview-label {
+    width: 100%;
+    margin-left: 0;
+  }
+  .nx-clear-product .nx-preview-body {
+    padding: 20px 16px;
+  }
+  .nx-clear-product .nx-preview-cards {
+    grid-template-columns: 1fr;
+    margin-block: 20px;
+  }
+  .nx-clear-product .nx-preview-cards article {
+    padding: 20px;
+  }
+  .nx-clear-product .nx-preview-recent {
+    padding: 20px;
+  }
+  .nx-clear-product .nx-preview-recent li {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .nx-clear-product .nx-preview-recent li > div {
+    min-width: 0;
+  }
+  .nexus-site.nx-clear-product :is(.nx-section, .nx-demo-section) {
+    padding-block: 48px;
+  }
+  .nexus-site.nx-clear-product .nx-section-heading h2 {
+    font-size: 28px;
+    line-height: 1.5;
+  }
+  .nx-clear-product .nx-section-heading > p {
+    font-size: 16px;
+  }
+  .nx-clear-product .nx-demo-section .nx-interactive-preview {
+    padding: 16px;
+  }
+  .nx-clear-product .nx-demo-intro {
+    margin-bottom: 24px;
+  }
+  .nx-clear-product .nx-workflow > li {
+    padding-block: 32px;
+  }
+  .nx-clear-product .nx-feature-screen {
+    padding: 12px;
+  }
+  .nx-clear-product .nx-feature-screen img {
+    min-width: 580px;
+  }
+  .nx-clear-product :is(.nx-faq, .nx-privacy-section, .nx-setup-steps) {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+  .nx-clear-product .nx-beta-notice {
+    padding: 24px 20px;
+  }
+  .nexus-site.nx-clear-product .nx-beta-notice h2 {
+    font-size: 23px;
+  }
+  .nx-clear-product :is(.nx-plan-note, .nx-news-entry) {
+    padding-block: 24px 40px;
+  }
+  .nx-clear-product .nx-final-cta {
+    padding-block: 48px;
+  }
+  .site.nx-clear-product
+    :is(
+      .site-section,
+      .pricing-grid,
+      .news-page,
+      .legal-page.support-page,
+      .publication-status-page
+    ),
+  .nx-clear-product .site-footer.nx-site-footer {
+    padding-inline: 20px;
+  }
+  .site.nx-clear-product
+    :is(.news-page, .legal-page.support-page, .publication-status-page) {
+    padding-block: 40px 56px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nx-clear-product *,
+  .nx-clear-product *::before,
+  .nx-clear-product *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}

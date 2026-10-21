@@ -51,12 +51,12 @@ it('keeps unknown, expired, used and revoked failures generic without echoing in
 });
 it('returns logged-out verification pages through OAuth without copying query code into the return URL',async()=>{
  await session();vi.stubEnv('DISCORD_APPLICATION_ID',guild);vi.stubEnv('DISCORD_CLIENT_SECRET','test-client-secret');
- const unauth=proxy(new NextRequest('https://nexus.example/link?code=never-consumed'));expect(unauth.headers.get('location')).toBe('https://nexus.example/auth/login?next=%2Flink');
+ const unauth=await proxy(new NextRequest('https://nexus.example/link?code=never-consumed',{headers:{host:'nexus.example'}}));expect(unauth.headers.get('location')).toBe('https://nexus.example/auth/login?next=%2Flink');
  const started=await login(new NextRequest('https://nexus.example/auth/login?next=/link'));expect(started.cookies.get('nexus_oauth_next')?.value).toBe('/link');
  const bad=await login(new NextRequest('https://nexus.example/auth/login?next=/link?code=never-consumed'));expect(bad.cookies.get('nexus_oauth_next')?.value).not.toBe('/link?code=never-consumed');
  vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce({ok:true,json:async()=>({access_token:'token',refresh_token:'synthetic-refresh',token_type:'Bearer',expires_in:3600,scope:'identify guilds'})}).mockResolvedValueOnce({ok:true,json:async()=>({id:user})}));
  const returned=await callback(new NextRequest('https://nexus.example/auth/callback?state=state&code=oauth-grant',{headers:{cookie:'nexus_oauth_state=state; nexus_oauth_next=/link'}}));expect(returned.headers.get('location')).toBe('https://nexus.example/link');
- const post=proxy(request('/link/redeem',{code:'secret'}));expect(post.headers.get('location')).toBeNull();
+ const post=await proxy(request('/link/redeem',{code:'secret'}));expect(post.status).toBe(403);expect(await post.json()).toEqual({error:'CSRF_REJECTED'});expect(post.headers.get('location')).toBeNull();
 });
 it('gates dashboard access on backend verification and current authority on every request',async()=>{
  const cookie=await session();vi.stubEnv('API_KEY','a'.repeat(64));vi.stubEnv('DISCORD_TOKEN','bot');
@@ -84,6 +84,6 @@ it('requires signed actor-bound disconnect confirmation and rejects stale or los
  const module=await import('../../apps/web/app/link/disconnect/route');expect('GET' in module).toBe(false);
 });
 it('keeps production Discord links HTTPS and free of codes, tokens and unsafe base URLs',()=>{
- expect(discordDashboardLink('https://nexus.example',guild,false,false)).toBe('https://nexus.example/link');expect(discordDashboardLink('https://nexus.example',guild,false,true)).toBe(`https://nexus.example/dashboard/${guild}`);
+ expect(discordDashboardLink('https://nexus.example',guild,false,false)).toBe(`https://nexus.example/setup?guild=${guild}`);expect(discordDashboardLink('https://nexus.example',guild,false,true)).toBe(`https://nexus.example/dashboard/${guild}`);
  for(const base of ['http://localhost:3100','https://localhost','https://127.0.0.1','https://user:secret@nexus.example','https://nexus.example?code=secret','https://nexus.example#token','javascript:alert(1)'])expect(discordDashboardLink(base,guild,false,false)).toBeUndefined();
 });

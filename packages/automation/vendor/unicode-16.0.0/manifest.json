@@ -1,0 +1,79 @@
+{
+  "unicodeVersion": "16.0.0",
+  "segmentation": "UAX #29 revision 45, default extended grapheme clusters (C1-1)",
+  "normalization": "UAX #15 revision 56",
+  "casing": "Unicode 16 default full case conversion, locale neutral; full default case folding",
+  "sources": [
+    {
+      "file": "auxiliary/GraphemeBreakProperty.txt",
+      "url": "https://www.unicode.org/Public/16.0.0/ucd/auxiliary/GraphemeBreakProperty.txt",
+      "bytes": 98751,
+      "sha256": "c29360bd6f7132811d701d29069541e827eb44bfc4c8fbde8c370d6982689dc1"
+    },
+    {
+      "file": "auxiliary/GraphemeBreakTest.txt",
+      "url": "https://www.unicode.org/Public/16.0.0/ucd/auxiliary/GraphemeBreakTest.txt",
+      "bytes": 171927,
+      "sha256": "ee2b9354d270ac061b29f09662cafea06341d77e704b8cc6bd72aaeeda363cb5"
+    },
+    {
+      "file": "emoji/emoji-data.txt",
+      "url": "https://www.unicode.org/Public/16.0.0/ucd/emoji/emoji-data.txt",
+      "bytes": 113024,
+      "sha256": "f1365a5173eee18e1f98b240cdc492e84a25f1ce7e0c9d1094eb29c41a22696a"
+    },
+    {
+      "file": "DerivedCoreProperties.txt",
+      "url": "https://www.unicode.org/Public/16.0.0/ucd/DerivedCoreProperties.txt",
+      "bytes": 1115959,
+      "sha256": "39d35161f2954497f69e08bdb9e701493f476a3d30222de20028feda36c1dabd"
+    },
+    {
+      "file": "UnicodeData.txt",
+      "url": "https://www.unicode.org/Public/16.0.0/ucd/UnicodeData.txt",
+      "bytes": 2175362,
+      "sha256": "ff58e5823bd095166564a006e47d111130813dcf8bf234ef79fa51a870edb48f"
+    },
+    {
+      "file": "SpecialCasing.txt",
+      "url": "https://www.unicode.org/Public/16.0.0/ucd/SpecialCasing.txt",
+      "bytes": 16809,
+      "sha256": "8d5de354eef79f2395a54c9c7dcebbaf3d30fc962d0f85611ea97aa973a0c451"
+    },
+    {
+      "file": "CaseFolding.txt",
+      "url": "https://www.unicode.org/Public/16.0.0/ucd/CaseFolding.txt",
+      "bytes": 86092,
+      "sha256": "6f1f9c588eb4a5c718d9e8f93b782685e5c7fec872cf05e8e6878053599e09bb"
+    },
+    {
+      "file": "DerivedNormalizationProps.txt",
+      "url": "https://www.unicode.org/Public/16.0.0/ucd/DerivedNormalizationProps.txt",
+      "bytes": 1372269,
+      "sha256": "4d4c03892dea9146d674b686e495df2d55a28d071ac474041d73518f887abddc"
+    },
+    {
+      "file": "PropList.txt",
+      "url": "https://www.unicode.org/Public/16.0.0/ucd/PropList.txt",
+      "bytes": 144253,
+      "sha256": "53d614508e2a0b2305a8aa21cd60d993de9326cdf65993660dfcce4503548583"
+    },
+    {
+      "file": "NormalizationTest.txt",
+      "url": "https://www.unicode.org/Public/16.0.0/ucd/NormalizationTest.txt",
+      "bytes": 2798671,
+      "sha256": "d811971453e7075e1ad56fb1b301eece5aa80757b81f6156e74a1bfb3ae5ceb1"
+    },
+    {
+      "file": "LICENSE.txt",
+      "url": "https://www.unicode.org/license.txt",
+      "bytes": 1995,
+      "sha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
+    }
+  ],
+  "generated": {
+    "file": "generated.json",
+    "bytes": 256905,
+    "sha256": "32facb6673a117ac193e92de38be67eafe00fa7fccb4e58bfad29772848061c9"
+  }
+}

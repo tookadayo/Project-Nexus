@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "revision": "UNSET",
+  "approval": {
+    "reference": "UNSET",
+    "approvedAt": null,
+    "validUntil": null
+  },
+  "scope": {
+    "guildIds": [],
+    "global": false
+  },
+  "readGrant": {
+    "permissions": []
+  },
+  "mutationGrant": {
+    "permissions": []
+  },
+  "retention": [],
+  "stepUp": null,
+  "maintenance": null
+}

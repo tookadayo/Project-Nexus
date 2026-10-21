@@ -90,17 +90,19 @@ try {
       new SettingsService(db),
       (s, hash) => scrubStream(redis!, vault, s, hash),
     );
-    await applyDeletionTombstones(
+    const result = await applyDeletionTombstones(
       db,
       vault,
       privacy,
       openDeletionTombstones((await readFile(path, "utf8")).trim(), key),
     );
     process.stdout.write(
-      "Deletion tombstones applied and restored sessions revoked. Keep recovery offline until remaining gates pass.\n",
+      `Deletion tombstones applied and restored sessions revoked. Runtime ready: ${result.runtimeReady}. Keep recovery offline; backup expiry, independently current tombstones and current target safety remain mandatory.\n`,
     );
   }
-} catch {
+} catch(error) {
+  if(error instanceof Error&&error.message==='TOMBSTONE_MIGRATIONS_REQUIRED')
+    process.stderr.write('Apply all current additive migrations while recovery remains offline, then reapply the newest deletion tombstones.\n');
   process.stderr.write(
     "Tombstone operation failed. Keep restore offline and check the protected configuration and scoped deletion state.\n",
   );

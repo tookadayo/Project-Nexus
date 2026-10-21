@@ -1,0 +1,254 @@
+Source: https://chatgpt.com/c/6ad081d5-2d78-83e8-ad9d-7ada76ef0fa1
+Collected: 2026-10-16 04:22 UTC
+Reasoning: 極高. Design only. Branch ordering/schema issues identified for later correction; not verified implementation-ready.
+
+付録IV-A：実事例01–04の具体分岐
+
+共通 evaluationAsOf: 2026-10-15T12:00:00Z
+共通前提: 個別caseの数値は未検証候補。既存13 Ruleのwindow/minNまたは明示configを参照し、case側で別の測定指標を勝手に追加しない。case-specific action/typed editorは提案のみ。
+
+CASE-01：Onboarding迷子
+
+caseId/version: CASE-01 / v1.0
+source: Discord Community Onboarding FAQ
+種別: OFFICIAL_PRODUCT_GUIDE
+
+事例として使う事実: 短い質問によるchannel/role割当、非必須質問の後回し、管理者preview、設定対象外channelの発見困難。離脱率・効果はこの資料から導出しない。
+
+Rule mapping
+
+Primary: ONB-001
+
+Access gate: PERM-001
+
+品質確認: DATA-001
+
+複数課題の集約時のみ: COMM-001
+
+入力
+field	型/単位	由来	取得不能時
+onb.destinationAccess	enum ALLOWED/WRITE_DENIED/NO_ACCESS/UNKNOWN	permission/capability observation	UNKNOWN
+onb.mandatoryQuestionCount	integer/count	onboarding構造化設定	UNKNOWN
+onb.optionalQuestionCount	integer/count	onboarding構造化設定	UNKNOWN
+onb.discoverabilityState	enum VISIBLE_TO_EXISTING/ONBOARDING_ONLY/UNKNOWN	構造化設定・管理者確認	UNKNOWN
+onb.previewState	enum PASS/FAIL/UNKNOWN	preview結果	UNKNOWN
+onb.channelPurpose	enum HELP/SOCIAL/PROJECT/OTHER/UNKNOWN	channel設定	UNKNOWN
+
+nativeStepDropoffは入力fieldとして採用しない。取得不能な離脱値を作らず、閲覧率から代用もしない。
+
+分岐
+順	branch ID / 条件	unknown時	action / target / mode / owner	見直し
+1	B01 ACCESS：destinationCount>0 AND (destinationAccess=NO_ACCESS OR WRITE_DENIED)	permission不明ならB06	CASE01-ACCESS-REVIEW / GUILD_ONBOARDING / REVIEW_ONLY / GUILD_ADMIN	permission再観測後
+2	B02 MANDATORY：destinationAccess=ALLOWED AND mandatoryQuestionCount > ONB-CASE01.mandatoryQuestionMax	count不明ならB06	CASE01-OPTIONALIZE-REVIEW / ONBOARDING_CONFIG / REVIEW_ONLY / GUILD_ADMIN	次のconfig preview
+3	B03 DISCOVERABILITY：access=ALLOWED AND mandatory条件正常 AND discoverabilityState=ONBOARDING_ONLY	discoverability不明ならB06	CASE01-DISCOVERABILITY-REVIEW / CHANNEL_DISCOVERABILITY / REVIEW_ONLY / GUILD_ADMIN	existing-member導線確認後
+4	B04 PREVIEW：access=ALLOWED AND mandatory条件正常 AND discoverability≠ONBOARDING_ONLY AND previewState=FAIL	preview不明ならB06	CASE01-PREVIEW-FIX / ONBOARDING_CONFIG / REVIEW_ONLY / GUILD_ADMIN	preview再確認
+5	B05 HEALTHY：上記条件なし、必要fieldが全て既知	―	NO_ACTION / GUILD_ONBOARDING / REVIEW_ONLY / GUILD_ADMIN	ONB-001の次window
+6	B06 UNKNOWN：必要source/permission/versionのいずれか不明	―	INELIGIBLE / actionなし	source成立後再評価
+
+CASE01-OPTIONALIZE-REVIEW等のtyped fieldは提案：questionId[], required:boolean, primaryDestinationId等。editor未照合のため現在はREVIEW_ONLY。private/safety channelをdiscoverability改善のため公開化しない。
+
+禁止策: native離脱率の創作、閲覧率から「迷子」を推定、private/safety gate解除、無断role付与、全質問の一律削除。
+
+合成fixture
+fixture	合成入力	期待
+IV-A01-F01	2026-10-15T11:50Z; access=NO_ACCESS; mandatory=unknown	B01 → CASE01-ACCESS-REVIEW
+IV-A01-F02	2026-10-15T11:40Z; access=ALLOWED; mandatory=ONB-CASE01.mandatoryQuestionMax+1; discoverability=VISIBLE	B02 → CASE01-OPTIONALIZE-REVIEW
+IV-A01-F03	2026-10-15T11:30Z; access=ALLOWED; mandatory=ONB-CASE01.mandatoryQuestionMax; discoverability=ONBOARDING_ONLY	B03 → CASE01-DISCOVERABILITY-REVIEW
+IV-A01-F04	2026-10-15T11:20Z; access=ALLOWED; mandatory正常; discoverability=VISIBLE; preview=FAIL	B04 → CASE01-PREVIEW-FIX
+IV-A01-F05	2026-10-15T11:10Z; access=ALLOWED; mandatory正常; discoverability=VISIBLE; preview=PASS	B05 → NO_ACTION
+IV-A01-F06	2026-10-15T11:00Z; access=UNKNOWN	B06 → INELIGIBLE
+CASE-02：最初の投稿に人の反応がない
+
+caseId/version: CASE-02 / v1.0
+source: Photography Community case study
+種別: COMMUNITY_CASE_STUDY / OPERATOR_SELF_REPORT
+
+事例として使う事実: 個別歓迎、週次photo contest、報告された20–30% retention。後者は因果証明ではなく、threshold・目標値・benchmarkには使用しない。
+
+Rule mapping
+
+Primary: ENG-001
+
+継続参加: RET-001
+
+Onboardingとの接続時: ONB-001
+
+集約: COMM-001
+
+入力
+field	型/単位	由来	取得不能時
+welcome.firstPostAt	timestamp UTC	構造化interaction	UNKNOWN
+welcome.humanStaffReplyCount	integer/count	actor分類済みinteraction aggregate	UNKNOWN
+welcome.botReplyCount	integer/count	interaction aggregate	UNKNOWN
+welcome.staffCoverageState	enum IN/OUT/UNKNOWN	IANA schedule + observation	UNKNOWN
+welcome.nextDestinationConfigured	boolean	welcome/onboarding設定	UNKNOWN
+welcome.introRequired	boolean	構造化設定	UNKNOWN
+welcome.channelPurpose	enum INTRO/QUIET_SOCIAL/SHOWCASE/OTHER/UNKNOWN	channel設定	UNKNOWN
+
+20–30% retention値はcase evidenceのみで、入力metricにはしない。
+
+分岐
+順	branch ID / 条件	unknown時	action / target / mode / owner	見直し
+1	B01 PRESSURE-GATE：introRequired=false OR channelPurpose=QUIET_SOCIAL	purpose不明ならB06	CASE02-SUPPRESS-PRESSURE / WELCOME_POLICY / REVIEW_ONLY / COMMUNITY_HOST	次windowで再確認
+2	B02 HUMAN-GAP：introRequired=true AND channelPurpose=INTRO AND staffCoverage=IN AND humanStaffReplyCount=0	coverage/reply不明ならB06	CASE02-WELCOME-ROTATION / WELCOME_POLICY / REVIEW_ONLY / COMMUNITY_HOST	次のstaffed window
+3	B03 OUTSIDE-COVERAGE：staffCoverage=OUT AND humanStaffReplyCount=0	coverage不明ならB06	CASE02-NO-REVIVAL-PING / WELCOME_POLICY / REVIEW_ONLY / COMMUNITY_HOST	次のcoverage window
+4	B04 BOT-ONLY：botReplyCount>0 AND humanStaffReplyCount=0 AND staffCoverage=IN	actor分類不明ならB06	CASE02-HUMAN-WELCOME-REVIEW / WELCOME_POLICY / REVIEW_ONLY / COMMUNITY_HOST	次のstaffed window
+5	B05 NEXT-DESTINATION：humanStaffReplyCount>0 AND nextDestinationConfigured=false	destination不明ならB06	CASE02-NEXT-DESTINATION-REVIEW / WELCOME_FLOW / REVIEW_ONLY / COMMUNITY_HOST	welcome flow再確認
+6	B06 HEALTHY/UNKNOWN：全条件正常ならNO_ACTION、必要field不明ならINELIGIBLE	INELIGIBLE	actionなし	source成立後
+
+typed field候補はcoverageWindowId, welcomeMode, destinationId, pressurePolicy等。未確認editorのためREVIEW_ONLY。
+
+禁止策: 静かなメンバーの削除、一斉revival ping、本人への心理・孤独・継続意図の推測、20–30%を目標値として利用。
+
+合成fixture
+fixture	合成入力	期待
+IV-A02-F01	2026-10-15T09:00Z; introRequired=false; purpose=INTRO	B01 → CASE02-SUPPRESS-PRESSURE
+IV-A02-F02	2026-10-15T10:00Z; intro=true; purpose=INTRO; coverage=IN; human=0	B02 → CASE02-WELCOME-ROTATION
+IV-A02-F03	2026-10-15T02:00Z; intro=true; purpose=INTRO; coverage=OUT; human=0	B03 → CASE02-NO-REVIVAL-PING
+IV-A02-F04	2026-10-15T10:30Z; coverage=IN; human=0; bot=1	B04 → CASE02-HUMAN-WELCOME-REVIEW
+IV-A02-F05	2026-10-15T11:00Z; human=1; nextDestination=false	B05 → CASE02-NEXT-DESTINATION-REVIEW
+IV-A02-F06	2026-10-15T11:30Z; human=1; nextDestination=true; purpose=SHOWCASE	B06 → NO_ACTION
+合成出力例
+
+例A — staffed window内で人の返信がない
+
+「最初の投稿は対応時間帯内ですが、構造化された有人返信が確認されていません。まず少人数の歓迎担当を交代で置く案を確認してください。botによる歓迎は別に記録されるため、人の対応があったとは扱っていません。」
+
+例B — 人の歓迎はあるが次の行き先がない
+
+「最初の歓迎は確認されています。一方、その後に案内する任意の行き先が設定されていません。現在のコミュニティ目的に合う次のchannelや活動への導線を1つだけ確認する案が適しています。」
+
+CASE-03：未回答の時間帯・専門性・情報待ち
+
+caseId/version: CASE-03 / v1.0
+source: Python Discord Help Channel Guide
+種別: PUBLIC_OPERATOR_GUIDE / CASE_OBSERVATION
+
+Rule mapping
+
+Primary: HELP-001
+
+対応手順mapping: PLAY-001
+
+取得品質: DATA-001
+
+集約: COMM-001
+
+入力
+field	型/単位	由来	取得不能時
+support.askerOutcome	enum SOLVED_CONFIRMED/OPEN/UNKNOWN	構造化outcome	UNKNOWN
+support.coverageState	enum IN/OUT/UNKNOWN	IANA schedule + observedAt	UNKNOWN
+support.firstUnansweredAt	timestamp UTC	structured queue event	UNKNOWN
+support.topicClass	enum GENERAL/SPECIALIST/UNKNOWN	明示tag	UNKNOWN
+support.specialistAssigned	enum YES/NO/UNKNOWN	role/assignment state	UNKNOWN
+support.intakeState	enum READY/NEEDS_DETAILS/UNKNOWN	structured intake	UNKNOWN
+
+HELP-001.config.unansweredAgeを経過時間thresholdとして参照し、coverage schedule上の「対応時間外」と混同しない。具体値は未検証config。
+
+分岐
+順	branch ID / 条件	unknown時	action / target / mode / owner	見直し
+1	B01 SOLVED：askerOutcome=SOLVED_CONFIRMED	outcome不明ならB06	CASE03-QUEUE-REMOVE-REVIEW / SUPPORT_QUEUE / REVIEW_ONLY / SUPPORT_LEAD	次queue更新
+2	B02 OUTSIDE：coverageState=OUT AND outcome≠SOLVED_CONFIRMED	coverage不明ならB06	CASE03-NEXT-COVERAGE / SUPPORT_COVERAGE / REVIEW_ONLY / SUPPORT_LEAD	次coverage開始時
+3	B03 GENERAL-UNANSWERED：coverage=IN AND topicClass=GENERAL AND elapsed >= HELP-001.config.unansweredAge	age/topic不明ならB06	CASE03-UNANSWERED-QUEUE / SUPPORT_QUEUE / REVIEW_ONLY / SUPPORT_LEAD	queue再評価
+4	B04 SPECIALIST-HANDOFF：coverage=IN AND topicClass=SPECIALIST AND specialistAssigned=NO	assignment不明ならB06	CASE03-SPECIALIST-HANDOFF / SUPPORT_ROUTING / REVIEW_ONLY / SPECIALIST_COORDINATOR	specialist割当確認
+5	B05 NEEDS-DETAILS：intakeState=NEEDS_DETAILS AND outcome≠SOLVED_CONFIRMED	intake不明ならB06	CASE03-INTAKE-CHECKLIST / SUPPORT_INTAKE / REVIEW_ONLY / SUPPORT_LEAD	一度の追加確認後
+6	B06 UNKNOWN：必要なstructured sourceが不明	―	INELIGIBLE / actionなし	source成立後
+
+返信、archive、無活動だけではSOLVED_CONFIRMEDにしない。
+
+禁止策: mass mention、duplicate cross-post、無活動=解決、archive=解決、自動close。個別本文の意味理解は行わない。
+
+合成fixture
+fixture	合成入力	期待
+IV-A03-F01	2026-10-15T09:00Z; outcome=SOLVED_CONFIRMED; coverage=IN	B01 → CASE03-QUEUE-REMOVE-REVIEW
+IV-A03-F02	2026-10-15T02:00Z; outcome=OPEN; coverage=OUT	B02 → CASE03-NEXT-COVERAGE
+IV-A03-F03	2026-10-15T11:00Z; coverage=IN; topic=GENERAL; elapsed=HELP-001.config.unansweredAge+1s	B03 → CASE03-UNANSWERED-QUEUE
+IV-A03-F04	2026-10-15T11:10Z; coverage=IN; topic=SPECIALIST; specialist=NO	B04 → CASE03-SPECIALIST-HANDOFF
+IV-A03-F05	2026-10-15T11:20Z; intake=NEEDS_DETAILS; outcome=OPEN	B05 → CASE03-INTAKE-CHECKLIST
+IV-A03-F06	2026-10-15T11:30Z; coverage=UNKNOWN; topic=GENERAL	B06 → INELIGIBLE
+合成出力例
+
+例A — 対応時間外
+
+「現在の質問は設定された対応時間帯の外にあります。未回答時間だけを理由に対応遅延とは扱わず、次の対応時間帯で確認する案を優先します。」
+
+例B — 専門topicだが担当者不在
+
+「質問には専門topicの構造化タグが付いていますが、現在そのtopicの担当者が確認されていません。新しい質問を重ねるより、元の参照を維持したまま適切な担当queueへ引き継ぐ案を確認してください。」
+
+CASE-04：返信はあるが進まない
+
+caseId/version: CASE-04 / v1.0
+source: Python Discord Helping Others Guide
+種別: PUBLIC_OPERATOR_GUIDE / COMMUNITY_OPERATION_GUIDANCE
+
+事例として使う事実: underlying problemの確認、足りない情報の確認、説明方法の調整・教育的対応。改善効果の数値はない。
+
+Rule mapping
+
+Primary: HELP-001
+
+対応手順: PLAY-001
+
+品質: DATA-001
+
+集約: COMM-001
+
+入力
+field	型/単位	由来	取得不能時
+support.askerExplicitOutcome	enum UNCLEAR/CLEAR/UNKNOWN	構造化outcome	UNKNOWN
+support.missingReproduction	enum YES/NO/UNKNOWN	intake field	UNKNOWN
+support.missingErrorContext	enum YES/NO/UNKNOWN	intake field	UNKNOWN
+support.problemState	enum CONFIRMED/UNKNOWN	staff structured confirmation	UNKNOWN
+support.sameTopicReopenCount	integer/count	structured issue history	UNKNOWN
+support.guideMappingState	enum FOUND/MISSING/UNKNOWN	explicit issueCode→guide mapping	UNKNOWN
+
+返信長、返信件数、reaction数、語彙等は入力しない。
+
+分岐
+順	branch ID / 条件	unknown時	action / target / mode / owner	見直し
+1	B01 UNCLEAR：askerExplicitOutcome=UNCLEAR	outcome不明ならB04	CASE04-CLARIFY-REVIEW / SUPPORT_INTAKE / REVIEW_ONLY / SUPPORT_LEAD	明示回答後
+2	B02 MISSING-REPRO：missingReproduction=YES OR missingErrorContext=YES	欠落状態不明ならB04	CASE04-INTAKE-CHECKLIST / SUPPORT_INTAKE / REVIEW_ONLY / SUPPORT_LEAD	checklist回答後
+3	B03 GUIDE-GAP：problemState=CONFIRMED AND sameTopicReopenCount>0 AND guideMappingState=MISSING	guide mapping不明ならB04	CASE04-GUIDE-REVIEW / SUPPORT_GUIDE / REVIEW_ONLY / SUPPORT_LEAD	guide mapping登録後
+4	B04 OUTCOME-UNKNOWN：askerExplicitOutcome=UNKNOWN、または明示的なoutcome確認なし	―	CASE04-OUTCOME-CONFIRM / SUPPORT_OUTCOME / REVIEW_ONLY / SUPPORT_LEAD	明示outcome取得後
+5	B05 NO-INTERVENTION：CLEAR AND missingReproduction=NO AND missingErrorContext=NOかつB03不成立	―	NO_ACTION / SUPPORT_ISSUE / REVIEW_ONLY / SUPPORT_LEAD	次のstructured outcome
+6	B06 SOURCE-UNKNOWN：必要sourceが観測不能	―	INELIGIBLE / actionなし	source成立後
+
+sameTopicReopenCount>0は「1回以上」という構造条件であり、別途の効果thresholdではない。
+
+禁止策: 返信長・件数・reactionから回答品質、知能、力量を推測しない。message本文を収集して意味理解しない。明示outcomeなしで解決扱いにしない。
+
+合成fixture
+fixture	合成入力	期待
+IV-A04-F01	2026-10-15T10:00Z; askerOutcome=UNCLEAR; reproduction=NO	B01 → CASE04-CLARIFY-REVIEW
+IV-A04-F02	2026-10-15T10:10Z; askerOutcome=CLEAR; reproduction=YES; error=NO	B02 → CASE04-INTAKE-CHECKLIST
+IV-A04-F03	2026-10-15T10:20Z; problem=CONFIRMED; reopenCount=2; guide=MISSING	B03 → CASE04-GUIDE-REVIEW
+IV-A04-F04	2026-10-15T10:30Z; askerOutcome=UNKNOWN; reproduction=NO; error=NO	B04 → CASE04-OUTCOME-CONFIRM
+IV-A04-F05	2026-10-15T10:40Z; outcome=CLEAR; reproduction=NO; error=NO; reopenCount=0	B05 → NO_ACTION
+IV-A04-F06	2026-10-15T10:50Z; problem=UNKNOWN; guide=UNKNOWN	B06 → INELIGIBLE
+合成出力例
+
+例A — 明示的に「不明」
+
+「現在の構造化情報だけでは、問題が解消したか確認できません。まず質問者または担当者による明示的な状態確認を1回行い、その結果をもとに次の対応を決める案が安全です。」
+
+例B — 再現情報が不足
+
+「現在の回答経過だけでは再現条件が揃っていません。本文の解釈で補うのではなく、再現手順とエラー情報など、あらかじめ定義した項目を確認する短いintakeを使う案を優先します。」
+
+共通補正
+
+COMM-001のdomain allowlistは
+ONBOARDING / SUPPORT / RETENTION / CHANNEL_USAGE / EVENT / REPORTING / AUTOMATION / PERMISSION の8分類。
+
+requiredDomainCountの2〜8は未検証の候補範囲。
+
+旧ENGAGEMENT domainは廃止し、該当概念は個別にRETENTIONまたはCHANNEL_USAGE等へ明示mappingする。
+
+旧fixture F03のcoverage=6/9は完全summaryとして扱わず、**REVIEW_ONLY**へ修正する。
+
+4事例とも、未確認source adapter・typed editor・live capabilityを存在するものとして扱わない。
+
+本付録のfixtureはすべて合成設計例であり、実測値でも実行済みテスト結果でもない。
+
+事例資料は分岐設計の根拠として使用するが、施策の因果効果・普遍的成功率・benchmarkを生成しない。
